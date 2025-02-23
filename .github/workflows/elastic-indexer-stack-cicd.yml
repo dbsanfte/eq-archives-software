@@ -6,7 +6,11 @@ on:
   push:
     tags:
       - v*
-  
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build-and-push:
     runs-on: eqvm  # The self-hosted runner label
@@ -36,7 +40,7 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: |
-            dbsanfte/${{ matrix.repo_name }}
+            dbsanfte/${{ matrix.name }}
           tags: |
             type=semver,pattern={{version}}
             type=sha
