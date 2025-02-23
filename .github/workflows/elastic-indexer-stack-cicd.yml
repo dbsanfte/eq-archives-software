@@ -18,7 +18,7 @@ jobs:
       fail-fast: false
       matrix:
        include:
-         - repo: indexer
+         - name: indexer
            path: ./elastic-indexer-stack/indexer
          - name: frontend
            path: ./elastic-indexer-stack/frontend
