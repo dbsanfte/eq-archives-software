@@ -1,0 +1,245 @@
+import config from "../config/engine.json";
+
+/**
+ * This file abstracts most logic around the configuration of the Reference UI.
+ *
+ * Configuration is an important part of the "reusability" and "generic-ness" of
+ * the Reference UI, but if you are using this app as a starting point for own
+ * project, everything related to configuration can largely be thrown away. To
+ * that end, this file attempts to contain most of that logic to one place.
+ */
+
+export function getConfig() {
+  if (process.env.NODE_ENV === "test") {
+    return {};
+  }
+
+  if (config.indexName) return config;
+
+  if (
+    typeof window !== "undefined" &&
+    window.appConfig &&
+    window.appConfig.engineName
+  ) {
+    return window.appConfig;
+  }
+
+  return {};
+}
+
+function toLowerCase(string) {
+  if (string) return string.toLowerCase();
+}
+
+function capitalizeFirstLetter(string) {
+  return string.charAt(0).toUpperCase() + string.slice(1);
+}
+
+export function getTitleField() {
+  // If no title field configuration has been provided, we attempt
+  // to use a "title" field, if one exists
+  return getConfig().titleField || "title";
+}
+
+export function getUrlField() {
+  return getConfig().urlField;
+}
+
+export function getThumbnailField() {
+  return getConfig().thumbnailField;
+}
+
+export function getFacetFields() {
+  return [ ...getConfig().valueFacets, ...getConfig().historicalFacets, ...getConfig().recentFacets ].flat();
+}
+
+export function getSortFields() {
+  return getConfig().sortFields || [];
+}
+
+export function getResultTitle(result) {
+  const titleField = getTitleField();
+
+  return result.getSnippet(titleField);
+}
+
+// Because if a field is configured to display as a "title", we don't want
+// to display it again in the fields list
+export function stripUnnecessaryResultFields(resultFields) {
+  return Object.keys(resultFields).reduce((acc, n) => {
+    if (
+      [
+        "_meta",
+        "id",
+        toLowerCase(getTitleField()),
+        toLowerCase(getUrlField()),
+        toLowerCase(getThumbnailField()),
+      ].includes(toLowerCase(n))
+    ) {
+      return acc;
+    }
+
+    acc[n] = resultFields[n];
+    return acc;
+  }, {});
+}
+
+export function buildSearchOptionsFromConfig() {
+  const config = getConfig();
+  const searchFields = (config.searchFields || config.fields || []).reduce(
+    (acc, n) => {
+      acc = acc || {};
+      acc[n] = {};
+      return acc;
+    },
+    undefined
+  );
+  
+  const resultFields = (config.resultFields || config.fields || []).reduce(
+    (acc, n) => {
+      acc = acc || {};
+      acc[n] = {
+        raw: {},
+        snippet: {
+          size: 100,
+          fallback: true
+        }
+      };
+      return acc;
+    },
+    undefined
+  );
+
+  // We can't use url, thumbnail, or title fields unless they're actually
+  // in the reuslts.
+  if (config.urlField) {
+    resultFields[config.urlField] = {
+      raw: {},
+      snippet: {
+        size: 100,
+        fallback: true
+      }
+    };
+  }
+
+  if (config.thumbnailField) {
+    resultFields[config.thumbnailField] = {
+      raw: {},
+      snippet: {
+        size: 100,
+        fallback: true
+      }
+    };
+  }
+
+  if (config.titleField) {
+    resultFields[config.titleField] = {
+      raw: {},
+      snippet: {
+        size: 100,
+        fallback: true
+      }
+    };
+  }
+
+  const searchOptions = {};
+  searchOptions.result_fields = resultFields;
+  searchOptions.search_fields = searchFields;
+  return searchOptions;
+}
+
+export function buildFacetConfigFromConfig() {
+  const config = getConfig();
+
+  const valueFacets = (config.valueFacets || []).reduce((acc, n) => {
+    acc = acc || {};
+    acc[n] = { 
+      type: "value", 
+      size: 100 
+    };
+    return acc;
+  }, undefined);
+
+  const historicalFacets = (config.historicalFacets || []).reduce((acc, n) => {
+    acc = acc || {};
+    acc[n] = { 
+      type: "range",
+      ranges: [
+        { from: new Date("1990-01-01").toISOString(), to: new Date("1998-12-31").toISOString(), name: "1998 and older" },
+        { from: new Date("1999-01-01").toISOString(), to: new Date("1999-12-31").toISOString(), name: "1999" },
+        { from: new Date("2000-01-01").toISOString(), to: new Date("2000-12-31").toISOString(), name: "2000" },
+        { from: new Date("2001-01-01").toISOString(), to: new Date("2001-12-31").toISOString(), name: "2001" },
+        { from: new Date("2002-01-01").toISOString(), to: new Date("2002-12-31").toISOString(), name: "2002" },
+        { from: new Date("2003-01-01").toISOString(), to: new Date("2003-12-31").toISOString(), name: "2003" },
+        { from: new Date("2004-01-01").toISOString(), to: new Date("2004-12-31").toISOString(), name: "2004" },
+        { from: new Date("2005-01-01").toISOString(), to: new Date("2005-12-31").toISOString(), name: "2005" },
+        { from: new Date("2006-01-01").toISOString(), to: new Date("2006-12-31").toISOString(), name: "2006" },
+        { from: new Date("2007-01-01").toISOString(), to: new Date("3000-12-31").toISOString(), name: "2007 and newer" }
+      ]
+    };
+    return acc;
+  }, undefined);
+    
+
+  const recentFacets = (config.recentFacets || []).reduce((acc, n) => {
+    acc = acc || {};
+    acc[n] = { 
+      type: "range",
+      ranges: [
+        { from: (new Date(new Date().setDate(new Date().getDate()-1))).toISOString(), to: (new Date()).toISOString(), name: "Today" },
+        { from: (new Date(new Date().setDate(new Date().getDate()-7))).toISOString(), to: (new Date()).toISOString(), name: "Past week" },
+        { from: (new Date(new Date().setDate(new Date().getDate()-30))).toISOString(), to: (new Date()).toISOString(), name: "Past month" },
+        { from: (new Date(new Date().setDate(new Date().getDate()-365))).toISOString(), to: (new Date()).toISOString(), name: "Past year" },
+        { from: (new Date(new Date().setDate(new Date().getDate()-36500))).toISOString(), to: (new Date()).toISOString(), name: "All time" }
+      ]
+    };
+    return acc;
+  }, undefined);
+
+  return {...valueFacets, ...historicalFacets, ...recentFacets};
+}
+
+export function buildSortOptionsFromConfig() {
+  const config = getConfig();
+  return [
+    {
+      name: "Relevance",
+      value: "",
+      direction: ""
+    },
+    ...(config.sortFields || []).reduce((acc, sortField) => {
+      acc.push({
+        name: `${capitalizeFirstLetter(sortField)} ASC`,
+        value: sortField,
+        direction: "asc"
+      });
+      acc.push({
+        name: `${capitalizeFirstLetter(sortField)} DESC`,
+        value: sortField,
+        direction: "desc"
+      });
+      return acc;
+    }, [])
+  ];
+}
+
+export function buildAutocompleteQueryConfig() {
+  const querySuggestFields = getConfig().querySuggestFields;
+  if (
+    !querySuggestFields ||
+    !Array.isArray(querySuggestFields) ||
+    querySuggestFields.length === 0
+  ) {
+    return {};
+  }
+
+  return {
+    suggestions: {
+      types: {
+        documents: {
+          fields: getConfig().querySuggestFields
+        }
+      }
+    }
+  };
+}

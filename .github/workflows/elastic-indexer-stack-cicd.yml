@@ -1,0 +1,46 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build-and-deploy:
+    runs-on: eqvm  # The self-hosted runner label
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v3
+
+      # OPTIONAL: If your runner doesn't already have Docker installed/logged in, do it here
+      # - name: Set up Docker Buildx
+      #   uses: docker/setup-buildx-action@v2
+
+      # 1) Log in to Container Registry 
+      - name: Log in to Dockerhub
+        run: echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u ${{ secrets.DOCKERHUB_USERNAME }} --password-stdin
+
+      # 3) Build & push indexer image
+      - name: Build indexer image
+        run: |
+          docker build \
+            -t ${{ secrets.DOCKERHUB_USERNAME }}/indexer:latest \
+            ./elastic-indexer-stack/indexer
+          docker push ${{ secrets.DOCKERHUB_USERNAME }}/indexer:latest
+
+      # 4) Deploy to local k3s
+      #- name: Deploy to k3s
+      #  # If k3s is installed as `k3s kubectl`, adjust the commands accordingly
+      #  # Here we assume `kubectl` is available and properly configured via KUBECONFIG
+      #  run: |
+      #    kubectl apply -f ./elastic-indexer-stack/k8s-manifests/00-namespace.yaml
+      #    kubectl apply -f ./elastic-indexer-stack/k8s-manifests/01-pv-pvc.yaml
+      #    kubectl apply -f ./elastic-indexer-stack/k8s-manifests/02-elasticsearch.yaml
+      #    kubectl apply -f ./elastic-indexer-stack/k8s-manifests/03-rabbitmq.yaml
+      #    kubectl apply -f ./elastic-indexer-stack/k8s-manifests/04-file-searcher.yaml
+      #    kubectl apply -f ./elastic-indexer-stack/k8s-manifests/05-indexer.yaml
+      #
+      #    # Optionally, wait for the deployments/statefulsets to be ready
+      #    kubectl rollout status statefulset/elasticsearch -n eq-archive
+      #    kubectl rollout status statefulset/rabbitmq -n eq-archive
+      #    kubectl rollout status statefulset/file-searcher -n eq-archive
+      #    kubectl rollout status deployment/indexer -n eq-archive

@@ -1,0 +1,65 @@
+# 04-file-searcher.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: file-searcher
+  namespace: eq-archive
+spec:
+  selector:
+    app: file-searcher
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: file-searcher
+  namespace: eq-archive
+spec:
+  serviceName: "file-searcher"
+  replicas: 1
+  selector:
+    matchLabels:
+      app: file-searcher
+  template:
+    metadata:
+      labels:
+        app: file-searcher
+    spec:
+      containers:
+      - name: file-searcher
+        image: "myregistry.com/file-searcher:latest"
+        env:
+        - name: RABBITMQ_HOST
+          value: "rabbitmq"
+        - name: RABBITMQ_QUEUE
+          value: "file_paths"
+        - name: ELASTICSEARCH_HOST
+          value: "elasticsearch"
+        - name: ELASTICSEARCH_INDEX
+          value: "eq-archive"
+        - name: FILE_PATH_GLOBS
+          value: "websites/eq.castersrealm.com"   # Example. Comma-separate multiple
+        - name: GIT_REPO_URL
+          value: "https://github.com/dbsanfte/eq-archives.git"
+        - name: LOCAL_REPO_PATH
+          value: "/data/eq-archives"
+        - name: SLEEP_INTERVAL
+          value: "3600"  # 1 hour
+        volumeMounts:
+        - name: eq-archives-volume
+          mountPath: "/data"
+      volumes: []
+      # We'll use a PVC for the data
+      # The "volumes" must match the "volumeClaimTemplates" if we want dynamic provisioning in a StatefulSet
+  volumeClaimTemplates:
+  - metadata:
+      name: eq-archives-volume
+    spec:
+      accessModes: ["ReadWriteMany"]  # or ReadWriteOnce if your storage allows multi-attach
+      resources:
+        requests:
+          storage: 20Gi
+      storageClassName: ""  # if needed or default

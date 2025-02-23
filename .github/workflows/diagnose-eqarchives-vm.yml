@@ -1,0 +1,24 @@
+name: Diagnose EQArchives VM
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: eqarchives-vm
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v3
+
+      - name: Run script
+        run: |
+          echo "--- uptime ---"
+          sudo uptime
+          echo "--- ps aux ---"
+          sudo ps aux
+          echo "--- df ---"
+          sudo df
+          echo "--- systemctl list-units --failed  ---"
+          sudo systemctl list-units --failed
+          

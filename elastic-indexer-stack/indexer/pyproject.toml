@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "indexer"
+version = "0.0.1"
+
+[tool.pytest.ini_options]
+pythonpath = "src"
+testpaths = ["src/indexer/tests"]
+norecursedirs = ".git .tox .env .venv .vscode .pytest_cache node_modules"
+addopts = [
+    "--import-mode=importlib",
+    "-v"
+]
+
+[tool.coverage.run]
+omit = [
+    "**/test_*.py"
+]

@@ -1,0 +1,43 @@
+# 05-indexer.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: indexer
+  namespace: eq-archive
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: indexer
+  template:
+    metadata:
+      labels:
+        app: indexer
+    spec:
+      containers:
+      - name: indexer
+        image: "myregistry.com/indexer:latest"
+        env:
+        - name: RABBITMQ_HOST
+          value: "rabbitmq"
+        - name: RABBITMQ_QUEUE
+          value: "file_paths"
+        - name: ELASTICSEARCH_HOST
+          value: "elasticsearch"
+        - name: ELASTICSEARCH_INDEX
+          value: "eq-archive"
+        - name: LOCAL_REPO_PATH
+          value: "/data/eq-archives"
+        - name: OPENAI_ENDPOINT
+          value: "http://openai-endpoint:8000/v1/api"  # Adjust to your LLM endpoint
+        - name: OPENAI_TEXT_MODEL_NAME
+          value: "my-text-model"
+        - name: OPENAI_IMAGE_MODEL_NAME
+          value: "my-image-model"
+        volumeMounts:
+        - name: eq-archives-volume
+          mountPath: "/data"
+      volumes:
+        - name: eq-archives-volume
+          persistentVolumeClaim:
+            claimName: eq-archives-pvc

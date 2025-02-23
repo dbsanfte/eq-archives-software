@@ -1,0 +1,19 @@
+server {
+    listen 80;
+    server_name localhost;
+    root /usr/share/nginx/html;
+
+    location / {
+        try_files $uri /index.html;
+    }
+
+    location /elasticsearch/$ELASTICSEARCH_INDEX/_search {
+        proxy_set_header                Authorization "Basic $ELASTICSEARCH_AUTHORIZATION";
+        proxy_pass                      $ELASTICSEARCH_URL/$ELASTICSEARCH_INDEX/_search;
+    }
+
+    location /openai/v1/embeddings {
+        proxy_set_header                Authorization "Bearer $OPENAI_API_KEY";
+        proxy_pass                      $OPENAI_URL/v1/embeddings;
+    }
+}

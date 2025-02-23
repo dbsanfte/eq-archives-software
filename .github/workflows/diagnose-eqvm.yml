@@ -1,0 +1,58 @@
+name: Diagnose EQVM
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnose:
+    runs-on: eqvm
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v3
+
+      - name: Run script
+        run: |
+          echo "--- stop vm ---"
+          sudo su -c 'vboxmanage controlvm eqarchives-vm poweroff' dbsanfte || :
+          
+          #echo "deb [arch=amd64] https://download.virtualbox.org/virtualbox/debian jammy contrib" | sudo tee /etc/apt/sources.list.d/virtualbox.list
+          #wget -q https://www.virtualbox.org/download/oracle_vbox_2016.asc -O- | sudo apt-key add -
+          #wget -q https://www.virtualbox.org/download/oracle_vbox.asc -O- | sudo apt-key add -
+          
+          export DEBIAN_FRONTEND=noninteractive
+          sudo apt-get update
+          sudo apt-get remove -y virtualbox virtualbox-7.0 virtualbox-6.1 virtualbox-6.0 virtualbox-dkms
+          sudo apt-get install -y linux-headers-`uname -r`
+          sudo apt-get install -y virtualbox-7.0 
+          #sudo apt-get install -y virtualbox-dkms
+          sudo modprobe vboxdrv || :
+          vboxmanage --version || :
+          
+          
+          #sudo apt-get upgrade -y
+          #sudo apt-get dist-upgrade -y
+          #sudo shutdown -r now
+
+          
+          #sudo dpkg-reconfigure virtualbox-dkms
+          #sudo dpkg-reconfigure virtualbox
+          
+
+          echo --- history ---
+          #sudo cat /root/.bash_history
+          echo ---
+          
+          echo "--- uptime ---"
+          #sudo uptime
+          echo "--- top ---"
+          sudo top -bn1
+          echo "--- ps aux ---"
+          sudo ps aux
+          echo "--- df ---"
+          #sudo df
+          echo "--- systemctl list-units --failed  ---"
+          sudo systemctl list-units --failed
+          #sudo reboot
+          
+          

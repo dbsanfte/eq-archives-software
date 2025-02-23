@@ -1,0 +1,99 @@
+domain_match_regex: .*(castersrealm|crgaming)\.com$
+
+text_prompt: |-
+  EverQuest Caster’s Realm—often referred to simply as “Castersrealm” and found at eq.castersrealm.com—was one of the most prominent third-party fan sites dedicated to the MMORPG EverQuest during the game’s early and mid-2000s heyday. Here’s an overview of its significance:
+
+  Castersrealm specialized in content for EverQuest’s caster-oriented classes—Wizards, Magicians, Enchanters, Necromancers, Druids, and Clerics (despite clerics being priests rather than “pure” casters). Over time, its coverage grew to encompass general EQ gameplay, but its deep knowledge and guides for magic-using classes made it a go-to resource.
+
+  - Spells and Abilities Database: One of Castersrealm’s core features was a robust database of spells, complete with descriptions, level requirements, research information, and commentary from players.
+
+  - Forums and Discussion Boards: The site hosted popular forums where players shared quest walkthroughs, leveling tips, raid strategies, and class-specific tactics.
+
+  - News and Expansion Coverage: EQ expansions released at a rapid pace, and Castersrealm provided patch notes, developer updates, and community events, acting as a hub for breaking EverQuest news.
+  Prominence and Influence
+
+  In EverQuest’s early years (especially around the launch of its first few expansions in the early 2000s), Castersrealm became part of the backbone of the growing EQ fan-site network.
+  It was often cited alongside other major EQ fan sites (such as Allakhazam’s Magical Realm, EQClerics, The Safehouse, and Everlore) when players needed class-specific advice or item/spell references.
+
+  Below is a page archived from the Castersrealm site. Describe its function on the site, and summarize its contents into the variable `llm_summary`.
+      
+  Categorize it into into one of the following content flavours into the variable `llm_content_flavour`:
+  - Forum Post
+  - Game News
+  - Zone Information
+  - Item Information
+  - Spell Information
+  - PvP Information
+  - Monster Information
+  - Tradeskill Information
+  - Strategy Guide
+  - Player Character Profile
+  - Other 
+
+  If the page relates to a specific item, zone, mob, or player, make sure to mention this in the summary.
+
+  Below is a list of content tags. Examine the content and decide how many of the tags apply. Add all the applicable tags to the list "llm_tags". 
+  - nerf: Discusses a change to the game that has diminished a specific class' abilities and effectiveness, making it less powerful
+  - patch: Discusses recent changes made to the game in a patch update
+  - exploit: Discusses players exploiting a specific bug in the game to their advantage during gameplay
+  - bug: Discusses a bug in the game
+  - guide: Provides a playing strategy or guide on how to do something in the game (Levelling, Questing, Tradeskilling, etc.)
+  - lore: Provides background story lore information about Everquest
+  - event: Discusses a special in-game special event run by the GMs or Guides in Everquest
+  - pvp: Discusses player versus player combat
+  - raid: Discusses raiding content, strategies for raiding, or raiding guilds
+  - quest: Discusses the specifics of a quest in the game
+  - drama: Discusses player or guild drama/politics in the game, especially arguments between players over in-game loot or competition for monster kills
+  - item: Discusses a specific item in the game, especially its stats and/or where to find it
+  - tradeskill: Discusses any of the various tradeskills in the game (Alchemy, Blacksmithing, Fletching, Tailoring, Tinkering, Spell Research, etc.)
+  - spell: Discusses a spell in the game, especially its effects and/or how to find/research it
+  - showeq: Discusses the use of the ShowEQ third-party software to cheat
+  - class-balance: Discusses the balance of classes in the game, specifically whether one class is overpowered or too weak compared to another
+  - forum: Content is from a web based forum, with topics and replies to that topic
+
+  Based on the text, guess the date of the content, giving priority to the latest date on the page. Store it as a timestamp into the variable `llm_guessed_date` in the format YYYY-MM-DD. If you can't guess, return an empty string.
+
+  Respond in the following JSON format and always populate all fields: 
+  
+  {"llm_summary": "...", "llm_content_flavour": "...", "llm_guessed_date": "...", "llm_tags": [ ... ] }
+
+  The text of the page follows:
+  ---
+
+image_prompt: |-
+  EverQuest Caster’s Realm—often referred to simply as “Castersrealm” and found at eq.castersrealm.com—was one of the most prominent third-party fan sites dedicated to the MMORPG EverQuest during the game’s early and mid-2000s heyday. Here’s an overview of its significance:
+
+  Castersrealm specialized in content for EverQuest’s caster-oriented classes—Wizards, Magicians, Enchanters, Necromancers, Druids, and Clerics (despite clerics being priests rather than “pure” casters). Over time, its coverage grew to encompass general EQ gameplay, but its deep knowledge and guides for magic-using classes made it a go-to resource.
+
+  - Spells and Abilities Database: One of Castersrealm’s core features was a robust database of spells, complete with descriptions, level requirements, research information, and commentary from players.
+
+  - Forums and Discussion Boards: The site hosted popular forums where players shared quest walkthroughs, leveling tips, raid strategies, and class-specific tactics.
+
+  - News and Expansion Coverage: EQ expansions released at a rapid pace, and Castersrealm provided patch notes, developer updates, and community events, acting as a hub for breaking EverQuest news.
+  Prominence and Influence
+
+  In EverQuest’s early years (especially around the launch of its first few expansions in the early 2000s), Castersrealm became part of the backbone of the growing EQ fan-site network.
+  It was often cited alongside other major EQ fan sites (such as Allakhazam’s Magical Realm, EQClerics, The Safehouse, and Everlore) when players needed class-specific advice or item/spell references.
+
+  Attached is an archived image from the CastersRealm website. 
+
+  Categorize it into into one of the following content flavours into the variable `llm_content_flavour`:
+  - Game Screenshot
+  - Item Stats
+  - Monster Portrait
+  - Player Character Portrait
+  - Other
+
+  Below is a list of content tags. Examine the content and decide whether any of the tags apply. If so, add the tag(s) as a string to the list "llm_tags". 
+  - screenshot: An in-game screenshot from the game Everquest itself
+  - item: A picture/screenshot of a specific item in the game, especially its stats and/or where to find it
+  - monster: A screenshot of a monster in the game
+  - art: The image is primarily artistic and not a game screenshot
+  - player: The image contains an Everquest player character
+
+  Extract any text from the image into the string array variable `llm_image_text`.
+          
+  Respond in the following JSON format: `{"llm_summary": "...", "llm_image_text": [...], "llm_content_flavour": "...", "llm_tags": [ ... ] }` and always populate all the fields.
+
+  The image follows:
+  ---

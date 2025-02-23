@@ -1,0 +1,61 @@
+import React from "react";
+import { Box, Typography, Link } from "@mui/material";
+
+export default function HeaderContent() {
+  return (
+    <Box 
+      display="flex" 
+      alignItems="center" 
+      justifyContent="space-between" 
+      p={2} 
+      mb={2}
+      bgcolor="#a69070" // Match logo background
+    >
+      <a href="/">
+        <img 
+          src="/images/eq-logo-no-bg.webp" 
+          alt="EQ Logo" 
+          style={{ 
+            maxHeight: "170px",
+            maxWidth: "100%",
+            height: "auto"
+          }}
+        />
+      </a>
+      <Box textAlign="left">
+        <img 
+          src="/images/eq-archives-banner.png" 
+          alt="EQ Archives Banner"
+          style={{ 
+            maxHeight: "170px",
+            maxWidth: "100%",
+            height: "auto"
+          }}
+        />
+      </Box>
+      <Box textAlign="right">
+        <Typography variant="h6">
+          Welcome to the new beta site!
+        </Typography>
+        <Link 
+          href="https://www.youtube.com/watch?v=DWXsCpAwKU4" 
+          target="_blank" 
+          rel="noopener noreferrer"
+          variant="subtitle1"
+          style={{ display: "block", color: "#ffffff" }}
+        >
+          Watch the Tutorial
+        </Link>
+        <Link 
+          href="https://discord.com/channels/@me/312315372021743616" 
+          target="_blank" 
+          rel="noopener noreferrer"
+          variant="subtitle2"
+          style={{ display: "block", color: "#ffffff" }}
+        >
+          Contact Dolalin on P99 Discord
+        </Link>
+      </Box>
+    </Box>
+  );
+}

@@ -1,0 +1,26 @@
+.result-container {
+    display: flex;
+    gap: 20px;
+  }
+  
+  .result-content {
+    flex: 1;
+  }
+
+  .result-summary,
+  .result-full-text {
+    margin-bottom: 20px;
+  }
+  
+  .result-summary h3 {
+    margin-top: 0px;
+    margin-bottom: 10px;
+    font-size: 1.2rem;
+    color: #333;
+  }
+  
+  .result-full-text h3 {
+    margin-bottom: 10px;
+    font-size: 1.2rem;
+    color: #333;
+  }

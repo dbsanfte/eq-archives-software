@@ -1,0 +1,23 @@
+{
+    "id": "chatcmpl-nqrc9qnfhb9ekamswxpg3h",
+    "object": "chat.completion",
+    "created": 1736877508,
+    "model": "llama-3.2-3b-instruct",
+    "choices": [
+        {
+            "index": 0,
+            "logprobs": null,
+            "finish_reason": "stop",
+            "message": {
+                "role": "assistant",
+                "content": "{\"llm_summary\": \"A summary of EverQuest game information, including classes, races, stats, special attributes, and item details.\", \"llm_content_flavour\": \"Game Information\", \"llm_guessed_date\": \"1999-2000\"}"
+            }
+        }
+    ],
+    "usage": {
+        "prompt_tokens": 1106,
+        "completion_tokens": 54,
+        "total_tokens": 1160
+    },
+    "system_fingerprint": "llama-3.2-3b-instruct"
+}

@@ -1,0 +1,14 @@
+{
+    "python.testing.pytestArgs": [
+        "elastic-indexer-stack"
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true,
+    "python.testing.unittestArgs": [
+        "-v",
+        "-s",
+        "./elastic-indexer-stack",
+        "-p",
+        "test_*.py"
+    ]
+}

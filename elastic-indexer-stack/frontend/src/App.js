@@ -1,0 +1,120 @@
+import React, { useRef, useEffect, useState, useMemo } from "react";
+import {
+  ErrorBoundary,
+  Facet,
+  SearchProvider,
+  SearchBox,
+  Results,
+  PagingInfo,
+  ResultsPerPage,
+  Paging,
+  Sorting,
+  WithSearch
+} from "@elastic/react-search-ui";
+import { Layout } from "@elastic/react-search-ui-views";
+import "@elastic/react-search-ui-views/lib/styles/styles.css";
+import {
+  getConfig,
+  getFacetFields,
+  buildSortOptionsFromConfig
+} from "./config/config-helper";
+import { Box, Button, Collapse, CircularProgress } from "@mui/material";
+import CustomResultView from "./views/result/CustomResultView";
+import HeaderContent from "./views/HeaderContent"; 
+import SearchParameters from "./views/search/SearchParameters"; 
+import AdvancedSettings, { DEFAULT_KNN_PARAMS } from "./views/search/AdvancedSettings";
+import { getSearchConfig } from "./search/Connector";
+
+export default function App() {
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [knnParams, setKnnParams] = useState(DEFAULT_KNN_PARAMS);
+
+  const knnParamsRef = useRef(knnParams);
+  useEffect(() => {
+    knnParamsRef.current = knnParams;
+  }, [knnParams]);
+
+  function handleParamChange(param, value) {
+    setKnnParams(prev => ({ ...prev, [param]: value }));
+  }
+
+  const config = useMemo(() => getSearchConfig(knnParamsRef), [knnParamsRef]);
+
+  return (
+    <SearchProvider config={config}>
+      <WithSearch 
+        mapContextToProps={({ wasSearched, isLoading }) => ({ wasSearched, isLoading })}
+      >
+        {({ wasSearched, isLoading }) => (
+          <div className="App" style={{ position: "relative" }}>
+            {isLoading && (
+              <Box
+                sx={{
+                  position: "absolute",
+                  top: "50%",
+                  left: "50%",
+                  transform: "translate(-50%, -50%)",
+                  zIndex: 999
+                }}
+              >
+                <CircularProgress size={80} />
+              </Box>
+            )}
+            <ErrorBoundary>
+              <Layout
+                header={
+                  <>
+                    <HeaderContent />
+                    <SearchBox searchAsYouType={true} />
+                    <Button
+                      variant="contained"
+                      style={{ marginTop: "1rem" }}
+                      onClick={() => setShowAdvanced(!showAdvanced)}
+                    >
+                      Advanced...
+                    </Button>
+                    <Collapse in={showAdvanced}>
+                      <Box sx={{ marginBottom: "1rem" }}>
+                        <SearchParameters values={knnParams} onChange={handleParamChange} />
+                      </Box>
+                      <AdvancedSettings values={knnParams} onChange={handleParamChange} />
+                    </Collapse>
+                  </>
+                }
+                sideContent={
+                  <div>
+                    {wasSearched && (
+                      <Sorting
+                        label="Sort by"
+                        sortOptions={buildSortOptionsFromConfig()}
+                      />
+                    )}
+                    {getFacetFields().map(field => (
+                      <Facet key={field} field={field} label={field} />
+                    ))}
+                  </div>
+                }
+                bodyContent={
+                  <Results
+                    titleField={getConfig().titleField}
+                    urlField={getConfig().urlField}
+                    thumbnailField={getConfig().thumbnailField}
+                    shouldTrackClickThrough={true}
+                    resultView={CustomResultView}
+                  />
+                }
+                bodyHeader={
+                  <>
+                    {wasSearched && <PagingInfo />}
+                    {wasSearched && <ResultsPerPage />}
+                  </>
+                }
+                bodyFooter={<Paging />}
+              />
+            </ErrorBoundary>
+          </div>
+        )}
+      </WithSearch>
+    </SearchProvider>
+  );
+}

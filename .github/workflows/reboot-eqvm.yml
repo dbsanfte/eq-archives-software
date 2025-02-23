@@ -1,0 +1,17 @@
+name: Reboot EQVM
+
+on:
+  workflow_dispatch:
+
+jobs:
+  reboot:
+    runs-on: eqvm
+
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v3
+
+      - name: Run reboot script
+        run: |
+          echo "Rebooting the runner..."
+          sudo reboot
