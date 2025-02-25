@@ -3,10 +3,7 @@ import logging
 import datetime
 import json
 from bs4 import BeautifulSoup
-from langchain_community.document_loaders import UnstructuredMarkdownLoader
-from langchain_openai.embeddings import OpenAIEmbeddings
 from langchain_core.documents import Document
-from langchain_experimental.text_splitter import SemanticChunker
 from markdownify import markdownify as md
 import numpy as np
 import textwrap as tw
@@ -41,7 +38,9 @@ class TextHandler:
                 title = self._resolve_title_from_file(full_path=full_path)
                 
                 # Chunk the doc and get embeddings
-                chunks_and_embeddings: list[dict] = self._get_chunks_and_embeddings(document=document)
+                chunks_and_embeddings: list[dict] = self._openai_manager.get_chunks_and_embeddings(
+                    document=document
+                )
                 
                 # Enrich the doc
                 llm_response = self._openai_manager.call_openai_api_text(text_content=document.page_content,
@@ -50,6 +49,7 @@ class TextHandler:
                 llm_summary = llm_response.get("llm_summary", "")
                 llm_content_flavour = llm_response.get("llm_content_flavour", None)
                 llm_guessed_date = llm_response.get("llm_guessed_date", None)
+                llm_extracted_dates = llm_response.get("llm_extracted_dates", None)
                 llm_summary_vector = llm_response.get("llm_summary_vector", None)
                 llm_tags = llm_response.get("llm_tags", [])
                 
@@ -69,6 +69,7 @@ class TextHandler:
                     llm_summary = llm_summary,
                     llm_summary_vector = llm_summary_vector,
                     llm_guessed_date = llm_guessed_date,
+                    llm_extracted_dates = llm_extracted_dates,
                     llm_model_name = llm_model_name,
                     llm_content_flavour = llm_content_flavour,
                     llm_tags = llm_tags,
@@ -84,26 +85,6 @@ class TextHandler:
             logger.error(f"Error processing text file {file_path}: {e}")
             logger.exception(e)
             raise e
-
-    def _get_chunks_and_embeddings(self, document: Document) -> list[dict]:
-        # Chunk text intelligently
-        chunks: list[Document] = []
-        embedder: OpenAIEmbeddings = self._openai_manager.get_openai_embedding_client()
-        splitter = SemanticChunker(embedder)
-        chunks = splitter.split_documents([document])
-        logger.debug(f"Chunks: {chunks}")
-        
-        # Embed each chunk
-        chunk_vectors: list[dict] = []
-        for chunk in chunks:
-            chunk_vectors.append(
-                {
-                    "text_chunk": chunk.page_content, 
-                    "vector": self._openai_manager.embed_text(text=chunk.page_content)
-                }
-            )
-        # Return a list of the chunk texts and their embeddings
-        return chunk_vectors
 
     def _get_documents_from_file(self, relative_path: str, full_path: str) -> list[Document]:
         """

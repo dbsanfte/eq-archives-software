@@ -1,0 +1,37 @@
+{
+    "$id": "https://example.com/person.schema.json",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "Response",
+    "type": "object",
+    "properties": {
+        "llm_tags": {
+            "type": "array",
+            "items": {
+                "type": "string",
+                "enum": [
+                    "nerf",
+                    "patch",
+                    "exploit",
+                    "bug",
+                    "guide",
+                    "lore",
+                    "event",
+                    "pvp",
+                    "raid",
+                    "quest",
+                    "drama",
+                    "item",
+                    "spell",
+                    "tradeskill",
+                    "showeq",
+                    "class-balance",
+                    "forum",
+                    "class-site"
+                ],
+                "pattern": "^[^\\\\s]+$",
+                "description": "Applicable content tags associated with the text."
+            },
+            "description": "Content tags associated with the text."
+        }
+    }
+}

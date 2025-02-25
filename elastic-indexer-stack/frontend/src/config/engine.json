@@ -26,6 +26,7 @@
   "historicalFacets": ["capture_date", "llm_guessed_date"],
   "vectorFields": ["llm_image_text_vector", "llm_summary_vector"],
   "nestedVectorFields": ["text"],
+  "nestedHistoricalFacets": ["llm_extracted_dates"],
   "recentFacets": ["last_indexed"],
   "embeddingModel": "text-embedding-nomic-embed-text-v1.5@q8_0",
   "elasticsearch_username": "readonly",

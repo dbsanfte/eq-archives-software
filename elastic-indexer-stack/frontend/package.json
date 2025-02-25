@@ -18,7 +18,7 @@
   "scripts": {
     "start": "react-scripts start",
     "build-js": "node ./scripts/build-no-chunks.js",
-    "build": "npm run build-js",
+    "build": "GENERATE_SOURCEMAP=false npm run build-js",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },

@@ -72,6 +72,7 @@ spec:
       containers:
         - name: search-beta-eqarchives
           image: dbsanfte/frontend:latest
+          imagePullPolicy: Always
           ports:
             - containerPort: 80
           env:

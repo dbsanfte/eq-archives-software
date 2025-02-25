@@ -1,58 +1,144 @@
 domain_match_regex: groups\.google\.com$
 
-text_prompt: |-
-  Below is a post archived from the alt.games.everquest newsgroup. Describe and summarize it into the variable `llm_summary`.
-      
-  Categorize it into into the following content flavour into the variable `llm_content_flavour`:
-  - Newsgroup Post
+text_prompts: 
+  tagging: |-
+    You are being supplied with an Everquest newsgroup post.
+    
+    Below is a list of content tags and descriptions:
+      - nerf: Discusses a change to the game that has diminished a specific class' abilities and effectiveness, making it less powerful
+      - patch: Discusses recent changes made to the game in a patch update
+      - exploit: Discusses players exploiting a specific bug in the game to their advantage during gameplay
+      - bug: Discusses a bug in the game
+      - guide: Provides a playing strategy or guide on how to do something in the game (Levelling, Questing, Tradeskilling, etc.)
+      - lore: Provides background story lore information about Everquest
+      - event: Discusses a special in-game special event run by the GMs or Guides in Everquest
+      - pvp: Discusses player versus player combat
+      - raid: Discusses raiding content, strategies for raiding, or raiding guilds
+      - quest: Discusses the specifics of a quest in the game
+      - drama: Discusses player or guild drama/politics in the game, especially arguments between players over in-game loot or competition for monster kills
+      - item: Discusses a specific item in the game, especially its stats and/or where to find it
+      - tradeskill: Discusses any of the various tradeskills in the game (Alchemy, Blacksmithing, Fletching, Tailoring, Tinkering, Spell Research, etc.)
+      - spell: Discusses a spell in the game, especially its effects and/or how to find/research it
+      - showeq: Discusses the use of the ShowEQ third-party software to cheat
+      - class-balance: Discusses the balance of classes in the game, specifically whether one class is overpowered or too weak compared to another
+    
+    Examine the content and decide how many of the above tags apply to it. Add all the applicable tags to the list `llm_tags`. If none of the tags apply, leave the list empty.
 
-  Below is a list of content tags. Examine the content and decide how many of the tags apply. Add all the applicable tags to the list "llm_tags". 
-  - nerf: Discusses a change to the game that has diminished a specific class' abilities and effectiveness, making it less powerful
-  - patch: Discusses recent changes made to the game in a patch update
-  - exploit: Discusses players exploiting a specific bug in the game to their advantage during gameplay
-  - bug: Discusses a bug in the game
-  - guide: Provides a playing strategy or guide on how to do something in the game (Levelling, Questing, Tradeskilling, etc.)
-  - lore: Provides background story lore information about Everquest
-  - event: Discusses a special in-game special event run by the GMs or Guides in Everquest
-  - pvp: Discusses player versus player combat
-  - raid: Discusses raiding content, strategies for raiding, or raiding guilds
-  - quest: Discusses the specifics of a quest in the game
-  - drama: Discusses player or guild drama/politics in the game, especially arguments between players over in-game loot or competition for monster kills
-  - item: Discusses a specific item in the game, especially its stats and/or where to find it
-  - tradeskill: Discusses any of the various tradeskills in the game (Alchemy, Blacksmithing, Fletching, Tailoring, Tinkering, Spell Research, etc.)
-  - spell: Discusses a spell in the game, especially its effects and/or how to find/research it
-  - showeq: Discusses the use of the ShowEQ third-party software to cheat
-  - class-balance: Discusses the balance of classes in the game, specifically whether one class is overpowered or too weak compared to another
+    Respond in the following JSON format:
+    
+    {"llm_tags": [ ... ]}
 
-  Based on the text, guess the date of the content and store it as a timestamp into the variable `llm_guessed_date` in the format YYYY-MM-DD. If you can't guess, return an empty string.
+    The content of the newsgroup post follows:
+    ---
+    ---
 
-  Respond in the following JSON format and always populate all fields: 
+  classification: |-
+    You are being supplied with an Everquest newsgroup post.
+
+    Categorize it into into the following content flavour into the variable `llm_content_flavour`:
+    - Newsgroup Post
+
+    Respond in the following JSON format:
+    
+    {"llm_content_flavour": "..."}
+
+    The content of the newsgroup post follows:
+    ---
+    ---
+
+
+  date: |-
+    You are being supplied with an Everquest newsgroup post. Perform the following two tasks:
   
-  {"llm_summary": "...", "llm_content_flavour": "...", "llm_guessed_date": "...", "llm_tags": [ ... ] }
+    1) Extract any dates you see in the content and put them into the list `llm_extracted_dates` with the JSON object format `{ "date": "YYYY-MM-DD" }`. 
 
-  The text of the post follows:
-  ---
+    2) Based on any dates you extracted in step 1, guess the most likely last-updated date of the content. Put it into the string variable `llm_guessed_date` in the format "YYYY-MM-DD". If you aren't sure, use the latest date from step 1.
 
-image_prompt: |-
-  Attached is an archived image from an old Everquest-related website. 
+    Important: Always populate `llm_guessed_date` if you extracted a date for `llm_extracted_dates`.
 
-  Categorize it into into one of the following content flavours into the variable `llm_content_flavour`:
-  - Game Screenshot
-  - Item Stats
-  - Monster
-  - Player Character Portrait
-  - Other
+    Respond in the following JSON format:
+    
+    {"llm_guessed_date": "...", "llm_extracted_dates": [ ... ] }
 
-  Extract any text from the image into the string array variable `llm_image_text`.
+    The content of the newsgroup post follows:
+    ---
+    ---
 
-  Below is a list of content tags. Examine the content and decide whether any of the tags apply. If so, add the tag(s) as a string to the list "llm_tags". 
-  - screenshot: An in-game screenshot from the game Everquest itself
-  - item: A picture/screenshot of a specific item in the game, especially its stats and/or where to find it
-  - monster: A screenshot of a monster in the game
-  - art: The image is primarily artistic and not a game screenshot
-  - player: The image contains an Everquest player character
-          
-  Respond in the following JSON format: `{"llm_summary": "...", "llm_image_text": [...], "llm_content_flavour": "...", "llm_tags": [ ... ] }` and always populate all the fields.
+  summary: |-
+    You are being supplied with an Everquest newsgroup post.
+  
+    Describe and summarize it into the variable `llm_summary`.
 
-  The image follows:
-  ---
+    Respond in the following JSON format:
+  
+    {"llm_summary": "..."}
+
+    The content of the newsgroup post follows:
+    ---
+    ---
+
+
+
+image_prompts: 
+  summary: |-
+    Attached is an archived image from an old Everquest-related website. 
+
+    Describe and summarize the image into the variable `llm_summary`.
+
+    Respond in the following JSON format:
+    
+    {"llm_summary": "..."}
+
+    The image follows:
+    ---
+    ---
+
+  classification: |-
+    Attached is an archived image from an old Everquest-related website. 
+
+    Categorize it into into one of the following content flavours into the variable `llm_content_flavour`:
+    
+    - Game Screenshot
+    - Item Stats
+    - Monster
+    - Player Character Portrait
+    - Other
+
+    Respond in the following JSON format:
+    
+    {"llm_content_flavour": "..."}
+
+    The image follows:
+    ---
+    ---
+
+  tagging: |-
+    Attached is an archived image from an old Everquest-related website. 
+
+    Below is a list of content tags. Examine the content and decide if any of the tags apply. Add all the applicable tags to the list "llm_tags". 
+    - screenshot: An in-game screenshot from the game Everquest itself
+    - item: A picture/screenshot of a specific item in the game, especially its stats and/or where to find it
+    - monster: A screenshot of a monster in the game
+    - art: The image is primarily artistic and not a game screenshot
+    - player: The image contains an Everquest player character
+
+    Respond in the following JSON format:
+    
+    {"llm_tags": [ ... ] }
+
+    The image follows:
+    ---
+    ---
+
+  text_extraction: |-
+    Attached is an archived image from an old Everquest-related website. 
+
+    Extract any phrases from the image into the string array variable `llm_image_text`.
+
+    Respond in the following JSON format:
+    
+    {"llm_image_text": [ ... ] }
+
+    The image follows:
+    ---
+    ---

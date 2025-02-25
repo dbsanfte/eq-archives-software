@@ -1,0 +1,15 @@
+{
+    "$id": "https://example.com/person.schema.json",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "Response",
+    "type": "object",
+    "properties": {
+        "llm_image_text": {
+            "type": "array",
+            "description": "Any text strings found in the image.",
+            "items": {
+                "type": "string"
+            }
+        }
+    }
+}

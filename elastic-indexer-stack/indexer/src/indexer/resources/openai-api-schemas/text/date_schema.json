@@ -1,0 +1,27 @@
+{
+    "$id": "https://example.com/person.schema.json",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "Response",
+    "type": "object",
+    "properties": {
+        "llm_guessed_date": {
+            "type": "string",
+            "format": "date",
+            "description": "Best guess as to the last-updated date of the text in format YYYY-MM-DD."
+        },
+        "llm_extracted_dates": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                "date": {
+                    "type": "string",
+                    "format": "date",
+                    "description": "A date in format YYYY-MM-DD."
+                }
+                }
+            },
+            "description": "Extracted dates from the text."
+        }
+    }
+}

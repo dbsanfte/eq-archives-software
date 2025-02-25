@@ -23,7 +23,7 @@ class Indexer:
         # Instantiate filetype handlers
         self._image_handler = ImageHandler(self._archive_handler, self._openai_manager)
         self._text_handler = TextHandler(self._archive_handler, self._openai_manager)
-        self._other_handler = OtherHandler(self._archive_handler)
+        self._other_handler = OtherHandler(self._archive_handler, self._openai_manager)
         
         # Local repo path
         self._LOCAL_REPO_PATH = os.environ.get("LOCAL_REPO_PATH", "/data/eq-archives")

@@ -7,18 +7,152 @@ from elasticsearch import Elasticsearch, exceptions
 
 logger = logging.getLogger(__name__)
 
+# A single dictionary describing each field and its ES mapping configuration
+ES_FIELDS = {
+    "id": {
+        "mapping": {"type": "keyword"},
+        "default": None
+    },
+    "parent_id": {
+        "mapping": {"type": "keyword"},
+        "default": None
+    },
+    "last_indexed": {
+        "mapping": {"type": "date"},
+        "default": None  # We'll set this later if None
+    },
+    "title": {
+        "mapping": {"type": "text"},
+        "default": None
+    },
+    "thumbnail": {
+        "mapping": {"type": "text"},
+        "default": None
+    },
+    "mime_type": {
+        "mapping": {"type": "keyword"},
+        "default": None
+    },
+    "file_type": {
+        "mapping": {"type": "keyword"},
+        "default": None
+    },
+    "text": {
+        "mapping": {
+            "type": "nested",
+            "properties": {
+                "vector": {
+                    "type": "dense_vector",
+                    "dims": 768,
+                    "index": True,
+                    "index_options": {"type": "int8_hnsw"}
+                },
+                "text_chunk": {"type": "text"}
+            }
+        },
+        "default": None
+    },
+    "text_full": {
+        "mapping": {"type": "text"},
+        "default": None
+    },
+    "llm_model_name": {
+        "mapping": {"type": "keyword"},
+        "default": None
+    },
+    "llm_summary": {
+        "mapping": {"type": "text"},
+        "default": None
+    },
+    "llm_summary_vector": {
+        "mapping": {
+            "type": "dense_vector",
+            "dims": 768,
+            "index": True,
+            "index_options": {"type": "int8_hnsw"}
+        },
+        "default": None
+    },
+    "llm_content_flavour": {
+        "mapping": {"type": "keyword"},
+        "default": None
+    },
+    "llm_tags": {
+        "mapping": {"type": "keyword"},
+        "default": None
+    },
+    "llm_guessed_date": {
+        "mapping": {"type": "date"},
+        "default": None
+    },
+    "llm_extracted_dates": {
+        "mapping": {
+            "type": "nested",
+            "properties": {
+                "date": {"type": "date"}
+            }
+        },
+        "default": None
+    },
+    "llm_image_text_full": {
+        "mapping": {"type": "text"},
+        "default": None
+    },
+    "llm_image_text_vector": {
+        "mapping": {
+            "type": "dense_vector",
+            "dims": 768,
+            "index": True,
+            "index_options": {"type": "int8_hnsw"}
+        },
+        "default": None
+    },
+    "domain_name": {
+        "mapping": {"type": "keyword"},
+        "default": None
+    },
+    "capture_date": {
+        "mapping": {"type": "date"},
+        "default": None
+    },
+    "mailing_list_name": {
+        "mapping": {"type": "keyword"},
+        "default": None
+    },
+    "url": {
+        "mapping": {"type": "text"},
+        "default": None
+    },
+    "alternate_url": {
+        "mapping": {"type": "text"},
+        "default": None
+    }
+}
+
 class ElasticsearchManager:
     _index_template_created = False
     _index_created = False
     
-    def __init__(self, es_client: Elasticsearch=None, host=None, port=None, es_username=None, es_password=None, 
-                 es_password_file="/run/secrets/es_password", es_username_file="/run/secrets/es_username", index_name=None, 
-                 es_max_retries=3, es_request_timeout=300, ssl_verify_certs=True, ssl_show_warn=True):
-        self._host=host or os.environ.get("ELASTICSEARCH_HOST", "http://elasticsearch")
-        self._port=port or os.environ.get("ELASTICSEARCH_PORT", "9200")
+    def __init__(
+        self, 
+        es_client: Elasticsearch=None, 
+        host=None, 
+        port=None, 
+        es_username=None, 
+        es_password=None, 
+        es_password_file="/run/secrets/es_password", 
+        es_username_file="/run/secrets/es_username", 
+        index_name=None, 
+        es_max_retries=3, 
+        es_request_timeout=300, 
+        ssl_verify_certs=True, 
+        ssl_show_warn=True
+    ):
+        self._host = host or os.environ.get("ELASTICSEARCH_HOST", "http://elasticsearch")
+        self._port = port or os.environ.get("ELASTICSEARCH_PORT", "9200")
         
-        self._es_username=es_username or os.environ.get("ELASTICSEARCH_USERNAME")
-        self._es_password=es_password or os.environ.get("ELASTICSEARCH_PASSWORD")
+        self._es_username = es_username or os.environ.get("ELASTICSEARCH_USERNAME")
+        self._es_password = es_password or os.environ.get("ELASTICSEARCH_PASSWORD")
         if os.path.exists(es_username_file):
             with open(es_username_file, "r") as f:
                 self._es_username = f.read().strip()
@@ -26,13 +160,13 @@ class ElasticsearchManager:
             with open(es_password_file, "r") as f:
                 self._es_password = f.read().strip()
         
-        self._index_name=index_name or os.environ.get("ELASTICSEARCH_INDEX", "eq-archive")
+        self._index_name = index_name or os.environ.get("ELASTICSEARCH_INDEX", "eq-archive")
         self._es_max_retries = os.environ.get("ELASTICSEARCH_MAX_RETRIES", es_max_retries)
         self._es_retry_on_timeout = os.environ.get("ELASTICSEARCH_RETRY_ON_TIMEOUT", True)
         self._es_request_timeout = os.environ.get("ELASTICSEARCH_REQUEST_TIMEOUT", es_request_timeout)
         self._ssl_verify_certs = os.environ.get("ELASTICSEARCH_SSL_VERIFY_CERTS", ssl_verify_certs)
         self._ssl_show_warn = os.environ.get("ELASTICSEARCH_SSL_SHOW_WARN", ssl_show_warn)
-        self._es_client = es_client  # Will be initialized on demand
+        self._es_client = es_client
 
     def _create_client(self):
         if self._es_client is not None:
@@ -71,6 +205,36 @@ class ElasticsearchManager:
             self._es_client = self._create_client()
         return self._es_client
 
+    def _create_index_template(self):
+        es = self.get_client()
+        if not self._index_template_created:
+            # Build ES mappings from our single ES_FIELDS dict
+            template_body = {
+                "index_patterns": ["eq-archive*"],
+                "template": {
+                    "settings": {"number_of_shards": 1},
+                    "mappings": {
+                        "properties": {
+                            field_name: cfg["mapping"] for field_name, cfg in ES_FIELDS.items()
+                        }
+                    }
+                }
+            }
+            template_name = "eq-archive-index-template"
+            es.indices.put_index_template(name=template_name, body=template_body)
+        self._index_template_created = True
+
+    def _initialize_es_index(self):
+        es = self.get_client()
+        if not self._index_created:
+            if not es.indices.exists(index=self._index_name):
+                logger.debug(f"Creating Elasticsearch index as it doesn't exist yet: {self._index_name}")
+                response = es.indices.create(index=self._index_name)
+                logger.debug(f"Index created: {response}")
+            else:
+                logger.debug(f"Index already exists: {self._index_name}")
+            self._index_created = True
+
     def index_document(self, doc_id, doc_body):
         es = self.get_client()
         try:
@@ -79,7 +243,7 @@ class ElasticsearchManager:
         except exceptions.RequestError as e:
             logger.error(f"Error indexing document: {e}")
             logger.exception(e)
-            
+
     def record_exists(self, doc_id):
         es = self.get_client()
         try:
@@ -88,7 +252,7 @@ class ElasticsearchManager:
             logger.error(f"Error checking if record exists: {e}")
             logger.exception(e)
             return False
-    
+
     def get_document(self, doc_id):
         es = self.get_client()
         try:
@@ -97,132 +261,6 @@ class ElasticsearchManager:
             logger.error(f"Error fetching document: {e}")
             logger.exception(e)
             return None
-
-    # DS - Multi vector documents in Elasticsearch:
-    # https://www.elastic.co/search-labs/blog/multi-vector-documents
-    def _create_index_template(self):
-        es = self.get_client()
-        
-        if not self._index_template_created:
-            template_body = {
-                "index_patterns": ["eq-archive*"],
-                "template": {
-                    "settings": {
-                        "number_of_shards": 1
-                    },
-                    "mappings": {
-                        "properties": {
-                            "id": {
-                                "type": "keyword"
-                            },
-                            "parent_id": {
-                                "type": "keyword"
-                            },
-                            "last_indexed": {
-                                "type": "date"
-                            },
-                            "title": {
-                                "type": "text"
-                            },
-                            "thumbnail": {
-                                "type": "text"
-                            },
-                            "mime_type": {
-                                "type": "keyword"
-                            },
-                            "file_type": {
-                                "type": "keyword"
-                            },
-                            "text": {
-                                "type": "nested",
-                                "properties": {
-                                    "vector": {
-                                        "type": "dense_vector",
-                                        "dims": 768,
-                                        "index": True,
-                                        "index_options": {
-                                            "type": "int8_hnsw"
-                                        }
-                                    },
-                                    "text_chunk": {
-                                        "type": "text"
-                                    }
-                                }
-                            },
-                            "text_full": {
-                                "type": "text"
-                            },
-                            "llm_model_name": {
-                                "type": "keyword"  
-                            },
-                            "llm_summary": {
-                                "type": "text"
-                            },
-                            "llm_summary_vector": {
-                                "type": "dense_vector",
-                                "dims": 768,
-                                "index": True,
-                                "index_options": {
-                                    "type": "int8_hnsw"
-                                }
-                            },
-                            "llm_content_flavour": {
-                                "type": "keyword"
-                            },
-                            "llm_tags": {
-                                "type": "keyword"
-                            },
-                            "llm_guessed_date": {
-                                "type": "date"  
-                            },
-                            "llm_image_text": {
-                                "type": "text"  
-                            },
-                            "llm_image_text_vector": {
-                                "type": "dense_vector",
-                                "dims": 768,
-                                "index": True,
-                                "index_options": {
-                                    "type": "int8_hnsw"
-                                }  
-                            },
-                            "domain_name": {
-                                "type": "keyword"
-                            },
-                            "capture_date": {
-                                "type": "date"
-                            },
-                            "mailing_list_name": {
-                                "type": "keyword"
-                            },
-                            "url": {
-                                "type": "text"
-                            },
-                            "alternate_url": {
-                                "type": "text"
-                            }
-                        }
-                    }
-                }
-            }
-            
-            template_name = "eq-archive-index-template"
-            logging.info(f"Ensuring index template created: {template_name}")
-            response = es.indices.put_index_template(name=template_name, body=template_body)
-            logging.debug(f"Index template up to date: {response}")
-            
-        self._index_template_created = True
-
-    def _initialize_es_index(self):
-        es = self.get_client()
-        if not self._index_created:
-            if not es.indices.exists(index=self._index_name):
-                logging.debug(f"Creating Elasticsearch index as it doesn't exist yet: {self._index_name}")
-                response = es.indices.create(index=self._index_name)
-                logging.debug(f"Index created: {response}")
-            else:
-                logging.debug(f"Index already exists: {self._index_name}")
-            self._index_created = True
 
     def chunks_exist(self, prefix):
         """
@@ -245,44 +283,18 @@ class ElasticsearchManager:
             return False
 
     @staticmethod
-    def build_document(
-        id: str,
-        title: str = None,
-        file_type: str = None,
-        mime_type: str = None,
-        text: list = None,
-        text_full: str = None,
-        llm_summary: str = None,
-        llm_summary_vector = None,
-        llm_guessed_date = None,
-        llm_model_name: str = None,
-        llm_content_flavour: str = None,
-        llm_tags: list = None,
-        llm_image_text_vector: list = None,
-        llm_image_text_full: str = None,
-        domain_name: str = None,
-        mailing_list_name: str = None,
-        url: str = None,
-        alternate_url: str = None,
-        thumbnail: str = None
-    ) -> dict:
-        return {
-            "id": id,
-            "last_indexed": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-            "title": title,
-            "file_type": file_type,
-            "mime_type": mime_type,
-            "text": text,
-            "text_full": text_full,
-            "llm_summary": llm_summary,
-            "llm_summary_vector": llm_summary_vector,
-            "llm_guessed_date": llm_guessed_date,
-            "llm_model_name": llm_model_name,
-            "llm_content_flavour": llm_content_flavour,
-            "llm_tags": llm_tags,
-            "domain_name": domain_name,
-            "mailing_list_name": mailing_list_name,
-            "url": url,
-            "alternate_url": alternate_url,
-            "thumbnail": thumbnail
-        }
+    def build_document(**kwargs):
+        # Identify any fields passed in that don't exist in ES_FIELDS
+        invalid_fields = set(kwargs.keys()) - set(ES_FIELDS.keys())
+        if invalid_fields:
+            raise ValueError(f"Invalid field(s): {', '.join(invalid_fields)}")
+
+        doc = {}
+        for field_name, config in ES_FIELDS.items():
+            doc[field_name] = kwargs.get(field_name, config.get("default"))
+
+        # If last_indexed wasn't passed in, set the current time
+        if not doc["last_indexed"]:
+            doc["last_indexed"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+        return doc

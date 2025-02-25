@@ -14,8 +14,15 @@ export function resolveQuery(queryText,
                              vectorFields, 
                              nestedVectorFields, 
                              embeddingModel) {
-    // If query contains double quotes, build a custom query:
-    if (queryText.includes('"')) {
+    
+    // If query contains special operators or quotes, build a custom query:
+    const RESERVED_CHARS = [
+        '"', '<', '>', '=', '*', '^', '[', ']', '(', ')', '{', 
+        '}', '!', '+', '-', '&&', '|', ':', '~', '?', '\\', '/', 
+        "AND", "OR", "NOT", "TO"
+    ];
+
+    if (RESERVED_CHARS.some(char => queryText.includes(char))) {
         requestBody.query = {
             bool: {
                 should: buildExactMatchQuery(queryText, searchFields)
@@ -86,33 +93,20 @@ function buildKnnQuery(queryText, embeddingModel, paramsRef, vectorFields, neste
 }
 
 function buildExactMatchQuery(queryText, searchFields) {
-    let phrases = [];
-    const remaining = queryText.replace(/"([^"]+)"/g, (match, p1) => {
-        phrases.push(p1);
-        return "";
-    }).trim();
+    /* 
+        We now handle:
+        - Double-quoted phrases
+        - Logical operators: AND, OR, NOT
+        - Parentheses grouping
 
-    let shouldQueries = [];
-
-    if (remaining) {
-        shouldQueries.push({
-            multi_match: {
-                query: remaining,
-                fields: searchFields,
-                type: "best_fields",
-                operator: "and"
-            }
-        });
-    }
-
-    phrases.forEach(phrase => {
-        searchFields.forEach(field => {
-            shouldQueries.push({
-                match_phrase: {
-                    [field]: phrase
-                }
-            });
-        });
-    });
-    return shouldQueries;
+        We use Elasticsearch's 'query_string' to let ES parse and handle 
+        all operators, parentheses, and phrases correctly.
+    */
+    return [{
+        query_string: {
+            query: queryText,
+            fields: searchFields,
+            default_operator: "AND"
+        }
+    }];
 }

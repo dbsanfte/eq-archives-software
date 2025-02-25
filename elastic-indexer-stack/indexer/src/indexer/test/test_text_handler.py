@@ -187,6 +187,7 @@ class DummyOpenAIManager:
             "llm_summary": "dummy summary",
             "llm_summary_vector": [0.1, 0.2],
             "llm_guessed_date": "2023-01-01T00:00:00Z",
+            "llm_extracted_dates": [{"date": "2023-01-01"}, {"date": "2023-01-02"}],
             "llm_model_name": "dummy-model",
             "llm_content_flavour": "dummy-flavour",
             "llm_tags": ["tag1", "tag2"]
@@ -200,6 +201,13 @@ class DummyOpenAIManager:
 
     def embed_text(self, text: str):
         return [0.1, 0.2, 0.3]
+
+    def get_chunks_and_embeddings(self, document):
+        # Simply return a single chunk using the document's page content
+        return [{
+            "text_chunk": document.page_content,
+            "vector": self.embed_text(text=document.page_content)
+        }]
 
 # Monkeypatch the SemanticChunker.split_documents to simply return the input documents
 import indexer.text_handler as text_handler_module
@@ -275,7 +283,7 @@ def test_process_text_file(tmp_path, dummy_dependencies):
     # Validate keys in the returned root document
     root_doc = docs[0]
     expected_keys = {"id", "last_indexed", "title", "file_type", "mime_type", "text",
-                     "llm_summary", "llm_summary_vector", "llm_guessed_date",
+                     "llm_summary", "llm_summary_vector", "llm_guessed_date", "llm_extracted_dates",
                      "llm_model_name", "llm_content_flavour", "llm_tags", "domain_name",
                      "mailing_list_name", "url", "alternate_url", "thumbnail"}
     assert expected_keys.issubset(root_doc.keys())

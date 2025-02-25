@@ -23,10 +23,12 @@ import CustomResultView from "./views/result/CustomResultView";
 import HeaderContent from "./views/HeaderContent"; 
 import SearchParameters from "./views/search/SearchParameters"; 
 import AdvancedSettings, { DEFAULT_KNN_PARAMS } from "./views/search/AdvancedSettings";
+import SyntaxExamples from "./views/search/SyntaxExamples";
 import { getSearchConfig } from "./search/Connector";
 
 export default function App() {
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showSyntax, setShowSyntax] = useState(false);
   const [knnParams, setKnnParams] = useState(DEFAULT_KNN_PARAMS);
 
   const knnParamsRef = useRef(knnParams);
@@ -60,41 +62,53 @@ export default function App() {
                 <CircularProgress size={80} />
               </Box>
             )}
-            <ErrorBoundary>
-              <Layout
-                header={
-                  <>
-                    <HeaderContent />
-                    <SearchBox searchAsYouType={true} />
-                    <Button
-                      variant="contained"
-                      style={{ marginTop: "1rem" }}
-                      onClick={() => setShowAdvanced(!showAdvanced)}
-                    >
-                      Advanced...
-                    </Button>
-                    <Collapse in={showAdvanced}>
-                      <Box sx={{ marginBottom: "1rem" }}>
-                        <SearchParameters values={knnParams} onChange={handleParamChange} />
-                      </Box>
-                      <AdvancedSettings values={knnParams} onChange={handleParamChange} />
-                    </Collapse>
-                  </>
-                }
-                sideContent={
-                  <div>
-                    {wasSearched && (
-                      <Sorting
-                        label="Sort by"
-                        sortOptions={buildSortOptionsFromConfig()}
-                      />
-                    )}
-                    {getFacetFields().map(field => (
-                      <Facet key={field} field={field} label={field} />
-                    ))}
-                  </div>
-                }
-                bodyContent={
+            <Layout
+              header={
+                <>
+                  <HeaderContent />
+                  <SearchBox searchAsYouType={true} />
+                  <Button
+                    variant="contained"
+                    style={{ marginTop: "1rem" }}
+                    onClick={() => setShowAdvanced(!showAdvanced)}
+                  >
+                    Advanced...
+                  </Button>
+                  <Button
+                    variant="contained"
+                    style={{ marginTop: "1rem", marginLeft: "1rem" }}
+                    onClick={() => setShowSyntax(!showSyntax)}
+                  >
+                    Search Syntax...
+                  </Button>
+                  <Collapse in={showAdvanced}>
+                    <Box sx={{ marginTop: "1rem", marginBottom: "1rem" }}>
+                      <SearchParameters values={knnParams} onChange={handleParamChange} />
+                    </Box>
+                    <AdvancedSettings values={knnParams} onChange={handleParamChange} />
+                  </Collapse>
+                  <Collapse in={showSyntax}>
+                    <Box sx={{ marginTop: "1rem", marginBottom: "1rem" }}>
+                      <SyntaxExamples />
+                    </Box>
+                  </Collapse>
+                </>
+              }
+              sideContent={
+                <div>
+                  {wasSearched && (
+                    <Sorting
+                      label="Sort by"
+                      sortOptions={buildSortOptionsFromConfig()}
+                    />
+                  )}
+                  {getFacetFields().map(field => (
+                    <Facet key={field} field={field} label={field} />
+                  ))}
+                </div>
+              }
+              bodyContent={
+                <ErrorBoundary>                
                   <Results
                     titleField={getConfig().titleField}
                     urlField={getConfig().urlField}
@@ -102,16 +116,16 @@ export default function App() {
                     shouldTrackClickThrough={true}
                     resultView={CustomResultView}
                   />
-                }
-                bodyHeader={
-                  <>
-                    {wasSearched && <PagingInfo />}
-                    {wasSearched && <ResultsPerPage />}
-                  </>
-                }
-                bodyFooter={<Paging />}
-              />
-            </ErrorBoundary>
+                </ErrorBoundary>
+              }
+              bodyHeader={
+                <>
+                  {wasSearched && <PagingInfo />}
+                  {wasSearched && <ResultsPerPage />}
+                </>
+              }
+              bodyFooter={<Paging />}
+            />
           </div>
         )}
       </WithSearch>

@@ -27,7 +27,9 @@ services:
       - ELASTICSEARCH_SSL_VERIFY_CERTS=false
       - ELASTICSEARCH_INDEX=eq-archive-0
       - REINDEXING_ENABLED=false
-      - SPARSE_CHECKOUT_PATHS=websites/eq.castersrealm.com,mailing-lists/EQ-Clerics,newsgroups
+#     - SPARSE_CHECKOUT_PATHS=websites/eq.castersrealm.com,mailing-lists/EQ-Clerics,newsgroups
+      - SPARSE_CHECKOUT_PATHS=websites/eq.castersrealm.com
+#     - SPARSE_CHECKOUT_PATHS=mailing-lists/EQ-Clerics
       - GIT_REPO_URL=https://github.com/dbsanfte/eq-archives.git
       - LOCAL_REPO_PATH=/data/eq-archives
       - SLEEP_INTERVAL=3600
