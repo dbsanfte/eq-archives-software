@@ -28,7 +28,7 @@ export const createConnector = (paramsRef) => {
     
     // Resolve the query based on the search term
     resolveQuery(
-        requestState.searchTerm, 
+        requestState, 
         requestBody, 
         searchFields, 
         paramsRef, 

@@ -12,6 +12,11 @@ server {
         proxy_pass                      $ELASTICSEARCH_URL/$ELASTICSEARCH_INDEX/_search;
     }
 
+    location /elasticsearch/$ELASTICSEARCH_INDEX/_count {
+        proxy_set_header                Authorization "Basic $ELASTICSEARCH_AUTHORIZATION";
+        proxy_pass                      $ELASTICSEARCH_URL/$ELASTICSEARCH_INDEX/_count;
+    }
+
     location /openai/v1/embeddings {
         proxy_set_header                Authorization "Bearer $OPENAI_API_KEY";
         proxy_pass                      $OPENAI_URL/v1/embeddings;

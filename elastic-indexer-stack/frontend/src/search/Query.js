@@ -1,13 +1,13 @@
 // Logic for building Elasticsearch queries based on user input
 //
-// @param {string} queryText - The user's search query
+// @param {string} requestState - The current request state, before postprocessing
 // @param {object} requestBody - The request body to be sent to Elasticsearch
 // @param {array} searchFields - The fields to search for the query
 // @param {object} paramsRef - The reference to the search parameters
 // @param {array} vectorFields - The fields containing vector embeddings
 // @param {string} embeddingModel - The name of the embedding model
 // @returns {void}
-export function resolveQuery(queryText, 
+export function resolveQuery(requestState, 
                              requestBody, 
                              searchFields, 
                              paramsRef, 
@@ -21,6 +21,11 @@ export function resolveQuery(queryText,
         '}', '!', '+', '-', '&&', '|', ':', '~', '?', '\\', '/', 
         "AND", "OR", "NOT", "TO"
     ];
+
+    const queryText = requestState.searchTerm;
+    requestBody.sort[0] = {
+        [requestState.sortField]: requestState.sortDirection
+    };
 
     if (RESERVED_CHARS.some(char => queryText.includes(char))) {
         requestBody.query = {

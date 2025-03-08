@@ -8,7 +8,7 @@
   }
 
   .result-summary,
-  .result-full-text {
+  .result-text-snippet {
     margin-bottom: 20px;
   }
   
@@ -19,7 +19,7 @@
     color: #333;
   }
   
-  .result-full-text h3 {
+  .result-text-snippet h3 {
     margin-bottom: 10px;
     font-size: 1.2rem;
     color: #333;

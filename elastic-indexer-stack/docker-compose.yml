@@ -105,6 +105,39 @@ services:
       - es_password
       - openai_api_key
 
+  indexer-3:
+    image: dbsanfte/indexer:latest
+    restart: unless-stopped
+    deploy:
+      replicas: 2
+    command:
+      - "--indexer"
+    depends_on:
+      - rabbitmq
+      - file-finder
+    environment:
+      - LOG_LEVEL=debug
+      - ELASTICSEARCH_HOST=http://192.168.50.100
+      - ELASTICSEARCH_PORT=31200
+      - ELASTICSEARCH_SSL_SHOW_WARN=false
+      - ELASTICSEARCH_SSL_VERIFY_CERTS=false
+      - ELASTICSEARCH_INDEX=eq-archive-0
+      - LOCAL_REPO_PATH=/data/eq-archives
+      - SKIP_IMAGE_FILES=true
+      - SKIP_OTHER_FILES=true
+      - OPENAI_ENDPOINT=http://192.168.50.82:1234/v1
+      - OPENAI_API_KEY=lmstudio
+      - OPENAI_TEXT_MODEL_NAME=phi-4@q6_k
+      - OPENAI_TEXT_TEMPERATURE=0.015
+      - OPENAI_IMAGE_MODEL_NAME=llava-v1.5-7b@q8_0
+      - OPENAI_EMBEDDING_MODEL_NAME=text-embedding-nomic-embed-text-v1.5@q8_0
+    volumes:
+      - eq-archives-volume:/data
+    secrets:
+      - es_username
+      - es_password
+      - openai_api_key
+
   frontend:
     image: dbsanfte/frontend:latest
     restart: unless-stopped

@@ -149,27 +149,36 @@ class OpenAIManager:
     def _prompt_llm_for_task(self, content_type: str, content: str, task_type: str, 
                              domain_name: str, mime_type: str=None) -> dict:
         """Prompt the LLM for a specific task."""
-        prompt = self._resolve_prompt_for_task(content_type=content_type, task_type=task_type, 
-                                               domain_name=domain_name)
-        schema = self._resolve_schema_for_task(content_type=content_type, task_type=task_type)
-        payload = self._resolve_payload_for_task(content_type=content_type, content=content, 
-                                                 prompt=prompt, schema=schema, mime_type=mime_type)
+        parsed_content = {}
         
-        headers = {"Content-Type": "application/json"}
-        if self._api_key:
-            headers["Authorization"] = f"Bearer {self._api_key}"
-        
-        resp = requests.post(
-            f"{self._base_url}/chat/completions",
-            headers=headers,
-            json=payload,
-            timeout=300
-        )
-        resp.raise_for_status()
-        
-        llm_result = resp.json()
-        parsed_content = self._parse_json_response(llm_result)
-                    
+        if domain_name == "groups.google.com" and task_type == "classification":
+            # If the domain is 'groups.google.com", this is a Newsgroup Post. Don't bother inferencing.
+            parsed_content["llm_content_flavour"] = "Newsgroup Post"
+        elif domain_name == "groups.yahoo.com" and task_type == "classification":
+            # If the domain is 'groups.yahoo.com", this is a Mailing List Email. Don't bother inferencing.
+            parsed_content["llm_content_flavour"] = "Mailing List Email"
+        else:
+            prompt = self._resolve_prompt_for_task(content_type=content_type, task_type=task_type, 
+                                                domain_name=domain_name)
+            schema = self._resolve_schema_for_task(content_type=content_type, task_type=task_type)
+            payload = self._resolve_payload_for_task(content_type=content_type, content=content, 
+                                                    prompt=prompt, schema=schema, mime_type=mime_type)
+            
+            headers = {"Content-Type": "application/json"}
+            if self._api_key:
+                headers["Authorization"] = f"Bearer {self._api_key}"
+            
+            resp = requests.post(
+                f"{self._base_url}/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=120
+            )
+            resp.raise_for_status()
+            
+            llm_result = resp.json()
+            parsed_content = self._parse_json_response(llm_result)
+                        
         summary_vector = self.embed_text(parsed_content.get("llm_summary", ""))
         combined_image_text = " ".join(parsed_content.get("llm_image_text", []))
         image_text_vector = self.embed_text(combined_image_text)

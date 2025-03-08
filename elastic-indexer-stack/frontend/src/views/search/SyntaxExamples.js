@@ -1,5 +1,7 @@
 import React from "react";
-import { Box, Typography, List, ListItem, ListItemText, Link } from "@mui/material";
+import { Box, Typography, List, ListItem, Link } from "@mui/material";
+import SyntaxHighlighter from "react-syntax-highlighter";
+import { materialDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 
 function SyntaxExamples({}) {
   const examples = [
@@ -33,7 +35,7 @@ Necros are overpowered`
       title: "Domain filtering:",
       content: `domain_name:("eq.castersrealm.com") 
 domain_name:("eq.castersrealm.com" OR "eq.crgaming.net") 
-domain_name:(NOT "eq.castersrealm.com") `
+domain_name:(NOT "eq.castersrealm.com")`
     },
     {
       title: "Date range filtering:",
@@ -58,46 +60,25 @@ capture_date:[1999-01-01 TO 1999-12-31]`
         {examples.map((example) => (
           <ListItem key={example.title} alignItems="flex-start" sx={{ display: "block", mb: 2 }}>
             <Typography variant="h6">{example.title}</Typography>
-            <ListItemText 
-              primary={example.content}
-              slotProps={{
-                primary: {
-                  variant: "body1",
-                  sx: { 
-                    whiteSpace: "pre-wrap", 
-                    mt: 1, 
-                    fontFamily: "monospace", 
-                    marginTop: "0.5rem"
-                  }
-                }
-              }}
-            />
+            <SyntaxHighlighter
+              language="json"
+              style={materialDark}
+              customStyle={{ backgroundColor: "black", padding: "0.5rem", borderRadius: "4px", marginTop: "0.5rem" }}
+            >
+              {example.content}
+            </SyntaxHighlighter>
           </ListItem>
         ))}
-          <ListItem key="elastic-docs" alignItems="flex-start" sx={{ display: "block", mb: 2 }}>
-            <Typography variant="h6" gutterBottom>
+        <ListItem key="elastic-docs" alignItems="flex-start" sx={{ display: "block", mb: 2 }}>
+          <Typography variant="h6" gutterBottom>
             Elasticsearch Query String Syntax Reference:
-            </Typography>
-            <ListItemText 
-              primary={
-                <Typography variant="body1">
-                  <Link href="https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-query-string-query.html#query-string-syntax" target="_blank" rel="noopener">
-                    https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-query-string-query.html#query-string-syntax
-                  </Link>
-                </Typography>
-              }
-              slotProps={{
-                primary: {
-                  sx: { 
-                    whiteSpace: "pre-wrap", 
-                    mt: 1, 
-                    fontFamily: "monospace", 
-                    marginTop: "0.5rem"
-                  }
-                }
-              }}
-            />
-          </ListItem>
+          </Typography>
+          <Typography variant="body1" sx={{ whiteSpace: "pre-wrap", mt: 1, fontFamily: "monospace", marginTop: "0.5rem" }}>
+            <Link href="https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-query-string-query.html#query-string-syntax" target="_blank" rel="noopener">
+              https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-query-string-query.html#query-string-syntax
+            </Link>
+          </Typography>
+        </ListItem>
       </List>
     </Box>
   );

@@ -21,6 +21,7 @@ import {
 import { Box, Button, Collapse, CircularProgress } from "@mui/material";
 import CustomResultView from "./views/result/CustomResultView";
 import HeaderContent from "./views/HeaderContent"; 
+import ArchiveStatusBar from "./views/ArchiveStatusBar";
 import SearchParameters from "./views/search/SearchParameters"; 
 import AdvancedSettings, { DEFAULT_KNN_PARAMS } from "./views/search/AdvancedSettings";
 import SyntaxExamples from "./views/search/SyntaxExamples";
@@ -65,6 +66,7 @@ export default function App() {
             <Layout
               header={
                 <>
+                  <ArchiveStatusBar />
                   <HeaderContent />
                   <SearchBox searchAsYouType={true} />
                   <Button

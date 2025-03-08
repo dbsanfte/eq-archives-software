@@ -15,9 +15,7 @@ const CustomResultView = (context, onClickLink) => {
   let textHTML = "";
   if (text_full?.snippet) {
     textHTML = text_full.snippet;
-  } else if (text_full?.raw) {
-    textHTML = text_full.raw;
-  }
+  } 
 
   return (
     <li className="sui-result">

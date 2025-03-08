@@ -21,7 +21,7 @@ const ButtonRow = ({ result }) => {
         }}
       >
         <Button variant="outlined" onClick={handlePreviewOpen}>
-          Preview Text
+          Preview Full Text
         </Button>
         <Button
           variant="outlined"
