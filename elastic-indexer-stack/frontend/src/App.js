@@ -15,7 +15,8 @@ import { Layout } from "@elastic/react-search-ui-views";
 import "@elastic/react-search-ui-views/lib/styles/styles.css";
 import {
   getConfig,
-  getFacetFields,
+  getStandardFacetFields,
+  getDatePickerFacetFields,
   buildSortOptionsFromConfig
 } from "./config/config-helper";
 import { Box, Button, Collapse, CircularProgress } from "@mui/material";
@@ -26,6 +27,8 @@ import SearchParameters from "./views/search/SearchParameters";
 import AdvancedSettings, { DEFAULT_KNN_PARAMS } from "./views/search/AdvancedSettings";
 import SyntaxExamples from "./views/search/SyntaxExamples";
 import { getSearchConfig } from "./search/Connector";
+import DateRangeFacet from "./views/search/DateRangeFacet";
+import { getDate } from "date-fns";
 
 export default function App() {
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -46,9 +49,9 @@ export default function App() {
   return (
     <SearchProvider config={config}>
       <WithSearch 
-        mapContextToProps={({ wasSearched, isLoading }) => ({ wasSearched, isLoading })}
+        mapContextToProps={({ wasSearched, isLoading, executeSearch }) => ({ wasSearched, isLoading, executeSearch })}
       >
-        {({ wasSearched, isLoading }) => (
+        {({ wasSearched, isLoading, executeSearch }) => (
           <div className="App" style={{ position: "relative" }}>
             {isLoading && (
               <Box
@@ -85,7 +88,11 @@ export default function App() {
                   </Button>
                   <Collapse in={showAdvanced}>
                     <Box sx={{ marginTop: "1rem", marginBottom: "1rem" }}>
-                      <SearchParameters values={knnParams} onChange={handleParamChange} />
+                      <SearchParameters 
+                        values={knnParams} 
+                        onChange={handleParamChange} 
+                        onSearch={executeSearch} 
+                      />
                     </Box>
                     <AdvancedSettings values={knnParams} onChange={handleParamChange} />
                   </Collapse>
@@ -98,15 +105,26 @@ export default function App() {
               }
               sideContent={
                 <div>
-                  {wasSearched && (
-                    <Sorting
-                      label="Sort by"
-                      sortOptions={buildSortOptionsFromConfig()}
-                    />
-                  )}
-                  {getFacetFields().map(field => (
-                    <Facet key={field} field={field} label={field} />
-                  ))}
+                  {
+                    wasSearched && (
+                      <Sorting
+                        label="Sort by"
+                        sortOptions={buildSortOptionsFromConfig()}
+                      />
+                    )
+                  }
+                  {
+                    getDatePickerFacetFields().map(field => {
+                      // Use custom DateRangeFacet for historical date fields
+                      return <DateRangeFacet key={field} field={field} label={field} />;
+                    })
+                  }
+                  {
+                    getStandardFacetFields().map(field => {
+                      // Use default Facet for standard fields
+                      return <Facet key={field} field={field} label={field} />;
+                    })
+                  }
                 </div>
               }
               bodyContent={

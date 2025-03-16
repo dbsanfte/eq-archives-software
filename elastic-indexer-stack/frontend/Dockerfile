@@ -7,10 +7,10 @@ WORKDIR /app
 # Copy package manifests
 COPY package.json ./
 # If you have a package-lock.json, copy it too:
-COPY package-lock.json ./
+COPY yarn.lock ./
 
 # Install dependencies
-RUN npm install
+RUN yarn install
 
 # Copy the rest of the project files
 COPY . .

@@ -23,10 +23,7 @@ export function resolveQuery(requestState,
     ];
 
     const queryText = requestState.searchTerm;
-    requestBody.sort[0] = {
-        [requestState.sortField]: requestState.sortDirection
-    };
-
+    
     if (RESERVED_CHARS.some(char => queryText.includes(char))) {
         requestBody.query = {
             bool: {

@@ -7,20 +7,23 @@
     "@elastic/search-ui-elasticsearch-connector": "latest",
     "@emotion/styled": "^11.14.0",
     "@mui/material": "^6.4.3",
+    "@mui/x-date-pickers": "^7.27.3",
+    "date-fns": "^2.30.0",
     "react": "^18.0.0",
     "react-dom": "^18.0.0",
-    "react-markdown": "^9.0.3",
+    "react-markdown": "^10.1.0",
     "react-scripts": "^5.0.0",
-    "react-syntax-highlighter": "^15.6.1"
+    "react-syntax-highlighter": "^15.6.1",
+    "yarn": "^1.22.22"
   },
   "devDependencies": {
-    "rewire": "^6.0.0"
+    "rewire": "^7.0.0"
   },
   "scripts": {
     "start": "react-scripts start",
     "build-js": "node ./scripts/build-no-chunks.js",
     "build-no-sourcemap": "GENERATE_SOURCEMAP=false npm run build-js",
-    "build": "npm run build-js",
+    "build": "GENERATE_SOURCEMAP=false npm run build-js",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },

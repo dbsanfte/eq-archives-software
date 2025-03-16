@@ -23,7 +23,7 @@
   "thumbnailField": "thumbnail",
   "sortFields": ["capture_date", "llm_guessed_date", "last_indexed"],
   "valueFacets": ["domain_name", "llm_content_flavour", "file_type", "mime_type", "mailing_list_name", "llm_tags"],
-  "historicalFacets": ["capture_date", "llm_guessed_date"],
+  "datePickerFacets": ["capture_date", "llm_guessed_date"],
   "vectorFields": ["llm_image_text_vector", "llm_summary_vector"],
   "nestedVectorFields": ["text"],
   "nestedHistoricalFacets": ["llm_extracted_dates"],

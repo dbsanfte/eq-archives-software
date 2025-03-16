@@ -168,12 +168,12 @@ If you can't figure out my email address, you're not supposed to write me.
 # Dummy implementations for dependencies
 class DummyArchiveHandler:
     def __init__(self):
-        self.mailing_lists_path = "mailing_lists"
-        self.newsgroups_path = "newsgroups"
-        self.websites_path = "websites"
+        self._mailing_lists_path = "mailing_lists"
+        self._newsgroups_path = "newsgroups"
+        self._websites_path = "websites"
 
-    def _convert_to_archive_url(self, file_path: str) -> str:
-        return "http://dummy.archive/" + file_path.replace(os.sep, "/")
+    def _convert_to_archive_url(self, relative_path: str) -> str:
+        return "http://dummy.archive/" + relative_path.replace(os.sep, "/")
 
     def _strip_index_html_from_url(self, url: str) -> str:
         return url.replace("index.html", "")
@@ -274,7 +274,7 @@ def test_process_text_file(tmp_path, dummy_dependencies):
     mime_type = "text/html"
     domain_name = "dummy.domain"
 
-    docs = handler.process_text_file(file_path=file_path, full_path=full_path, mime_type=mime_type,
+    docs = handler.process_text_file(relative_path=file_path, full_path=full_path, mime_type=mime_type,
                                      domain_name=domain_name)
     # Expect one call inside process_text_file that returns a single root document with nested chunks.
     assert isinstance(docs, list)
@@ -307,7 +307,7 @@ def test_resolve_title_from_file_for_website(tmp_path, dummy_dependencies):
     temp_file.write_text(file_content, encoding="utf-8")
     fake_full_path = str(temp_file)
     
-    title = handler._resolve_title_from_file(fake_full_path)
+    title = handler._resolve_title_from_file(relative_path="websites/website_test.html", full_path=fake_full_path)
     assert title == "Test Page Title"
 
 def test_get_documents_from_file_default(tmp_path, dummy_dependencies):
@@ -340,7 +340,7 @@ def test_chunk_and_embed_newsgroup_post_1(tmp_path, dummy_dependencies):
     file_path = f"newsgroups{os.sep}post1.txt"
     full_path = str(temp_file)
     # Process the newsgroup post file
-    docs = handler.process_text_file(file_path=file_path, full_path=full_path,
+    docs = handler.process_text_file(relative_path=file_path, full_path=full_path,
                                      mime_type="text/plain", domain_name="groups.google.com")
     # In our dummy chunker, we expect one chunk and one root document (total 2 docs)
     root_doc = docs[-1]
@@ -364,7 +364,7 @@ def test_chunk_and_embed_newsgroup_post_2(tmp_path, dummy_dependencies):
     file_path = f"newsgroups{os.sep}post2.txt"
     full_path = str(temp_file)
     # Process the file
-    docs = handler.process_text_file(file_path=file_path, full_path=full_path,
+    docs = handler.process_text_file(relative_path=file_path, full_path=full_path,
                                      mime_type="text/plain", domain_name="groups.google.com")
     root_doc = docs[-1]
     assert isinstance(root_doc["text"], list)

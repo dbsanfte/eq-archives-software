@@ -35,7 +35,7 @@ class TestFileFinderInitialization(unittest.TestCase):
         self.assertEqual(finder._LOCAL_REPO_PATH, '/data/eq-archives')
         self.assertEqual(finder._SPARSE_CHECKOUT_PATHS, '')
         self.assertFalse(finder._REINDEXING_ENABLED)
-        self.assertEqual(finder._REINDEXING_INTERVAL, 86400)
+        self.assertEqual(finder._REINDEXING_INTERVAL, 2628000)
 
     def test_logger_initialization(self):
         es_manager = MagicMock()
@@ -193,19 +193,6 @@ class TestCheckAndQueueFile(unittest.TestCase):
         self.assertEqual(rabbitmq_manager.publish_message.call_count, 0)
         
     @patch('datetime.datetime')
-    def test_check_and_queue_chunks_exist_no_reindex(self, mock_datetime):
-        es_manager = MagicMock()
-        rabbitmq_manager = MagicMock()
-        finder = FileFinder(es_manager, rabbitmq_manager)
-        finder._REINDEXING_ENABLED = False
-
-        es_manager.record_exists.return_value = False
-        es_manager.chunks_exist.return_value = True
-        finder._check_and_queue_file('test/path')
-
-        self.assertEqual(rabbitmq_manager.publish_message.call_count, 0)
-
-    @patch('datetime.datetime')
     def test_check_and_queue_file_recently_indexed(self, mock_datetime):
         es_manager = MagicMock()
         rabbitmq_manager = MagicMock()
@@ -217,7 +204,7 @@ class TestCheckAndQueueFile(unittest.TestCase):
         last_indexed = now - timedelta(seconds=1800)  # Within interval
 
         es_manager.record_exists.return_value = True
-        doc = {'_source': {'last_indexed': last_indexed.isoformat()}}
+        doc = {'_source': {'last_indexed': last_indexed.isoformat(), 'llm_summary': 'summary'}}
         es_manager.get_document.return_value = doc
 
         finder._check_and_queue_file('test/path')

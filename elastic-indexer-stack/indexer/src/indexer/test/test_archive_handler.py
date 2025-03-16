@@ -5,10 +5,6 @@ from indexer.archive_handler import ArchiveHandler
 
 @pytest.fixture
 def archive_handler(monkeypatch):
-    # Set environment variables for consistent paths
-    monkeypatch.setenv("NEWSGROUPS_PATH", "newsgroups")
-    monkeypatch.setenv("MAILING_LISTS_PATH", "mailing-lists")
-    monkeypatch.setenv("WEBSITES_PATH", "websites")
     return ArchiveHandler()
 
 def test_strip_index_html_from_url(archive_handler):
@@ -21,9 +17,15 @@ def test_strip_index_html_from_url(archive_handler):
     assert archive_handler._strip_index_html_from_url(url2) == url2
 
 def test_convert_to_archive_url_websites(archive_handler):
-    # File path: websites/example.com/20220101132501/page.html
-    file_path = os.path.join("websites", "example.com", "20220101132501", "page.html")
-    expected = "https://web.archive.org/web/20220101132501/http://example.com/page.html"
+    # File path: websites/eq.castersrealm.com/20000612004545/cgi-bin/eq/postings.cgi
+    file_path = os.path.join("websites", "eq.castersrealm.com", "20000612004545", "cgi-bin", "eq", "postings.cgi")
+    expected = "https://web.archive.org/web/20000612004545/http://eq.castersrealm.com/cgi-bin/eq/postings.cgi"
+    assert archive_handler._convert_to_archive_url(file_path) == expected
+
+def test_convert_to_archive_url_websites_custom(archive_handler):
+    # File path: websites/eq.castersrealm.com/20020322082233/players/default.asp?Action=&Letter=M&Searchtype=levels&Server=24&class=6&lower_level=1&upper_level=9
+    file_path = os.path.join("websites", "eq.castersrealm.com", "20020322082233", "players", "default.asp?Action=&Letter=M&Searchtype=levels&Server=24&class=6&lower_level=1&upper_level=9")
+    expected = "https://web.archive.org/web/20020322082233/http://eq.castersrealm.com/players/default.asp?Action=&Letter=M&Searchtype=levels&Server=24&class=6&lower_level=1&upper_level=9"
     assert archive_handler._convert_to_archive_url(file_path) == expected
 
 def test_convert_to_archive_url_mailing_lists(archive_handler):
@@ -88,3 +90,24 @@ def test_resolve_thumbnail_url_mailing_newsgroups(archive_handler):
     newsgroup_url = "http://example.com/newsgroups/message.html"
     assert archive_handler._resolve_thumbnail_url(mailing_url, "text") == "thumbnails/mailing-list.webp"
     assert archive_handler._resolve_thumbnail_url(newsgroup_url, "text") == "thumbnails/newsgroup.webp"
+
+def test_extract_domain_and_date_websites(archive_handler):
+    # Test extraction for websites using relative path
+    relative_path = os.path.join("websites", "example.com", "20220101132501", "extra", "page.html")
+    domain, capture_date = archive_handler._extract_domain_and_date(relative_path, "")
+    assert domain == "example.com"
+    assert capture_date == "2022-01-01 13:25:01"  # Updated to expect formatted date
+
+def test_extract_websites_date_formatting(archive_handler):
+    # Test the direct method with various date formats
+    relative_path = os.path.join("websites", "example.com", "20220101132501", "extra", "page.html")
+    domain, formatted_date = archive_handler._extract_websites(relative_path=relative_path)
+    assert domain == "example.com"
+    assert formatted_date == "2022-01-01 13:25:01"
+    
+    # Test with another timestamp
+    relative_path = os.path.join("websites", "test-domain.org", "19991231235959", "extra", "page.html")
+    domain, formatted_date = archive_handler._extract_websites(relative_path=relative_path)
+    assert domain == "test-domain.org"
+    assert formatted_date == "1999-12-31 23:59:59"
+    

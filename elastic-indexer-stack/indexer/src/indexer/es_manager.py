@@ -5,8 +5,6 @@ import logging
 import datetime
 from elasticsearch import Elasticsearch, exceptions
 
-logger = logging.getLogger(__name__)
-
 # A single dictionary describing each field and its ES mapping configuration
 ES_FIELDS = {
     "id": {
@@ -136,17 +134,18 @@ class ElasticsearchManager:
     def __init__(
         self, 
         es_client: Elasticsearch=None, 
-        host=None, 
-        port=None, 
-        es_username=None, 
-        es_password=None, 
-        es_password_file="/run/secrets/es_password", 
-        es_username_file="/run/secrets/es_username", 
-        index_name=None, 
-        es_max_retries=3, 
-        es_request_timeout=300, 
-        ssl_verify_certs=True, 
-        ssl_show_warn=True
+        host: str=None, 
+        port: str=None, 
+        es_username: str=None, 
+        es_password: str=None, 
+        es_password_file: str="/run/secrets/es_password", 
+        es_username_file: str="/run/secrets/es_username", 
+        index_name: str=None, 
+        es_max_retries: int=3, 
+        es_request_timeout: int=300, 
+        ssl_verify_certs: bool=True, 
+        ssl_show_warn: bool=True,
+        logger: logging.Logger=None
     ):
         self._host = host or os.environ.get("ELASTICSEARCH_HOST", "http://elasticsearch")
         self._port = port or os.environ.get("ELASTICSEARCH_PORT", "9200")
@@ -167,14 +166,15 @@ class ElasticsearchManager:
         self._ssl_verify_certs = os.environ.get("ELASTICSEARCH_SSL_VERIFY_CERTS", ssl_verify_certs)
         self._ssl_show_warn = os.environ.get("ELASTICSEARCH_SSL_SHOW_WARN", ssl_show_warn)
         self._es_client = es_client
+        self._logger = logger or logging.getLogger(__name__)
 
     def _create_client(self):
         if self._es_client is not None:
             if self._es_client.ping():
-                logger.debug("Reusing existing Elasticsearch client.")
+                self._logger.debug("Reusing existing Elasticsearch client.")
                 return self._es_client
             else:
-                logger.warning("Existing Elasticsearch client is unavailable, reconnecting...")
+                self._logger.warning("Existing Elasticsearch client is unavailable, reconnecting...")
         
         es = Elasticsearch(
             f"{self._host}:{self._port}",
@@ -188,7 +188,7 @@ class ElasticsearchManager:
         )
         if not es.ping():
             raise exceptions.ConnectionError("Could not ping Elasticsearch.")
-        logger.info("Successfully connected to Elasticsearch.")
+        self._logger.info("Successfully connected to Elasticsearch.")
         self._es_client = es
         self._create_index_template()
         self._initialize_es_index()
@@ -196,12 +196,12 @@ class ElasticsearchManager:
 
     def get_client(self):
         if self._es_client is None:
-            logger.debug("Creating new Elasticsearch client...")
+            self._logger.debug("Creating new Elasticsearch client...")
             self._es_client = self._create_client()
         try:
             self._es_client.ping()
         except exceptions.ConnectionError:
-            logger.warning("Elasticsearch client is unavailable, reconnecting...")
+            self._logger.warning("Elasticsearch client is unavailable, reconnecting...")
             self._es_client = self._create_client()
         return self._es_client
 
@@ -228,29 +228,29 @@ class ElasticsearchManager:
         es = self.get_client()
         if not self._index_created:
             if not es.indices.exists(index=self._index_name):
-                logger.debug(f"Creating Elasticsearch index as it doesn't exist yet: {self._index_name}")
+                self._logger.debug(f"Creating Elasticsearch index as it doesn't exist yet: {self._index_name}")
                 response = es.indices.create(index=self._index_name)
-                logger.debug(f"Index created: {response}")
+                self._logger.debug(f"Index created: {response}")
             else:
-                logger.debug(f"Index already exists: {self._index_name}")
+                self._logger.debug(f"Index already exists: {self._index_name}")
             self._index_created = True
 
     def index_document(self, doc_id, doc_body):
         es = self.get_client()
         try:
-            logger.debug(f"Indexing document: {doc_id}")
+            self._logger.debug(f"Indexing document: {doc_id}")
             es.index(index=self._index_name, id=doc_id, op_type="index", body=doc_body)
         except exceptions.RequestError as e:
-            logger.error(f"Error indexing document: {e}")
-            logger.exception(e)
+            self._logger.error(f"Error indexing document: {e}")
+            self._logger.exception(e)
 
     def record_exists(self, doc_id):
         es = self.get_client()
         try:
             return es.exists(index=self._index_name, id=doc_id)
         except exceptions.RequestError as e:
-            logger.error(f"Error checking if record exists: {e}")
-            logger.exception(e)
+            self._logger.error(f"Error checking if record exists: {e}")
+            self._logger.exception(e)
             return False
 
     def get_document(self, doc_id):
@@ -258,8 +258,8 @@ class ElasticsearchManager:
         try:
             return es.get(index=self._index_name, id=doc_id)
         except exceptions.RequestError as e:
-            logger.error(f"Error fetching document: {e}")
-            logger.exception(e)
+            self._logger.error(f"Error fetching document: {e}")
+            self._logger.exception(e)
             return None
 
     def chunks_exist(self, prefix):
@@ -278,8 +278,8 @@ class ElasticsearchManager:
             result = es.search(index=self._index_name, body=body, size=1)
             return result.get("hits", {}).get("total", {}).get("value", 0) > 0
         except exceptions.RequestError as e:
-            logger.error(f"Error searching for chunks: {e}")
-            logger.exception(e)
+            self._logger.error(f"Error searching for chunks: {e}")
+            self._logger.exception(e)
             return False
 
     @staticmethod

@@ -48,19 +48,19 @@ text_prompts:
 
 
   date: |-
-    You are being supplied with an Everquest mailing-list post. Perform the following two tasks:
+    You are being supplied with the content of an old Everquest-related mailing-list post. Perform the following two tasks:f
   
-    1) Extract any dates you see in the content and put them into the list `llm_extracted_dates` with the JSON object format `{ "date": "YYYY-MM-DD" }`. 
+    1) Extract any dates you see in the content and put them into a json list of `llm_extracted_dates`, each with the JSON object format `{ "date": "YYYY-MM-DD" }`. 
 
-    2) Based on any dates you extracted in step 1, guess the most likely last-updated date of the content. Put it into the string variable `llm_guessed_date` in the format "YYYY-MM-DD". If you aren't sure, use the latest date from step 1.
-
-    Important: Always populate `llm_guessed_date` if you extracted a date for `llm_extracted_dates`.
+    2) From the dates extracted in step 1, guess the most likely last-updated date of the content. Put it into the string variable `llm_guessed_date` in the format "YYYY-MM-DD". 
 
     Respond in the following JSON format:
     
     {"llm_guessed_date": "...", "llm_extracted_dates": [ ... ] }
 
-    The content of the mailing-list post follows:
+    IMPORTANT: `llm_guessed_date` MUST be one of the dates extracted in `llm_extracted_dates`.
+
+    The content of the website follows:
     ---
     ---
 

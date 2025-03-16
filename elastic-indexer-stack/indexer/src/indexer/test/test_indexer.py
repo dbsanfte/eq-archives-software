@@ -10,16 +10,16 @@ class DummyArchiveHandler:
         return ("example.com", "2022-01-01")
 
 class DummyTextHandler:
-    def process_text_file(self, file_path, full_path, mime_type, domain_name):
+    def process_text_file(self, relative_path, full_path, mime_type, domain_name):
         # Simulate generating one document
         return [{"id": "doc_text", "content": "dummy text content"}]
 
 class DummyImageHandler:
-    def process_image_file(self, file_path, full_path, mime_type, domain_name):
+    def process_image_file(self, relative_path, full_path, mime_type, domain_name):
         return [{"id": "doc_image", "content": "dummy image content"}]
 
 class DummyOtherHandler:
-    def process_other_file(self, file_path, mime_type, domain_name):
+    def process_other_file(self, relative_path, mime_type, domain_name):
         return [{"id": "doc_other", "content": "dummy other content"}]
 
 # Fake functions to simulate file system and mime detection behavior
@@ -84,7 +84,7 @@ def test_process_text_file(dummy_dependencies, monkeypatch):
 def test_skip_text_file(dummy_dependencies, monkeypatch):
     indexer, dummy_es_manager = dummy_dependencies
     # Set SKIP_TEXT_FILES to 'true' so that text files are skipped
-    monkeypatch.setenv("SKIP_TEXT_FILES", "true")
+    indexer._SKIP_TEXT_FILES = True
     monkeypatch.setattr(os.path, "isfile", fake_isfile_true)
     monkeypatch.setattr(magic, "from_file", fake_magic_from_file_text)
     message = {"file_path": "dummy.txt"}

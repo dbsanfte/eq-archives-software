@@ -1,13 +1,13 @@
 import {
   buildAutocompleteQueryConfig,
-  buildFacetConfigFromConfig,
+  buildStandardFacetConfigFromConfig,
   buildSearchOptionsFromConfig
 } from "./config-helper";
 
 export function createConfig(apiConnector) {
   return {
     searchQuery: {
-      facets: buildFacetConfigFromConfig(),
+      facets: buildStandardFacetConfigFromConfig(),
       ...buildSearchOptionsFromConfig()
     },
     autocompleteQuery: buildAutocompleteQueryConfig(),

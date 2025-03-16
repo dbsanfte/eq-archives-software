@@ -6,8 +6,8 @@ from indexer.es_manager import ElasticsearchManager
 
 # Dummy implementations
 class DummyArchiveHandler:
-    def _convert_to_archive_url(self, file_path: str) -> str:
-        return "http://dummy.archive/" + file_path.replace(os.sep, "/")
+    def _convert_to_archive_url(self, relative_path: str) -> str:
+        return "http://dummy.archive/" + relative_path.replace(os.sep, "/")
     def _strip_index_html_from_url(self, url: str) -> str:
         return url.replace("index.html", "")
     def _resolve_thumbnail_url(self, url: str, file_type: str) -> str:

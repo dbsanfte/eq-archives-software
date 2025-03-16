@@ -40,8 +40,8 @@ from indexer.es_manager import ElasticsearchManager
 
 # Dummy dependency implementations
 class DummyArchiveHandler:
-    def _convert_to_archive_url(self, file_path: str) -> str:
-        return "http://dummy.archive/" + file_path.replace(os.sep, "/")
+    def _convert_to_archive_url(self, relative_path: str) -> str:
+        return "http://dummy.archive/" + relative_path.replace(os.sep, "/")
 
     def _strip_index_html_from_url(self, url: str) -> str:
         return url.replace("index.html", "")
@@ -88,7 +88,8 @@ def test_process_image_file_success(tmp_path, dummy_dependencies):
     mime_type = "image/png"
     domain_name = "dummy.domain"
     
-    docs = handler.process_image_file(file_path, full_path, mime_type, domain_name)
+    docs = handler.process_image_file(relative_path=file_path, full_path=full_path, 
+                                      mime_type=mime_type, domain_name=domain_name)
     
     assert isinstance(docs, list)
     assert len(docs) == 1
@@ -120,7 +121,8 @@ def test_process_image_file_file_error(tmp_path, dummy_dependencies, caplog):
     mime_type = "image/png"
     domain_name = "dummy.domain"
     
-    result = handler.process_image_file(file_path, fake_full_path, mime_type, domain_name)
+    result = handler.process_image_file(relative_path=file_path, full_path=fake_full_path, 
+                                        mime_type=mime_type, domain_name=domain_name)
     # Since an Exception is caught inside, result is None
     assert result is None
 

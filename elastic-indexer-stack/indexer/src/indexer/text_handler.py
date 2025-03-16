@@ -12,19 +12,22 @@ from .archive_handler import ArchiveHandler
 from .openai_manager import OpenAIManager
 from .es_manager import ElasticsearchManager
 
-logger = logging.getLogger(__name__)
-
 class TextHandler:
-    def __init__(self, archive_handler: ArchiveHandler, openai_manager: OpenAIManager):
+    def __init__(self, archive_handler: ArchiveHandler, openai_manager: OpenAIManager, logger: logging.Logger=None,
+                 llm_enrichment_enabled: bool=True):
+        self._logger = logger or logging.getLogger(__name__)
         self._archive_handler=archive_handler
         self._openai_manager=openai_manager
+        self._LLM_ENRICHMENT_ENABLED=llm_enrichment_enabled
+        if os.environ.get("SKIP_LLM_ENRICHMENT", "false") == "true":
+            self._LLM_ENRICHMENT_ENABLED=False
         
-    def process_text_file(self, file_path: str, full_path: str, mime_type: str, 
+    def process_text_file(self, relative_path: str, full_path: str, mime_type: str, 
                           domain_name: str) -> list[dict]:
         try:
             # Parse into LangChain document
-            documents: list[Document] = self._get_documents_from_file(relative_path=file_path, full_path=full_path)
-            url = self._archive_handler._convert_to_archive_url(file_path=file_path)
+            documents: list[Document] = self._get_documents_from_file(relative_path=relative_path, full_path=full_path)
+            url = self._archive_handler._convert_to_archive_url(relative_path=relative_path)
             if url == "":
                 raise ValueError("Archive URL not found for text-type file.")
             alternate_url = self._archive_handler._strip_index_html_from_url(url=url)
@@ -33,18 +36,29 @@ class TextHandler:
             title = "Untitled"
             docs = []
             for document in documents:
-                logger.debug(f"Document: {document}")
+                self._logger.debug(f"Document: {document}")
                 # Resolve the doc title
-                title = self._resolve_title_from_file(full_path=full_path)
+                title = self._resolve_title_from_file(full_path=full_path, relative_path=relative_path)
                 
                 # Chunk the doc and get embeddings
                 chunks_and_embeddings: list[dict] = self._openai_manager.get_chunks_and_embeddings(
                     document=document
                 )
                 
-                # Enrich the doc
-                llm_response = self._openai_manager.call_openai_api_text(text_content=document.page_content,
-                                                                         domain_name=domain_name)
+                llm_response = {}
+                try:
+                    if self._LLM_ENRICHMENT_ENABLED:
+                        # Enrich the doc
+                        llm_response = self._openai_manager.call_openai_api_text(text_content=document.page_content,
+                                                                                domain_name=domain_name)
+                    else:
+                        self._logger.info("LLM enrichment is disabled. Won't enrich this doc.")
+                except Exception as e:
+                    # We failed at enrichment. Still index it though.
+                    self._logger.error(f"Error calling OpenAI API for text file {relative_path}: {e}")
+                    self._logger.exception(e)
+                    self._logger.warning("Skipping LLM enrichment for this document.")
+                
                 llm_model_name = llm_response.get("llm_model_name", None)
                 llm_summary = llm_response.get("llm_summary", "")
                 llm_content_flavour = llm_response.get("llm_content_flavour", None)
@@ -54,13 +68,13 @@ class TextHandler:
                 llm_tags = llm_response.get("llm_tags", [])
                 
                 mailing_list_name = None
-                if self._archive_handler.mailing_lists_path in file_path:
+                if self._archive_handler._mailing_lists_path in relative_path:
                     # Also grab the mailing-list name for mailing lists
-                    mailing_list_name = os.path.basename(os.path.dirname(file_path))    
+                    mailing_list_name = os.path.basename(os.path.dirname(relative_path))    
                 
                 # Build the doc
                 doc = ElasticsearchManager.build_document(
-                    id = file_path.replace(os.sep, '/'),
+                    id = relative_path.replace(os.sep, '/'),
                     title = title,
                     file_type = "text",
                     mime_type = mime_type,
@@ -82,8 +96,8 @@ class TextHandler:
                 docs.append(doc)                
             return docs
         except Exception as e:
-            logger.error(f"Error processing text file {file_path}: {e}")
-            logger.exception(e)
+            self._logger.error(f"Error processing text file {relative_path}: {e}")
+            self._logger.exception(e)
             raise e
 
     def _get_documents_from_file(self, relative_path: str, full_path: str) -> list[Document]:
@@ -92,14 +106,14 @@ class TextHandler:
         """
         preprocessed_content = None
     
-        if (self._archive_handler.newsgroups_path in relative_path):
+        if (self._archive_handler._newsgroups_path in relative_path):
             preprocessed_content = self._preprocess_newsgroup_file(full_path=full_path)
-        elif (self._archive_handler.mailing_lists_path in relative_path):
+        elif (self._archive_handler._mailing_lists_path in relative_path):
             preprocessed_content = self._preprocess_mailing_list_file(full_path=full_path)
-        elif (self._archive_handler.websites_path in relative_path):
-            preprocessed_content = self._preprocess_website_file(full_path=full_path)
+        elif (self._archive_handler._websites_path in relative_path):
+            preprocessed_content = self._preprocess_website_file(full_path=full_path, relative_path=relative_path)
         else:
-            logger.warning(f"File {full_path} is not in a recognized archive path. Will treat as html.")
+            self._logger.warning(f"File {full_path} is not in a recognized archive path. Will treat as html.")
             with open(full_path, "r") as file:
                 content = file.read()
                 preprocessed_content = md(content, strip=["script", "style"])
@@ -162,48 +176,76 @@ class TextHandler:
             md_content = md(tw.dedent(text).strip(), strip=["script", "style"])
             return md_content
         
-    def _preprocess_website_file(self, full_path: str) -> str:
-        with open(full_path, "r") as file:
-            file_content = file.read()
-            url = self._archive_handler._convert_to_archive_url(file_path=full_path)
-            content = f"<b>Page URL:</b> {url}<br/><hr/>{file_content}"
-            md_content = md(content, strip=["script", "style"])
-            return md_content
+    def _preprocess_website_file(self, full_path: str, relative_path: str) -> str:
+        file_content = None
+        
+        # Try UTF-8 first
+        try:
+            with open(full_path, "r", encoding="utf-8") as file:
+                file_content = file.read()
+        except UnicodeDecodeError:
+            # If UTF-8 fails, try Windows-1252 (ANSI)
+            try:
+                with open(full_path, "r", encoding="cp1252") as file:
+                    file_content = file.read()
+            except UnicodeDecodeError:
+                # If that also fails, raise a more descriptive error
+                raise ValueError(f"Could not decode file {full_path} with UTF-8 or cp1252 encoding.")
+        
+        url = self._archive_handler._convert_to_archive_url(relative_path=relative_path)
+        content = f"<b>Page URL:</b> {url}<br/><hr/>{file_content}"
+        md_content = md(content, strip=["script", "style"])
+        return md_content
 
-    def _resolve_title_from_file(self, full_path: str) -> str:
+    def _resolve_title_from_file(self, full_path: str, relative_path: str) -> str:
         """
         Extract/Resolve an appropriate title from a text-type file.
         """
         title = "Untitled"
         
-        if self._archive_handler.websites_path in full_path:
-            with open(full_path, 'r') as file:
-                soup = BeautifulSoup(file, 'html.parser')
-                title_tag = soup.find('title')
-                if title_tag:
-                    title = title_tag.string
-                    logger.debug(f"Title from HTML: {title}")
-                else:
-                    logger.debug("Couldn't find title tag in HTML file, falling back to default.")
-        elif self._archive_handler.newsgroups_path in full_path:
+        if self._archive_handler._websites_path in relative_path:
+            file_content = None
+            
+            # Try UTF-8 first
+            try:
+                with open(full_path, 'r', encoding="utf-8") as file:
+                    file_content = file.read()
+            except UnicodeDecodeError:
+                # If UTF-8 fails, try Windows-1252 (ANSI)
+                try:
+                    with open(full_path, 'r', encoding="cp1252") as file:
+                        file_content = file.read()
+                except UnicodeDecodeError:
+                    # If that also fails, log warning and keep default title
+                    self._logger.warning(f"Could not decode file {full_path} with UTF-8 or cp1252 encoding. Using default title.")
+                    return title
+            
+            soup = BeautifulSoup(file_content, 'html.parser')
+            title_tag = soup.find('title')
+            if title_tag:
+                title = title_tag.string
+                self._logger.debug(f"Title from HTML: {title}")
+            else:
+                self._logger.debug("Couldn't find title tag in HTML file, falling back to default.")
+        elif self._archive_handler._newsgroups_path in relative_path:
             with open(full_path, 'r') as file:
                 for line in file:
                     if line.startswith('Subject: '):
                         title = line[9:].strip()
-                        logger.debug(f"Title from Newsgroup: {title}")
+                        self._logger.debug(f"Title from Newsgroup: {title}")
                         break
                 if title == "Untitled":
-                    logger.warning(
+                    self._logger.warning(
                         f"Couldn't find subject line in Newsgroup file {full_path}, falling back to default.")
-        elif self._archive_handler.mailing_lists_path in full_path:
+        elif self._archive_handler._mailing_lists_path in relative_path:
             if not full_path.endswith(".json"):
                 raise ValueError("Mailing list file must be a JSON file.")
             with open(full_path, 'r') as file:
                 json_file = json.loads(file.read())
                 title = json_file["ygData"]["subject"] or "Untitled"
-                logger.debug(f"Title from Mailing List: {title}")
+                self._logger.debug(f"Title from Mailing List: {title}")
         else:
             title = os.path.basename(full_path)
-            logger.debug(f"Title from Filename: {title}")
+            self._logger.debug(f"Title from Filename: {title}")
         
         return title

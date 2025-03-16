@@ -11,14 +11,14 @@ from langchain_openai.embeddings import OpenAIEmbeddings
 from langchain_core.documents import Document
 from langchain_experimental.text_splitter import SemanticChunker
 
-logger = logging.getLogger(__name__)
-
 class OpenAIManager:
-    def __init__(self, base_url=None, api_key=None, text_model_name=None, image_model_name=None,
-                 api_key_file="/run/secrets/openai_api_key", embedding_model_name=None, 
-                 prompt_pkg='indexer.resources.prompts', schema_pkg='indexer.resources.openai-api-schemas', 
-                 text_temperature=None, image_temperature=None, default_prompt=None):
+    def __init__(self, base_url: str=None, api_key: str=None, text_model_name: str=None, image_model_name: str=None,
+                 api_key_file: str="/run/secrets/openai_api_key", embedding_model_name: str=None, 
+                 prompt_pkg: str='indexer.resources.prompts', schema_pkg: str='indexer.resources.openai-api-schemas', 
+                 text_temperature: int=None, image_temperature: int=None, default_prompt: str=None,
+                 logger: logging.Logger=None):
         
+        self._logger = logger or logging.getLogger(__name__)
         self._base_url = base_url or os.environ.get("OPENAI_ENDPOINT", "http://localhost:1234/v1")
         self._api_key = api_key or os.environ.get("OPENAI_API_KEY", "lm-studio")
         if os.path.exists(api_key_file):
@@ -37,7 +37,8 @@ class OpenAIManager:
                                                   api_key=self._api_key,
                                                   model=self._embedding_model_name,
                                                   # DS: This is needed for embeddings API compatibliity with LMStudio etc:
-                                                  check_embedding_ctx_length=False)
+                                                  check_embedding_ctx_length=False,
+                                                  timeout=120)
         # DS: note: difficulties with models crashing during embedding
         # seem to be due to context windows on models being very small.
         # Embedding models with big context windows don't have such a problem
@@ -88,7 +89,7 @@ class OpenAIManager:
         try:
             return json.loads(response["choices"][0]["message"]["content"])
         except (KeyError, IndexError, json.JSONDecodeError) as e:
-            logger.error(f"No valid JSON from completion: {e}")
+            self._logger.error(f"No valid JSON from completion: {e}")
             raise ValueError("Invalid JSON response")
 
     def _resolve_schema_for_task(self, content_type: str, task_type: str) -> dict:
@@ -97,7 +98,7 @@ class OpenAIManager:
             with importlib.resources.open_text(self._schema_pkg, f"{content_type}/{task_type}_schema.json") as file:
                 return json.load(file)
         except Exception as e:
-            logger.error(f"Error resoving schema for content_type {content_type} and task_type {task_type}: {e}")
+            self._logger.error(f"Error resoving schema for content_type {content_type} and task_type {task_type}: {e}")
             raise
         
     def _resolve_payload_for_task(self, content_type: str, prompt: str, schema: dict, 
@@ -233,8 +234,8 @@ class OpenAIManager:
             # Return the responses
             return result
         except Exception as e:
-            logger.error(f"Error calling OpenAI for text file: {e}")
-            logger.exception(e)
+            self._logger.error(f"Error calling OpenAI for text file: {e}")
+            self._logger.exception(e)
             raise e
         
     def call_openai_api_text(self, text_content: str, domain_name: str) -> dict:
@@ -251,17 +252,17 @@ class OpenAIManager:
         """Embed text from OpenAI."""
         try:
             if not text or text.isspace():
-                logger.debug(f"Empty text, returning a None embedding for text: {text}")
+                self._logger.debug(f"Empty text, returning a None embedding for text: {text}")
                 return None
-            logger.debug(f"Fetching embedding for: {text}")
+            self._logger.debug(f"Fetching embedding for: {text}")
             embedding = self._openai_embeddings.embed_query(text)
             if embedding is None:
-                logger.error(f"Empty embedding for: {text}")
+                self._logger.error(f"Empty embedding for: {text}")
                 raise ValueError("Empty embedding")
             return np.array(embedding, dtype=np.float32)
         except Exception as e:
-            logger.error(f"Error fetching embedding: {e}")
-            logger.exception(e)
+            self._logger.error(f"Error fetching embedding: {e}")
+            self._logger.exception(e)
             raise
         
     def get_chunks_and_embeddings(self, document: Document) -> list[dict]:
@@ -270,7 +271,7 @@ class OpenAIManager:
         embedder: OpenAIEmbeddings = self.get_openai_embedding_client()
         splitter = SemanticChunker(embedder)
         chunks = splitter.split_documents([document])
-        logger.debug(f"Chunks: {chunks}")
+        self._logger.debug(f"Chunks: {chunks}")
         
         # Embed each chunk
         chunk_vectors: list[dict] = []

@@ -24,9 +24,17 @@ export const createConnector = (paramsRef) => {
   const host = `${window.location.protocol}//${window.location.host}/elasticsearch`;
 
   const knnPostProcess = (requestBody, requestState) => {
+    // Make sure any requested sorting is applied, the default is just by _score:
+    if (requestState.sortField && requestState.sortField !== "") {
+        requestBody.sort[0] = {
+            [requestState.sortField]: requestState.sortDirection
+        };
+    }
+
+    // If no search term is provided, return the request body as is
     if (!requestState.searchTerm) return requestBody;
     
-    // Resolve the query based on the search term
+    // Otherwise, resolve the query based on the search term
     resolveQuery(
         requestState, 
         requestBody, 

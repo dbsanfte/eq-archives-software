@@ -6,16 +6,42 @@ from .es_manager import ElasticsearchManager
 from .rabbitmq_manager import RabbitMQManager
 
 class FileFinder:
-    def __init__(self, es_manager: ElasticsearchManager, rabbitmq_manager: RabbitMQManager, logger=None):
+    def __init__(self, es_manager: ElasticsearchManager, rabbitmq_manager: RabbitMQManager, logger=None, 
+                 skip_llm_enrichment: bool=False,
+                 always_do_llm_enrichment: bool=False,
+                 reindexing_enabled: bool=False, 
+                 reindexing_interval: int=2628000,
+                 git_repo_url: str="https://github.com/dbsanfte/eq-archives.git",
+                 local_repo_path: str="/data/eq-archives", 
+                 sparse_checkout_paths: str=""):
         self._es_manager = es_manager
         self._rabbitmq_manager = rabbitmq_manager
         self._logger = logger or logging.getLogger(__name__)
         
-        self._GIT_REPO_URL = os.environ.get("GIT_REPO_URL", "https://github.com/dbsanfte/eq-archives.git")
-        self._LOCAL_REPO_PATH = os.environ.get("LOCAL_REPO_PATH", "/data/eq-archives")
-        self._SPARSE_CHECKOUT_PATHS = os.environ.get("SPARSE_CHECKOUT_PATHS", "")
-        self._REINDEXING_ENABLED = os.environ.get("REINDEXING_ENABLED", "false").lower() == "true"
-        self._REINDEXING_INTERVAL = int(os.environ.get("REINDEXING_INTERVAL", "86400"))
+        # Flags and constants
+        self._GIT_REPO_URL = git_repo_url
+        if os.environ.get("GIT_REPO_URL", "") != "":
+            self._GIT_REPO_URL = os.environ.get("GIT_REPO_URL")
+        self._LOCAL_REPO_PATH = local_repo_path
+        if os.environ.get("LOCAL_REPO_PATH", "") != "":
+            self._LOCAL_REPO_PATH = os.environ.get("LOCAL_REPO_PATH")
+        self._SPARSE_CHECKOUT_PATHS = sparse_checkout_paths
+        if os.environ.get("SPARSE_CHECKOUT_PATHS", "") != "":
+            self._SPARSE_CHECKOUT_PATHS = os.environ.get("SPARSE_CHECKOUT_PATHS")
+        self._REINDEXING_ENABLED = reindexing_enabled
+        if os.environ.get("REINDEXING_ENABLED", "") != "":
+            self._REINDEXING_ENABLED = os.environ.get("REINDEXING_ENABLED").lower() == "true"
+        self._REINDEXING_INTERVAL = reindexing_interval
+        if os.environ.get("REINDEXING_INTERVAL", "") != "":
+            self._REINDEXING_INTERVAL = int(os.environ.get("REINDEXING_INTERVAL"))
+        self._SKIP_LLM_ENRICHMENT = skip_llm_enrichment
+        if os.environ.get("SKIP_LLM_ENRICHMENT", "") != "":
+            self._SKIP_LLM_ENRICHMENT = os.environ.get("SKIP_LLM_ENRICHMENT").lower() == "true"
+        self._ALWAYS_DO_LLM_ENRICHMENT = always_do_llm_enrichment
+        if os.environ.get("ALWAYS_DO_LLM_ENRICHMENT", "") != "":
+            self._ALWAYS_DO_LLM_ENRICHMENT = os.environ.get("ALWAYS_DO_LLM_ENRICHMENT").lower() == "true"
+            
+        
         # In-memory cache for tracking enqueued files: {relative_path: timestamp}
         self._enqueued_cache = {}
         
@@ -84,14 +110,30 @@ class FileFinder:
             self._logger.debug(f"File {relative_path} was recently queued at {cache_timestamp}. Skipping duplicate enqueue.")
             return
         
-        chunk_prefix = f"{relative_path}#"
-        if self._es_manager.record_exists(doc_id=relative_path) or self._es_manager.chunks_exist(prefix=chunk_prefix):
+        if self._es_manager.record_exists(doc_id=relative_path):
+            # Fetch the doc to query its status
+            doc = self._es_manager.get_document(doc_id=relative_path) or {}
+            
+            if not self._SKIP_LLM_ENRICHMENT:
+                # If the file is already indexed, verify it's been enriched:
+                llm_summary = doc.get("_source", {}).get("llm_summary")
+                if not llm_summary:
+                    self._logger.debug(f"File is indexed but not enriched: {relative_path}")
+                    self._rabbitmq_manager.publish_message(item={"file_path": relative_path})
+                    return
+                if self._ALWAYS_DO_LLM_ENRICHMENT:
+                    self._logger.debug(f"Re-enriching file because ALWAYS_DO_LLM_ENRICHMENT is enabled: {relative_path}")
+                    self._rabbitmq_manager.publish_message(item={"file_path": relative_path})
+                    return
+                # Looks enriched and we aren't set to re-enrich
+                self._logger.debug(f"File is already enriched: {relative_path}")
             if not self._REINDEXING_ENABLED:
-                self._logger.debug(f"Already indexed or chunked: {relative_path}")
+                # Don't reindex if reindexing is disabled
+                self._logger.debug(f"Already indexed and reindexing disabled, skipping file: {relative_path}")
                 return
             else:
-                doc = self._es_manager.get_document(doc_id=relative_path) or {}
                 last_indexed_str = doc.get("_source", {}).get("last_indexed")
+                # Check if the file was indexed recently
                 if last_indexed_str:
                     last_indexed = datetime.fromisoformat(last_indexed_str).replace(tzinfo=timezone.utc)
                     if last_indexed >= now - timedelta(seconds=self._REINDEXING_INTERVAL):
