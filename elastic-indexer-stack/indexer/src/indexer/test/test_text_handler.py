@@ -232,8 +232,9 @@ def test_preprocess_mailing_list_file(tmp_path, dummy_dependencies):
     
     # Prepare the mailing list JSON with required "date" field added.
     mailing_list_data = json.loads(__import__("textwrap").dedent(MAILING_LIST_JSON_1).strip())
-    # Add a "date" field to ygData since _preprocess_mailing_list_file expects it.
-    mailing_list_data["ygData"]["date"] = 923071557
+    # Add a "date" field to ygData with different timestamp than postDate
+    # to verify date is preferred over postDate
+    mailing_list_data["ygData"]["date"] = 925071557
     mailing_list_json = json.dumps(mailing_list_data)
     
     # Write the mailing list JSON file into a "mailing_lists" folder
@@ -260,6 +261,41 @@ def test_preprocess_mailing_list_file(tmp_path, dummy_dependencies):
     assert "From:" in page_content
     # Check that a Date header was generated (ISO format date string)
     assert "Date:" in page_content
+    # Verify that the date used comes from the "date" field, not "postDate"
+    date_from_timestamp = datetime.datetime.fromtimestamp(925071557, datetime.timezone.utc).isoformat()
+    assert date_from_timestamp in page_content
+
+def test_preprocess_mailing_list_file_with_postdate(tmp_path, dummy_dependencies):
+    archive_handler, openai_manager = dummy_dependencies
+    handler = TextHandler(archive_handler=archive_handler, openai_manager=openai_manager)
+    
+    # Use the existing JSON which already has a "postDate" field
+    mailing_list_data = json.loads(__import__("textwrap").dedent(MAILING_LIST_JSON_1).strip())
+    # Make sure no "date" field exists to test the fallback to "postDate"
+    if "date" in mailing_list_data["ygData"]:
+        del mailing_list_data["ygData"]["date"]
+    mailing_list_json = json.dumps(mailing_list_data)
+    
+    # Write the mailing list JSON file into a "mailing_lists" folder
+    mailing_list_dir = tmp_path / "mailing_lists" / "test_list_postdate"
+    mailing_list_dir.mkdir(parents=True, exist_ok=True)
+    mailing_list_file = mailing_list_dir / "mailing_list.json"
+    mailing_list_file.write_text(mailing_list_json, encoding="utf-8")
+    
+    full_path = str(mailing_list_file)
+    relative_path = os.path.join("mailing_lists", "test_list_postdate", "mailing_list.json")
+    
+    # Get the document
+    docs = handler._get_documents_from_file(relative_path=relative_path, full_path=full_path)
+    assert isinstance(docs, list)
+    assert len(docs) == 1
+    doc = docs[0]
+    # The preprocessed content should be produced via markdownify from the generated HTML.
+    page_content = doc.page_content
+    # Verify the "postDate" field was used correctly
+    post_date_value = int(mailing_list_data["ygData"]["postDate"])
+    date_from_timestamp = datetime.datetime.fromtimestamp(post_date_value, datetime.timezone.utc).isoformat()
+    assert date_from_timestamp in page_content
 
 def test_process_text_file(tmp_path, dummy_dependencies):
     archive_handler, openai_manager = dummy_dependencies

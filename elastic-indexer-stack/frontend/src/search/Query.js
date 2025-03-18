@@ -1,3 +1,5 @@
+import { embeddingService } from './EmbeddingService';
+
 // Logic for building Elasticsearch queries based on user input
 //
 // @param {string} requestState - The current request state, before postprocessing
@@ -43,52 +45,43 @@ export function resolveQuery(requestState,
 }
 
 function buildKnnQuery(queryText, embeddingModel, paramsRef, vectorFields, nestedVectorFields) {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/openai/v1/embeddings", false);
-    xhr.setRequestHeader("Content-Type", "application/json");
-    xhr.send(JSON.stringify({ input: [queryText], model: embeddingModel }));
-
+    // Get the embedding from cache instead of synchronous XHR
+    const vector = embeddingService.getEmbedding(queryText);
     let knnQuery = [];
-    if (xhr.status === 200) {
-        const data = JSON.parse(xhr.responseText);
-        const vector = data?.data?.[0].embedding;
-        if (vector) {
-            const { k, num_candidates, boost } = paramsRef.current;
-            // First query the top-level fields
-            if (vectorFields?.length) {
-                const vectorQuery = vectorFields.map(field => ({
-                    field,
-                    query_vector: vector,
-                    k,
-                    num_candidates,
-                    boost
-                }));
-                knnQuery = knnQuery.concat(vectorQuery);
-            }
+    
+    if (vector) {
+        const { k, num_candidates, boost } = paramsRef.current;
+        // First query the top-level fields
+        if (vectorFields?.length) {
+            const vectorQuery = vectorFields.map(field => ({
+                field,
+                query_vector: vector,
+                k,
+                num_candidates,
+                boost
+            }));
+            knnQuery = knnQuery.concat(vectorQuery);
+        }
 
-            // Then query the nested fields
-            if (nestedVectorFields?.length) {
-                const nestedQuery = nestedVectorFields.map(field => ({
-                    "field": field+".vector",
-                    query_vector: vector,
-                    k,
-                    num_candidates,
-                    boost,
-                    inner_hits: {
-                        _source: false,
-                        "fields": [field+".text_chunk"],
-                        highlight: {
-                            fields: {
-                                [field+".text_chunk"]: {}
-                            }
+        // Then query the nested fields
+        if (nestedVectorFields?.length) {
+            const nestedQuery = nestedVectorFields.map(field => ({
+                "field": field+".vector",
+                query_vector: vector,
+                k,
+                num_candidates,
+                boost,
+                inner_hits: {
+                    _source: false,
+                    "fields": [field+".text_chunk"],
+                    highlight: {
+                        fields: {
+                            [field+".text_chunk"]: {}
                         }
                     }
-                }));
-                knnQuery = knnQuery.concat(nestedQuery);
-            }
-        }
-        else {
-            console.error("No embedding found for query:", queryText);
+                }
+            }));
+            knnQuery = knnQuery.concat(nestedQuery);
         }
     }
     return knnQuery;

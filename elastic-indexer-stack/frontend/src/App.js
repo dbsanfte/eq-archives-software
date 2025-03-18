@@ -29,6 +29,7 @@ import SyntaxExamples from "./views/search/SyntaxExamples";
 import { getSearchConfig } from "./search/Connector";
 import DateRangeFacet from "./views/search/DateRangeFacet";
 import { getDate } from "date-fns";
+import EnhancedSearchBox from "./views/search/EnhancedSearchBox";
 
 export default function App() {
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -44,7 +45,19 @@ export default function App() {
     setKnnParams(prev => ({ ...prev, [param]: value }));
   }
 
-  const config = useMemo(() => getSearchConfig(knnParamsRef), [knnParamsRef]);
+  // Create config with searchAsYouType disabled to prevent auto-searches, 
+  // as we override this behaviour in EnhancedSearchBox
+  const config = useMemo(() => {
+    const baseConfig = getSearchConfig(knnParamsRef);
+    return {
+      ...baseConfig,
+      // Override these settings to prevent automatic searches
+      searchQuery: {
+        ...(baseConfig.searchQuery || {}),
+        searchAsYouType: false // This disables automatic searches
+      }
+    };
+  }, [knnParamsRef]);
 
   return (
     <SearchProvider config={config}>
@@ -71,7 +84,7 @@ export default function App() {
                 <>
                   <ArchiveStatusBar />
                   <HeaderContent />
-                  <SearchBox searchAsYouType={true} />
+                  <EnhancedSearchBox searchAsYouType={true} /> {/* We'll handle automatic searches ourselves */}
                   <Button
                     variant="contained"
                     style={{ marginTop: "1rem" }}

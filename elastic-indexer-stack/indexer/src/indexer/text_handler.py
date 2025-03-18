@@ -161,8 +161,20 @@ class TextHandler:
             
             subject_line = "Subject: " + json_file["ygData"]["subject"]
             group_line = "Mailing-list: " + os.path.basename(os.path.dirname(full_path))
-            date_line = "Date: " + datetime.datetime.fromtimestamp(json_file["ygData"]["date"], 
-                                                                 datetime.timezone.utc).isoformat()
+            
+            # Try to get date from 'date' field, fall back to 'postDate' if needed
+            timestamp = None
+            if "date" in json_file["ygData"] and json_file["ygData"]["date"] is not None:
+                timestamp = json_file["ygData"]["date"]
+            elif "postDate" in json_file["ygData"] and json_file["ygData"]["postDate"] is not None:
+                timestamp = json_file["ygData"]["postDate"]
+            
+            if timestamp is not None:
+                date_line = "Date: " + datetime.datetime.fromtimestamp(timestamp, 
+                                                                  datetime.timezone.utc).isoformat()
+            else:
+                date_line = "Date: Unknown"
+                
             from_line = "From: " + json_file["ygData"]["from"]
             
             text = f"""

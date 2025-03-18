@@ -95,11 +95,11 @@ function DateRangeFacetView({ label, field, filters, addFilter, removeFilter, se
     setHasActiveDirectFilter(false);
     
     // Reset searchkit.postProcessRequest to remove our custom filter
-    if (searchkit && searchkit.postProcessRequest) {
+    if (searchkit?.postProcessRequest) {
       const originalPostProcess = searchkit.postProcessRequest;
       searchkit.postProcessRequest = (body, state, queryConfig) => {
         // If post_filter exists, remove our filter
-        if (body.post_filter && body.post_filter.bool && body.post_filter.bool.must) {
+        if (body.post_filter?.bool?.must) {
           body.post_filter.bool.must = body.post_filter.bool.must.filter(
             filter => !(filter.range && filter.range[field])
           );
@@ -158,8 +158,15 @@ function DateRangeFacetView({ label, field, filters, addFilter, removeFilter, se
                 size: 'small', 
                 fullWidth: true, 
                 inputProps: { style: { fontSize: '13px' } },
-                InputLabelProps: { style: { fontSize: '13px' } }
+                InputLabelProps: { style: { fontSize: '13px', zIndex: 0 } }
               } 
+            }}
+            componentsProps={{
+              popper: {
+                sx: {
+                  zIndex: 1050 // A reasonable value that won't interfere with most dropdowns
+                }
+              }
             }}
           />
           <DatePicker
@@ -171,7 +178,7 @@ function DateRangeFacetView({ label, field, filters, addFilter, removeFilter, se
                 size: 'small', 
                 fullWidth: true, 
                 inputProps: { style: { fontSize: '13px' } },
-                InputLabelProps: { style: { fontSize: '13px' } }
+                InputLabelProps: { style: { fontSize: '13px', zIndex: 0 } }
               } 
             }}
             minDate={fromDate}
