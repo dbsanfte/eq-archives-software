@@ -163,14 +163,14 @@ class TextHandler:
             group_line = "Mailing-list: " + os.path.basename(os.path.dirname(full_path))
             
             # Try to get date from 'date' field, fall back to 'postDate' if needed
-            timestamp = None
+            timestamp: str = None
             if "date" in json_file["ygData"] and json_file["ygData"]["date"] is not None:
                 timestamp = json_file["ygData"]["date"]
             elif "postDate" in json_file["ygData"] and json_file["ygData"]["postDate"] is not None:
                 timestamp = json_file["ygData"]["postDate"]
             
-            if timestamp is not None:
-                date_line = "Date: " + datetime.datetime.fromtimestamp(timestamp, 
+            if timestamp is not None and timestamp != "" and timestamp != "0":
+                date_line = "Date: " + datetime.datetime.fromtimestamp(int(timestamp), 
                                                                   datetime.timezone.utc).isoformat()
             else:
                 date_line = "Date: Unknown"

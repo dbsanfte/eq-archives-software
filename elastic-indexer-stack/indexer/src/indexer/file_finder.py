@@ -42,7 +42,6 @@ class FileFinder:
         if os.environ.get("ALWAYS_DO_LLM_ENRICHMENT", "") != "":
             self._ALWAYS_DO_LLM_ENRICHMENT = os.environ.get("ALWAYS_DO_LLM_ENRICHMENT").lower() == "true"
             
-        
         # In-memory cache for tracking enqueued files: {relative_path: timestamp}
         self._enqueued_cache = {}
         
@@ -107,7 +106,7 @@ class FileFinder:
         
         # Check local cache for recent enqueue
         cache_timestamp = self._enqueued_cache.get(relative_path)
-        if cache_timestamp and (now - cache_timestamp).total_seconds() < self._REINDEXING_INTERVAL:
+        if cache_timestamp and (int(now.timestamp()) - cache_timestamp) < self._REINDEXING_INTERVAL:
             self._logger.debug(f"File {relative_path} was recently queued at {cache_timestamp}. Skipping duplicate enqueue.")
             return
         
@@ -147,7 +146,7 @@ class FileFinder:
         self._rabbitmq_manager.publish_message(item=msg)
         
         # Update the cache with the current timestamp for this file
-        self._enqueued_cache[relative_path] = now
+        self._enqueued_cache[relative_path] = int(now.timestamp())
         
     def walk_and_queue(self):
         self._sparse_checkout_repo()
