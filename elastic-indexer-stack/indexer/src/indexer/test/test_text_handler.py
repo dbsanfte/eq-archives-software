@@ -373,3 +373,48 @@ def test_chunk_and_embed_newsgroup_post_2(tmp_path, dummy_dependencies):
     # For NEWSGROUP_POST_2, the body starts with "Zelgadis wrote:" and includes discussion lines.
     assert "Zelgadis wrote:" in chunk["text_chunk"]
     assert "Currently playing:" in chunk["text_chunk"]
+
+def test_llm_summary_placeholder(tmp_path, dummy_dependencies):
+    archive_handler, openai_manager = dummy_dependencies
+    handler = TextHandler(archive_handler=archive_handler, openai_manager=openai_manager)
+    
+    # Override the OpenAI manager to return a response without llm_summary
+    def missing_summary_response(*args, **kwargs):
+        return {
+            # No llm_summary key
+            "llm_summary_vector": [0.1, 0.2],
+            "llm_guessed_date": "2023-01-01T00:00:00Z",
+            "llm_extracted_dates": [{"date": "2023-01-01"}],
+            "llm_model_name": "dummy-model",
+            "llm_content_flavour": "dummy-flavour",
+            "llm_tags": ["tag1", "tag2"]
+        }
+    
+    # Replace the original method with our modified version
+    original_method = openai_manager.call_openai_api_text
+    openai_manager.call_openai_api_text = missing_summary_response
+    
+    # Create a simple text file
+    file_content = "This is a test file."
+    temp_file = tmp_path / "test_placeholder.txt"
+    temp_file.write_text(file_content, encoding="utf-8")
+    file_path = str(temp_file.relative_to(tmp_path))
+    full_path = str(temp_file)
+    
+    try:
+        # Process the file
+        docs = handler.process_text_file(
+            relative_path=file_path,
+            full_path=full_path,
+            mime_type="text/plain",
+            domain_name="example.com"
+        )
+        
+        # Verify that the placeholder is used for llm_summary
+        assert isinstance(docs, list)
+        assert len(docs) > 0
+        root_doc = docs[0]
+        assert root_doc["llm_summary"] == "[ Still awaiting LLM Enrichment... ]"
+    finally:
+        # Restore the original method
+        openai_manager.call_openai_api_text = original_method

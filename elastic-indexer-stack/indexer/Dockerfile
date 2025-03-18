@@ -32,8 +32,9 @@ FROM builder AS test-stage
 
 # Copy dev requirements and install them
 COPY ./src/indexer/requirements-dev.txt .
+COPY ./pyproject.toml .
 RUN pip install --no-cache-dir -r requirements-dev.txt && \
-    python -m pytest --maxfail=1 --disable-warnings && \
+    python -m pytest && \
     echo "Unit tests passed" > /tmp/test-results.txt
 
 # ----- Production Stage (without dev dependencies) -----

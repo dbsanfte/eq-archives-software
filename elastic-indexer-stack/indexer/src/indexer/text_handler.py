@@ -60,12 +60,12 @@ class TextHandler:
                     self._logger.warning("Skipping LLM enrichment for this document.")
                 
                 llm_model_name = llm_response.get("llm_model_name", None)
-                llm_summary = llm_response.get("llm_summary", "")
+                llm_summary = llm_response.get("llm_summary", OpenAIManager.AWAITING_LLM_ENRICHMENT)
                 llm_content_flavour = llm_response.get("llm_content_flavour", None)
                 llm_guessed_date = llm_response.get("llm_guessed_date", None)
                 llm_extracted_dates = llm_response.get("llm_extracted_dates", None)
                 llm_summary_vector = llm_response.get("llm_summary_vector", None)
-                llm_tags = llm_response.get("llm_tags", [])
+                llm_tags = llm_response.get("llm_tags", None)
                 
                 mailing_list_name = None
                 if self._archive_handler._mailing_lists_path in relative_path:

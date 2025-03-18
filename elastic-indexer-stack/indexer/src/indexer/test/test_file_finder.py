@@ -83,10 +83,10 @@ class TestSparseCheckoutRepo(unittest.TestCase):
 
         finder._sparse_checkout_repo()
 
-        for path in ["path1", "path2"]:
+        for p in ["path1", "path2"]:
             mock_subprocess.assert_any_call([
                 "git", "-C", finder._LOCAL_REPO_PATH,
-                "sparse-checkout", "add", path
+                "sparse-checkout", "add", p
             ], check=True)
 
     @patch('subprocess.run')
@@ -101,7 +101,6 @@ class TestSparseCheckoutRepo(unittest.TestCase):
         mock_subprocess.assert_any_call(["git", "-C", finder._LOCAL_REPO_PATH, "pull"], check=True)
 
 class TestWalkAndQueue(unittest.TestCase):
-    
     @patch.object(FileFinder, '_sparse_checkout_repo')
     @patch('os.walk')
     @patch('indexer.file_finder.logging.getLogger')
@@ -112,7 +111,6 @@ class TestWalkAndQueue(unittest.TestCase):
     def test_walk_and_queue(self, mock_get_logger, mock_walk, mock_checkout):
         es_manager = MagicMock()
         es_manager.record_exists.return_value = False
-        es_manager.chunks_exist.return_value = False
         rabbitmq_manager = MagicMock()
         mock_logger = MagicMock()
         mock_get_logger.return_value = mock_logger
@@ -138,7 +136,6 @@ class TestWalkAndQueue(unittest.TestCase):
     def test_skip_hidden_files(self, mock_walk, mock_checkout):
         es_manager = MagicMock()
         es_manager.record_exists.return_value = False
-        es_manager.chunks_exist.return_value = False
         rabbitmq_manager = MagicMock()
         
         finder = FileFinder(es_manager, rabbitmq_manager)
@@ -361,3 +358,164 @@ class TestSparseCheckoutRepo(unittest.TestCase):
         pull_call = call(["git", "-C", finder._LOCAL_REPO_PATH, "pull"], check=True)
         self.assertIn(checkout_call, mock_run.call_args_list)
         self.assertIn(pull_call, mock_run.call_args_list)
+
+class TestCheckAndQueueFileLLMEnrichment(unittest.TestCase):
+    def test_skip_llm_enrichment_true_bypasses_enrichment_check(self):
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        finder = FileFinder(es_manager, rabbitmq_manager, skip_llm_enrichment=True)
+        finder._REINDEXING_ENABLED = False
+        
+        es_manager.record_exists.return_value = True
+        
+        # Document is indexed but not enriched
+        doc = {'_source': {'last_indexed': datetime.now(timezone.utc).isoformat()}}
+        es_manager.get_document.return_value = doc
+        
+        finder._check_and_queue_file('test/path')
+        
+        # File should not be queued since enrichment check is skipped and reindexing is disabled
+        rabbitmq_manager.publish_message.assert_not_called()
+
+    def test_file_with_missing_llm_summary_is_queued(self):
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        finder = FileFinder(es_manager, rabbitmq_manager)
+        
+        es_manager.record_exists.return_value = True
+        
+        # Document is indexed but has no llm_summary field
+        doc = {'_source': {'last_indexed': datetime.now(timezone.utc).isoformat()}}
+        es_manager.get_document.return_value = doc
+        
+        finder._check_and_queue_file('test/path')
+        
+        # File should be queued for enrichment
+        rabbitmq_manager.publish_message.assert_called_once_with(item={"file_path": "test/path"})
+
+    def test_file_with_placeholder_llm_summary_is_queued(self):
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        finder = FileFinder(es_manager, rabbitmq_manager)
+        
+        es_manager.record_exists.return_value = True
+        
+        # Document is indexed but has placeholder llm_summary
+        doc = {
+            '_source': {
+                'last_indexed': datetime.now(timezone.utc).isoformat(),
+                'llm_summary': "[ Still awaiting LLM Enrichment... ]"
+            }
+        }
+        es_manager.get_document.return_value = doc
+        
+        finder._check_and_queue_file('test/path')
+        
+        # File should be queued for enrichment
+        rabbitmq_manager.publish_message.assert_called_once_with(item={"file_path": "test/path"})
+
+    def test_enriched_file_with_always_enrich_true_is_queued(self):
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        finder = FileFinder(es_manager, rabbitmq_manager, always_do_llm_enrichment=True)
+        
+        es_manager.record_exists.return_value = True
+        
+        # Document is indexed and has a valid llm_summary
+        doc = {
+            '_source': {
+                'last_indexed': datetime.now(timezone.utc).isoformat(),
+                'llm_summary': "This is a proper summary."
+            }
+        }
+        es_manager.get_document.return_value = doc
+        
+        finder._check_and_queue_file('test/path')
+        
+        # File should be queued for re-enrichment
+        rabbitmq_manager.publish_message.assert_called_once_with(item={"file_path": "test/path"})
+
+    def test_enriched_file_not_queued_when_already_enriched(self):
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        finder = FileFinder(es_manager, rabbitmq_manager)
+        finder._REINDEXING_ENABLED = False
+        
+        es_manager.record_exists.return_value = True
+        
+        # Document is indexed and has a valid llm_summary
+        doc = {
+            '_source': {
+                'last_indexed': datetime.now(timezone.utc).isoformat(),
+                'llm_summary': "This is a proper summary."
+            }
+        }
+        es_manager.get_document.return_value = doc
+        
+        finder._check_and_queue_file('test/path')
+        
+        # File should not be queued since it's already enriched and reindexing is disabled
+        rabbitmq_manager.publish_message.assert_not_called()
+
+class TestShouldSkipFile(unittest.TestCase):
+    def setUp(self):
+        # Create a FileFinder instance with dummy managers and a mock logger
+        self.es_manager = MagicMock()
+        self.rabbitmq_manager = MagicMock()
+        self.mock_logger = MagicMock()
+        self.finder = FileFinder(self.es_manager, self.rabbitmq_manager, logger=self.mock_logger)
+    
+    def test_hidden_file(self):
+        # Files starting with a dot should be skipped.
+        filename = ".hidden.txt"
+        full_path = "/some/path/.hidden.txt"
+        relative_path = ".hidden.txt"
+        result = self.finder._should_skip_file(filename, full_path, relative_path)
+        self.assertTrue(result)
+        self.mock_logger.debug.assert_called_with("Skipping hidden file: .hidden.txt")
+        
+    def test_mailing_lists_non_json(self):
+        # In mailing-lists directory, non-json files should be skipped.
+        filename = "file.txt"
+        full_path = "/data/mailing-lists/file.txt"
+        relative_path = "mailing-lists/file.txt"
+        result = self.finder._should_skip_file(filename, full_path, relative_path)
+        self.assertTrue(result)
+        self.mock_logger.debug.assert_called_with("Skipping non-json mailing-list file: mailing-lists/file.txt")
+    
+    def test_mailing_lists_json(self):
+        # In mailing-lists directory, .json files should not be skipped.
+        filename = "file.json"
+        full_path = "/data/mailing-lists/file.json"
+        relative_path = "mailing-lists/file.json"
+        result = self.finder._should_skip_file(filename, full_path, relative_path)
+        self.assertFalse(result)
+    
+    def test_newsgroups_non_txt(self):
+        # In newsgroups directory, non-txt files should be skipped.
+        filename = "file.html"
+        full_path = "/data/newsgroups/file.html"
+        relative_path = "newsgroups/file.html"
+        result = self.finder._should_skip_file(filename, full_path, relative_path)
+        self.assertTrue(result)
+        self.mock_logger.debug.assert_called_with("Skipping non-txt newsgroups file: newsgroups/file.html")
+    
+    def test_newsgroups_txt(self):
+        # In newsgroups directory, .txt files should not be skipped.
+        filename = "file.txt"
+        full_path = "/data/newsgroups/file.txt"
+        relative_path = "newsgroups/file.txt"
+        result = self.finder._should_skip_file(filename, full_path, relative_path)
+        self.assertFalse(result)
+    
+    def test_non_special_file(self):
+        # Files that are not hidden and don't belong to mailing-lists or newsgroups should not be skipped.
+        filename = "document.pdf"
+        full_path = "/data/others/document.pdf"
+        relative_path = "others/document.pdf"
+        result = self.finder._should_skip_file(filename, full_path, relative_path)
+        self.assertFalse(result)
+
+if __name__ == '__main__':
+    unittest.main()
+

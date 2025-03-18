@@ -34,7 +34,6 @@ def run_file_finder():
         except Exception as e:
             logging.error(f"Error in file-searcher loop: {e}")
             logging.exception(e)
-            time.sleep(5)
 
 def run_indexer():
     logger.info("Starting indexer...")
@@ -48,7 +47,6 @@ def run_indexer():
         except Exception as e:
             logger.error(f"Error in indexer loop: {e}")
             logger.exception(e)
-            time.sleep(1) 
 
 def main():
     parser = argparse.ArgumentParser()

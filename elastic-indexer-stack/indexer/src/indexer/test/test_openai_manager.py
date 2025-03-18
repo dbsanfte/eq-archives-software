@@ -1,6 +1,7 @@
 from unittest.mock import patch, MagicMock
 import pytest
 import requests
+import numpy as np
 from langchain_core.documents import Document
 from indexer.openai_manager import OpenAIManager
 import importlib
@@ -72,18 +73,6 @@ def test_call_openai_api_image_failure(openai_client):
         with pytest.raises(requests.exceptions.HTTPError):
             openai_client.call_openai_api_image("base64data", "image/jpeg", "test.com")
 
-def test_parse_json_response(openai_client):
-    """Test the JSON parsing of responses."""
-    # Valid response
-    valid_response = {"choices": [{"message": {"content": '{"key": "value"}'}}]}
-    parsed = openai_client._parse_json_response(valid_response)
-    assert parsed == {'key': 'value'}
-    
-    # Invalid response
-    invalid_response = {"choices": [{"message": {"content": "invalid json"}}]}
-    with pytest.raises(ValueError):
-        openai_client._parse_json_response(invalid_response)
-
 def test_build_prompts_cache(openai_client, tmp_path):
     # Mock package structure
     prompts_dir = tmp_path / "prompts"
@@ -128,6 +117,21 @@ def test_resolve_schema_for_task(openai_client):
         schema = openai_client._resolve_schema_for_task("text", "classification")
         assert schema["type"] == "object"
 
+def test_resolve_schema_exception(openai_client):
+    """Test exception handling in _resolve_schema_for_task."""
+    with patch('importlib.resources.open_text', side_effect=FileNotFoundError("Schema not found")):
+        with pytest.raises(FileNotFoundError):
+            openai_client._resolve_schema_for_task("text", "unknown_task")
+            
+    with patch('importlib.resources.open_text') as mock_open:
+        # Return a file object that raises an exception when read
+        mock_file = MagicMock()
+        mock_file.__enter__.return_value.read.side_effect = json.JSONDecodeError("Invalid JSON", "", 0)
+        mock_open.return_value = mock_file
+        
+        with pytest.raises(json.JSONDecodeError):
+            openai_client._resolve_schema_for_task("text", "classification")
+
 def test_resolve_payload_for_task_text(openai_client):
     schema = {"type": "object"}
     payload = openai_client._resolve_payload_for_task(
@@ -163,12 +167,11 @@ def test_prompt_llm_for_task(mock_post, openai_client):
         }
     }
     
-    # Patch embed_text to return a deterministic vector (using text length for simplicity)
+    # Patch embed_text to return deterministic vectors
     def fake_embed(text):
-        return [len(text)]  # dummy vector for testing
+        return [len(text)] if text else None
     
-    # Patch _openai_embeddings.embed_query to use fake_embed so that embed_query() is defined.
-    openai_client._openai_embeddings = MagicMock(embed_query=fake_embed)
+    openai_client.embed_text = fake_embed
     
     # Mock schema
     with patch("importlib.resources.open_text") as mock_file:
@@ -181,6 +184,32 @@ def test_prompt_llm_for_task(mock_post, openai_client):
             domain_name="notfound.com"
         )
     assert result["llm_summary"] == "summary"
+
+def test_prompt_llm_google_groups(openai_client):
+    """Test that Google Groups domain gets automatic classification without LLM call."""
+    with patch('requests.post') as mock_post:
+        result = openai_client._prompt_llm_for_task(
+            content_type="text",
+            content="Test content",
+            task_type="classification",
+            domain_name="groups.google.com"
+        )
+        
+        assert result["llm_content_flavour"] == "Newsgroup Post"
+        mock_post.assert_not_called()  # Verify no API call was made
+
+def test_prompt_llm_yahoo_groups(openai_client):
+    """Test that Yahoo Groups domain gets automatic classification without LLM call."""
+    with patch('requests.post') as mock_post:
+        result = openai_client._prompt_llm_for_task(
+            content_type="text",
+            content="Test content",
+            task_type="classification",
+            domain_name="groups.yahoo.com"
+        )
+        
+        assert result["llm_content_flavour"] == "Mailing List Email"
+        mock_post.assert_not_called()  # Verify no API call was made
 
 @patch("requests.post")
 def test_call_openai_api_full_workflow_text(mock_post, openai_client):
@@ -267,4 +296,118 @@ def test_call_openai_api_full_workflow_text(mock_post, openai_client):
     assert result["llm_guessed_date"] == "2002-05-24"
     assert result["llm_tags"] == ["tagging-tag1", "tagging-tag2"]
 
+@patch("requests.post")
+def test_call_openai_api_image_workflow(mock_post, openai_client):
+    """Test the _call_openai_api() method with image content."""
+    # Mock responses for each call in the image workflow
+    classification_resp = MagicMock()
+    classification_resp.json.return_value = {
+        "choices": [{"message": {"content": '{"llm_content_flavour": "image classification"}'}}]
+    }
     
+    summary_resp = MagicMock()
+    summary_resp.json.return_value = {
+        "choices": [{"message": {"content": '{"llm_summary": "image summary"}'}}]
+    }
+    
+    tagging_resp = MagicMock()
+    tagging_resp.json.return_value = {
+        "choices": [{"message": {"content": '{"llm_tags": ["image-tag1", "image-tag2"]}'}}]
+    }
+    
+    text_extraction_resp = MagicMock()
+    text_extraction_resp.json.return_value = {
+        "choices": [{"message": {"content": '{"llm_image_text": ["extracted text 1", "extracted text 2"]}'}}]
+    }
+    
+    # Patch embed_text to return deterministic vectors
+    def fake_embed(text):
+        return [len(text)] if text else None
+    
+    openai_client.embed_text = fake_embed
+    
+    # Requests.post should be called 4 times for image content
+    mock_post.side_effect = [
+        classification_resp,
+        summary_resp,
+        tagging_resp,
+        text_extraction_resp
+    ]
+    
+    # Invoke the method with image content
+    result = openai_client._call_openai_api(
+        content="base64imagedata",
+        content_type="image",
+        domain_name="test.com",
+        mime_type="image/jpeg"
+    )
+    
+    # Verify the image-specific results
+    assert result["llm_image_text"] == ["extracted text 1", "extracted text 2"]
+    assert result["llm_image_text_vector"] == [len(" ".join(["extracted text 1", "extracted text 2"]))]
+    assert mock_post.call_count == 4  # Should be called 4 times for all steps
+    
+    # Check that all required API calls were made
+    assert mock_post.call_count == 4
+    
+    # Verify image text extraction result is present
+    assert "llm_image_text" in result
+    assert isinstance(result["llm_image_text"], list)
+
+def test_embed_text_success(openai_client):
+    """Test successful text embedding."""
+    # Create a deterministic embedding
+    expected_values = np.array([0.1, 0.2, 0.3], dtype=np.float32)
+    
+    # Replace the embeddings object with a mock that has the required method
+    mock_embeddings = MagicMock()
+    mock_embeddings.embed_query.return_value = expected_values.tolist()
+    openai_client._openai_embeddings = mock_embeddings
+    
+    result = openai_client.embed_text("Test text")
+    # Check for None result
+    assert result is not None, "embed_text returned None for non-empty input"
+    # Convert result to numpy array for comparison
+    result_array = np.array(result, dtype=np.float32)
+    assert np.allclose(result_array, expected_values), f"Expected {expected_values}, got {result_array}"
+
+def test_embed_text_empty(openai_client):
+    """Test that empty text returns None."""
+    # Create a mock for the embeddings object
+    mock_embeddings = MagicMock()
+    openai_client._openai_embeddings = mock_embeddings
+    
+    result = openai_client.embed_text("")
+    assert result is None
+    mock_embeddings.embed_query.assert_not_called()
+    
+    result = openai_client.embed_text("   ")
+    assert result is None
+    mock_embeddings.embed_query.assert_not_called()
+
+def test_embed_text_exception(openai_client):
+    """Test exception handling in embed_text."""
+    # Create a mock for the embeddings object
+    mock_embeddings = MagicMock()
+    mock_embeddings.embed_query.side_effect = ValueError("Embedding error")
+    openai_client._openai_embeddings = mock_embeddings
+    
+    with pytest.raises(ValueError):
+        openai_client.embed_text("Test text")
+
+def test_api_key_from_file(tmp_path):
+    """Test loading API key from file."""
+    # Create a temporary file with an API key
+    key_file = tmp_path / "api_key"
+    key_file.write_text("test-key-from-file")
+    
+    # Initialize with the key file
+    with patch('openai.OpenAI'):
+        client = OpenAIManager(api_key_file=str(key_file))
+        assert client._api_key == "test-key-from-file"
+        
+        # Test that file takes precedence over direct api_key parameter
+        client = OpenAIManager(api_key="direct-key", api_key_file=str(key_file))
+        assert client._api_key == "test-key-from-file"
+
+

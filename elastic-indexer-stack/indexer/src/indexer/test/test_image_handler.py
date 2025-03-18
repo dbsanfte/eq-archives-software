@@ -2,41 +2,7 @@ import os
 import pytest
 from indexer.image_handler import ImageHandler
 from indexer.es_manager import ElasticsearchManager
-
-# Pseudocode:
-#
-# 1. Define dummy dependencies:
-#    • DummyArchiveHandler with methods:
-#         _convert_to_archive_url(file_path) → returns a valid URL, unless overridden;
-#         _strip_index_html_from_url(url) → returns url with "index.html" removed;
-#         _resolve_thumbnail_url(url, file_type) → returns a dummy thumbnail URL.
-#    • DummyOpenAIManager with method:
-#         call_openai_api_image(image_b64, mime_type, domain_name) → returns a dict with keys:
-#            "llm_model_name", "llm_summary", "llm_image_text", "llm_content_flavour",
-#            "llm_tags", "llm_image_text_vector".
-#    • Patch ElasticsearchManager.build_document to simply return the passed parameters in a dict.
-#
-# 2. Write test functions:
-#    • test_process_image_file_success:
-#         - Create a temporary binary (image) file with dummy content.
-#         - Instantiate ImageHandler with dummy dependencies.
-#         - Call process_image_file with the dummy file path, full path, mime type, and domain name.
-#         - Assert that it returns a list with one document and that the expected keys and values are present.
-#    • test_process_image_file_file_error:
-#         - Pass a non-existent file path to process_image_file.
-#         - Assert that the function handles the file error gracefully (returns None).
-#    • test_process_image_file_invalid_url:
-#         - Create a dummy ArchiveHandler subclass where _convert_to_archive_url returns an empty string.
-#         - Process a valid file and assert that exception is raised internally and the function returns None.
-#
-# 3. Use pytest and monkeypatch for patching ElasticsearchManager.build_document.
-# 4. Use a relative import to import ImageHandler.
-# 
-# Now output the complete test file code in a single Python code block.
-
-# Python
-
-# Relative import from the package based on __init__.py being present in parent directory.
+from indexer.openai_manager import OpenAIManager
 
 # Dummy dependency implementations
 class DummyArchiveHandler:
@@ -57,6 +23,17 @@ class DummyOpenAIManager:
             "llm_image_text": ["dummy text"],
             "llm_content_flavour": "dummy flavour",
             "llm_tags": ["tag1", "tag2"],
+            "llm_image_text_vector": [0.1, 0.2],
+        }
+
+class DummyOpenAIManagerNoSummary:
+    def call_openai_api_image(self, image_b64, mime_type, domain_name) -> dict:
+        # Return dict without the "llm_summary" key to trigger default placeholder.
+        return {
+            "llm_model_name": "dummy-model",
+            "llm_image_text": ["dummy text"],
+            "llm_content_flavour": "dummy flavour",
+            "llm_tags": ["tag1"],
             "llm_image_text_vector": [0.1, 0.2],
         }
 
@@ -129,7 +106,7 @@ def test_process_image_file_file_error(tmp_path, dummy_dependencies, caplog):
 def test_process_image_file_invalid_url(tmp_path, dummy_dependencies, caplog):
     # Create a subclass of DummyArchiveHandler that returns an empty URL.
     class InvalidURLArchiveHandler(DummyArchiveHandler):
-        def _convert_to_archive_url(self, file_path: str) -> str:
+        def _convert_to_archive_url(self, relative_path: str) -> str:
             return ""
     
     archive_handler = InvalidURLArchiveHandler()
@@ -146,6 +123,168 @@ def test_process_image_file_invalid_url(tmp_path, dummy_dependencies, caplog):
     mime_type = "image/png"
     domain_name = "dummy.domain"
     
-    result = handler.process_image_file(file_path, full_path, mime_type, domain_name)
+    result = handler.process_image_file(relative_path=file_path, full_path=full_path, mime_type=mime_type, domain_name=domain_name)
     # Since _convert_to_archive_url returns empty string, ValueError is raised and caught, so result is None.
     assert result is None
+    # Check for the error message - using a more general check that will match various formats of the same message
+    assert "URL not found" in caplog.text or "archive URL" in caplog.text.lower()
+
+def test_process_image_file_placeholder_llm_summary(tmp_path):
+    archive_handler = DummyArchiveHandler()
+    openai_manager = DummyOpenAIManagerNoSummary()
+    handler = ImageHandler(archive_handler=archive_handler, openai_manager=openai_manager)
+    
+    # Create a temporary binary image file with dummy content (JPEG header)
+    img_content = b'\xFF\xD8\xFF\xE0'
+    temp_image = tmp_path / "test_image.jpg"
+    temp_image.write_bytes(img_content)
+    
+    file_path = os.path.join("images", "test_image.jpg")
+    full_path = str(temp_image)
+    mime_type = "image/jpeg"
+    domain_name = "dummy.domain"
+    
+    docs = handler.process_image_file(relative_path=file_path, full_path=full_path,
+                                       mime_type=mime_type, domain_name=domain_name)
+    
+    # Assert that docs is a list with one document
+    assert isinstance(docs, list)
+    assert len(docs) == 1
+    doc = docs[0]
+    
+    # Verify that if "llm_summary" isn't defined, the placeholder default is used.
+    assert doc["llm_summary"] == OpenAIManager.AWAITING_LLM_ENRICHMENT
+    
+def test_llm_enrichment_disabled_constructor(tmp_path, dummy_dependencies, caplog):
+    archive_handler, openai_manager = dummy_dependencies
+    
+    # Create a spy version of OpenAIManager to verify it's not called
+    class SpyOpenAIManager(DummyOpenAIManager):
+        def __init__(self):
+            self.called = False
+            
+        def call_openai_api_image(self, image_b64, mime_type, domain_name):
+            self.called = True
+            return super().call_openai_api_image(image_b64, mime_type, domain_name)
+    
+    spy_openai = SpyOpenAIManager()
+    
+    # Create handler with LLM enrichment disabled
+    handler = ImageHandler(
+        archive_handler=archive_handler,
+        openai_manager=spy_openai,
+        llm_enrichment_enabled=False
+    )
+    
+    # Create a temporary image file
+    img_content = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR'
+    temp_image = tmp_path / "test_image.png"
+    temp_image.write_bytes(img_content)
+    
+    file_path = os.path.join("images", "test_image.png")
+    full_path = str(temp_image)
+    mime_type = "image/png"
+    domain_name = "dummy.domain"
+    
+    docs = handler.process_image_file(relative_path=file_path, full_path=full_path, 
+                                        mime_type=mime_type, domain_name=domain_name)
+    
+    # Verify OpenAI was not called
+    assert not spy_openai.called
+    
+    # Verify document was still created with placeholder values
+    assert isinstance(docs, list)
+    assert len(docs) == 1
+    doc = docs[0]
+    assert doc["llm_summary"] == OpenAIManager.AWAITING_LLM_ENRICHMENT
+    assert doc["llm_image_text"] == None
+    assert doc["llm_tags"] == None
+    assert doc["llm_image_text_vector"] == None
+
+def test_llm_enrichment_disabled_env_var(tmp_path, dummy_dependencies, caplog, monkeypatch):
+    archive_handler, openai_manager = dummy_dependencies
+    
+    # Create a spy version of OpenAIManager
+    class SpyOpenAIManager(DummyOpenAIManager):
+        def __init__(self):
+            self.called = False
+            
+        def call_openai_api_image(self, image_b64, mime_type, domain_name):
+            self.called = True
+            return super().call_openai_api_image(image_b64, mime_type, domain_name)
+    
+    spy_openai = SpyOpenAIManager()
+    
+    # Set environment variable to disable LLM enrichment
+    monkeypatch.setenv("SKIP_LLM_ENRICHMENT", "true")
+    
+    # Create handler (should respect the env var)
+    handler = ImageHandler(
+        archive_handler=archive_handler,
+        openai_manager=spy_openai
+    )
+    
+    # Create a temporary image file
+    img_content = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR'
+    temp_image = tmp_path / "test_image.png"
+    temp_image.write_bytes(img_content)
+    
+    file_path = os.path.join("images", "test_image.png")
+    full_path = str(temp_image)
+    mime_type = "image/png"
+    domain_name = "dummy.domain"
+    
+    docs = handler.process_image_file(relative_path=file_path, full_path=full_path, 
+                                        mime_type=mime_type, domain_name=domain_name)
+    
+    # Verify OpenAI was not called
+    assert not spy_openai.called
+    
+    # Verify document was still created with placeholder values
+    assert isinstance(docs, list)
+    assert len(docs) == 1
+    doc = docs[0]
+    assert doc["llm_summary"] == OpenAIManager.AWAITING_LLM_ENRICHMENT
+    assert doc["llm_image_text"] == None
+    assert doc["llm_tags"] == None
+    assert doc["llm_image_text_vector"] == None
+
+def test_openai_api_exception(tmp_path, caplog):
+    archive_handler = DummyArchiveHandler()
+    
+    # Create OpenAI manager that raises an exception
+    class ExceptionOpenAIManager:
+        def call_openai_api_image(self, image_b64, mime_type, domain_name):
+            raise Exception("API failure")
+    
+    openai_manager = ExceptionOpenAIManager()
+    handler = ImageHandler(archive_handler=archive_handler, openai_manager=openai_manager)
+    
+    # Create a temporary image file
+    img_content = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR'
+    temp_image = tmp_path / "test_image.png"
+    temp_image.write_bytes(img_content)
+    
+    file_path = os.path.join("images", "test_image.png")
+    full_path = str(temp_image)
+    mime_type = "image/png"
+    domain_name = "dummy.domain"
+    
+    docs = handler.process_image_file(relative_path=file_path, full_path=full_path, 
+                                        mime_type=mime_type, domain_name=domain_name)
+    
+    # Verify document was still created despite OpenAI exception
+    assert isinstance(docs, list)
+    assert len(docs) == 1
+    doc = docs[0]
+    
+    # Verify placeholder values were used
+    assert doc["llm_model_name"] is None
+    assert doc["llm_summary"] == OpenAIManager.AWAITING_LLM_ENRICHMENT
+    assert doc["llm_image_text"] == None
+    assert doc["llm_tags"] == None
+    
+    # Verify error was logged
+    assert "Error calling OpenAI API for image" in caplog.text
+    assert "API failure" in caplog.text
+    assert "Skipping LLM enrichment for this image" in caplog.text

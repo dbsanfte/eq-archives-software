@@ -12,6 +12,8 @@ from langchain_core.documents import Document
 from langchain_experimental.text_splitter import SemanticChunker
 
 class OpenAIManager:
+    AWAITING_LLM_ENRICHMENT = "[ Still awaiting LLM Enrichment... ]"
+    
     def __init__(self, base_url: str=None, api_key: str=None, text_model_name: str=None, image_model_name: str=None,
                  api_key_file: str="/run/secrets/openai_api_key", embedding_model_name: str=None, 
                  prompt_pkg: str='indexer.resources.prompts', schema_pkg: str='indexer.resources.openai-api-schemas', 

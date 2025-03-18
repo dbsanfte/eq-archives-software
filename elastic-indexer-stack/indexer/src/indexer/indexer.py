@@ -59,7 +59,7 @@ class Indexer:
             return
         self._logger.info(f"Generated {len(docs)} documents for file: {file_path}")
         for doc in docs:
-            self._es_manager.index_document(doc.get("id"), doc)
+            self._es_manager.index_document(doc.get("id", file_path), doc)
                 
     def _get_docs(self, file_path: str, full_path: str) -> list[dict]:
         docs = [{}]

@@ -42,11 +42,11 @@ class ImageHandler:
                 self._logger.warning("Skipping LLM enrichment for this image.")
                 
             llm_model_name = llm_response.get("llm_model_name", None)
-            llm_summary = llm_response.get("llm_summary", None)
-            llm_image_text = llm_response.get("llm_image_text", [])
+            llm_summary = llm_response.get("llm_summary", OpenAIManager.AWAITING_LLM_ENRICHMENT)
+            llm_image_text = llm_response.get("llm_image_text", None)
             llm_content_flavour = llm_response.get("llm_content_flavour", None)
             llm_image_text_vector = llm_response.get("llm_image_text_vector", None)
-            llm_tags = llm_response.get("llm_tags", [])
+            llm_tags = llm_response.get("llm_tags", None)
                 
             # Build document for image file
             doc_id = relative_path.replace(os.sep, '/')

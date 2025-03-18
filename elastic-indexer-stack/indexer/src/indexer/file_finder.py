@@ -4,6 +4,7 @@ import subprocess
 from datetime import datetime, timezone, timedelta
 from .es_manager import ElasticsearchManager
 from .rabbitmq_manager import RabbitMQManager
+from .openai_manager import OpenAIManager
 
 class FileFinder:
     def __init__(self, es_manager: ElasticsearchManager, rabbitmq_manager: RabbitMQManager, logger=None, 
@@ -88,8 +89,8 @@ class FileFinder:
         if filename.startswith("."):
             self._logger.debug(f"Skipping hidden file: {filename}")
             return True
-        if "mailing-lists/" in full_path and not filename.endswith(".html"):
-            self._logger.debug(f"Skipping non-html mailing-list file: {relative_path}")
+        if "mailing-lists/" in full_path and not filename.endswith(".json"):
+            self._logger.debug(f"Skipping non-json mailing-list file: {relative_path}")
             return True
         if "newsgroups/" in full_path and not filename.endswith(".txt"):
             self._logger.debug(f"Skipping non-txt newsgroups file: {relative_path}")
@@ -117,7 +118,7 @@ class FileFinder:
             if not self._SKIP_LLM_ENRICHMENT:
                 # If the file is already indexed, verify it's been enriched:
                 llm_summary = doc.get("_source", {}).get("llm_summary")
-                if not llm_summary:
+                if not llm_summary or llm_summary == OpenAIManager.AWAITING_LLM_ENRICHMENT:
                     self._logger.debug(f"File is indexed but not enriched: {relative_path}")
                     self._rabbitmq_manager.publish_message(item={"file_path": relative_path})
                     return
