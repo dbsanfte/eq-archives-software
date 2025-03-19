@@ -516,6 +516,301 @@ class TestShouldSkipFile(unittest.TestCase):
         result = self.finder._should_skip_file(filename, full_path, relative_path)
         self.assertFalse(result)
 
+class TestLLMEnrichmentFlags(unittest.TestCase):
+    def test_skip_llm_enrichment_default(self):
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        
+        finder = FileFinder(es_manager, rabbitmq_manager)
+        
+        self.assertFalse(finder._SKIP_LLM_ENRICHMENT)
+        self.assertFalse(finder._ALWAYS_DO_LLM_ENRICHMENT)
+        
+    def test_skip_llm_enrichment_constructor_param(self):
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        
+        finder = FileFinder(es_manager, rabbitmq_manager, skip_llm_enrichment=True)
+        
+        self.assertTrue(finder._SKIP_LLM_ENRICHMENT)
+        self.assertFalse(finder._ALWAYS_DO_LLM_ENRICHMENT)
+        
+    def test_always_do_llm_enrichment_constructor_param(self):
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        
+        finder = FileFinder(es_manager, rabbitmq_manager, always_do_llm_enrichment=True)
+        
+        self.assertFalse(finder._SKIP_LLM_ENRICHMENT)
+        self.assertTrue(finder._ALWAYS_DO_LLM_ENRICHMENT)
+        
+    @patch.dict('os.environ', {'SKIP_LLM_ENRICHMENT': 'true'})
+    def test_skip_llm_enrichment_env_var(self):
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        
+        finder = FileFinder(es_manager, rabbitmq_manager)
+        
+        self.assertTrue(finder._SKIP_LLM_ENRICHMENT)
+        
+    @patch.dict('os.environ', {'ALWAYS_DO_LLM_ENRICHMENT': 'true'})
+    def test_always_do_llm_enrichment_env_var(self):
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        
+        finder = FileFinder(es_manager, rabbitmq_manager)
+        
+        self.assertTrue(finder._ALWAYS_DO_LLM_ENRICHMENT)
+        
+    @patch.dict('os.environ', {'SKIP_LLM_ENRICHMENT': 'true'})
+    def test_env_var_overrides_constructor_param(self):
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        
+        finder = FileFinder(es_manager, rabbitmq_manager, skip_llm_enrichment=False)
+        
+        self.assertTrue(finder._SKIP_LLM_ENRICHMENT)
+        
+    @patch.dict('os.environ', {'SKIP_LLM_ENRICHMENT': 'false'})
+    def test_skip_llm_enrichment_env_var_false(self):
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        
+        finder = FileFinder(es_manager, rabbitmq_manager, skip_llm_enrichment=True)
+        
+        self.assertFalse(finder._SKIP_LLM_ENRICHMENT)
+
+class TestCacheTimestamp(unittest.TestCase):
+    def setUp(self):
+        self.es_manager = MagicMock()
+        self.rabbitmq_manager = MagicMock()
+        self.finder = FileFinder(self.es_manager, self.rabbitmq_manager)
+        self.test_file = "test/file.txt"
+        
+    @patch('datetime.datetime')
+    def test_file_not_in_cache_gets_queued(self, mock_datetime):
+        # Setup
+        now = datetime(2025, 3, 18, tzinfo=timezone.utc)
+        mock_datetime.now.return_value = now
+        self.es_manager.record_exists.return_value = False
+        
+        # Test
+        self.finder._check_and_queue_file(self.test_file)
+        
+        # Verify
+        self.rabbitmq_manager.publish_message.assert_called_once_with(item={"file_path": self.test_file})
+        self.assertIn(self.test_file, self.finder._enqueued_cache)
+        self.assertGreaterEqual(self.finder._enqueued_cache[self.test_file], int(now.timestamp()))
+        
+    @patch('datetime.datetime')
+    def test_recently_cached_file_skipped(self, mock_datetime):
+        # Setup
+        now = datetime(2025, 3, 18, tzinfo=timezone.utc)
+        mock_datetime.now.return_value = now
+        
+        # Simulate a file that was recently cached (10 minutes ago)
+        ten_min_ago = int((now - timedelta(minutes=10)).timestamp())
+        self.finder._enqueued_cache[self.test_file] = ten_min_ago
+        
+        # Test
+        self.finder._check_and_queue_file(self.test_file)
+        
+        # Verify no publish happened
+        self.rabbitmq_manager.publish_message.assert_not_called()
+        
+    @patch('datetime.datetime')
+    def test_old_cached_file_gets_requeued(self, mock_datetime):
+        # Setup
+        now = datetime(2025, 3, 18, tzinfo=timezone.utc)
+        mock_datetime.now.return_value = now
+        self.es_manager.record_exists.return_value = False
+        
+        # Simulate a file that was cached longer ago than the reindex interval
+        old_timestamp = int((now - timedelta(seconds=self.finder._REINDEXING_INTERVAL + 100)).timestamp())
+        self.finder._enqueued_cache[self.test_file] = old_timestamp
+        
+        # Test
+        self.finder._check_and_queue_file(self.test_file)
+        
+        # Verify
+        self.rabbitmq_manager.publish_message.assert_called_once_with(item={"file_path": self.test_file})
+        self.assertIn(self.test_file, self.finder._enqueued_cache)
+        self.assertGreaterEqual(self.finder._enqueued_cache[self.test_file], int(now.timestamp()))
+        
+    @patch('datetime.datetime')
+    def test_cache_updated_when_file_queued(self, mock_datetime):
+        # Setup
+        now = datetime(2025, 3, 18, tzinfo=timezone.utc)
+        mock_datetime.now.return_value = now
+        self.es_manager.record_exists.return_value = False
+        
+        # Test
+        self.finder._check_and_queue_file(self.test_file)
+        
+        # Verify cache was updated
+        self.assertGreaterEqual(self.finder._enqueued_cache[self.test_file], int(now.timestamp()))
+        
+    @patch('datetime.datetime')
+    def test_cache_respects_reindexing_interval(self, mock_datetime):
+        # Setup
+        now = datetime(2025, 3, 18, tzinfo=timezone.utc)
+        mock_datetime.now.return_value = now
+        self.es_manager.record_exists.return_value = False
+        
+        # Set a custom reindexing interval
+        custom_interval = 7200  # 2 hours
+        self.finder._REINDEXING_INTERVAL = custom_interval
+        
+        # Simulate a file cached exactly at the boundary
+        boundary_timestamp = int((now - timedelta(seconds=custom_interval)).timestamp())
+        self.finder._enqueued_cache[self.test_file] = boundary_timestamp
+        
+        # Test
+        self.finder._check_and_queue_file(self.test_file)
+        
+        # Verify file was queued (since it's exactly at the boundary)
+        self.rabbitmq_manager.publish_message.assert_called_once_with(item={"file_path": self.test_file})
+
+class TestBatchedFutureProcessing(unittest.TestCase):
+    @patch.object(FileFinder, '_sparse_checkout_repo')
+    @patch('os.walk')
+    def test_max_pending_futures_respected(self, mock_walk, mock_checkout):
+        # Setup
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        finder = FileFinder(es_manager, rabbitmq_manager, max_workers=2)
+        
+        # Override the _process_file method to add delay and track calls
+        original_process_file = finder._process_file
+        process_calls = []
+        
+        def slow_process_file(path):
+            process_calls.append(path)
+            # Call the original but add tracking
+            original_process_file(path)
+            
+        finder._process_file = slow_process_file
+        
+        # Prepare test data - 10 files
+        mock_walk.return_value = [
+            (finder._LOCAL_REPO_PATH, ['dir1'], ['file1.txt', 'file2.txt', 'file3.txt', 'file4.txt', 'file5.txt',
+                                'file6.txt', 'file7.txt', 'file8.txt', 'file9.txt', 'file10.txt']),
+        ]
+        
+        # Set a small max_pending_futures for testing
+        finder._max_workers = 2
+        
+        # Mock _process_completed_futures to track calls
+        original_process_completed = finder._process_completed_futures
+        process_completed_calls = []
+        
+        def mock_process_completed(active_futures):
+            process_completed_calls.append(len(active_futures))
+            original_process_completed(active_futures)
+            
+        finder._process_completed_futures = mock_process_completed
+        
+        # Test
+        finder.walk_and_queue()
+        
+        # Verify
+        # Ensure all files were processed
+        self.assertEqual(len(process_calls), 10)
+        
+        # Verify that _process_completed_futures was called when batch limit reached
+        self.assertTrue(any(count >= finder._max_workers * 3 for count in process_completed_calls), 
+                       f"Batching threshold never reached. Counts: {process_completed_calls}")
+
+    @patch.object(FileFinder, '_sparse_checkout_repo')
+    @patch('os.walk')
+    @patch('concurrent.futures.wait')
+    def test_process_completed_futures(self, mock_wait, mock_walk, mock_checkout):
+        # Setup
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        finder = FileFinder(es_manager, rabbitmq_manager)
+        
+        # Create mock futures
+        future1 = MagicMock()
+        future2 = MagicMock()
+        future3 = MagicMock()
+        
+        active_futures = [future1, future2, future3]
+        
+        # Configure mock_wait to return done futures
+        mock_wait.return_value = ([future1, future2], [future3])
+        
+        # Test
+        finder._process_completed_futures(active_futures)
+        
+        # Verify
+        mock_wait.assert_called_once()
+        future1.result.assert_called_once()
+        future2.result.assert_called_once()
+        future3.result.assert_not_called()
+        
+        # Check that completed futures were removed
+        self.assertEqual(len(active_futures), 1)
+        self.assertIn(future3, active_futures)
+
+    @patch.object(FileFinder, '_sparse_checkout_repo')
+    @patch('os.walk')
+    def test_exception_in_worker_thread(self, mock_walk, mock_checkout):
+        # Setup
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        finder = FileFinder(es_manager, rabbitmq_manager)
+        mock_logger = MagicMock()
+        finder._logger = mock_logger
+        
+        # Override the _process_file method to raise an exception
+        def failing_process_file(path):
+            if path == "file2.txt":
+                raise ValueError("Test error")
+                
+        finder._process_file = failing_process_file
+        
+        # Prepare test data
+        mock_walk.return_value = [
+            (finder._LOCAL_REPO_PATH, [], ['file1.txt', 'file2.txt', 'file3.txt']),
+        ]
+        
+        # Test
+        finder.walk_and_queue()
+        
+        # Verify
+        # Check that the error was logged
+        error_calls = [call for call in mock_logger.error.call_args_list if "Test error" in str(call)]
+        self.assertGreaterEqual(len(error_calls), 1)
+
+    @patch.object(FileFinder, '_sparse_checkout_repo')
+    @patch('os.walk')
+    def test_all_files_eventually_processed(self, mock_walk, mock_checkout):
+        # Setup
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        finder = FileFinder(es_manager, rabbitmq_manager)
+        
+        # Track processed files
+        processed_files = []
+        def track_process(path):
+            processed_files.append(path)
+            
+        finder._process_file = track_process
+        
+        # Prepare test data - multiple directories
+        mock_walk.return_value = [
+            (finder._LOCAL_REPO_PATH, ['dir1'], ['file1.txt', 'file2.txt']),
+            (finder._LOCAL_REPO_PATH + '/dir1', [], ['file3.txt', 'file4.txt']),
+        ]
+        
+        # Test
+        finder.walk_and_queue()
+        
+        # Verify all files were processed - normalize paths before comparison
+        expected_files = ["file1.txt", "file2.txt", "dir1/file3.txt", "dir1/file4.txt"]
+        self.assertEqual(sorted(processed_files), sorted(expected_files))
+
 if __name__ == '__main__':
     unittest.main()
 

@@ -1,6 +1,7 @@
 import os
 import tempfile
 import pytest
+import json
 from indexer.archive_handler import ArchiveHandler
 
 @pytest.fixture
@@ -55,17 +56,6 @@ def test_extract_newsgroups(tmp_path, archive_handler):
     domain, capture_date = archive_handler._extract_newsgroups(full_path)
     assert domain == "groups.google.com"
     assert capture_date == "2022-01-01"
-
-def test_extract_mailing_lists(tmp_path, archive_handler):
-    # Create a temporary file with a <b>Date:</b> tag for mailing lists.
-    content = "<html>\n<b>Date:</b> 2022-02-02 <br/>\nOther content\n</html>"
-    test_file = tmp_path / "mailing_list.txt"
-    test_file.write_text(content)
-    full_path = str(test_file)
-    
-    domain, capture_date = archive_handler._extract_mailing_lists(full_path)
-    assert domain == "groups.yahoo.com"
-    assert capture_date == "2022-02-02"
 
 def test_resolve_thumbnail_url_defaults(archive_handler):
     # Test defaults when URL is None.
@@ -215,33 +205,6 @@ def test_extract_newsgroups_read_error(archive_handler, monkeypatch):
     assert domain == "groups.google.com"
     assert date is None
 
-# Exception handling tests for _extract_mailing_lists method
-def test_extract_mailing_lists_file_not_found(archive_handler):
-    # Test with non-existent file
-    domain, date = archive_handler._extract_mailing_lists("non_existent_file.txt")
-    assert domain == "groups.yahoo.com"
-    assert date is None
-
-def test_extract_mailing_lists_no_date(tmp_path, archive_handler):
-    # Create file with no Date tag
-    test_file = tmp_path / "no_date.txt"
-    test_file.write_text("<html>Content with no date tag</html>")
-    
-    domain, date = archive_handler._extract_mailing_lists(str(test_file))
-    assert domain == "groups.yahoo.com"
-    assert date is None
-
-def test_extract_mailing_lists_read_error(archive_handler, monkeypatch):
-    # Mock open to raise an exception
-    def mock_open(*args, **kwargs):
-        raise IOError("Simulated read error")
-    
-    monkeypatch.setattr("builtins.open", mock_open)
-    
-    domain, date = archive_handler._extract_mailing_lists("any_file.txt")
-    assert domain == "groups.yahoo.com"
-    assert date is None
-
 # Exception handling tests for _convert_to_archive_url method
 def test_convert_to_archive_url_exception(archive_handler, monkeypatch):
     # Force the method to raise an exception
@@ -257,3 +220,134 @@ def test_convert_to_archive_url_unsupported_type(archive_handler):
     # Test with an unsupported path type that doesn't match websites, mailing-lists or newsgroups
     url = archive_handler._convert_to_archive_url("unsupported/path/type")
     assert url == ""
+def test_get_mailing_list_date(archive_handler, monkeypatch):
+    # Mock _extract_mailing_lists to return a predictable date
+    def mock_extract_mailing_lists(path):
+        return "groups.yahoo.com", "2023-01-01T00:00:00+00:00"
+    
+    monkeypatch.setattr(archive_handler, "_extract_mailing_lists", mock_extract_mailing_lists)
+    
+    date = archive_handler.get_mailing_list_date("mock/path.json")
+    assert date == "2023-01-01T00:00:00+00:00"
+    
+def test_get_mailing_list_date_none(archive_handler, monkeypatch):
+    # Mock _extract_mailing_lists to return None for the date
+    def mock_extract_mailing_lists(path):
+        return "groups.yahoo.com", None
+    
+    monkeypatch.setattr(archive_handler, "_extract_mailing_lists", mock_extract_mailing_lists)
+    
+    date = archive_handler.get_mailing_list_date("mock/path.json")
+    assert date is None
+
+def test_extract_mailing_lists_with_date(archive_handler, tmp_path):
+    # Create a temporary JSON file with a valid 'date' field
+    json_content = {
+        "ygData": {
+            "date": "1609459200"  # 2021-01-01 00:00:00 UTC
+        }
+    }
+    test_file = tmp_path / "with_date.json"
+    test_file.write_text(json.dumps(json_content))
+    
+    domain, date = archive_handler._extract_mailing_lists(str(test_file))
+    assert domain == "groups.yahoo.com"
+    assert "2021-01-01" in date  # Check that the date was converted correctly
+
+def test_extract_mailing_lists_with_post_date(archive_handler, tmp_path):
+    # Create a temporary JSON file with only a valid 'postDate' field
+    json_content = {
+        "ygData": {
+            "date": None,
+            "postDate": "1609545600"  # 2021-01-02 00:00:00 UTC
+        }
+    }
+    test_file = tmp_path / "with_post_date.json"
+    test_file.write_text(json.dumps(json_content))
+    
+    domain, date = archive_handler._extract_mailing_lists(str(test_file))
+    assert domain == "groups.yahoo.com"
+    assert "2021-01-02" in date  # Check that the date was converted correctly
+
+def test_extract_mailing_lists_both_dates(archive_handler, tmp_path):
+    # Create a temporary JSON file with both 'date' and 'postDate' fields
+    # 'date' should take precedence
+    json_content = {
+        "ygData": {
+            "date": "1609459200",  # 2021-01-01 00:00:00 UTC
+            "postDate": "1609545600"  # 2021-01-02 00:00:00 UTC
+        }
+    }
+    test_file = tmp_path / "both_dates.json"
+    test_file.write_text(json.dumps(json_content))
+    
+    domain, date = archive_handler._extract_mailing_lists(str(test_file))
+    assert domain == "groups.yahoo.com"
+    assert "2021-01-01" in date  # Should use 'date' field, not 'postDate'
+
+def test_extract_mailing_lists_no_date(archive_handler, tmp_path):
+    # Create a temporary JSON file with no valid date fields
+    json_content = {
+        "ygData": {
+            "date": None,
+            "postDate": None
+        }
+    }
+    test_file = tmp_path / "no_date.json"
+    test_file.write_text(json.dumps(json_content))
+    
+    domain, date = archive_handler._extract_mailing_lists(str(test_file))
+    assert domain == "groups.yahoo.com"
+    assert date is None
+
+def test_extract_mailing_lists_empty_date(archive_handler, tmp_path):
+    # Create a temporary JSON file with empty date strings
+    json_content = {
+        "ygData": {
+            "date": "",
+            "postDate": ""
+        }
+    }
+    test_file = tmp_path / "empty_date.json"
+    test_file.write_text(json.dumps(json_content))
+    
+    domain, date = archive_handler._extract_mailing_lists(str(test_file))
+    assert domain == "groups.yahoo.com"
+    assert date is None
+
+def test_extract_mailing_lists_zero_date(archive_handler, tmp_path):
+    # Create a temporary JSON file with "0" as date value
+    json_content = {
+        "ygData": {
+            "date": "0",
+            "postDate": "0"
+        }
+    }
+    test_file = tmp_path / "zero_date.json"
+    test_file.write_text(json.dumps(json_content))
+    
+    domain, date = archive_handler._extract_mailing_lists(str(test_file))
+    assert domain == "groups.yahoo.com"
+    assert date is None
+
+def test_extract_mailing_lists_file_not_found(archive_handler):
+    # Test with a non-existent file path
+    with pytest.raises(FileNotFoundError):
+        archive_handler._extract_mailing_lists("non_existent_file.json")
+
+def test_extract_mailing_lists_invalid_json(archive_handler, tmp_path):
+    # Create a temporary file with invalid JSON content
+    test_file = tmp_path / "invalid.json"
+    test_file.write_text("This is not valid JSON")
+    
+    with pytest.raises(json.JSONDecodeError):
+        archive_handler._extract_mailing_lists(str(test_file))
+
+def test_extract_mailing_lists_missing_ygdata(archive_handler, tmp_path):
+    # Create a temporary JSON file missing the ygData field
+    json_content = {"someOtherField": "value"}
+    test_file = tmp_path / "missing_ygdata.json"
+    test_file.write_text(json.dumps(json_content))
+    
+    with pytest.raises(KeyError):
+        archive_handler._extract_mailing_lists(str(test_file))

@@ -1,6 +1,8 @@
 import os
 import re
 import logging
+import json
+import datetime
 
 class ArchiveHandler:
     def __init__(self, newsgroups_path: str=None, mailing_lists_path: str=None, 
@@ -107,21 +109,30 @@ class ArchiveHandler:
         return domain_name, capture_date
 
     def _extract_mailing_lists(self, full_path: str) -> tuple[str, str]:
-        domain_name = "groups.yahoo.com"
-        capture_date = None
-        try:
-            with open(full_path, 'r') as file:
-                for line in file:
-                    if '<b>Date:</b>' in line:
-                        match = re.search(r'<b>Date:</b>\s*(.*?)\s*<br/>', line)
-                        if match:
-                            capture_date = match.group(1).strip()
-                            break
-            self._logger.debug(f"Extracted mailing list date: {capture_date}")
-        except Exception as e:
-            self._logger.error(f"Error extracting mailing list date from {full_path}: {e}")
-            self._logger.exception(e)
+        domain_name: str = "groups.yahoo.com"
+        capture_date: str = None
+        
+        with open(full_path, "r") as file:
+            content = file.read()
+            json_file = json.loads(content)
+        
+            # Try to get date from 'date' field, fall back to 'postDate' if needed
+            timestamp: str = None
+            if "date" in json_file["ygData"] and json_file["ygData"]["date"] is not None:
+                timestamp = json_file["ygData"]["date"]
+            elif "postDate" in json_file["ygData"] and json_file["ygData"]["postDate"] is not None:
+                timestamp = json_file["ygData"]["postDate"]
+            
+            if timestamp is not None and timestamp != "" and timestamp != "0":
+                capture_date = datetime.datetime.fromtimestamp(int(timestamp), 
+                                                        datetime.timezone.utc).isoformat()
+                self._logger.debug(f"Extracted mailing list date: {capture_date}")
+            else:
+                self._logger.warning(f"No date found in mailing list file: {full_path}")
         return domain_name, capture_date
+    
+    def get_mailing_list_date(self, full_path: str) -> str:
+        return self._extract_mailing_lists(full_path)[1]
 
     def _resolve_thumbnail_url(self, url: str, file_type: str) -> str:
         default = "thumbnails/other.webp"

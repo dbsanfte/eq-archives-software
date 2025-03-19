@@ -5,6 +5,9 @@ from datetime import datetime, timezone, timedelta
 from .es_manager import ElasticsearchManager
 from .rabbitmq_manager import RabbitMQManager
 from .openai_manager import OpenAIManager
+import concurrent.futures
+from concurrent.futures import ThreadPoolExecutor
+import multiprocessing
 
 class FileFinder:
     def __init__(self, es_manager: ElasticsearchManager, rabbitmq_manager: RabbitMQManager, logger=None, 
@@ -14,7 +17,8 @@ class FileFinder:
                  reindexing_interval: int=2628000,
                  git_repo_url: str="https://github.com/dbsanfte/eq-archives.git",
                  local_repo_path: str="/data/eq-archives", 
-                 sparse_checkout_paths: str=""):
+                 sparse_checkout_paths: str="",
+                 max_workers: int=multiprocessing.cpu_count()):
         self._es_manager = es_manager
         self._rabbitmq_manager = rabbitmq_manager
         self._logger = logger or logging.getLogger(__name__)
@@ -41,7 +45,9 @@ class FileFinder:
         self._ALWAYS_DO_LLM_ENRICHMENT = always_do_llm_enrichment
         if os.environ.get("ALWAYS_DO_LLM_ENRICHMENT", "") != "":
             self._ALWAYS_DO_LLM_ENRICHMENT = os.environ.get("ALWAYS_DO_LLM_ENRICHMENT").lower() == "true"
-            
+        self._max_workers = max_workers
+        if os.environ.get("MAX_WORKERS", "") != "":
+            self._max_workers = int(os.environ.get("MAX_WORKERS"))
         # In-memory cache for tracking enqueued files: {relative_path: timestamp}
         self._enqueued_cache = {}
         
@@ -148,25 +154,71 @@ class FileFinder:
         # Update the cache with the current timestamp for this file
         self._enqueued_cache[relative_path] = int(now.timestamp())
         
+    def _process_file(self, relative_path):
+        """Process an individual file for indexing in a separate thread."""
+        try:
+            self._logger.debug(f"Processing file (in thread): {relative_path}")
+            self._check_and_queue_file(relative_path)
+        except Exception as e:
+            self._logger.error(f"Error processing file: {relative_path}: {e}")
+            self._logger.exception(e)
+            # Re-raise to be caught by the executor
+            raise
+
     def walk_and_queue(self):
+        """
+        Walk through filesystem and queue files for processing in parallel using threads.
+        Uses batching to limit memory consumption from queued futures.
+        """
         self._sparse_checkout_repo()
-        for root, dirs, files in os.walk(self._LOCAL_REPO_PATH):
-            if ".git" in dirs:
-                dirs.remove(".git")
+        
+        # Set maximum number of pending futures to 3x the number of workers
+        max_pending_futures = self._max_workers * 3
+        
+        with ThreadPoolExecutor(max_workers=self._max_workers) as executor:
+            active_futures = []
             
-            self._logger.info(f"Processing files in {root}...")
-            self._logger.debug(f"Number of files found: {len(files)}")
-            
-            for filename in files:
-                full_path = os.path.join(root, filename).replace(os.path.sep, "/")
-                relative_path = os.path.relpath(full_path, self._LOCAL_REPO_PATH).replace(os.path.sep, "/")
+            for root, dirs, files in os.walk(self._LOCAL_REPO_PATH):
+                if ".git" in dirs:
+                    dirs.remove(".git")
                 
-                if self._should_skip_file(filename, full_path, relative_path):
-                    continue
+                self._logger.info(f"Processing files in {root}...")
+                self._logger.debug(f"Number of files found: {len(files)}")
+                
+                for filename in files:
+                    full_path = os.path.join(root, filename).replace(os.path.sep, "/")
+                    relative_path = os.path.relpath(full_path, self._LOCAL_REPO_PATH).replace(os.path.sep, "/")
                     
-                self._logger.debug(f"Processing file: {relative_path}")
-                try:
-                    self._check_and_queue_file(relative_path)
-                except Exception as e:
-                    self._logger.error(f"Error processing file: {relative_path}: {e}")
-                    self._logger.exception(e)
+                    if self._should_skip_file(filename, full_path, relative_path):
+                        continue
+                    
+                    # Check if we need to wait for some futures to complete
+                    if len(active_futures) >= max_pending_futures:
+                        # Wait for some futures to complete before continuing
+                        self._process_completed_futures(active_futures)
+                    
+                    self._logger.debug(f"Submitting file for processing: {relative_path}")
+                    future = executor.submit(self._process_file, relative_path)
+                    active_futures.append(future)
+                
+            # Process any remaining futures
+            while active_futures:
+                self._process_completed_futures(active_futures)
+    
+    def _process_completed_futures(self, active_futures):
+        """Process completed futures and remove them from the active list."""
+        # Wait for the first future to complete (timeout=0 means it returns immediately if nothing is done)
+        done, _ = concurrent.futures.wait(
+            active_futures, 
+            timeout=None,  # Block until at least one future completes
+            return_when=concurrent.futures.FIRST_COMPLETED
+        )
+        
+        # Process completed futures
+        for future in done:
+            try:
+                future.result()  # This will raise any exception that occurred in the thread
+            except Exception as e:
+                self._logger.error(f"Error in thread: {e}")
+                self._logger.exception(e)
+            active_futures.remove(future)

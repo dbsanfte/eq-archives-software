@@ -79,7 +79,7 @@ class TextHandler:
                     file_type = "text",
                     mime_type = mime_type,
                     text = chunks_and_embeddings,
-                    text_full = md(document.page_content, strip=["script", "style"]),
+                    text_full = document.page_content,
                     llm_summary = llm_summary,
                     llm_summary_vector = llm_summary_vector,
                     llm_guessed_date = llm_guessed_date,
@@ -116,7 +116,7 @@ class TextHandler:
             self._logger.warning(f"File {full_path} is not in a recognized archive path. Will treat as html.")
             with open(full_path, "r") as file:
                 content = file.read()
-                preprocessed_content = md(content, strip=["script", "style"])
+                preprocessed_content = md(content)
         
         doc = Document(page_content=preprocessed_content, metadata={"source": full_path})
         return [doc]
@@ -147,12 +147,15 @@ class TextHandler:
                 <hr/>
                 {text_section}
             """
-            md_content = md(tw.dedent(text).strip(), strip=["script", "style"])
+            md_content = md(tw.dedent(text).strip())
             return md_content
         
     def _preprocess_mailing_list_file(self, full_path: str) -> str:
         if not full_path.endswith(".json"):
             raise ValueError("Mailing list file must be a JSON file.")
+        
+        capture_date = self._archive_handler.get_mailing_list_date(full_path=full_path)
+        
         with open(full_path, "r") as file:
             content = file.read()
             json_file = json.loads(content)
@@ -162,16 +165,8 @@ class TextHandler:
             subject_line = "Subject: " + json_file["ygData"]["subject"]
             group_line = "Mailing-list: " + os.path.basename(os.path.dirname(full_path))
             
-            # Try to get date from 'date' field, fall back to 'postDate' if needed
-            timestamp: str = None
-            if "date" in json_file["ygData"] and json_file["ygData"]["date"] is not None:
-                timestamp = json_file["ygData"]["date"]
-            elif "postDate" in json_file["ygData"] and json_file["ygData"]["postDate"] is not None:
-                timestamp = json_file["ygData"]["postDate"]
-            
-            if timestamp is not None and timestamp != "" and timestamp != "0":
-                date_line = "Date: " + datetime.datetime.fromtimestamp(int(timestamp), 
-                                                                  datetime.timezone.utc).isoformat()
+            if capture_date is not None:
+                date_line = "Date: " + capture_date
             else:
                 date_line = "Date: Unknown"
                 
@@ -185,7 +180,7 @@ class TextHandler:
                 <hr/>
                 {text_section}
             """
-            md_content = md(tw.dedent(text).strip(), strip=["script", "style"])
+            md_content = md(tw.dedent(text).strip())
             return md_content
         
     def _preprocess_website_file(self, full_path: str, relative_path: str) -> str:
@@ -206,7 +201,7 @@ class TextHandler:
         
         url = self._archive_handler._convert_to_archive_url(relative_path=relative_path)
         content = f"<b>Page URL:</b> {url}<br/><hr/>{file_content}"
-        md_content = md(content, strip=["script", "style"])
+        md_content = md(content)
         return md_content
 
     def _resolve_title_from_file(self, full_path: str, relative_path: str) -> str:

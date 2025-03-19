@@ -62,7 +62,7 @@ class Indexer:
             self._es_manager.index_document(doc.get("id", file_path), doc)
                 
     def _get_docs(self, file_path: str, full_path: str) -> list[dict]:
-        docs = [{}]
+        docs = []
         mime_type, domain_name, capture_date = self._get_file_metadata(file_path=file_path, full_path=full_path)
         
         if mime_type.startswith("text") or "json" in mime_type or "html" in mime_type:
