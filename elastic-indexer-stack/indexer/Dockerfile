@@ -53,6 +53,7 @@ RUN export DEBIAN_FRONTEND=noninteractive DEBCONF_NONINTERACTIVE_SEEN=true && \
     apt-get update && \
     apt-get install --no-install-recommends -y \
     file \
+    git \
     libmagic-dev \
     tzdata \
     && \
