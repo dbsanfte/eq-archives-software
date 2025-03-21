@@ -8,6 +8,7 @@ from .openai_manager import OpenAIManager
 import concurrent.futures
 from concurrent.futures import ThreadPoolExecutor
 import multiprocessing
+import queue
 
 class FileFinder:
     def __init__(self, es_manager: ElasticsearchManager, rabbitmq_manager: RabbitMQManager, logger=None, 
@@ -50,6 +51,9 @@ class FileFinder:
             self._max_workers = int(os.environ.get("MAX_WORKERS"))
         # In-memory cache for tracking enqueued files: {relative_path: timestamp}
         self._enqueued_cache = {}
+        
+        # Thread-safe queue for messages that need to be published to RabbitMQ
+        self._message_queue = queue.Queue()
         
     def _sparse_checkout_repo(self):
         if not os.path.exists(f"{self._LOCAL_REPO_PATH}/.git"):
@@ -102,10 +106,19 @@ class FileFinder:
             return True
         return False
 
+    def _queue_for_publishing(self, relative_path):
+        """Add file to thread-safe queue for later publishing to RabbitMQ."""
+        self._logger.info(f"Queueing file for indexing: {relative_path}")
+        msg = {"file_path": relative_path}
+        self._message_queue.put(msg)
+        
+        # Update the cache with the current timestamp for this file
+        now = datetime.now(timezone.utc)
+        self._enqueued_cache[relative_path] = int(now.timestamp())
+
     def _check_and_queue_file(self, relative_path: str):
         """
-        Revised to use an in-memory cache to prevent flooding the queue with duplicate messages.
-        The cache entry expires after REINDEXING_INTERVAL seconds.
+        Revised to use an in-memory queue instead of directly publishing to RabbitMQ.
         """
         self._logger.debug(f"Checking file: {relative_path}")
         now = datetime.now(timezone.utc)
@@ -125,11 +138,11 @@ class FileFinder:
                 llm_summary = doc.get("_source", {}).get("llm_summary")
                 if not llm_summary or llm_summary == OpenAIManager.AWAITING_LLM_ENRICHMENT:
                     self._logger.debug(f"File is indexed but not enriched: {relative_path}")
-                    self._rabbitmq_manager.publish_message(item={"file_path": relative_path})
+                    self._queue_for_publishing(relative_path)
                     return
                 if self._ALWAYS_DO_LLM_ENRICHMENT:
                     self._logger.debug(f"Re-enriching file because ALWAYS_DO_LLM_ENRICHMENT is enabled: {relative_path}")
-                    self._rabbitmq_manager.publish_message(item={"file_path": relative_path})
+                    self._queue_for_publishing(relative_path)
                     return
                 # Looks enriched and we aren't set to re-enrich
                 self._logger.debug(f"File is already enriched: {relative_path}")
@@ -147,12 +160,7 @@ class FileFinder:
                         return
                 self._logger.debug(f"Reindexing enabled, and file is due for reindexing: {relative_path}")
         
-        self._logger.info(f"Queueing file for indexing: {relative_path}")
-        msg = {"file_path": relative_path}
-        self._rabbitmq_manager.publish_message(item=msg)
-        
-        # Update the cache with the current timestamp for this file
-        self._enqueued_cache[relative_path] = int(now.timestamp())
+        self._queue_for_publishing(relative_path)
         
     def _process_file(self, relative_path):
         """Process an individual file for indexing in a separate thread."""
@@ -168,7 +176,7 @@ class FileFinder:
     def walk_and_queue(self):
         """
         Walk through filesystem and queue files for processing in parallel using threads.
-        Uses batching to limit memory consumption from queued futures.
+        Only the main thread publishes to RabbitMQ to ensure thread safety.
         """
         self._sparse_checkout_repo()
         
@@ -185,6 +193,9 @@ class FileFinder:
                 self._logger.info(f"Processing files in {root}...")
                 self._logger.debug(f"Number of files found: {len(files)}")
                 
+                # Publish any queued messages (from previous directories)
+                self._publish_queued_messages()
+                
                 for filename in files:
                     full_path = os.path.join(root, filename).replace(os.path.sep, "/")
                     relative_path = os.path.relpath(full_path, self._LOCAL_REPO_PATH).replace(os.path.sep, "/")
@@ -196,6 +207,8 @@ class FileFinder:
                     if len(active_futures) >= max_pending_futures:
                         # Wait for some futures to complete before continuing
                         self._process_completed_futures(active_futures)
+                        # Publish any messages that were queued by completed futures
+                        self._publish_queued_messages()
                     
                     self._logger.debug(f"Submitting file for processing: {relative_path}")
                     future = executor.submit(self._process_file, relative_path)
@@ -204,6 +217,37 @@ class FileFinder:
             # Process any remaining futures
             while active_futures:
                 self._process_completed_futures(active_futures)
+                # Publish any messages that were queued by completed futures
+                self._publish_queued_messages()
+            
+            # Final check for any remaining messages
+            self._publish_queued_messages(drain_all=True)
+    
+    def _publish_queued_messages(self, drain_all=False, batch_size=100):
+        """
+        Publish queued messages to RabbitMQ from the main thread.
+        
+        Args:
+            drain_all: If True, drain the entire queue. Otherwise, process up to batch_size.
+            batch_size: Maximum number of messages to process in one call.
+        """
+        published_count = 0
+        
+        # Process either up to batch_size or all messages if drain_all is True
+        while not self._message_queue.empty() and (drain_all or published_count < batch_size):
+            try:
+                msg = self._message_queue.get_nowait()
+                self._rabbitmq_manager.publish_message(item=msg)
+                published_count += 1
+                self._message_queue.task_done()
+            except queue.Empty:
+                break
+            except Exception as e:
+                self._logger.error(f"Error publishing message to RabbitMQ: {e}")
+                self._logger.exception(e)
+                
+        if published_count > 0:
+            self._logger.debug(f"Published {published_count} messages to RabbitMQ")
     
     def _process_completed_futures(self, active_futures):
         """Process completed futures and remove them from the active list."""

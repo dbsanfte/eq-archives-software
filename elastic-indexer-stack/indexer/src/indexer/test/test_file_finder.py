@@ -2,6 +2,8 @@ import unittest
 from unittest.mock import patch, MagicMock, call
 from datetime import datetime, timezone, timedelta
 from indexer.file_finder import FileFinder
+import threading
+import queue
 
 class TestFileFinderInitialization(unittest.TestCase):
     @patch.dict('os.environ', {
@@ -215,6 +217,8 @@ class TestCheckAndQueueFile(unittest.TestCase):
         finder = FileFinder(es_manager, rabbitmq_manager)
         finder._REINDEXING_ENABLED = True
         finder._REINDEXING_INTERVAL = 3600
+        # Initialize a fresh queue
+        finder._message_queue = queue.Queue()
 
         now = datetime.now(timezone.utc)
         last_indexed = now - timedelta(seconds=5400)  # Beyond interval
@@ -224,6 +228,9 @@ class TestCheckAndQueueFile(unittest.TestCase):
         es_manager.get_document.return_value = doc
 
         finder._check_and_queue_file('test/path')
+        
+        # Now publish the queued messages
+        finder._publish_queued_messages(drain_all=True)
 
         rabbitmq_manager.publish_message.assert_called_once_with(item={"file_path": "test/path"})
 
@@ -231,14 +238,19 @@ class TestCheckAndQueueFile(unittest.TestCase):
         es_manager = MagicMock()
         rabbitmq_manager = MagicMock()
         finder = FileFinder(es_manager, rabbitmq_manager)
+        # Initialize a fresh queue
+        finder._message_queue = queue.Queue()
 
         es_manager.record_exists.return_value = False
         es_manager.chunks_exist.return_value = False
         finder._check_and_queue_file('test/path')
+        
+        # Now publish the queued messages (this is what the main thread would do)
+        finder._publish_queued_messages(drain_all=True)
 
         rabbitmq_manager.publish_message.assert_called_once_with(item={"file_path": "test/path"})
 
-class TestSparseCheckoutRepo(unittest.TestCase):
+class TestSparseCheckoutRepoDetails(unittest.TestCase):
     @patch('subprocess.run')
     @patch('os.makedirs')
     @patch('os.path.exists', return_value=False)
@@ -381,6 +393,8 @@ class TestCheckAndQueueFileLLMEnrichment(unittest.TestCase):
         es_manager = MagicMock()
         rabbitmq_manager = MagicMock()
         finder = FileFinder(es_manager, rabbitmq_manager)
+        # Initialize a fresh queue
+        finder._message_queue = queue.Queue()
         
         es_manager.record_exists.return_value = True
         
@@ -390,6 +404,9 @@ class TestCheckAndQueueFileLLMEnrichment(unittest.TestCase):
         
         finder._check_and_queue_file('test/path')
         
+        # Publish queued messages
+        finder._publish_queued_messages(drain_all=True)
+        
         # File should be queued for enrichment
         rabbitmq_manager.publish_message.assert_called_once_with(item={"file_path": "test/path"})
 
@@ -397,6 +414,8 @@ class TestCheckAndQueueFileLLMEnrichment(unittest.TestCase):
         es_manager = MagicMock()
         rabbitmq_manager = MagicMock()
         finder = FileFinder(es_manager, rabbitmq_manager)
+        # Initialize a fresh queue
+        finder._message_queue = queue.Queue()
         
         es_manager.record_exists.return_value = True
         
@@ -411,6 +430,9 @@ class TestCheckAndQueueFileLLMEnrichment(unittest.TestCase):
         
         finder._check_and_queue_file('test/path')
         
+        # Publish queued messages
+        finder._publish_queued_messages(drain_all=True)
+        
         # File should be queued for enrichment
         rabbitmq_manager.publish_message.assert_called_once_with(item={"file_path": "test/path"})
 
@@ -418,6 +440,8 @@ class TestCheckAndQueueFileLLMEnrichment(unittest.TestCase):
         es_manager = MagicMock()
         rabbitmq_manager = MagicMock()
         finder = FileFinder(es_manager, rabbitmq_manager, always_do_llm_enrichment=True)
+        # Initialize a fresh queue
+        finder._message_queue = queue.Queue()
         
         es_manager.record_exists.return_value = True
         
@@ -431,6 +455,9 @@ class TestCheckAndQueueFileLLMEnrichment(unittest.TestCase):
         es_manager.get_document.return_value = doc
         
         finder._check_and_queue_file('test/path')
+        
+        # Publish queued messages
+        finder._publish_queued_messages(drain_all=True)
         
         # File should be queued for re-enrichment
         rabbitmq_manager.publish_message.assert_called_once_with(item={"file_path": "test/path"})
@@ -586,6 +613,8 @@ class TestCacheTimestamp(unittest.TestCase):
         self.rabbitmq_manager = MagicMock()
         self.finder = FileFinder(self.es_manager, self.rabbitmq_manager)
         self.test_file = "test/file.txt"
+        # Clear the queue before each test
+        self.finder._message_queue = queue.Queue()
         
     @patch('datetime.datetime')
     def test_file_not_in_cache_gets_queued(self, mock_datetime):
@@ -596,6 +625,9 @@ class TestCacheTimestamp(unittest.TestCase):
         
         # Test
         self.finder._check_and_queue_file(self.test_file)
+        
+        # Now publish the queued messages (this is what the main thread would do)
+        self.finder._publish_queued_messages(drain_all=True)
         
         # Verify
         self.rabbitmq_manager.publish_message.assert_called_once_with(item={"file_path": self.test_file})
@@ -614,9 +646,11 @@ class TestCacheTimestamp(unittest.TestCase):
         
         # Test
         self.finder._check_and_queue_file(self.test_file)
+        self.finder._publish_queued_messages(drain_all=True)
         
         # Verify no publish happened
         self.rabbitmq_manager.publish_message.assert_not_called()
+        self.assertTrue(self.finder._message_queue.empty())
         
     @patch('datetime.datetime')
     def test_old_cached_file_gets_requeued(self, mock_datetime):
@@ -631,6 +665,7 @@ class TestCacheTimestamp(unittest.TestCase):
         
         # Test
         self.finder._check_and_queue_file(self.test_file)
+        self.finder._publish_queued_messages(drain_all=True)
         
         # Verify
         self.rabbitmq_manager.publish_message.assert_called_once_with(item={"file_path": self.test_file})
@@ -647,7 +682,7 @@ class TestCacheTimestamp(unittest.TestCase):
         # Test
         self.finder._check_and_queue_file(self.test_file)
         
-        # Verify cache was updated
+        # Verify cache was updated (no need to publish for this test)
         self.assertGreaterEqual(self.finder._enqueued_cache[self.test_file], int(now.timestamp()))
         
     @patch('datetime.datetime')
@@ -667,9 +702,59 @@ class TestCacheTimestamp(unittest.TestCase):
         
         # Test
         self.finder._check_and_queue_file(self.test_file)
+        self.finder._publish_queued_messages(drain_all=True)
         
         # Verify file was queued (since it's exactly at the boundary)
         self.rabbitmq_manager.publish_message.assert_called_once_with(item={"file_path": self.test_file})
+
+class TestQueuePublishing(unittest.TestCase):
+    def setUp(self):
+        self.es_manager = MagicMock()
+        self.rabbitmq_manager = MagicMock()
+        self.finder = FileFinder(self.es_manager, self.rabbitmq_manager)
+        self.finder._message_queue = queue.Queue()
+        
+    def test_queue_for_publishing(self):
+        # Test that _queue_for_publishing adds to the queue but doesn't call RabbitMQ
+        self.finder._queue_for_publishing("test/file.txt")
+        
+        # Verify the message is in the queue
+        self.assertFalse(self.finder._message_queue.empty())
+        
+        # Verify RabbitMQ not called yet
+        self.rabbitmq_manager.publish_message.assert_not_called()
+    
+    def test_publish_queued_messages(self):
+        # Add some test messages
+        test_files = ["test/file1.txt", "test/file2.txt", "test/file3.txt"]
+        for file in test_files:
+            self.finder._message_queue.put({"file_path": file})
+        
+        # Test partial publishing (only 2 out of 3)
+        self.finder._publish_queued_messages(drain_all=False, batch_size=2)
+        
+        # Verify 2 calls were made
+        self.assertEqual(self.rabbitmq_manager.publish_message.call_count, 2)
+        
+        # Test publishing the remaining message
+        self.finder._publish_queued_messages(drain_all=True)
+        
+        # Verify all messages were published
+        self.assertEqual(self.rabbitmq_manager.publish_message.call_count, 3)
+        self.assertTrue(self.finder._message_queue.empty())
+    
+    def test_publish_handles_exceptions(self):
+        # Setup RabbitMQ to fail
+        self.rabbitmq_manager.publish_message.side_effect = Exception("Test error")
+        self.finder._logger = MagicMock()
+        
+        # Add a message and try to publish
+        self.finder._message_queue.put({"file_path": "test/file.txt"})
+        self.finder._publish_queued_messages(drain_all=True)
+        
+        # Verify error was logged
+        self.finder._logger.error.assert_called()
+        self.finder._logger.exception.assert_called()
 
 class TestBatchedFutureProcessing(unittest.TestCase):
     @patch.object(FileFinder, '_sparse_checkout_repo')
@@ -678,7 +763,7 @@ class TestBatchedFutureProcessing(unittest.TestCase):
         # Setup
         es_manager = MagicMock()
         rabbitmq_manager = MagicMock()
-        finder = FileFinder(es_manager, rabbitmq_manager, max_workers=2)
+        finder = FileFinder(es_manager, rabbitmq_manager)
         
         # Override the _process_file method to add delay and track calls
         original_process_file = finder._process_file
@@ -811,6 +896,100 @@ class TestBatchedFutureProcessing(unittest.TestCase):
         expected_files = ["file1.txt", "file2.txt", "dir1/file3.txt", "dir1/file4.txt"]
         self.assertEqual(sorted(processed_files), sorted(expected_files))
 
+class TestThreadSafePublishing(unittest.TestCase):
+    def setUp(self):
+        self.es_manager = MagicMock()
+        self.rabbitmq_manager = MagicMock()
+        self.finder = FileFinder(self.es_manager, self.rabbitmq_manager)
+        self.finder._message_queue = queue.Queue()
+        self.finder._logger = MagicMock()
+        
+    def test_concurrent_queue_additions(self):
+        """Test that multiple threads can safely add to the queue concurrently"""
+        # Setup normal RabbitMQ mock
+        self.rabbitmq_manager.publish_message = MagicMock()
+        
+        # Define large number of concurrent operations
+        num_threads = 50
+        
+        # Create worker function that simulates checking and queueing a file
+        def worker_func(path):
+            # Each thread puts a unique message in the queue
+            self.finder._queue_for_publishing(f"path_{path}")
+        
+        # Run many threads concurrently
+        threads = []
+        for i in range(num_threads):
+            thread = threading.Thread(target=worker_func, args=(i,))
+            thread.start()
+            threads.append(thread)
+            
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join()
+        
+        # Verify the queue contains all messages
+        self.assertEqual(self.finder._message_queue.qsize(), num_threads)
+        
+        # Now publish all messages and verify count
+        self.finder._publish_queued_messages(drain_all=True)
+        self.assertEqual(self.rabbitmq_manager.publish_message.call_count, num_threads)
+        
+    def test_message_queue_task_done(self):
+        """Test that tasks are properly marked as done when published"""
+        # Replace the queue with a mock to verify task_done is called
+        mock_queue = MagicMock(spec=queue.Queue)
+        original_queue = self.finder._message_queue
+        self.finder._message_queue = mock_queue
+        
+        # Setup mock queue to simulate having items then being empty
+        mock_queue.empty.side_effect = [False, False, False, True]
+        mock_queue.get.side_effect = [
+            {"file_path": "file1.txt"},
+            {"file_path": "file2.txt"},
+            {"file_path": "file3.txt"},
+            queue.Empty()
+        ]
+        
+        # Publish messages
+        self.finder._publish_queued_messages(drain_all=True)
+        
+        # Verify task_done was called for each item
+        self.assertEqual(mock_queue.task_done.call_count, 3)
+        
+        # Restore original queue
+        self.finder._message_queue = original_queue
+            
+    @patch.object(FileFinder, '_publish_queued_messages')
+    def test_publish_called_at_appropriate_times(self, mock_publish):
+        """Test that publishing is called at appropriate times during walk_and_queue"""
+        # Setup
+        def mock_process_futures(active_futures):
+            # Clear all futures to break out of the while loop
+            active_futures.clear()
+            
+        self.finder._process_completed_futures = mock_process_futures
+        mock_walk = MagicMock()
+        mock_walk.return_value = [
+            (self.finder._LOCAL_REPO_PATH, ['dir1'], ['file1.txt']),
+            (self.finder._LOCAL_REPO_PATH + '/dir1', [], ['file2.txt'])
+        ]
+        
+        # Run with patched os.walk
+        with patch('os.walk', return_value=mock_walk.return_value):
+            with patch.object(FileFinder, '_sparse_checkout_repo'):
+                with patch('concurrent.futures.ThreadPoolExecutor'):
+                    self.finder.walk_and_queue()
+        
+        # Verify publishing was called:
+        # 1. After processing each directory
+        # 2. After processing completed futures
+        # 3. Final drain at the end
+        self.assertGreaterEqual(mock_publish.call_count, 3)
+        
+        # Verify final call was with drain_all=True
+        _, kwargs = mock_publish.call_args_list[-1]
+        self.assertTrue(kwargs.get('drain_all', False))
+
 if __name__ == '__main__':
     unittest.main()
-

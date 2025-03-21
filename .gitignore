@@ -4,3 +4,5 @@
 **/*.pyc
 **/*.pyo
 **/*.secret.txt
+coverage.json
+.coverage
