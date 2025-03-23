@@ -212,7 +212,10 @@ class ElasticsearchManager:
             template_body = {
                 "index_patterns": ["eq-archive*"],
                 "template": {
-                    "settings": {"number_of_shards": 1},
+                    "settings": {
+                        "number_of_shards": 1,
+                        "max_result_window": 1000
+                    },
                     "mappings": {
                         "properties": {
                             field_name: cfg["mapping"] for field_name, cfg in ES_FIELDS.items()

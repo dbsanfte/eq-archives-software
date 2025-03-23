@@ -26,13 +26,41 @@ spec:
     stsIncludeSubdomains: true
     customFrameOptionsValue: sameorigin
 ---
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: ratelimit
+  namespace: eqarchives-es
+spec:
+  rateLimit:
+    average: 20
+    burst: 30
+    period: 1s
+    sourceCriterion:
+      ipStrategy:
+        depth: 0
+        excludedIPs: []
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
+  name: connectionlimit
+  namespace: eqarchives-es
+spec:
+  inFlightReq:
+    amount: 10  # Maximum 10 concurrent requests per source IP
+    sourceCriterion:
+      ipStrategy:
+        depth: 0
+        excludedIPs: []
+---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: search-beta-eqarchives-root
   namespace: eqarchives-es
   annotations:
-    "traefik.ingress.kubernetes.io/router.middlewares": eqarchives-es-securityheaders@kubernetescrd
+    "traefik.ingress.kubernetes.io/router.middlewares": eqarchives-es-securityheaders@kubernetescrd,eqarchives-es-ratelimit@kubernetescrd,eqarchives-es-connectionlimit@kubernetescrd
     "traefik.ingress.kubernetes.io/router.entrypoints": websecure
     "traefik.ingress.kubernetes.io/router.tls": "true"
 spec:
@@ -58,7 +86,7 @@ metadata:
   name: search-beta-eqarchives
   namespace: eqarchives-es
 spec:
-  replicas: 1
+  replicas: 4
   selector:
     matchLabels:
       app: search-beta-eqarchives
