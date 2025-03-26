@@ -135,7 +135,7 @@ export default function App() {
                   {
                     getStandardFacetFields().map(field => {
                       // Use default Facet for standard fields
-                      return <Facet key={field} field={field} label={field} />;
+                      return <Facet key={field} field={field} label={field} isFilterable={true} />;
                     })
                   }
                 </div>

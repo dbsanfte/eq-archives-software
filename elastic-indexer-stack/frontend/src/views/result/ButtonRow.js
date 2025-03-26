@@ -1,7 +1,8 @@
 import React, { useState } from "react";
 import PropTypes from "prop-types";
 import { Button, Dialog, DialogTitle, DialogContent, DialogActions } from "@mui/material";
-import ReactMarkdown from "react-markdown";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 const ButtonRow = ({ result }) => {
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -38,9 +39,10 @@ const ButtonRow = ({ result }) => {
       <Dialog open={previewOpen} onClose={handlePreviewClose} fullWidth maxWidth="md">
         <DialogTitle>Preview Text</DialogTitle>
         <DialogContent dividers>
-          <ReactMarkdown>
+          <Markdown remarkPlugins={[remarkGfm]}>
+            {/* Use the raw text if it's a string, otherwise use an empty string */}
             {typeof result.text_full?.raw === "string" ? result.text_full.raw : ""}
-          </ReactMarkdown>
+          </Markdown>
         </DialogContent>
         <DialogActions>
           <Button onClick={handlePreviewClose} color="primary">

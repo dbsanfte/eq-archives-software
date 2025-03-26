@@ -3,6 +3,8 @@ services:
     image: rabbitmq:3.9-management
     container_name: rabbitmq
     restart: unless-stopped
+    deploy:
+      replicas: 0
     ports:
       - "5672:5672"
       - "15672:15672"
@@ -13,6 +15,8 @@ services:
     image: dbsanfte/indexer:latest
     container_name: file-finder
     restart: unless-stopped
+    deploy:
+      replicas: 0
     build:
       context: ./indexer
     command:
@@ -44,7 +48,7 @@ services:
     image: dbsanfte/indexer:latest
     restart: unless-stopped
     deploy:
-      replicas: 1
+      replicas: 0
     command:
       - "--indexer"
     depends_on:
@@ -78,7 +82,7 @@ services:
     image: dbsanfte/indexer:latest
     restart: unless-stopped
     deploy:
-      replicas: 1
+      replicas: 0
     command:
       - "--indexer"
     depends_on:
@@ -112,7 +116,7 @@ services:
     image: dbsanfte/indexer:latest
     restart: unless-stopped
     deploy:
-      replicas: 3
+      replicas: 0
     command:
       - "--indexer"
     depends_on:
