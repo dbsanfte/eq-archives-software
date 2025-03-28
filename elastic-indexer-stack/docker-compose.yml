@@ -158,7 +158,7 @@ services:
     environment:
       - LOG_LEVEL=debug
       - ELASTICSEARCH_URL=http://192.168.50.100:31200
-      - OPENAI_URL=http://192.168.50.139:1234
+      - OPENAI_URL=http://192.168.50.81:1234
       - ELASTICSEARCH_INDEX=eq-archive
     secrets:
       - es_readonly_username

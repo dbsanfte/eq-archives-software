@@ -1,4 +1,4 @@
-import React, { useCallback, useState, useEffect } from "react";
+import React, { useCallback, useState, useEffect, useRef } from "react";
 import { SearchBox, withSearch } from "@elastic/react-search-ui";
 import { embeddingService } from "../../search/EmbeddingService";
 import { getConfig } from "../../config/config-helper";
@@ -16,10 +16,13 @@ const EnhancedSearchBox = ({
   const { embeddingModel } = getConfig();
   const [isEmbeddingLoading, setIsEmbeddingLoading] = useState(false);
   const [internalSearchTerm, setInternalSearchTerm] = useState(searchTerm || "");
+  const isUserTyping = useRef(false);
   
-  // Update internal state when external searchTerm changes
+  // Update internal state when external searchTerm changes, but only if user is not typing
   useEffect(() => {
-    setInternalSearchTerm(searchTerm || "");
+    if (!isUserTyping.current) {
+      setInternalSearchTerm(searchTerm || "");
+    }
   }, [searchTerm]);
 
   // Execute search only after embedding is ready
@@ -28,7 +31,6 @@ const EnhancedSearchBox = ({
     
     if (!value?.trim()) {
       setSearchTerm(value);
-      executeSearch({ searchTerm: value });
       return;
     }
 
@@ -40,18 +42,16 @@ const EnhancedSearchBox = ({
         await embeddingService.fetchEmbedding(value, embeddingModel);
       }
       
-      // Only now update the actual search term in the SearchKit state
+      // Only now update the actual search term in the SearchKit state, 
+      // and trigger the search:
       setSearchTerm(value);
-      
-      // And execute the search with the now-cached embedding
-      executeSearch({ searchTerm: value });
     } catch (error) {
       console.error("Error fetching embedding:", error);
       // Still try to execute search even if embedding fails
       setSearchTerm(value);
-      executeSearch({ searchTerm: value });
     } finally {
       setIsEmbeddingLoading(false);
+      isUserTyping.current = false;
     }
   }, [embeddingModel, executeSearch, setSearchTerm, isEmbeddingLoading]);
 
@@ -66,6 +66,9 @@ const EnhancedSearchBox = ({
   );
 
   const handleInputChange = useCallback((value) => {
+    // Mark that user is currently typing
+    isUserTyping.current = true;
+    
     // Only update the internal value, not the SearchKit state yet
     setInternalSearchTerm(value);
     
@@ -82,9 +85,14 @@ const EnhancedSearchBox = ({
       onSubmit={async (value) => {
         // When user explicitly submits, ensure we execute with embedding
         debouncedSearch.cancel();
+        isUserTyping.current = false;
         await executeSearchWithEmbedding(value);
       }}
       onChange={handleInputChange}
+      onBlur={() => {
+        // Reset typing flag when the input loses focus
+        isUserTyping.current = false;
+      }}
       autocompleteSuggestions={autocompleteSuggestions}
       {...props}
     />
