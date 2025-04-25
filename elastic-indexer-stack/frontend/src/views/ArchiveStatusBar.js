@@ -73,8 +73,10 @@ export default function ArchiveStatusBar() {
   return (
     <Box
       display="flex"
+      flexDirection={{ xs: "column", sm: "row" }}
       alignItems="center"
-      justifyContent="space-between"
+      justifyContent={{ xs: "center", sm: "space-between" }}
+      gap={1}
       p={2}
       mb={2}
       sx={{ marginBottom: "0px", paddingTop: "0px" }}
@@ -82,7 +84,7 @@ export default function ArchiveStatusBar() {
       <Typography variant="subtitle1">
         Documents Indexed: {docCount.toLocaleString()}
       </Typography>
-      {indexRate !== null && (
+      {indexRate !== null && indexRate > 0 && (
         <Typography variant="subtitle1">
           Indexing Rate: {indexRate.toFixed(2)} docs/min
         </Typography>

@@ -5,24 +5,29 @@ export default function HeaderContent() {
   return (
     <Box 
       display="flex" 
+      flexDirection={{ xs: "column", md: "row" }}
       alignItems="center" 
-      justifyContent="space-between" 
+      gap={2}
+      justifyContent={{ xs: "center", md: "space-between" }}
       p={2} 
       mb={2}
       bgcolor="#a69070" // Match logo background
     >
-      <a href="/">
-        <img 
-          src="/images/eq-logo-no-bg.webp" 
-          alt="EQ Logo" 
-          style={{ 
-            maxHeight: "170px",
-            maxWidth: "100%",
-            height: "auto"
-          }}
-        />
-      </a>
-      <Box textAlign="left">
+      <Box textAlign={{ xs: "center", md: "left" }}>
+        <a href="/">
+          <img 
+            src="/images/eq-logo-no-bg.webp" 
+            alt="EQ Logo" 
+            style={{ 
+              maxHeight: "170px",
+              maxWidth: "100%",
+              height: "auto"
+            }}
+          />
+        </a>
+      </Box>
+      
+      <Box textAlign="center">
         <img 
           src="/images/eq-archives-banner.png" 
           alt="EQ Archives Banner"
@@ -33,7 +38,8 @@ export default function HeaderContent() {
           }}
         />
       </Box>
-      <Box textAlign="right">
+      
+      <Box textAlign={{ xs: "center", md: "right" }}>
         <Typography variant="h6">
           Welcome to the new search portal!
         </Typography>
