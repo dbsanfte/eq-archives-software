@@ -153,18 +153,29 @@ function DateRangeFacetView({ label, field, filters, addFilter, removeFilter, se
             label="From Date"
             value={fromDate}
             onChange={(newValue) => setFromDate(newValue)}
+            openTo="day"
+            format="dd/MM/yyyy"
             slotProps={{ 
               textField: { 
                 size: 'small', 
                 fullWidth: true, 
                 inputProps: { style: { fontSize: '13px' } },
-                InputLabelProps: { style: { fontSize: '13px', zIndex: 0 } }
+                InputLabelProps: { style: { fontSize: '13px', zIndex: 0 } },
+                placeholder: "DD/MM/YYYY",
+                onKeyDown: (event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    if (fromDate && toDate) {
+                      handleApplyFilter();
+                    }
+                  }
+                }
               } 
             }}
             componentsProps={{
               popper: {
                 sx: {
-                  zIndex: 1050 // A reasonable value that won't interfere with most dropdowns
+                  zIndex: 1050
                 }
               }
             }}
@@ -173,12 +184,23 @@ function DateRangeFacetView({ label, field, filters, addFilter, removeFilter, se
             label="To Date"
             value={toDate}
             onChange={(newValue) => setToDate(newValue)}
+            openTo="day"
+            format="dd/MM/yyyy"
             slotProps={{ 
               textField: { 
                 size: 'small', 
                 fullWidth: true, 
                 inputProps: { style: { fontSize: '13px' } },
-                InputLabelProps: { style: { fontSize: '13px', zIndex: 0 } }
+                InputLabelProps: { style: { fontSize: '13px', zIndex: 0 } },
+                placeholder: "DD/MM/YYYY",
+                onKeyDown: (event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    if (fromDate && toDate) {
+                      handleApplyFilter();
+                    }
+                  }
+                }
               } 
             }}
             minDate={fromDate}
