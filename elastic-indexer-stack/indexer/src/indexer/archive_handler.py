@@ -57,7 +57,7 @@ class ArchiveHandler:
                 return final_url
             return ""
         except Exception as e:
-            self._logger.error(f"Error converting file path to archive URL: {e}")
+            self._logger.error(f"Error converting file path of [{relative_path}] to archive URL: {e}")
             self._logger.exception(e)
             return ""
 

@@ -31,7 +31,7 @@ services:
       - ELASTICSEARCH_SSL_VERIFY_CERTS=false
       - ELASTICSEARCH_INDEX=eq-archive-0
       - REINDEXING_ENABLED=false
-      - SPARSE_CHECKOUT_PATHS=newsgroups,mailing-lists,websites/eq.castersrealm.com,websites/forums.castersrealm.com,websites/everquest.allakhazam.com,websites/eqbeastiary.allakhazam.com,websites/eqdb.allakhazam.com,websites/links.allakhazam.com,websites/mythiran.allakhazam.com,websites/forums.crgaming.com,websites/eqfaction.castersrealm.com,websites/eqjapan.castersrealm.com,websites/forum.magecompendium.com,websites/forums.interealms.com,websites/eqcleric.gameglow.com
+      - SPARSE_CHECKOUT_PATHS=newsgroups,mailing-lists,websites/eq.castersrealm.com
 #     - SPARSE_CHECKOUT_PATHS=websites/eq.castersrealm.com
 #     - SPARSE_CHECKOUT_PATHS=mailing-lists/EQ-Clerics
       - GIT_REPO_URL=https://github.com/dbsanfte/eq-archives.git

@@ -2,6 +2,8 @@ import os
 import datetime
 import json
 import tempfile
+import chardet
+import random
 import pytest
 from bs4 import BeautifulSoup
 from indexer.text_handler import TextHandler
@@ -815,3 +817,156 @@ def test_process_text_file_with_unicode_mailing_list(tmp_path, dummy_dependencie
     
     # Check metadata
     assert "Still awaiting LLM Enrichment" in doc["llm_summary"] # Since we disabled LLM enrichment
+
+def test_detect_and_read_file_utf8(tmp_path, dummy_dependencies):
+    """Test reading a UTF-8 encoded file."""
+    archive_handler, openai_manager = dummy_dependencies
+    handler = TextHandler(archive_handler=archive_handler, openai_manager=openai_manager)
+    
+    # Create a UTF-8 file
+    content = "Hello, world! UTF-8 test with unicode: 你好，世界！"
+    temp_file = tmp_path / "utf8_test.txt"
+    temp_file.write_text(content, encoding="utf-8")
+    
+    # Test the method
+    result_content, result_encoding = handler._detect_and_read_file(str(temp_file))
+    
+    # Verify results
+    assert result_content is not None
+    assert result_encoding is not None
+    assert result_encoding.lower() in ["utf-8", "utf8", "utf_8"]  # chardet might return slightly different format
+    assert result_content == content
+    assert "你好，世界" in result_content
+
+def test_detect_and_read_file_cp1252(tmp_path, dummy_dependencies):
+    """Test reading a Windows-1252 encoded file."""
+    archive_handler, openai_manager = dummy_dependencies
+    handler = TextHandler(archive_handler=archive_handler, openai_manager=openai_manager)
+    
+    # Create a CP-1252 file (Windows Western European)
+    cp1252_bytes = b"Hello, world! CP-1252 test with special chars: \xA3\xA9\xAE"  # £©®
+    temp_file = tmp_path / "cp1252_test.txt"
+    with open(temp_file, 'wb') as f:
+        f.write(cp1252_bytes)
+    
+    # Test the method
+    result_content, result_encoding = handler._detect_and_read_file(str(temp_file))
+    
+    # Verify results
+    assert result_content is not None
+    assert result_encoding is not None
+    assert "Hello, world!" in result_content
+    assert "£©®" in result_content
+
+def test_detect_and_read_file_with_fallback(tmp_path, dummy_dependencies, monkeypatch):
+    """Test reading a file where the first encoding detection fails but a fallback works."""
+    archive_handler, openai_manager = dummy_dependencies
+    handler = TextHandler(archive_handler=archive_handler, openai_manager=openai_manager)
+    
+    # Mock chardet to return an incorrect encoding first
+    original_detect = chardet.detect
+    def mock_detect(data):
+        return {'encoding': 'utf-16', 'confidence': 0.99}
+    
+    monkeypatch.setattr(chardet, 'detect', mock_detect)
+    
+    # Create a utf-8 file that will need fallback
+    content = "Hello, this is a fallback test"
+    temp_file = tmp_path / "fallback_test.txt"
+    temp_file.write_text(content, encoding="utf-8")
+    
+    # Test the method
+    result_content, result_encoding = handler._detect_and_read_file(str(temp_file))
+    
+    # Verify results - should use one of the fallbacks
+    assert result_content is not None
+    assert result_encoding is not None
+    assert result_encoding in ['utf-8', 'cp1252', 'latin-1']
+    assert result_content == content
+    
+    # Restore original function
+    monkeypatch.setattr(chardet, 'detect', original_detect)
+
+def test_detect_and_read_file_nonexistent(tmp_path, dummy_dependencies):
+    """Test handling a nonexistent file."""
+    archive_handler, openai_manager = dummy_dependencies
+    handler = TextHandler(archive_handler=archive_handler, openai_manager=openai_manager)
+    
+    # Create a path to a nonexistent file
+    nonexistent_file = tmp_path / "does_not_exist.txt"
+    
+    # Test the method
+    result_content, result_encoding = handler._detect_and_read_file(str(nonexistent_file))
+    
+    # Verify results
+    assert result_content is None
+    assert result_encoding is None
+
+def test_detect_and_read_file_exception_handling(tmp_path, dummy_dependencies, monkeypatch):
+    """Test various exception handling scenarios in the _detect_and_read_file method."""
+    archive_handler, openai_manager = dummy_dependencies
+    handler = TextHandler(archive_handler=archive_handler, openai_manager=openai_manager)
+    
+    # Create a test file
+    temp_file = tmp_path / "exception_test.txt"
+    temp_file.write_text("Some content", encoding="utf-8")
+    
+    # Test case 1: chardet raises an exception
+    def mock_detect_error(data):
+        raise Exception("Simulated chardet error")
+    
+    monkeypatch.setattr(chardet, 'detect', mock_detect_error)
+    
+    # Test the method with chardet error
+    content1, encoding1 = handler._detect_and_read_file(str(temp_file))
+    assert content1 is None
+    assert encoding1 is None
+    
+    # Restore original function
+    monkeypatch.undo()
+    
+    # Test case 2: File permission error
+    # Create a temporary file and make it read-only after writing
+    temp_file2 = tmp_path / "permission_test.txt"
+    temp_file2.write_text("Permission test", encoding="utf-8")
+    
+    # Mock open to raise permission error
+    original_open = open
+    def mock_open_error(file, *args, **kwargs):
+        if str(file) == str(temp_file2) and 'rb' in args:
+            raise PermissionError("Permission denied")
+        return original_open(file, *args, **kwargs)
+    
+    builtin_name = 'builtins.open'
+    monkeypatch.setattr(builtin_name, mock_open_error)
+    
+    # Test the method with permission error
+    content2, encoding2 = handler._detect_and_read_file(str(temp_file2))
+    assert content2 is None
+    assert encoding2 is None
+    
+    # Restore original function
+    monkeypatch.undo()
+    
+    # Test case 3: Internal ValueError when all encodings fail
+    temp_file3 = tmp_path / "encoding_fail_test.txt" 
+    
+    # Create file with raw binary data that won't decode with any standard encoding
+    with open(temp_file3, 'wb') as f:
+        f.write(bytes([0xFF, 0xFE, 0x00, 0xFD] + [random.randint(0, 255) for _ in range(20)]))
+    
+    # Mock the encoding attempts to all fail but let the detection work
+    def mock_open_encoding_fails(file, *args, **kwargs):
+        if str(file) == str(temp_file3) and 'encoding' in kwargs:
+            raise UnicodeDecodeError('charmap', b'test', 0, 1, 'Test decoding error')
+        return original_open(file, *args, **kwargs)
+    
+    monkeypatch.setattr(builtin_name, mock_open_encoding_fails)
+    
+    # Test the method when all encodings fail
+    content3, encoding3 = handler._detect_and_read_file(str(temp_file3))
+    assert content3 is None
+    assert encoding3 is None
+    
+    # Restore original open function
+    monkeypatch.undo()

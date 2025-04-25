@@ -11,15 +11,18 @@
         },
         "llm_extracted_dates": {
             "type": "array",
+            "uniqueItems": true,
             "items": {
                 "type": "object",
                 "properties": {
-                "date": {
-                    "type": "string",
-                    "format": "date",
-                    "description": "A date in format YYYY-MM-DD."
-                }
-                }
+                    "date": {
+                        "type": "string",
+                        "format": "date",
+                        "description": "A date in format YYYY-MM-DD."
+                    }
+                },
+                "required": ["date"],
+                "additionalProperties": false
             },
             "description": "Extracted dates from the text."
         }

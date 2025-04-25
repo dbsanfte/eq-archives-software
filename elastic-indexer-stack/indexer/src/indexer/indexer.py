@@ -41,6 +41,7 @@ class Indexer:
         
     def process_file(self, message: dict) -> None:
         file_path = message.get("file_path")
+        self._logger.info(f"Got a file off the queue: {file_path}")
         if not file_path:
             e = ValueError("No file_path in RabbitMQ message!")
             self._logger.exception(e)

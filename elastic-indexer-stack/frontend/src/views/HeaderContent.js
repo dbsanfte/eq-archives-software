@@ -35,7 +35,7 @@ export default function HeaderContent() {
       </Box>
       <Box textAlign="right">
         <Typography variant="h6">
-          Welcome to the new beta site!
+          Welcome to the new search portal!
         </Typography>
         <Link 
           href="https://www.youtube.com/watch?v=DWXsCpAwKU4" 

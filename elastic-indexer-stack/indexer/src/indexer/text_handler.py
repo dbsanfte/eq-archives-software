@@ -7,6 +7,7 @@ from langchain_core.documents import Document
 from markdownify import markdownify as md
 import numpy as np
 import textwrap as tw
+import chardet
 
 from .archive_handler import ArchiveHandler
 from .openai_manager import OpenAIManager
@@ -162,7 +163,12 @@ class TextHandler:
             
             text_section = json_file["ygData"]["messageBody"]
             
-            subject_line = "Subject: " + json_file["ygData"]["subject"]
+            subject_line = "Subject: "
+            try:
+                subject_line = "Subject: " + json_file["ygData"]["subject"]
+            except KeyError:
+                self._logger.warning(f"Subject not found in JSON file {full_path}. Using default subject.")
+            
             group_line = "Mailing-list: " + os.path.basename(os.path.dirname(full_path))
             
             if capture_date is not None:
@@ -184,20 +190,10 @@ class TextHandler:
             return md_content
         
     def _preprocess_website_file(self, full_path: str, relative_path: str) -> str:
-        file_content = None
+        file_content, _ = self._detect_and_read_file(full_path)
         
-        # Try UTF-8 first
-        try:
-            with open(full_path, "r", encoding="utf-8") as file:
-                file_content = file.read()
-        except UnicodeDecodeError:
-            # If UTF-8 fails, try Windows-1252 (ANSI)
-            try:
-                with open(full_path, "r", encoding="cp1252") as file:
-                    file_content = file.read()
-            except UnicodeDecodeError:
-                # If that also fails, raise a more descriptive error
-                raise ValueError(f"Could not decode file {full_path} with UTF-8 or cp1252 encoding.")
+        if file_content is None:
+            raise ValueError(f"Could not decode file {full_path} with any encoding.")
         
         url = self._archive_handler._convert_to_archive_url(relative_path=relative_path)
         content = f"<b>Page URL:</b> {url}<br/><hr/>{file_content}"
@@ -211,22 +207,12 @@ class TextHandler:
         title = "Untitled"
         
         if self._archive_handler._websites_path in relative_path:
-            file_content = None
+            file_content, _ = self._detect_and_read_file(full_path)
             
-            # Try UTF-8 first
-            try:
-                with open(full_path, 'r', encoding="utf-8") as file:
-                    file_content = file.read()
-            except UnicodeDecodeError:
-                # If UTF-8 fails, try Windows-1252 (ANSI)
-                try:
-                    with open(full_path, 'r', encoding="cp1252") as file:
-                        file_content = file.read()
-                except UnicodeDecodeError:
-                    # If that also fails, log warning and keep default title
-                    self._logger.warning(f"Could not decode file {full_path} with UTF-8 or cp1252 encoding. Using default title.")
-                    return title
-            
+            if file_content is None:
+                self._logger.warning(f"Could not decode file {full_path} with any encoding. Using default title.")
+                return title
+                
             soup = BeautifulSoup(file_content, 'html.parser')
             title_tag = soup.find('title')
             if title_tag:
@@ -249,10 +235,59 @@ class TextHandler:
                 raise ValueError("Mailing list file must be a JSON file.")
             with open(full_path, 'r') as file:
                 json_file = json.loads(file.read())
-                title = json_file["ygData"]["subject"] or "Untitled"
+                title = "Untitled"
+                try:
+                    title = json_file["ygData"]["subject"]
+                except KeyError:
+                    self._logger.warning(f"Subject not found in JSON file {full_path}, using default title.")
                 self._logger.debug(f"Title from Mailing List: {title}")
         else:
             title = os.path.basename(full_path)
             self._logger.debug(f"Title from Filename: {title}")
         
         return title
+
+    def _detect_and_read_file(self, file_path: str) -> tuple[str, str]:
+        """
+        Detect file encoding and read the file content.
+        Returns a tuple of (content, encoding used) or (None, None) if file can't be read.
+        """
+        file_content = None
+        encoding_used = None
+        
+        try:
+            # Read the file in binary mode first
+            with open(file_path, 'rb') as binary_file:
+                raw_data = binary_file.read(10000)  # Read first chunk to detect encoding
+                detection_result = chardet.detect(raw_data)
+            
+            encoding = detection_result['encoding']
+            confidence = detection_result['confidence']
+            self._logger.debug(f"Detected encoding: {encoding} with confidence: {confidence}")
+            
+            # Try with detected encoding
+            try:
+                with open(file_path, 'r', encoding=encoding) as file:
+                    file_content = file.read()
+                    encoding_used = encoding
+            except UnicodeDecodeError:
+                # If detected encoding fails, try our fallbacks
+                self._logger.warning(f"Detected encoding {encoding} failed for {file_path}")
+                for fallback_encoding in ['utf-8', 'cp1252', 'latin-1']:
+                    if fallback_encoding != encoding:  # Don't try the same encoding twice
+                        try:
+                            with open(file_path, 'r', encoding=fallback_encoding) as file:
+                                file_content = file.read()
+                                encoding_used = fallback_encoding
+                                self._logger.debug(f"Successfully read with fallback encoding: {fallback_encoding}")
+                                break
+                        except UnicodeDecodeError:
+                            continue
+            if file_content is None:
+                raise ValueError(f"Failed to read file {file_path} with all attempted encodings.")
+            
+        except Exception as e:
+            self._logger.error(f"Error during encoding detection for {file_path}: {e}")
+            self._logger.exception(e)
+        
+        return file_content, encoding_used

@@ -79,7 +79,9 @@ text_prompts:
     
     {"llm_guessed_date": "...", "llm_extracted_dates": [ ... ] }
 
-    IMPORTANT: `llm_guessed_date` MUST be one of the dates extracted in `llm_extracted_dates`.
+    IMPORTANT: 
+    * If a date occurs multiple times, only include it once in `llm_extracted_dates`.
+    * `llm_guessed_date` MUST be one of the dates extracted in `llm_extracted_dates`. 
 
     The content of the website follows:
     ---
