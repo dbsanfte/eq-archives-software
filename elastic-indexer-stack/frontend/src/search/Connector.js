@@ -1,15 +1,15 @@
 // This file is responsible for creating the connector and search config objects
 // that are used by the Search component to interact with the Elasticsearch API.
-//
-// The createConnector function creates a new ElasticsearchAPIConnector object
-// with the specified host, index, and connection options. 
-//
-// The getSearchConfig function creates a new Config object with the specified connector.
 
 import ElasticsearchAPIConnector from "@elastic/search-ui-elasticsearch-connector";
 import { getConfig } from "../config/config-helper";
 import { createConfig } from "../config/Config";
 import { resolveQuery } from "./Query";
+import filterRegistry from './FilterRegistry';
+
+// Debug: Log filter count at module load time
+console.log(`[Connector] Module loaded - Filter count: ${filterRegistry.getFilterCount()}`);
+filterRegistry.listFilters();
 
 export const createConnector = (paramsRef) => {
   const {
@@ -24,6 +24,10 @@ export const createConnector = (paramsRef) => {
   const host = `${window.location.protocol}//${window.location.host}/elasticsearch`;
 
   const knnPostProcess = (requestBody, requestState) => {
+    // Debug: Log filter count at post-process time
+    console.log(`[Connector] Post-processing - Filter count: ${filterRegistry.getFilterCount()}`);
+    filterRegistry.listFilters();
+    
     // Make sure any requested sorting is applied, the default is just by _score:
     if (requestState.sortField && requestState.sortField !== "") {
         requestBody.sort[0] = {
@@ -32,7 +36,11 @@ export const createConnector = (paramsRef) => {
     }
 
     // If no search term is provided, return the request body as is
-    if (!requestState.searchTerm) return requestBody;
+    if (!requestState.searchTerm) {
+      // Apply any registered filters from our FilterRegistry service
+      requestBody = filterRegistry.applyFilters(requestBody);
+      return requestBody;
+    }
     
     // Otherwise, resolve the query based on the search term
     resolveQuery(
@@ -42,8 +50,11 @@ export const createConnector = (paramsRef) => {
         paramsRef, 
         vectorFields,
         nestedVectorFields, 
-        embeddingModel)
-    ;
+        embeddingModel
+    );
+    
+    // Apply any registered filters from our FilterRegistry service
+    requestBody = filterRegistry.applyFilters(requestBody);
 
     return requestBody;
   };

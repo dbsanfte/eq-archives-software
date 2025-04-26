@@ -3,7 +3,6 @@ import {
   ErrorBoundary,
   Facet,
   SearchProvider,
-  SearchBox,
   Results,
   PagingInfo,
   ResultsPerPage,
@@ -28,7 +27,6 @@ import AdvancedSettings, { DEFAULT_KNN_PARAMS } from "./views/search/AdvancedSet
 import SyntaxExamples from "./views/search/SyntaxExamples";
 import { getSearchConfig } from "./search/Connector";
 import DateRangeFacet from "./views/search/DateRangeFacet";
-import { getDate } from "date-fns";
 import EnhancedSearchBox from "./views/search/EnhancedSearchBox";
 
 export default function App() {

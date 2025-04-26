@@ -8,16 +8,16 @@ import { WithSearch } from '@elastic/react-search-ui';
 import filterRegistry from '../../search/FilterRegistry';
 
 // Create a persistent registry to track active filters across remounts
-if (!window.__activeDateFilters) {
-  window.__activeDateFilters = new Set();
+if (!window.__activeNestedDateFilters) {
+  window.__activeNestedDateFilters = new Set();
 }
 
-function DateRangeFacetView({ label, field, filters, addFilter, removeFilter }) {
+function NestedDateRangeFacetView({ label, field, filters, addFilter, removeFilter }) {
   const [fromDate, setFromDate] = useState(null);
   const [toDate, setToDate] = useState(null);
   const operationInProgress = useRef(false);
   const [hasActiveDirectFilter, setHasActiveDirectFilter] = useState(false);
-  const filterId = `date-range-${field}`;
+  const filterId = `nested-date-range-${field}`;
   const filterActive = useRef(false);
   const initialUrlRestoreRef = useRef(true);
   
@@ -33,8 +33,8 @@ function DateRangeFacetView({ label, field, filters, addFilter, removeFilter }) 
     if (initialUrlRestoreRef.current && existingFilter?.values?.length > 0) {
       const filterValue = existingFilter.values[0];
       
-      // Check if this is a standard date field filter (does NOT have nested marker)
-      if (filterValue.isNestedField !== true) {
+      // Check if this is a nested field filter (has our marker)
+      if (filterValue.isNestedField === true) {
         console.log(`[${field}] Restoring filter from URL parameters: ${filterId}`);
         
         if (filterValue.from && filterValue.to) {
@@ -52,7 +52,7 @@ function DateRangeFacetView({ label, field, filters, addFilter, removeFilter }) 
           filterActive.current = true;
           
           // Add to our active filters registry
-          window.__activeDateFilters.add(filterId);
+          window.__activeNestedDateFilters.add(filterId);
         }
       }
       
@@ -64,7 +64,7 @@ function DateRangeFacetView({ label, field, filters, addFilter, removeFilter }) 
   // Check if we should re-register our filter (if it was active before component remount)
   useEffect(() => {
     // Skip if we're handling a page load from URL parameters
-    if (!initialUrlRestoreRef.current && window.__activeDateFilters.has(filterId) && existingFilter?.values?.length > 0) {
+    if (!initialUrlRestoreRef.current && window.__activeNestedDateFilters.has(filterId) && existingFilter?.values?.length > 0) {
       console.log(`[${field}] Re-registering persisted filter after remount: ${filterId}`);
       const filterValue = existingFilter.values[0];
       
@@ -124,9 +124,9 @@ function DateRangeFacetView({ label, field, filters, addFilter, removeFilter }) 
     const toIso = toDateValue.toISOString();
     
     // Mark this filter as active in our persistent registry
-    window.__activeDateFilters.add(filterId);
+    window.__activeNestedDateFilters.add(filterId);
     
-    // Register the standard filter with our FilterRegistry
+    // Register the nested filter with our FilterRegistry
     console.log(`[${field}] Registering filter with ID: ${filterId}`);
     filterRegistry.registerFilter(filterId, (body) => {
       if (!body.query) {
@@ -141,22 +141,39 @@ function DateRangeFacetView({ label, field, filters, addFilter, removeFilter }) 
         body.query.bool.filter = [];
       }
       
-      // Remove any existing filter for this field (to avoid duplicates)
+      // Remove any existing direct range filter for this field to avoid duplicates
       body.query.bool.filter = body.query.bool.filter.filter(
-        filter => !(filter.range && filter.range[field])
+        filter => !(
+          (filter.range && filter.range[field]) || 
+          (filter.nested && filter.nested.path === field)
+        )
       );
       
-      // Add standard range query
-      const rangeQuery = {
-        range: {
-          [field]: {
-            gte: fromIso,
-            lte: toIso
+      // Also remove any existing filter inside nested bool queries
+      body.query.bool.filter = body.query.bool.filter.filter(
+        filter => !(
+          filter.bool && 
+          filter.bool.filter && 
+          filter.bool.filter.some(f => f.range && f.range[field])
+        )
+      );
+      
+      // Add properly structured nested query
+      const nestedQuery = {
+        nested: {
+          path: field,
+          query: {
+            range: {
+              [`${field}.date`]: {
+                gte: fromIso,
+                lte: toIso
+              }
+            }
           }
         }
       };
       
-      body.query.bool.filter.push(rangeQuery);
+      body.query.bool.filter.push(nestedQuery);
       return body;
     });
     
@@ -169,12 +186,13 @@ function DateRangeFacetView({ label, field, filters, addFilter, removeFilter }) 
 
   const handleApplyFilter = () => {
     if (fromDate && toDate) {
-      // Create a range filter value for UI state tracking
+      // Create a range filter value for UI state tracking only
+      // We'll use a special placeholder value to indicate this is a nested filter
       const rangeValue = {
         from: fromDate.toISOString(),
         to: toDate.toISOString(),
         name: `${fromDate.toLocaleDateString()} - ${toDate.toLocaleDateString()}`,
-        isDateField: true // Marker to indicate this is a standard date field (not nested)
+        isNestedField: true // Important marker for URL state restoration
       };
       
       // Remove any existing filter
@@ -182,7 +200,8 @@ function DateRangeFacetView({ label, field, filters, addFilter, removeFilter }) 
         removeFilter(field, null, "range");
       }
       
-      // Apply filter to the original field for UI state tracking
+      // Apply filter to the original field for UI state tracking ONLY
+      // The actual query will be built by the filter registry
       addFilter(field, rangeValue, "range");
       
       // Register the filter
@@ -207,7 +226,7 @@ function DateRangeFacetView({ label, field, filters, addFilter, removeFilter }) 
     
     // Remove our filter from the registry and from the persistent set
     filterRegistry.removeFilter(filterId);
-    window.__activeDateFilters.delete(filterId);
+    window.__activeNestedDateFilters.delete(filterId);
     filterActive.current = false;
     
     setTimeout(() => {
@@ -223,7 +242,7 @@ function DateRangeFacetView({ label, field, filters, addFilter, removeFilter }) 
       if (!filterActive.current) {
         console.log(`[${field}] Removing filter: ${filterId} during unmount`);
         filterRegistry.removeFilter(filterId);
-        window.__activeDateFilters.delete(filterId);
+        window.__activeNestedDateFilters.delete(filterId);
       } else {
         console.log(`[${field}] Preserving active filter: ${filterId} during unmount`);
       }
@@ -335,7 +354,7 @@ function DateRangeFacetView({ label, field, filters, addFilter, removeFilter }) 
   );
 }
 
-DateRangeFacetView.propTypes = {
+NestedDateRangeFacetView.propTypes = {
   label: PropTypes.string.isRequired,
   field: PropTypes.string.isRequired,
   filters: PropTypes.array.isRequired,
@@ -344,7 +363,7 @@ DateRangeFacetView.propTypes = {
 };
 
 // Connect component to Search UI's context
-const DateRangeFacet = ({ field, label }) => (
+const NestedDateRangeFacet = ({ field, label }) => (
   <WithSearch
     mapContextToProps={({ filters, addFilter, removeFilter }) => ({
       filters,
@@ -352,13 +371,13 @@ const DateRangeFacet = ({ field, label }) => (
       removeFilter
     })}
   >
-    {props => <DateRangeFacetView field={field} label={label} {...props} />}
+    {props => <NestedDateRangeFacetView field={field} label={label} {...props} />}
   </WithSearch>
 );
 
-DateRangeFacet.propTypes = {
+NestedDateRangeFacet.propTypes = {
   field: PropTypes.string.isRequired,
   label: PropTypes.string.isRequired
 };
 
-export default DateRangeFacet;
+export default NestedDateRangeFacet;

@@ -57,6 +57,10 @@ export function getDatePickerFacetFields() {
   return [ getConfig().datePickerFacets ].flat();
 }
 
+export function getNestedDatePickerFacetFields() {
+    return [ getConfig().nestedDatePickerFacets ].flat();
+  }
+
 export function getSortFields() {
   return getConfig().sortFields || [];
 }
