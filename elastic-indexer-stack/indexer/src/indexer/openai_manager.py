@@ -17,7 +17,7 @@ class OpenAIManager:
     def __init__(self, base_url: str=None, api_key: str=None, text_model_name: str=None, image_model_name: str=None,
                  api_key_file: str="/run/secrets/openai_api_key", embedding_model_name: str=None, 
                  prompt_pkg: str='indexer.resources.prompts', schema_pkg: str='indexer.resources.openai-api-schemas', 
-                 text_temperature: int=None, image_temperature: int=None, default_prompt: str=None,
+                 text_temperature: int=None, image_temperature: int=None, default_prompt: str=None, default_timeout: int=None,
                  logger: logging.Logger=None):
         
         self._logger = logger or logging.getLogger(__name__)
@@ -32,6 +32,7 @@ class OpenAIManager:
         self._schema_pkg = schema_pkg
         self._text_temperature = text_temperature or os.environ.get("OPENAI_TEXT_TEMPERATURE", 0.015)
         self._image_temperature = image_temperature or os.environ.get("OPENAI_IMAGE_TEMPERATURE", 0.015)
+        self._default_timeout = default_timeout or os.environ.get("OPENAI_DEFAULT_TIMEOUT", 300)
         
         # Initialize OpenAI client
         self._client = OpenAI(base_url=self._base_url, api_key=self._api_key)
@@ -40,7 +41,7 @@ class OpenAIManager:
                                                   model=self._embedding_model_name,
                                                   # DS: This is needed for embeddings API compatibliity with LMStudio etc:
                                                   check_embedding_ctx_length=False,
-                                                  timeout=120)
+                                                  timeout=self._default_timeout)
         # DS: note: difficulties with models crashing during embedding
         # seem to be due to context windows on models being very small.
         # Embedding models with big context windows don't have such a problem
@@ -175,7 +176,7 @@ class OpenAIManager:
                 f"{self._base_url}/chat/completions",
                 headers=headers,
                 json=payload,
-                timeout=120
+                timeout=self._default_timeout
             )
             resp.raise_for_status()
             
