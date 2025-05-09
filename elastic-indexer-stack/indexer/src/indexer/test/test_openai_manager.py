@@ -403,11 +403,118 @@ def test_api_key_from_file(tmp_path):
     
     # Initialize with the key file
     with patch('openai.OpenAI'):
-        client = OpenAIManager(api_key_file=str(key_file))
+        client = OpenAIManager(base_url="dummy", api_key_file=str(key_file))
         assert client._api_key == "test-key-from-file"
         
         # Test that file takes precedence over direct api_key parameter
-        client = OpenAIManager(api_key="direct-key", api_key_file=str(key_file))
+        client = OpenAIManager(base_url="dummy", api_key="direct-key", api_key_file=str(key_file))
         assert client._api_key == "test-key-from-file"
+
+def test_init_with_all_urls():
+    """Test initialization with all URLs explicitly provided."""
+    with patch('openai.OpenAI'), patch('langchain_openai.embeddings.OpenAIEmbeddings'):
+        manager = OpenAIManager(
+            base_url="http://base.url",
+            base_url_completions="http://completions.url",
+            base_url_embeddings="http://embeddings.url",
+            api_key="test-key"
+        )
+        
+        assert manager._base_url == "http://base.url"
+        assert manager._base_url_completions == "http://completions.url"
+        assert manager._base_url_embeddings == "http://embeddings.url"
+
+def test_init_with_only_base_url():
+    """Test initialization with only base_url provided."""
+    with patch('openai.OpenAI'), patch('langchain_openai.embeddings.OpenAIEmbeddings'):
+        manager = OpenAIManager(
+            base_url="http://base.url",
+            api_key="test-key"
+        )
+        
+        assert manager._base_url == "http://base.url"
+        assert manager._base_url_completions == "http://base.url"
+        assert manager._base_url_embeddings == "http://base.url"
+
+def test_init_with_partial_urls():
+    """Test initialization with some URLs missing."""
+    with patch('openai.OpenAI'), patch('langchain_openai.embeddings.OpenAIEmbeddings'):
+        manager = OpenAIManager(
+            base_url="http://base.url",
+            base_url_completions="http://completions.url",
+            api_key="test-key"
+        )
+        
+        assert manager._base_url == "http://base.url"
+        assert manager._base_url_completions == "http://completions.url"
+        assert manager._base_url_embeddings == "http://base.url"
+        
+        # Test with only embeddings URL
+        manager = OpenAIManager(
+            base_url="http://base.url",
+            base_url_embeddings="http://embeddings.url",
+            api_key="test-key"
+        )
+        
+        assert manager._base_url == "http://base.url"
+        assert manager._base_url_completions == "http://base.url"
+        assert manager._base_url_embeddings == "http://embeddings.url"
+
+def test_init_with_env_vars():
+    """Test initialization using environment variables."""
+    with patch('openai.OpenAI'), patch('langchain_openai.embeddings.OpenAIEmbeddings'), \
+         patch.dict('os.environ', {
+             'OPENAI_ENDPOINT': 'http://env.base.url',
+             'OPENAI_ENDPOINT_COMPLETIONS': 'http://env.completions.url',
+             'OPENAI_ENDPOINT_EMBEDDINGS': 'http://env.embeddings.url'
+         }):
+        manager = OpenAIManager(api_key="test-key")
+        
+        assert manager._base_url == "http://env.base.url"
+        assert manager._base_url_completions == "http://env.completions.url"
+        assert manager._base_url_embeddings == "http://env.embeddings.url"
+
+def test_init_with_partial_env_vars():
+    """Test initialization with partial environment variables."""
+    with patch('openai.OpenAI'), patch('langchain_openai.embeddings.OpenAIEmbeddings'), \
+         patch.dict('os.environ', {
+             'OPENAI_ENDPOINT': 'http://env.base.url',
+             'OPENAI_ENDPOINT_COMPLETIONS': 'http://env.completions.url'
+         }):
+        manager = OpenAIManager(api_key="test-key")
+        
+        assert manager._base_url == "http://env.base.url"
+        assert manager._base_url_completions == "http://env.completions.url"
+        assert manager._base_url_embeddings == "http://env.base.url"
+
+def test_init_missing_url_error():
+    """Test error when no valid URLs are provided."""
+    with patch('openai.OpenAI'), patch('langchain_openai.embeddings.OpenAIEmbeddings'):
+        with pytest.raises(ValueError, match="Base URL for completions is not set"):
+            OpenAIManager(api_key="test-key")
+
+def test_client_initialization():
+    """Test OpenAI clients are initialized with correct URLs."""
+    with patch('openai.OpenAI') as mock_openai, \
+         patch('langchain_openai.embeddings.OpenAIEmbeddings') as mock_embeddings:
+        
+        manager = OpenAIManager(
+            base_url_completions="http://completions.url",
+            base_url_embeddings="http://embeddings.url",
+            api_key="test-key"
+        )
+        
+        mock_openai.assert_called_once_with(
+            base_url="http://completions.url", 
+            api_key="test-key"
+        )
+        
+        mock_embeddings.assert_called_once_with(
+            openai_api_base="http://embeddings.url",
+            api_key="test-key",
+            model=manager._embedding_model_name,
+            check_embedding_ctx_length=False,
+            timeout=manager._default_timeout
+        )
 
 

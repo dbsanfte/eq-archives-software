@@ -14,14 +14,28 @@ from langchain_experimental.text_splitter import SemanticChunker
 class OpenAIManager:
     AWAITING_LLM_ENRICHMENT = "[ Still awaiting LLM Enrichment... ]"
     
-    def __init__(self, base_url: str=None, api_key: str=None, text_model_name: str=None, image_model_name: str=None,
+    def __init__(self, base_url: str=None, base_url_completions: str=None, base_url_embeddings: str=None,
+                 api_key: str=None, text_model_name: str=None, image_model_name: str=None,
                  api_key_file: str="/run/secrets/openai_api_key", embedding_model_name: str=None, 
                  prompt_pkg: str='indexer.resources.prompts', schema_pkg: str='indexer.resources.openai-api-schemas', 
                  text_temperature: int=None, image_temperature: int=None, default_prompt: str=None, default_timeout: int=None,
                  logger: logging.Logger=None):
         
         self._logger = logger or logging.getLogger(__name__)
-        self._base_url = base_url or os.environ.get("OPENAI_ENDPOINT", "http://localhost:1234/v1")
+        
+        self._base_url = base_url or os.environ.get("OPENAI_ENDPOINT", None)
+        self._base_url_completions = base_url_completions or os.environ.get("OPENAI_ENDPOINT_COMPLETIONS", None)
+        self._base_url_embeddings = base_url_embeddings or os.environ.get("OPENAI_ENDPOINT_EMBEDDINGS", None)
+        
+        if not self._base_url_completions:
+            self._base_url_completions = self._base_url
+            if not self._base_url_completions:
+                raise ValueError("Base URL for completions is not set. Please provide a valid URL.")
+        if not self._base_url_embeddings:
+            self._base_url_embeddings = self._base_url
+            if not self._base_url_embeddings:
+                raise ValueError("Base URL for embeddings is not set. Please provide a valid URL.")
+            
         self._api_key = api_key or os.environ.get("OPENAI_API_KEY", "lm-studio")
         if os.path.exists(api_key_file):
             with open(api_key_file, "r") as f:
@@ -35,8 +49,8 @@ class OpenAIManager:
         self._default_timeout = default_timeout or os.environ.get("OPENAI_DEFAULT_TIMEOUT", 300)
         
         # Initialize OpenAI client
-        self._client = OpenAI(base_url=self._base_url, api_key=self._api_key)
-        self._openai_embeddings = OpenAIEmbeddings(openai_api_base=self._base_url, 
+        self._client = OpenAI(base_url=self._base_url_completions, api_key=self._api_key)
+        self._openai_embeddings = OpenAIEmbeddings(openai_api_base=self._base_url_embeddings, 
                                                   api_key=self._api_key,
                                                   model=self._embedding_model_name,
                                                   # DS: This is needed for embeddings API compatibliity with LMStudio etc:
@@ -173,7 +187,7 @@ class OpenAIManager:
                 headers["Authorization"] = f"Bearer {self._api_key}"
             
             resp = requests.post(
-                f"{self._base_url}/chat/completions",
+                f"{self._base_url_completions}/chat/completions",
                 headers=headers,
                 json=payload,
                 timeout=self._default_timeout
