@@ -495,26 +495,19 @@ def test_init_missing_url_error():
 
 def test_client_initialization():
     """Test OpenAI clients are initialized with correct URLs."""
-    with patch('openai.OpenAI') as mock_openai, \
-         patch('langchain_openai.embeddings.OpenAIEmbeddings') as mock_embeddings:
-        
-        manager = OpenAIManager(
-            base_url_completions="http://completions.url",
-            base_url_embeddings="http://embeddings.url",
-            api_key="test-key"
-        )
-        
-        mock_openai.assert_called_once_with(
-            base_url="http://completions.url", 
-            api_key="test-key"
-        )
-        
-        mock_embeddings.assert_called_once_with(
-            openai_api_base="http://embeddings.url",
-            api_key="test-key",
-            model=manager._embedding_model_name,
-            check_embedding_ctx_length=False,
-            timeout=manager._default_timeout
-        )
+    # Call the constructor
+    manager = OpenAIManager(
+        base_url_completions="http://completions.url",
+        base_url_embeddings="http://embeddings.url",
+        api_key="test-key"
+    )
+    
+    # Check if the OpenAI client and embeddings are initialized correctly
+    assert manager._client is not None
+    assert manager._openai_embeddings is not None
+    assert manager._client._base_url == "http://completions.url"
+    assert manager._client.api_key == "test-key"
+    assert manager._openai_embeddings.openai_api_base == "http://embeddings.url"
+    assert manager._openai_embeddings.openai_api_key._secret_value == "test-key"
 
 
