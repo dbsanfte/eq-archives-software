@@ -45,18 +45,20 @@ class Indexer:
         if not file_path:
             e = ValueError("No file_path in RabbitMQ message!")
             self._logger.exception(e)
+            self._logger.error(f"Indexing failed for file: {file_path}")
             raise e
             
         full_path = os.path.join(self._LOCAL_REPO_PATH, file_path)
         if not os.path.isfile(full_path):
             e = ValueError(f"File not found on disk: {full_path}")
             self._logger.exception(e)
+            self._logger.error(f"Indexing failed for file: {file_path}")
             raise e
 
         docs: list[dict] = self._get_docs(file_path, full_path)
                 
         if len(docs) == 0:
-            self._logger.warning(f"No documents generated for file: {file_path}")
+            self._logger.error(f"No documents generated for file: {file_path}, therefore the file will not be indexed.")
             return
         self._logger.info(f"Generated {len(docs)} documents for file: {file_path}")
         for doc in docs:

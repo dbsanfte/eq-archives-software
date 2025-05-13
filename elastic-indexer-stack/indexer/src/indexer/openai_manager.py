@@ -18,8 +18,8 @@ class OpenAIManager:
                  api_key: str=None, text_model_name: str=None, image_model_name: str=None,
                  api_key_file: str="/run/secrets/openai_api_key", embedding_model_name: str=None, 
                  prompt_pkg: str='indexer.resources.prompts', schema_pkg: str='indexer.resources.openai-api-schemas', 
-                 text_temperature: int=None, image_temperature: int=None, default_prompt: str=None, default_timeout: int=None,
-                 logger: logging.Logger=None):
+                 text_temperature: float=None, image_temperature: float=None, max_completion_tokens: int=None, 
+                 default_prompt: str=None, default_timeout: int=None, logger: logging.Logger=None):
         
         self._logger = logger or logging.getLogger(__name__)
         
@@ -31,10 +31,12 @@ class OpenAIManager:
             self._base_url_completions = self._base_url
             if not self._base_url_completions:
                 raise ValueError("Base URL for completions is not set. Please provide a valid URL.")
+            self._logger.debug(f"Using base URL for completions: {self._base_url_completions}")
         if not self._base_url_embeddings:
             self._base_url_embeddings = self._base_url
             if not self._base_url_embeddings:
                 raise ValueError("Base URL for embeddings is not set. Please provide a valid URL.")
+            self._logger.debug(f"Using base URL for embeddings: {self._base_url_embeddings}")
             
         self._api_key = api_key or os.environ.get("OPENAI_API_KEY", "lm-studio")
         if os.path.exists(api_key_file):
@@ -44,9 +46,10 @@ class OpenAIManager:
         self._image_model_name = image_model_name or os.environ.get("OPENAI_IMAGE_MODEL_NAME", "")
         self._embedding_model_name = embedding_model_name or os.environ.get("OPENAI_EMBEDDING_MODEL_NAME", "unknown")
         self._schema_pkg = schema_pkg
-        self._text_temperature = text_temperature or os.environ.get("OPENAI_TEXT_TEMPERATURE", 0.015)
-        self._image_temperature = image_temperature or os.environ.get("OPENAI_IMAGE_TEMPERATURE", 0.015)
-        self._default_timeout = default_timeout or os.environ.get("OPENAI_DEFAULT_TIMEOUT", 300)
+        self._text_temperature = text_temperature or float(os.environ.get("OPENAI_TEXT_TEMPERATURE", "0.015"))
+        self._image_temperature = image_temperature or float(os.environ.get("OPENAI_IMAGE_TEMPERATURE", "0.015"))
+        self._default_timeout = default_timeout or int(os.environ.get("OPENAI_DEFAULT_TIMEOUT", "300"))
+        self._max_completion_tokens = max_completion_tokens or int(os.environ.get("OPENAI_MAX_COMPLETION_TOKENS", "4096"))
         
         # Initialize OpenAI client
         self._client = OpenAI(base_url=self._base_url_completions, api_key=self._api_key)
@@ -139,7 +142,8 @@ class OpenAIManager:
                         "schema": schema
                     }
                 },
-                "temperature": self._text_temperature
+                "temperature": self._text_temperature,
+                "max_completion_tokens": self._max_completion_tokens
             }
         elif content_type == "image":
             return {
@@ -159,7 +163,8 @@ class OpenAIManager:
                         "schema": schema
                     }
                 },
-                "temperature": self._image_temperature
+                "temperature": self._image_temperature,
+                "max_completion_tokens": self._max_completion_tokens
             }
         else:
             raise ValueError(f"Unknown content_type: {content_type}")

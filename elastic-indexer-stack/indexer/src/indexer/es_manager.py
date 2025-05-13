@@ -241,7 +241,7 @@ class ElasticsearchManager:
     def index_document(self, doc_id, doc_body):
         es = self.get_client()
         try:
-            self._logger.debug(f"Indexing document: {doc_id}")
+            self._logger.debug(f"Indexing document to Elasticsearch: {doc_id}")
             es.index(index=self._index_name, id=doc_id, op_type="index", body=doc_body)
         except exceptions.RequestError as e:
             self._logger.error(f"Error indexing document: {e}")
