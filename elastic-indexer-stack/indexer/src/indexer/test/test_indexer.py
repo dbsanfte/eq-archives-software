@@ -57,17 +57,21 @@ def dummy_dependencies(monkeypatch):
     return indexer, dummy_es_manager
 
 def test_missing_file_path(dummy_dependencies):
-    indexer, _ = dummy_dependencies
-    with pytest.raises(ValueError, match="No file_path in RabbitMQ message!"):
-        indexer.process_file({})
+    indexer, dummy_es_manager = dummy_dependencies
+    # No file path in message
+    indexer.process_file({})
+    # Verify no document was indexed since the function returns early
+    dummy_es_manager.index_document.assert_not_called()
 
 def test_file_not_found(dummy_dependencies, monkeypatch):
-    indexer, _ = dummy_dependencies
-    # Force os.path.isfile to return False
+    indexer, dummy_es_manager = dummy_dependencies
+    # Force os.path.isfile to return False to simulate file not found
     monkeypatch.setattr(os.path, "isfile", fake_isfile_false)
     message = {"file_path": "nonexistent.txt"}
-    with pytest.raises(ValueError, match="File not found on disk"):
-        indexer.process_file(message)
+    # Call should not raise an exception, but log and return early
+    indexer.process_file(message)
+    # Verify no document was indexed
+    dummy_es_manager.index_document.assert_not_called()
 
 def test_process_text_file(dummy_dependencies, monkeypatch):
     indexer, dummy_es_manager = dummy_dependencies
