@@ -10,5 +10,6 @@
         "./elastic-indexer-stack",
         "-p",
         "test_*.py"
-    ]
+    ],
+    "python.analysis.typeCheckingMode": "basic"
 }

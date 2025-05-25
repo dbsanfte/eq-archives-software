@@ -19,6 +19,7 @@ import {
   buildSortOptionsFromConfig
 } from "./config/config-helper";
 import { Box, Button, Collapse, CircularProgress } from "@mui/material";
+import { KeyboardArrowUp } from "@mui/icons-material";
 import CustomResultView from "./views/result/CustomResultView";
 import HeaderContent from "./views/HeaderContent"; 
 import ArchiveStatusBar from "./views/ArchiveStatusBar";
@@ -41,6 +42,13 @@ export default function App() {
 
   function handleParamChange(param, value) {
     setKnnParams(prev => ({ ...prev, [param]: value }));
+  }
+
+  function scrollToTop() {
+    window.scrollTo({
+      top: 0,
+      behavior: 'smooth'
+    });
   }
 
   // Create config with searchAsYouType disabled to prevent auto-searches, 
@@ -155,7 +163,23 @@ export default function App() {
                   {wasSearched && <ResultsPerPage />}
                 </>
               }
-              bodyFooter={<Paging />}
+              bodyFooter={
+                <div>
+                  <Paging />
+                  {wasSearched && (
+                    <Box sx={{ display: 'flex', justifyContent: 'center', marginTop: '1rem' }}>
+                      <Button
+                        variant="outlined"
+                        onClick={scrollToTop}
+                        startIcon={<KeyboardArrowUp />}
+                        sx={{ textTransform: 'none' }}
+                      >
+                        Back to Top
+                      </Button>
+                    </Box>
+                  )}
+                </div>
+              }
             />
           </div>
         )}
