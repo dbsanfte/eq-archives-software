@@ -20,8 +20,8 @@ class DummyArchiveHandlerEmptyURL(DummyArchiveHandler):
         return ""
 
 class DummyOpenAIManager:
-    def get_chunks_and_embeddings(self, text):
-        return [{"text_chunk": text, "vector": [1, 2, 3]}]
+    def get_chunks_and_embeddings(self, document):
+        return [{"text_chunk": document.page_content, "vector": [1, 2, 3]}]
     def call_openai_api_text(self, text_content: str, domain_name: str) -> dict:
         return {
             "llm_summary": "dummy summary",
@@ -34,8 +34,8 @@ class DummyOpenAIManager:
         }
 
 class DummyOpenAIManagerNoSummary:
-    def get_chunks_and_embeddings(self, text):
-        return [{"text_chunk": text, "vector": [1, 2, 3]}]
+    def get_chunks_and_embeddings(self, document):
+        return [{"text_chunk": document.page_content, "vector": [1, 2, 3]}]
     def call_openai_api_text(self, text_content: str, domain_name: str) -> dict:
         return {}
 
@@ -102,8 +102,7 @@ def test_process_other_file_success(tmp_path, other_handler):
     assert doc["llm_extracted_dates"] == [{"date": "2023-01-01"}, {"date": "2023-01-02"}]
     assert doc["llm_model_name"] == "dummy-model"
     assert doc["llm_content_flavour"] == "dummy-flavour"
-    assert doc["llm_tags"] == ["tag1", "tag2"]
-    # Check that the chunks list is as expected.
+    assert doc["llm_tags"] == ["tag1", "tag2"]    # Check that the chunks list is as expected.
     assert isinstance(doc["text"], list)
     assert len(doc["text"]) == 1
     chunk = doc["text"][0]

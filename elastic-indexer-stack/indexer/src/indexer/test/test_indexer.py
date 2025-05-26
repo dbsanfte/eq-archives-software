@@ -19,7 +19,7 @@ class DummyImageHandler:
         return [{"id": "doc_image", "content": "dummy image content"}]
 
 class DummyOtherHandler:
-    def process_other_file(self, relative_path, mime_type, domain_name):
+    def process_other_file(self, file_path, mime_type=None, domain_name=None):
         return [{"id": "doc_other", "content": "dummy other content"}]
 
 # Fake functions to simulate file system and mime detection behavior

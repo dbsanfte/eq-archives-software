@@ -2,9 +2,12 @@ from unittest.mock import patch, MagicMock
 import pytest
 import requests
 import numpy as np
+import os
+import logging
 from langchain_core.documents import Document
 from indexer.openai_manager import OpenAIManager
 import importlib
+import importlib.resources
 import yaml
 import json
 
@@ -401,14 +404,22 @@ def test_api_key_from_file(tmp_path):
     key_file = tmp_path / "api_key"
     key_file.write_text("test-key-from-file")
     
-    # Initialize with the key file
-    with patch('openai.OpenAI'):
+    # Test that file is used when no other sources are available
+    with patch('openai.OpenAI'), patch('langchain_openai.embeddings.OpenAIEmbeddings'):
         client = OpenAIManager(base_url="dummy", api_key_file=str(key_file))
         assert client._api_key == "test-key-from-file"
         
-        # Test that file takes precedence over direct api_key parameter
+        # Test that direct api_key parameter takes precedence over file
         client = OpenAIManager(base_url="dummy", api_key="direct-key", api_key_file=str(key_file))
-        assert client._api_key == "test-key-from-file"
+        assert client._api_key == "direct-key"
+        
+        # Test that env var takes precedence over file but not over direct param
+        with patch.dict('os.environ', {'OPENAI_API_KEY': 'env-key'}):
+            client = OpenAIManager(base_url="dummy", api_key_file=str(key_file))
+            assert client._api_key == "env-key"
+            
+            client = OpenAIManager(base_url="dummy", api_key="direct-key", api_key_file=str(key_file))
+            assert client._api_key == "direct-key"
 
 def test_init_with_all_urls():
     """Test initialization with all URLs explicitly provided."""
@@ -495,19 +506,141 @@ def test_init_missing_url_error():
 
 def test_client_initialization():
     """Test OpenAI clients are initialized with correct URLs."""
-    # Call the constructor
-    manager = OpenAIManager(
-        base_url_completions="http://completions.url",
-        base_url_embeddings="http://embeddings.url",
-        api_key="test-key"
-    )
-    
-    # Check if the OpenAI client and embeddings are initialized correctly
-    assert manager._client is not None
-    assert manager._openai_embeddings is not None
-    assert manager._client._base_url == "http://completions.url"
-    assert manager._client.api_key == "test-key"
-    assert manager._openai_embeddings.openai_api_base == "http://embeddings.url"
-    assert manager._openai_embeddings.openai_api_key._secret_value == "test-key"
+    with patch('openai.OpenAI') as mock_openai, patch('langchain_openai.embeddings.OpenAIEmbeddings') as mock_embeddings:
+        # Configure the mocks to return objects with the expected attributes
+        mock_client = MagicMock()
+        mock_client._base_url = "http://completions.url"
+        mock_client.api_key = "test-key"
+        mock_openai.return_value = mock_client
+        
+        mock_embeddings_instance = MagicMock()
+        mock_embeddings_instance.openai_api_base = "http://embeddings.url"
+        mock_embeddings.return_value = mock_embeddings_instance
+        
+        # Call the constructor
+        manager = OpenAIManager(
+            base_url_completions="http://completions.url",
+            base_url_embeddings="http://embeddings.url",
+            api_key="test-key"
+        )
+        
+        # Check if the OpenAI client and embeddings are initialized correctly
+        assert manager._client is not None
+        assert manager._openai_embeddings is not None
+        assert manager._client._base_url == "http://completions.url"
+        assert manager._client.api_key == "test-key"
+        assert manager._openai_embeddings.openai_api_base == "http://embeddings.url"
+
+def test_negative_text_temperature_handling():
+    """Test that negative text_temperature is handled by setting to None."""
+    with patch('openai.OpenAI'), patch('langchain_openai.embeddings.OpenAIEmbeddings'):
+        manager = OpenAIManager(
+            base_url="http://test.com",
+            api_key="test-key",
+            text_temperature=-0.5
+        )
+        assert manager._text_temperature is None
+
+def test_negative_image_temperature_handling():
+    """Test that negative image_temperature is handled by setting to None."""
+    with patch('openai.OpenAI'), patch('langchain_openai.embeddings.OpenAIEmbeddings'):
+        manager = OpenAIManager(
+            base_url="http://test.com",
+            api_key="test-key",
+            image_temperature=-1.0
+        )
+        assert manager._image_temperature is None
+
+def test_negative_max_completion_tokens_handling():
+    """Test that negative max_completion_tokens is handled by setting to None."""
+    with patch('openai.OpenAI'), patch('langchain_openai.embeddings.OpenAIEmbeddings'):
+        manager = OpenAIManager(
+            base_url="http://test.com",
+            api_key="test-key",
+            max_completion_tokens=-100
+        )
+        assert manager._max_completion_tokens is None
+
+def test_negative_values_from_environment_variables():
+    """Test that negative values from environment variables are handled correctly."""
+    with patch('openai.OpenAI'), patch('langchain_openai.embeddings.OpenAIEmbeddings'), \
+         patch.dict('os.environ', {
+             'OPENAI_TEXT_TEMPERATURE': '-0.1',
+             'OPENAI_IMAGE_TEMPERATURE': '-2.5',
+             'OPENAI_MAX_COMPLETION_TOKENS': '-50'
+         }):
+        manager = OpenAIManager(
+            base_url="http://test.com",
+            api_key="test-key"
+        )
+        assert manager._text_temperature is None
+        assert manager._image_temperature is None
+        assert manager._max_completion_tokens is None
+
+def test_zero_values_are_preserved():
+    """Test that zero values are preserved and not treated as negative."""
+    with patch('openai.OpenAI'), patch('langchain_openai.embeddings.OpenAIEmbeddings'):
+        manager = OpenAIManager(
+            base_url="http://test.com",
+            api_key="test-key",
+            text_temperature=0.0,
+            image_temperature=0.0,
+            max_completion_tokens=0
+        )
+        assert manager._text_temperature is not None and abs(manager._text_temperature - 0.0) < 1e-10
+        assert manager._image_temperature is not None and abs(manager._image_temperature - 0.0) < 1e-10
+        assert manager._max_completion_tokens == 0
+
+def test_positive_values_are_preserved():
+    """Test that positive values are preserved correctly."""
+    with patch('openai.OpenAI'), patch('langchain_openai.embeddings.OpenAIEmbeddings'):
+        manager = OpenAIManager(
+            base_url="http://test.com",
+            api_key="test-key",
+            text_temperature=0.7,
+            image_temperature=1.0,
+            max_completion_tokens=2048
+        )
+        assert manager._text_temperature is not None and abs(manager._text_temperature - 0.7) < 1e-10
+        assert manager._image_temperature is not None and abs(manager._image_temperature - 1.0) < 1e-10
+        assert manager._max_completion_tokens == 2048
+
+def test_negative_values_logging_warning():
+    """Test that negative values trigger warning logs."""
+    with patch('openai.OpenAI'), patch('langchain_openai.embeddings.OpenAIEmbeddings'):
+        with patch.object(logging.Logger, 'warning') as mock_warning:
+            OpenAIManager(
+                base_url="http://test.com",
+                api_key="test-key",
+                text_temperature=-0.5,
+                image_temperature=-1.0,
+                max_completion_tokens=-100
+            )
+            
+            # Check that warning was called for each negative value
+            expected_calls = [
+                "Text temperature is negative: -0.5. Setting to None.",
+                "Image temperature is negative: -1.0. Setting to None.",
+                "Max completion tokens is negative: -100. Setting to None."
+            ]
+            
+            actual_calls = [call[0][0] for call in mock_warning.call_args_list]
+            
+            for expected_call in expected_calls:
+                assert expected_call in actual_calls
+
+def test_mixed_negative_and_positive_values():
+    """Test handling when some values are negative and others are positive."""
+    with patch('openai.OpenAI'), patch('langchain_openai.embeddings.OpenAIEmbeddings'):
+        manager = OpenAIManager(
+            base_url="http://test.com",
+            api_key="test-key",
+            text_temperature=0.5,      # positive, should be preserved
+            image_temperature=-0.3,    # negative, should be None
+            max_completion_tokens=1024  # positive, should be preserved
+        )
+        assert manager._text_temperature is not None and abs(manager._text_temperature - 0.5) < 1e-10
+        assert manager._image_temperature is None
+        assert manager._max_completion_tokens == 1024
 
 

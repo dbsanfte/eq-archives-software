@@ -12,8 +12,13 @@ from .other_handler import OtherHandler
 from .archive_handler import ArchiveHandler
 
 class Indexer:
-    def __init__(self, es_manager: ElasticsearchManager, openai_manager: OpenAIManager, archive_handler: ArchiveHandler=None,
-                 logger: logging.Logger=None, skip_text_files: bool=False, skip_image_files: bool=False, skip_other_files: bool=False):
+    def __init__(self, es_manager: ElasticsearchManager, 
+                 openai_manager: OpenAIManager, 
+                 archive_handler: ArchiveHandler | None = None,
+                 logger: logging.Logger | None = None, 
+                 skip_text_files: bool=False, 
+                 skip_image_files: bool=False, 
+                 skip_other_files: bool=False):
         self._logger = logger or logging.getLogger(__name__)
         self._es_manager = es_manager
         self._openai_manager = openai_manager
@@ -88,15 +93,18 @@ class Indexer:
             if self._SKIP_OTHER_FILES:
                 self._logger.info("Skipping other file due to SKIP_OTHER_FILES flag.")
             else:
-                docs = self._other_handler.process_other_file(relative_path=file_path, mime_type=mime_type, domain_name=domain_name)
+                docs = self._other_handler.process_other_file(file_path=file_path, mime_type=mime_type, domain_name=domain_name)
         
+        if not docs:
+            self._logger.warning(f"No documents generated for file: {file_path}. This might be due to unsupported file type or empty content.")
+            return []
         for doc in docs:
             # Set capture_dates:
             doc["capture_date"] = capture_date
         
         return docs
                 
-    def _get_file_metadata(self, file_path: str, full_path: str) -> tuple[str, str, str]:
+    def _get_file_metadata(self, file_path: str, full_path: str) -> tuple[str, str, str | None]:
         mime_type = magic.from_file(full_path, mime=True)
         domain_name, capture_date = self._archive_handler._extract_domain_and_date(relative_path=file_path, 
                                                                                  full_path=full_path)

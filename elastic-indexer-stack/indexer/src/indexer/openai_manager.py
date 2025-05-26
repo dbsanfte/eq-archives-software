@@ -14,14 +14,23 @@ from langchain_experimental.text_splitter import SemanticChunker
 class OpenAIManager:
     AWAITING_LLM_ENRICHMENT = "[ Still awaiting LLM Enrichment... ]"
     
-    def __init__(self, base_url: str=None, base_url_completions: str=None, base_url_embeddings: str=None,
-                 api_key: str=None, text_model_name: str=None, image_model_name: str=None,
-                 api_key_file: str="/run/secrets/openai_api_key", embedding_model_name: str=None, 
-                 prompt_pkg: str='indexer.resources.prompts', schema_pkg: str='indexer.resources.openai-api-schemas', 
-                 text_temperature: float=None, image_temperature: float=None, max_completion_tokens: int=None, 
-                 reasoning_effort: str=None, default_prompt: dict=None, default_timeout: int=None, 
-                 logger: logging.Logger=None):
-        
+    def __init__(self, base_url: str | None = None, 
+                 base_url_completions: str | None = None, 
+                 base_url_embeddings: str | None = None,
+                 api_key: str | None = None, 
+                 text_model_name: str | None = None, 
+                 image_model_name: str | None = None,
+                 api_key_file: str = "/run/secrets/openai_api_key", 
+                 embedding_model_name: str | None = None, 
+                 prompt_pkg: str = 'indexer.resources.prompts', 
+                 schema_pkg: str = 'indexer.resources.openai-api-schemas', 
+                 text_temperature: float | None = None, 
+                 image_temperature: float | None = None, 
+                 max_completion_tokens: int | None = None, 
+                 reasoning_effort: str | None = None, 
+                 default_prompt: dict | None = None, 
+                 default_timeout: int | None = None, 
+                 logger: logging.Logger | None = None):
         self._logger = logger or logging.getLogger(__name__)
         
         self._base_url = base_url or os.environ.get("OPENAI_ENDPOINT", None)
@@ -39,25 +48,31 @@ class OpenAIManager:
                 raise ValueError("Base URL for embeddings is not set. Please provide a valid URL.")
             self._logger.debug(f"Using base URL for embeddings: {self._base_url_embeddings}")
             
-        self._api_key = api_key or os.environ.get("OPENAI_API_KEY", "lm-studio")
-        if os.path.exists(api_key_file):
+        # Priority order: constructor param -> env var -> secret file -> None
+        self._api_key = api_key
+        if self._api_key is None:
+            self._api_key = os.environ.get("OPENAI_API_KEY", None)
+        if self._api_key is None and os.path.exists(api_key_file):
             with open(api_key_file, "r") as f:
-                self._api_key = f.read().strip()
+                file_content = f.read().strip()
+                if file_content:
+                    self._api_key = file_content
+                    
         self._text_model_name = text_model_name or os.environ.get("OPENAI_TEXT_MODEL_NAME", "")
         self._image_model_name = image_model_name or os.environ.get("OPENAI_IMAGE_MODEL_NAME", "")
         self._embedding_model_name = embedding_model_name or os.environ.get("OPENAI_EMBEDDING_MODEL_NAME", "unknown")
         self._schema_pkg = schema_pkg
-        self._text_temperature = text_temperature or float(os.environ.get("OPENAI_TEXT_TEMPERATURE", "0.015"))
+        self._text_temperature = text_temperature if text_temperature is not None else float(os.environ.get("OPENAI_TEXT_TEMPERATURE", "0.015"))
         if self._text_temperature < 0.0:
             self._logger.warning(f"Text temperature is negative: {self._text_temperature}. Setting to None.")
             self._text_temperature = None
-        self._image_temperature = image_temperature or float(os.environ.get("OPENAI_IMAGE_TEMPERATURE", "0.015"))
+        self._image_temperature = image_temperature if image_temperature is not None else float(os.environ.get("OPENAI_IMAGE_TEMPERATURE", "0.015"))
         if self._image_temperature < 0.0:
             self._logger.warning(f"Image temperature is negative: {self._image_temperature}. Setting to None.")
             self._image_temperature = None
         self._reasoning_effort = reasoning_effort or os.environ.get("OPENAI_REASONING_EFFORT", None)
-        self._default_timeout = default_timeout or int(os.environ.get("OPENAI_DEFAULT_TIMEOUT", "300"))
-        self._max_completion_tokens = max_completion_tokens or int(os.environ.get("OPENAI_MAX_COMPLETION_TOKENS", "4096"))
+        self._default_timeout = default_timeout if default_timeout is not None else int(os.environ.get("OPENAI_DEFAULT_TIMEOUT", "300"))
+        self._max_completion_tokens = max_completion_tokens if max_completion_tokens is not None else int(os.environ.get("OPENAI_MAX_COMPLETION_TOKENS", "4096"))
         if self._max_completion_tokens < 0:
             self._logger.warning(f"Max completion tokens is negative: {self._max_completion_tokens}. Setting to None.")
             self._max_completion_tokens = None
@@ -99,17 +114,29 @@ class OpenAIManager:
 
     def _resolve_prompt_for_task(self, content_type: str, task_type: str, domain_name: str) -> str:
         """Resolve the appropriate prompt based on domain name and type."""
+        # Check if there is a domain-name specific prompt
+        self._logger.debug(f"Resolving prompt for content_type: {content_type}, task_type: {task_type}, domain_name: {domain_name}")
         if domain_name:
             for regex, data in self._prompts_cache.items():
                 if re.search(regex, domain_name):
                     content_prompts: dict = data.get(f"{content_type}_prompts")
                     if content_prompts:
-                        return content_prompts.get(task_type)
+                        prompt = content_prompts.get(task_type)
+                        assert prompt is not None, f"No prompt found for task_type {task_type} in {domain_name} prompts."
+                        return prompt
                     raise ValueError(f"No {content_type} prompts found in {domain_name} file for task_type {task_type}.")
         
-        content_prompts: dict = self._default_prompt.get(f"{content_type}_prompts")
+        # If no domain match, use default prompts
+        self._logger.debug(f"No domain-specific prompt found, using default prompts for content_type: {content_type}, task_type: {task_type}")
+        content_prompts: dict = self._default_prompt.get(f"{content_type}_prompts", {})
+        if len(content_prompts) == 0:
+            self._logger.warning(f"No prompts found for content_type {content_type} in default prompts.")
+            raise ValueError(f"No prompts found for content_type {content_type} in default prompts.")
+        
         if content_prompts:
-            return content_prompts.get(task_type)
+            prompt = content_prompts.get(task_type)
+            assert prompt is not None, f"No prompt found for task_type {task_type} in default prompts."
+            return prompt
         raise ValueError(f"No {content_type} prompts found in default file for task_type {task_type}.")
         
     def get_openai_embedding_client(self) -> OpenAIEmbeddings:
@@ -133,7 +160,7 @@ class OpenAIManager:
             raise
         
     def _resolve_payload_for_task(self, content_type: str, prompt: str, schema: dict, 
-                                  content: str, mime_type: str=None) -> dict:
+                                  content: str, mime_type: str | None = None) -> dict:
         """Resolve the appropriate payload based on content_type and task_type."""
         if content_type == "text" or content_type == "other":
             return {
@@ -183,7 +210,7 @@ class OpenAIManager:
             raise ValueError(f"Unknown content_type: {content_type}")
             
     def _prompt_llm_for_task(self, content_type: str, content: str, task_type: str, 
-                             domain_name: str, mime_type: str=None) -> dict:
+                             domain_name: str, mime_type: str | None = None) -> dict:
         """Prompt the LLM for a specific task."""
         parsed_content = {}
         
@@ -239,7 +266,7 @@ class OpenAIManager:
                 base[key] = value
         return base
 
-    def _call_openai_api(self, content: str, content_type: str, domain_name: str, mime_type: str=None) -> dict:
+    def _call_openai_api(self, content: str, content_type: str, domain_name: str, mime_type: str | None = None) -> dict:
         """Call OpenAI API for processing."""
         try:
             result = {}

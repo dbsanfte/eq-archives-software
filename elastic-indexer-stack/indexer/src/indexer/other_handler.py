@@ -1,13 +1,17 @@
 import os
 import logging
 from docling.document_converter import DocumentConverter
+from langchain_core.documents import Document
 
 from .archive_handler import ArchiveHandler
 from .openai_manager import OpenAIManager
 from .es_manager import ElasticsearchManager
 
 class OtherHandler:
-    def __init__(self, archive_handler: ArchiveHandler, openai_manager: OpenAIManager, logger: logging.Logger=None,
+    def __init__(self, 
+                 archive_handler: ArchiveHandler, 
+                 openai_manager: OpenAIManager, 
+                 logger: logging.Logger | None = None,
                  llm_enrichment_enabled: bool=True):
         self._logger = logger or logging.getLogger(__name__)
         self._openai_manager=openai_manager
@@ -16,7 +20,7 @@ class OtherHandler:
         if os.environ.get("SKIP_LLM_ENRICHMENT", "false") == "true":
             self._LLM_ENRICHMENT_ENABLED=False
 
-    def process_other_file(self, file_path: str, mime_type: str=None, domain_name: str=None) -> list[dict]:
+    def process_other_file(self, file_path: str, mime_type: str | None =None, domain_name: str | None = None) -> list[dict] | None:
         try:
             title = os.path.basename(file_path)
             url = self._archive_handler._convert_to_archive_url(relative_path=file_path)
@@ -28,7 +32,10 @@ class OtherHandler:
             markdown = self._extract_text_from_other_file(file_path=file_path)
             
             chunks_and_embeddings = self._openai_manager.get_chunks_and_embeddings(
-                text=markdown
+                document=Document(
+                    page_content=markdown, 
+                    metadata={"file_path": file_path, "mime_type": mime_type}
+                )
             )
             
             llm_response = {}
