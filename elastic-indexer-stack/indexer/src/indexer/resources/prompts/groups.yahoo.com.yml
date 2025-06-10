@@ -1,9 +1,18 @@
 domain_match_regex: groups\.yahoo\.com$
 
 text_prompts: 
-  tagging: |-
-    You are being supplied with an Everquest mailing-list post.
+  initial: |-
+    You are being supplied with an old Everquest-related mailing-list post.
     
+    Don't do anything yet, wait for further instructions.
+    
+    The content of the mailing-list post follows:
+    ---
+    ---
+
+  tagging: |-
+    Consider the content of the mailing-list post.
+
     Below is a list of content tags and descriptions:
       - nerf: Discusses a change to the game that has diminished a specific class' abilities and effectiveness, making it less powerful
       - patch: Discusses recent changes made to the game in a patch update
@@ -22,33 +31,35 @@ text_prompts:
       - showeq: Discusses the use of the ShowEQ third-party software to cheat
       - class-balance: Discusses the balance of classes in the game, specifically whether one class is overpowered or too weak compared to another
     
-    Examine the content and decide how many of the above tags apply to it. Add all the applicable tags to the list `llm_tags`. If none of the tags apply, leave the list empty.
+    Examine the content and decide how many of the above tags apply to it. Add all the applicable tags to the list `llm_tags`. If none of the tags apply, leave the list empty. Do not duplicate tags, and do not add tags that are not in the list above.
 
-    Respond in the following JSON format:
-    
-    {"llm_tags": [ ... ]}
+    Example response JSON:
+    ```json
+    {
+      "llm_tags": [ 
+        "tag1",
+        "tag2"
+      ] 
+    }
+    ```
 
-    The content of the mailing-list post follows:
-    ---
-    ---
 
   classification: |-
-    You are being supplied with an Everquest mailing-list post.
+    Consider the contents of the mailing-list post.
 
     Categorize it into into the following content flavour into the variable `llm_content_flavour`:
     - Mailing List Email
 
     Respond in the following JSON format:
     
-    {"llm_content_flavour": "..."}
-
-    The content of the mailing-list post follows:
-    ---
-    ---
-
+    ```json
+    {
+      "llm_content_flavour": "..."
+    }
+    ```
 
   date: |-
-    You are being supplied with the content of an old Everquest-related mailing-list post. Perform the following two tasks:f
+    Consider the content of the mailing-list post. Perform the following two tasks:
   
     1) Extract any dates you see in the content and put them into a json list of `llm_extracted_dates`, each with the JSON object format `{ "date": "YYYY-MM-DD" }`. 
 
@@ -56,32 +67,42 @@ text_prompts:
 
     Respond in the following JSON format:
     
-    {"llm_guessed_date": "...", "llm_extracted_dates": [ ... ] }
+    ```json
+    {
+      "llm_guessed_date": "YYYY-MM-DD",
+      "llm_extracted_dates": [
+        { "date": "YYYY-MM-DD" },
+        { "date": "YYYY-MM-DD" }
+      ]
+    }
+    ```
 
     IMPORTANT: 
     * If a date occurs multiple times, only include it once in `llm_extracted_dates`.
     * `llm_guessed_date` MUST be one of the dates extracted in `llm_extracted_dates`. 
 
-    The content of the website follows:
-    ---
-    ---
-
   summary: |-
-    You are being supplied with an Everquest mailing-list post.
-  
-    Describe and summarize it into the variable `llm_summary`.
+    Describe and summarize the mailing-list post into the variable `llm_summary`.
 
     Respond in the following JSON format:
   
-    {"llm_summary": "..."}
-
-    The content of the mailing-list post follows:
-    ---
-    ---
-
+    ```json
+    {
+      "llm_summary": "..."
+    }
+    ```
 
 
 image_prompts: 
+  initial: |-
+    You are being supplied with an archived image from an Everquest-related website.
+    
+    Don't do anything yet, wait for further instructions.
+    
+    The image follows:
+    ---
+    ---
+
   summary: |-
     Attached is an archived image from an old Everquest-related website. 
 
@@ -89,11 +110,11 @@ image_prompts:
 
     Respond in the following JSON format:
     
-    {"llm_summary": "..."}
-
-    The image follows:
-    ---
-    ---
+    ```json
+    {
+      "llm_summary": "..."
+    }
+    ```
 
   classification: |-
     Attached is an archived image from an old Everquest-related website. 
@@ -108,11 +129,12 @@ image_prompts:
 
     Respond in the following JSON format:
     
-    {"llm_content_flavour": "..."}
+    ```json
+    {
+      "llm_content_flavour": "..."
+    }
+    ```
 
-    The image follows:
-    ---
-    ---
 
   tagging: |-
     Attached is an archived image from an old Everquest-related website. 
@@ -126,11 +148,15 @@ image_prompts:
 
     Respond in the following JSON format:
     
-    {"llm_tags": [ ... ] }
+    ```json
+    {
+      "llm_tags": [ 
+        "tag1",
+        "tag2"
+      ]
+    }
+    ```
 
-    The image follows:
-    ---
-    ---
 
   text_extraction: |-
     Attached is an archived image from an old Everquest-related website. 
@@ -139,8 +165,12 @@ image_prompts:
 
     Respond in the following JSON format:
     
-    {"llm_image_text": [ ... ] }
+    ```json
+    {
+      "llm_image_text": [ 
+        "...",
+        "..." 
+      ]
+    }
+    ```
 
-    The image follows:
-    ---
-    ---

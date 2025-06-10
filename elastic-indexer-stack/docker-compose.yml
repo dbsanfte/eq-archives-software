@@ -64,7 +64,7 @@ services:
       - LOCAL_REPO_PATH=/data/eq-archives
       - SKIP_IMAGE_FILES=true
       - SKIP_OTHER_FILES=true
-      - OPENAI_ENDPOINT=http://192.168.50.139:1234/v1
+      - OPENAI_ENDPOINT=http://192.168.50.81:8000/v1
       - OPENAI_API_KEY=lmstudio
       - OPENAI_TEXT_MODEL_NAME=phi-4-mini-instruct
       - OPENAI_TEXT_TEMPERATURE=0.015
@@ -90,7 +90,7 @@ services:
     environment:
       - LOG_LEVEL=debug
       - ELASTICSEARCH_URL=http://192.168.50.100:31200
-      - OPENAI_URL=http://192.168.50.81:1234
+      - OPENAI_URL=http://192.168.50.81:8001
       - ELASTICSEARCH_INDEX=eq-archive
     secrets:
       - es_readonly_username

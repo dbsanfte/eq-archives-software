@@ -11,13 +11,15 @@ import importlib.resources
 import yaml
 import json
 
+# Update the fixture to include response_format parameter
 @pytest.fixture
 def openai_client():
     """Fixture to provide an instance of OpenAIManager."""
-    with patch('openai.OpenAI'):
+    with patch('openai.OpenAI'), patch('langchain_openai.embeddings.OpenAIEmbeddings'):
         client = OpenAIManager(
             base_url="http://test.com",
-            api_key="test-key"
+            api_key="test-key",
+            response_format="json_schema"  # Explicitly set default for tests
         )
         yield client
 
@@ -135,27 +137,255 @@ def test_resolve_schema_exception(openai_client):
         with pytest.raises(json.JSONDecodeError):
             openai_client._resolve_schema_for_task("text", "classification")
 
-def test_resolve_payload_for_task_text(openai_client):
-    schema = {"type": "object"}
-    payload = openai_client._resolve_payload_for_task(
-        content_type="text",
-        prompt="Test prompt",
-        schema=schema,
-        content="Test content"
-    )
-    assert payload["model"] == openai_client._text_model_name
+def test_resolve_payload_excludes_none_values_text(openai_client):
+    """Test that None values are excluded from the text payload in _prompt_llm_for_task."""
+    # This test needs to be rewritten to test the payload construction in _prompt_llm_for_task
+    with patch("requests.post") as mock_post:
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": '{"llm_summary": "test"}'}}]
+        }
+        mock_post.return_value = mock_resp
+        
+        # Set up prompts
+        openai_client._default_prompt = {
+            "text_prompts": {
+                "initial": "Initial prompt",
+                "classification": "Classification prompt"
+            }
+        }
+        
+        # Temporarily set values to None
+        openai_client._text_temperature = None
+        openai_client._max_completion_tokens = None
+        openai_client._reasoning_effort = None
+        
+        # Patch embed_text
+        openai_client.embed_text = lambda text: [len(text)] if text else None
+        
+        # Mock schema
+        with patch("importlib.resources.open_text") as mock_file:
+            mock_file.return_value.__enter__.return_value.read.return_value = json.dumps({"type": "object"})
+            
+            result, _ = openai_client._prompt_llm_for_task(
+                content_type="text",
+                content="Test content",
+                task_type="classification",
+                domain_name="test.com"
+            )
+        
+        # Check the payload that was sent
+        call_args = mock_post.call_args
+        payload = call_args[1]['json']
+        
+        # Check that None values are not included in the payload
+        assert "temperature" not in payload
+        assert "max_completion_tokens" not in payload
+        assert "reasoning_effort" not in payload
+        
+        # Check that other values are still included
+        assert "model" in payload
+        assert "messages" in payload
+        assert "response_format" in payload
 
-def test_resolve_payload_for_task_image(openai_client):
-    schema = {"type": "object"}
-    payload = openai_client._resolve_payload_for_task(
-        content_type="image",
-        prompt="Image prompt",
-        schema=schema,
-        content="BASE64DATA",
-        mime_type="image/png"
-    )
-    assert payload["model"] == openai_client._image_model_name
-    assert "image_url" in payload["messages"][0]["content"][1]
+def test_resolve_payload_excludes_none_values_image(openai_client):
+    """Test that None values are excluded from the image payload in _prompt_llm_for_task."""
+    with patch("requests.post") as mock_post:
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": '{"llm_summary": "test"}'}}]
+        }
+        mock_post.return_value = mock_resp
+        
+        # Set up prompts
+        openai_client._default_prompt = {
+            "image_prompts": {
+                "initial": "Initial image prompt",
+                "classification": "Classification prompt"
+            }
+        }
+        
+        # Temporarily set values to None
+        openai_client._image_temperature = None
+        openai_client._max_completion_tokens = None
+        openai_client._reasoning_effort = None
+        
+        # Patch embed_text
+        openai_client.embed_text = lambda text: [len(text)] if text else None
+        
+        # Mock schema
+        with patch("importlib.resources.open_text") as mock_file:
+            mock_file.return_value.__enter__.return_value.read.return_value = json.dumps({"type": "object"})
+            
+            result, _ = openai_client._prompt_llm_for_task(
+                content_type="image",
+                content="BASE64DATA",
+                task_type="classification",
+                domain_name="test.com",
+                mime_type="image/png"
+            )
+        
+        # Check the payload that was sent
+        call_args = mock_post.call_args
+        payload = call_args[1]['json']
+        
+        # Check that None values are not included in the payload
+        assert "temperature" not in payload
+        assert "max_completion_tokens" not in payload
+        assert "reasoning_effort" not in payload
+        
+        # Check that other values are still included
+        assert "model" in payload
+        assert "messages" in payload
+        assert "response_format" in payload
+
+def test_resolve_payload_includes_non_none_values(openai_client):
+    """Test that non-None values are included in the payload in _prompt_llm_for_task."""
+    with patch("requests.post") as mock_post:
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": '{"llm_summary": "test"}'}}]
+        }
+        mock_post.return_value = mock_resp
+        
+        # Set up prompts
+        openai_client._default_prompt = {
+            "text_prompts": {
+                "initial": "Initial prompt",
+                "classification": "Classification prompt"
+            }
+        }
+        
+        # Set specific values
+        openai_client._text_temperature = 0.5
+        openai_client._max_completion_tokens = 100
+        openai_client._reasoning_effort = "high"
+        
+        # Patch embed_text
+        openai_client.embed_text = lambda text: [len(text)] if text else None
+        
+        # Mock schema
+        with patch("importlib.resources.open_text") as mock_file:
+            mock_file.return_value.__enter__.return_value.read.return_value = json.dumps({"type": "object"})
+            
+            result, _ = openai_client._prompt_llm_for_task(
+                content_type="text",
+                content="Test content",
+                task_type="classification",
+                domain_name="test.com"
+            )
+        
+        # Check the payload that was sent
+        call_args = mock_post.call_args
+        payload = call_args[1]['json']
+        
+        # Check that values are included in the payload
+        assert "temperature" in payload
+        assert abs(payload["temperature"] - 0.5) < 1e-10
+        assert "max_completion_tokens" in payload
+        assert payload["max_completion_tokens"] == 100
+        assert "reasoning_effort" in payload
+        assert payload["reasoning_effort"] == "high"
+
+def test_resolve_payload_mixed_none_and_non_none_values(openai_client):
+    """Test payload with a mix of None and non-None values in _prompt_llm_for_task."""
+    with patch("requests.post") as mock_post:
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": '{"llm_summary": "test"}'}}]
+        }
+        mock_post.return_value = mock_resp
+        
+        # Set up prompts
+        openai_client._default_prompt = {
+            "text_prompts": {
+                "initial": "Initial prompt",
+                "classification": "Classification prompt"
+            }
+        }
+        
+        # Set mixed values
+        openai_client._text_temperature = 0.7
+        openai_client._max_completion_tokens = None
+        openai_client._reasoning_effort = "auto"
+        
+        # Patch embed_text
+        openai_client.embed_text = lambda text: [len(text)] if text else None
+        
+        # Mock schema
+        with patch("importlib.resources.open_text") as mock_file:
+            mock_file.return_value.__enter__.return_value.read.return_value = json.dumps({"type": "object"})
+            
+            result, _ = openai_client._prompt_llm_for_task(
+                content_type="text",
+                content="Test content",
+                task_type="classification",
+                domain_name="test.com"
+            )
+        
+        # Check the payload that was sent
+        call_args = mock_post.call_args
+        payload = call_args[1]['json']
+        
+        # Check that only non-None values are included
+        assert "temperature" in payload
+        assert abs(payload["temperature"] - 0.7) < 1e-10
+        assert "max_completion_tokens" not in payload
+        assert "reasoning_effort" in payload
+        assert payload["reasoning_effort"] == "auto"
+
+def test_resolve_payload_with_cache_prompt_true_and_false(openai_client):
+    """Test that cache_prompt is included only when True in _prompt_llm_for_task."""
+    with patch("requests.post") as mock_post:
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": '{"llm_summary": "test"}'}}]
+        }
+        mock_post.return_value = mock_resp
+        
+        # Set up prompts
+        openai_client._default_prompt = {
+            "text_prompts": {
+                "initial": "Initial prompt",
+                "classification": "Classification prompt"
+            }
+        }
+        
+        # Patch embed_text
+        openai_client.embed_text = lambda text: [len(text)] if text else None
+        
+        # Mock schema
+        with patch("importlib.resources.open_text") as mock_file:
+            mock_file.return_value.__enter__.return_value.read.return_value = json.dumps({"type": "object"})
+            
+            # Test with cache_prompt = True
+            openai_client._cache_prompt = True
+            result, _ = openai_client._prompt_llm_for_task(
+                content_type="text",
+                content="Test content",
+                task_type="classification",
+                domain_name="test.com"
+            )
+            
+            # Check the payload that was sent
+            call_args = mock_post.call_args
+            payload = call_args[1]['json']
+            assert "cache_prompt" in payload
+            assert payload["cache_prompt"] is True
+            
+            # Test with cache_prompt = False
+            openai_client._cache_prompt = False
+            result, _ = openai_client._prompt_llm_for_task(
+                content_type="text",
+                content="Test content",
+                task_type="classification",
+                domain_name="test.com"
+            )
+            
+            # Check the payload that was sent
+            call_args = mock_post.call_args
+            payload = call_args[1]['json']
+            assert "cache_prompt" not in payload
 
 @patch("requests.post")
 def test_prompt_llm_for_task(mock_post, openai_client):
@@ -166,6 +396,7 @@ def test_prompt_llm_for_task(mock_post, openai_client):
     mock_post.return_value = mock_resp
     openai_client._default_prompt = {
         "text_prompts": {
+            "initial": "Initial prompt",
             "classification": "Default classification prompt"
         }
     }
@@ -180,18 +411,19 @@ def test_prompt_llm_for_task(mock_post, openai_client):
     with patch("importlib.resources.open_text") as mock_file:
         
         mock_file.return_value.__enter__.return_value.read.return_value = json.dumps({"type": "object"})
-        result = openai_client._prompt_llm_for_task(
+        result, conversation_history = openai_client._prompt_llm_for_task(
             content_type="text",
             content="Test content",
             task_type="classification",
             domain_name="notfound.com"
         )
     assert result["llm_summary"] == "summary"
+    assert len(conversation_history) == 3  # initial message, task prompt, assistant response
 
 def test_prompt_llm_google_groups(openai_client):
     """Test that Google Groups domain gets automatic classification without LLM call."""
     with patch('requests.post') as mock_post:
-        result = openai_client._prompt_llm_for_task(
+        result, conversation_history = openai_client._prompt_llm_for_task(
             content_type="text",
             content="Test content",
             task_type="classification",
@@ -199,12 +431,13 @@ def test_prompt_llm_google_groups(openai_client):
         )
         
         assert result["llm_content_flavour"] == "Newsgroup Post"
+        assert conversation_history == []  # No conversation history for skipped calls
         mock_post.assert_not_called()  # Verify no API call was made
 
 def test_prompt_llm_yahoo_groups(openai_client):
     """Test that Yahoo Groups domain gets automatic classification without LLM call."""
     with patch('requests.post') as mock_post:
-        result = openai_client._prompt_llm_for_task(
+        result, conversation_history = openai_client._prompt_llm_for_task(
             content_type="text",
             content="Test content",
             task_type="classification",
@@ -212,6 +445,7 @@ def test_prompt_llm_yahoo_groups(openai_client):
         )
         
         assert result["llm_content_flavour"] == "Mailing List Email"
+        assert conversation_history == []  # No conversation history for skipped calls
         mock_post.assert_not_called()  # Verify no API call was made
 
 @patch("requests.post")
@@ -636,11 +870,433 @@ def test_mixed_negative_and_positive_values():
             base_url="http://test.com",
             api_key="test-key",
             text_temperature=0.5,      # positive, should be preserved
-            image_temperature=-0.3,    # negative, should be None
+            image_temperature=-0.3,  # negative, should be None
             max_completion_tokens=1024  # positive, should be preserved
         )
         assert manager._text_temperature is not None and abs(manager._text_temperature - 0.5) < 1e-10
         assert manager._image_temperature is None
         assert manager._max_completion_tokens == 1024
+
+@patch("requests.post")
+def test_prompt_llm_with_conversation_history(mock_post, openai_client):
+    """Test _prompt_llm_for_task with existing conversation history."""
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {
+        "choices": [{"message": {"content": '{"llm_summary": "new summary"}'}}]
+    }
+    mock_post.return_value = mock_resp
+    
+    # Set up prompts
+    openai_client._default_prompt = {
+        "text_prompts": {
+            "summary": "Summary prompt"
+        }
+    }
+    
+    # Existing conversation history
+    existing_history = [
+        {"role": "user", "content": [{"type": "text", "text": "Initial prompt"}, {"type": "text", "text": "Test content"}]},
+        {"role": "user", "content": "Classification prompt"},
+        {"role": "assistant", "content": '{"llm_content_flavour": "Test Classification"}'}
+    ]
+    
+    # Patch embed_text
+    openai_client.embed_text = lambda text: [len(text)] if text else None
+    
+    # Mock schema
+    with patch("importlib.resources.open_text") as mock_file:
+        mock_file.return_value.__enter__.return_value.read.return_value = json.dumps({"type": "object"})
+        
+        result, updated_history = openai_client._prompt_llm_for_task(
+            content_type="text",
+            content="Test content",
+            task_type="summary",
+            domain_name="test.com",
+            conversation_history=existing_history
+        )
+    
+    # Verify result
+    assert result["llm_summary"] == "new summary"
+    
+    # Verify conversation history was extended
+    assert len(updated_history) == 5  # 3 existing + 1 new user message + 1 assistant response
+    assert updated_history[:3] == existing_history  # Original history preserved
+    assert updated_history[3]["role"] == "user"
+    assert updated_history[3]["content"] == "Summary prompt"
+    assert updated_history[4]["role"] == "assistant"
+
+@patch("requests.post")
+def test_call_openai_api_conversation_flow(mock_post, openai_client):
+    """Test that conversation history is maintained throughout the API call flow."""
+    # Mock responses for each call
+    classification_resp = MagicMock()
+    classification_resp.json.return_value = {
+        "choices": [{"message": {"content": '{"llm_content_flavour": "Test Content"}'}}]
+    }
+    
+    summary_resp = MagicMock()
+    summary_resp.json.return_value = {
+        "choices": [{"message": {"content": '{"llm_summary": "Test summary"}'}}]
+    }
+    
+    tagging_resp = MagicMock()
+    tagging_resp.json.return_value = {
+        "choices": [{"message": {"content": '{"llm_tags": ["tag1", "tag2"]}'}}]
+    }
+    
+    date_resp = MagicMock()
+    date_resp.json.return_value = {
+        "choices": [{"message": {"content": '{"llm_guessed_date": "2024-01-01", "llm_extracted_dates": [{"date": "2024-01-01"}]}'}}]
+    }
+    
+    mock_post.side_effect = [
+        classification_resp,
+        summary_resp,
+        tagging_resp,
+        date_resp
+    ]
+    
+    # Set up prompts
+    openai_client._default_prompt = {
+        "text_prompts": {
+            "initial": "Initial prompt",
+            "classification": "Classification prompt",
+            "summary": "Summary prompt",
+            "tagging": "Tagging prompt",
+            "date": "Date prompt"
+        }
+    }
+    
+    # Patch embed_text
+    openai_client.embed_text = lambda text: [len(text)] if text else None
+    
+    # Mock schema
+    with patch("importlib.resources.open_text") as mock_file:
+        mock_file.return_value.__enter__.return_value.read.return_value = json.dumps({"type": "object"})
+        
+        result = openai_client._call_openai_api(
+            content="Test content",
+            content_type="text",
+            domain_name="test.com"
+        )
+    
+    # Verify that each call built upon the previous conversation
+    assert mock_post.call_count == 4
+    
+    # Check first call (classification) - should have initial prompt + content + classification prompt
+    first_call_messages = mock_post.call_args_list[0][1]['json']['messages']
+    assert len(first_call_messages) == 2
+    assert first_call_messages[0]['content'][0]['text'] == "Initial prompt"
+    assert first_call_messages[0]['content'][1]['text'] == "Test content"
+    assert first_call_messages[1]['content'] == "Classification prompt"
+    
+    # Check second call (summary) - should include previous conversation
+    second_call_messages = mock_post.call_args_list[1][1]['json']['messages']
+    assert len(second_call_messages) == 4  # initial, classification prompt, assistant response, summary prompt
+    
+    # Check third call (tagging) - should include all previous conversation
+    third_call_messages = mock_post.call_args_list[2][1]['json']['messages']
+    assert len(third_call_messages) == 6  # previous 4 + assistant response + tagging prompt
+    
+    # Check fourth call (date) - should include all previous conversation
+    fourth_call_messages = mock_post.call_args_list[3][1]['json']['messages']
+    assert len(fourth_call_messages) == 8  # previous 6 + assistant response + date prompt
+
+def test_resolve_prompt_for_task_initial(openai_client):
+    """Test resolving initial prompts."""
+    # Set up default prompts with initial prompt
+    openai_client._default_prompt = {
+        "text_prompts": {
+            "initial": "Initial text prompt",
+            "classification": "Classification prompt"
+        },
+        "image_prompts": {
+            "initial": "Initial image prompt",
+            "classification": "Classification prompt"
+        }
+    }
+    
+    # Test text initial prompt
+    result = openai_client._resolve_prompt_for_task(
+        content_type="text", 
+        task_type="initial", 
+        domain_name="test.com"
+    )
+    assert result == "Initial text prompt"
+    
+    # Test image initial prompt
+    result = openai_client._resolve_prompt_for_task(
+        content_type="image", 
+        task_type="initial", 
+        domain_name="test.com"
+    )
+    assert result == "Initial image prompt"
+
+def test_response_format_default():
+    """Test that response_format defaults to 'json_schema'."""
+    with patch('openai.OpenAI'), patch('langchain_openai.embeddings.OpenAIEmbeddings'):
+        manager = OpenAIManager(
+            base_url="http://test.com",
+            api_key="test-key"
+        )
+        assert manager._response_format == "json_schema"
+
+def test_response_format_constructor_param():
+    """Test setting response_format via constructor parameter."""
+    with patch('openai.OpenAI'), patch('langchain_openai.embeddings.OpenAIEmbeddings'):
+        # Test json_schema
+        manager = OpenAIManager(
+            base_url="http://test.com",
+            api_key="test-key",
+            response_format="json_schema"
+        )
+        assert manager._response_format == "json_schema"
+        
+        # Test json_object
+        manager = OpenAIManager(
+            base_url="http://test.com",
+            api_key="test-key",
+            response_format="json_object"
+        )
+        assert manager._response_format == "json_object"
+        
+        # Test none
+        manager = OpenAIManager(
+            base_url="http://test.com",
+            api_key="test-key",
+            response_format="none"
+        )
+        assert manager._response_format == "none"
+
+def test_response_format_env_var():
+    """Test setting response_format via environment variable."""
+    with patch('openai.OpenAI'), patch('langchain_openai.embeddings.OpenAIEmbeddings'):
+        # Test json_object from env var
+        with patch.dict('os.environ', {'OPENAI_RESPONSE_FORMAT': 'json_object'}):
+            manager = OpenAIManager(
+                base_url="http://test.com",
+                api_key="test-key"
+            )
+            assert manager._response_format == "json_object"
+        
+        # Test none from env var
+        with patch.dict('os.environ', {'OPENAI_RESPONSE_FORMAT': 'none'}):
+            manager = OpenAIManager(
+                base_url="http://test.com",
+                api_key="test-key"
+            )
+            assert manager._response_format == "none"
+
+def test_response_format_param_overrides_env():
+    """Test that constructor parameter overrides environment variable."""
+    with patch('openai.OpenAI'), patch('langchain_openai.embeddings.OpenAIEmbeddings'):
+        with patch.dict('os.environ', {'OPENAI_RESPONSE_FORMAT': 'json_object'}):
+            manager = OpenAIManager(
+                base_url="http://test.com",
+                api_key="test-key",
+                response_format="none"
+            )
+            assert manager._response_format == "none"
+
+def test_response_format_invalid_value():
+    """Test that invalid response_format values raise ValueError."""
+    with patch('openai.OpenAI'), patch('langchain_openai.embeddings.OpenAIEmbeddings'):
+        with pytest.raises(ValueError, match="Invalid response_format: invalid. Must be one of"):
+            OpenAIManager(
+                base_url="http://test.com",
+                api_key="test-key",
+                response_format="invalid"
+            )
+
+@patch("requests.post")
+def test_response_format_json_schema_payload(mock_post, openai_client):
+    """Test that json_schema response format includes full schema in payload."""
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {
+        "choices": [{"message": {"content": '{"llm_summary": "test"}'}}]
+    }
+    mock_post.return_value = mock_resp
+    
+    # Set response format to json_schema (default)
+    openai_client._response_format = "json_schema"
+    
+    # Set up prompts
+    openai_client._default_prompt = {
+        "text_prompts": {
+            "initial": "Initial prompt",
+            "classification": "Classification prompt"
+        }
+    }
+    
+    # Patch embed_text
+    openai_client.embed_text = lambda text: [len(text)] if text else None
+    
+    # Mock schema
+    test_schema = {"type": "object", "properties": {"llm_summary": {"type": "string"}}}
+    with patch("importlib.resources.open_text") as mock_file:
+        mock_file.return_value.__enter__.return_value.read.return_value = json.dumps(test_schema)
+        
+        result, _ = openai_client._prompt_llm_for_task(
+            content_type="text",
+            content="Test content",
+            task_type="classification",
+            domain_name="test.com"
+        )
+    
+    # Check the payload
+    call_args = mock_post.call_args
+    payload = call_args[1]['json']
+    
+    # Verify response_format structure for json_schema
+    assert "response_format" in payload
+    assert payload["response_format"]["type"] == "json_schema"
+    assert "json_schema" in payload["response_format"]
+    assert payload["response_format"]["json_schema"]["name"] == "text_response"
+    assert payload["response_format"]["json_schema"]["strict"] == True
+    assert payload["response_format"]["json_schema"]["schema"] == test_schema
+
+@patch("requests.post")
+def test_response_format_json_object_payload(mock_post, openai_client):
+    """Test that json_object response format only includes type in payload."""
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {
+        "choices": [{"message": {"content": '{"llm_summary": "test"}'}}]
+    }
+    mock_post.return_value = mock_resp
+    
+    # Set response format to json_object
+    openai_client._response_format = "json_object"
+    
+    # Set up prompts
+    openai_client._default_prompt = {
+        "text_prompts": {
+            "initial": "Initial prompt",
+            "classification": "Classification prompt"
+        }
+    }
+    
+    # Patch embed_text
+    openai_client.embed_text = lambda text: [len(text)] if text else None
+    
+    # Mock schema (even though it won't be used)
+    with patch("importlib.resources.open_text") as mock_file:
+        mock_file.return_value.__enter__.return_value.read.return_value = json.dumps({"type": "object"})
+        
+        result, _ = openai_client._prompt_llm_for_task(
+            content_type="text",
+            content="Test content",
+            task_type="classification",
+            domain_name="test.com"
+        )
+    
+    # Check the payload
+    call_args = mock_post.call_args
+    payload = call_args[1]['json']
+    
+    # Verify response_format structure for json_object
+    assert "response_format" in payload
+    assert payload["response_format"] == {"type": "json_object"}
+    assert "json_schema" not in payload["response_format"]
+
+@patch("requests.post")
+def test_response_format_none_payload(mock_post, openai_client):
+    """Test that 'none' response format excludes response_format from payload."""
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {
+        "choices": [{"message": {"content": '{"llm_summary": "test"}'}}]
+    }
+    mock_post.return_value = mock_resp
+    
+    # Set response format to none
+    openai_client._response_format = "none"
+    
+    # Set up prompts
+    openai_client._default_prompt = {
+        "text_prompts": {
+            "initial": "Initial prompt",
+            "classification": "Classification prompt"
+        }
+    }
+    
+    # Patch embed_text
+    openai_client.embed_text = lambda text: [len(text)] if text else None
+    
+    # Mock schema (even though it won't be used)
+    with patch("importlib.resources.open_text") as mock_file:
+        mock_file.return_value.__enter__.return_value.read.return_value = json.dumps({"type": "object"})
+        
+        result, _ = openai_client._prompt_llm_for_task(
+            content_type="text",
+            content="Test content",
+            task_type="classification",
+            domain_name="test.com"
+        )
+    
+    # Check the payload
+    call_args = mock_post.call_args
+    payload = call_args[1]['json']
+    
+    # Verify response_format is NOT in payload
+    assert "response_format" not in payload
+
+@patch("requests.post")
+def test_response_format_with_image_content(mock_post, openai_client):
+    """Test response format handling with image content."""
+    mock_resp = MagicMock()
+    mock_resp.json.return_value = {
+        "choices": [{"message": {"content": '{"llm_content_flavour": "image type"}'}}]
+    }
+    mock_post.return_value = mock_resp
+    
+    # Test each response format with image content
+    for format_type in ["json_schema", "json_object", "none"]:
+        openai_client._response_format = format_type
+        
+        # Set up prompts
+        openai_client._default_prompt = {
+            "image_prompts": {
+                "initial": "Initial image prompt",
+                "classification": "Classification prompt"
+            }
+        }
+        
+        # Patch embed_text
+        openai_client.embed_text = lambda text: [len(text)] if text else None
+        
+        # Mock schema
+        with patch("importlib.resources.open_text") as mock_file:
+            mock_file.return_value.__enter__.return_value.read.return_value = json.dumps({"type": "object"})
+            
+            result, _ = openai_client._prompt_llm_for_task(
+                content_type="image",
+                content="BASE64DATA",
+                task_type="classification",
+                domain_name="test.com",
+                mime_type="image/png"
+            )
+        
+        # Check the payload
+        call_args = mock_post.call_args
+        payload = call_args[1]['json']
+        
+        if format_type == "json_schema":
+            assert "response_format" in payload
+            assert payload["response_format"]["type"] == "json_schema"
+            assert "json_schema" in payload["response_format"]
+        elif format_type == "json_object":
+            assert "response_format" in payload
+            assert payload["response_format"] == {"type": "json_object"}
+        else:  # none
+            assert "response_format" not in payload
+
+# Add this to test the resolve_payload_for_task tests are properly removed
+def test_resolve_payload_for_task_removed():
+    """Test that _resolve_payload_for_task method no longer exists."""
+    with patch('openai.OpenAI'), patch('langchain_openai.embeddings.OpenAIEmbeddings'):
+        manager = OpenAIManager(
+            base_url="http://test.com",
+            api_key="test-key"
+        )
+        assert not hasattr(manager, '_resolve_payload_for_task')
 
 

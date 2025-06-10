@@ -33,8 +33,11 @@ export function resolveQuery(requestState,
             }
         };
     }
-    else if (paramsRef.current.enableSemanticSearch && vectorFields?.length && queryText) {
-        // Otherwise, perform semantic search if enabled:
+    // Only perform semantic search if enabled AND service is available
+    else if (paramsRef.current.enableSemanticSearch && 
+             vectorFields?.length && 
+             queryText && 
+             embeddingService.isEmbeddingServiceAvailable()) {
         try {
             requestBody.knn = buildKnnQuery(queryText, embeddingModel, paramsRef, vectorFields, nestedVectorFields);
         }

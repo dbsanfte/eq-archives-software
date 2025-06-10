@@ -26,8 +26,10 @@ class OpenAIManager:
                  schema_pkg: str = 'indexer.resources.openai-api-schemas', 
                  text_temperature: float | None = None, 
                  image_temperature: float | None = None, 
+                 cache_prompt: bool | None = None,
                  max_completion_tokens: int | None = None, 
                  reasoning_effort: str | None = None, 
+                 response_format: str | None = None,
                  default_prompt: dict | None = None, 
                  default_timeout: int | None = None, 
                  logger: logging.Logger | None = None):
@@ -58,24 +60,52 @@ class OpenAIManager:
                 if file_content:
                     self._api_key = file_content
                     
+        self._cache_prompt = cache_prompt if cache_prompt is not None else os.environ.get("OPENAI_CACHE_PROMPT", "false").lower() == "true"
         self._text_model_name = text_model_name or os.environ.get("OPENAI_TEXT_MODEL_NAME", "")
         self._image_model_name = image_model_name or os.environ.get("OPENAI_IMAGE_MODEL_NAME", "")
         self._embedding_model_name = embedding_model_name or os.environ.get("OPENAI_EMBEDDING_MODEL_NAME", "unknown")
         self._schema_pkg = schema_pkg
-        self._text_temperature = text_temperature if text_temperature is not None else float(os.environ.get("OPENAI_TEXT_TEMPERATURE", "0.015"))
+        
+        # Handle text temperature with proper type conversion
+        if text_temperature is not None:
+            self._text_temperature = text_temperature
+        else:
+            try:
+                self._text_temperature = float(os.environ.get("OPENAI_TEXT_TEMPERATURE", "0.015"))
+            except ValueError:
+                self._logger.error(f"Invalid float value for OPENAI_TEXT_TEMPERATURE: {os.environ.get('OPENAI_TEXT_TEMPERATURE')}")
+                self._text_temperature = 0.015
+                
         if self._text_temperature < 0.0:
             self._logger.warning(f"Text temperature is negative: {self._text_temperature}. Setting to None.")
             self._text_temperature = None
-        self._image_temperature = image_temperature if image_temperature is not None else float(os.environ.get("OPENAI_IMAGE_TEMPERATURE", "0.015"))
+            
+        # Handle image temperature with proper type conversion
+        if image_temperature is not None:
+            self._image_temperature = image_temperature
+        else:
+            try:
+                self._image_temperature = float(os.environ.get("OPENAI_IMAGE_TEMPERATURE", "0.015"))
+            except ValueError:
+                self._logger.error(f"Invalid float value for OPENAI_IMAGE_TEMPERATURE: {os.environ.get('OPENAI_IMAGE_TEMPERATURE')}")
+                self._image_temperature = 0.015
+                
         if self._image_temperature < 0.0:
             self._logger.warning(f"Image temperature is negative: {self._image_temperature}. Setting to None.")
             self._image_temperature = None
+            
         self._reasoning_effort = reasoning_effort or os.environ.get("OPENAI_REASONING_EFFORT", None)
         self._default_timeout = default_timeout if default_timeout is not None else int(os.environ.get("OPENAI_DEFAULT_TIMEOUT", "300"))
         self._max_completion_tokens = max_completion_tokens if max_completion_tokens is not None else int(os.environ.get("OPENAI_MAX_COMPLETION_TOKENS", "4096"))
         if self._max_completion_tokens < 0:
             self._logger.warning(f"Max completion tokens is negative: {self._max_completion_tokens}. Setting to None.")
             self._max_completion_tokens = None
+        
+        # Response format configuration
+        self._response_format = response_format or os.environ.get("OPENAI_RESPONSE_FORMAT", "json_schema")
+        valid_formats = ["json_schema", "json_object", "none"]
+        if self._response_format not in valid_formats:
+            raise ValueError(f"Invalid response_format: {self._response_format}. Must be one of {valid_formats}")
         
         # Initialize OpenAI client
         self._client = OpenAI(base_url=self._base_url_completions, api_key=self._api_key)
@@ -156,80 +186,99 @@ class OpenAIManager:
             with importlib.resources.open_text(self._schema_pkg, f"{content_type}/{task_type}_schema.json") as file:
                 return json.load(file)
         except Exception as e:
-            self._logger.error(f"Error resoving schema for content_type {content_type} and task_type {task_type}: {e}")
+            self._logger.error(f"Error resoving schema for content_type {content_type} and task_type {task_type}: {e}")        
             raise
-        
-    def _resolve_payload_for_task(self, content_type: str, prompt: str, schema: dict, 
-                                  content: str, mime_type: str | None = None) -> dict:
-        """Resolve the appropriate payload based on content_type and task_type."""
-        if content_type == "text" or content_type == "other":
-            return {
-                "model": self._text_model_name,
-                "messages": [{
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "text", "text": content}
-                    ]
-                }],
-                "response_format": {
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "text_response",
-                        "strict": "true",
-                        "schema": schema
-                    }
-                },
-                "temperature": self._text_temperature,
-                "max_completion_tokens": self._max_completion_tokens,
-                "reasoning_effort": self._reasoning_effort
-            }
-        elif content_type == "image":
-            return {
-                "model": self._image_model_name,
-                "messages": [{
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{content}"}} 
-                    ]
-                }],
-                "response_format": {
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "text_response",
-                        "strict": "true",
-                        "schema": schema
-                    }
-                },
-                "temperature": self._image_temperature,
-                "max_completion_tokens": self._max_completion_tokens,
-                "reasoning_effort": self._reasoning_effort
-            }
-        else:
-            raise ValueError(f"Unknown content_type: {content_type}")
-            
+    
     def _prompt_llm_for_task(self, content_type: str, content: str, task_type: str, 
-                             domain_name: str, mime_type: str | None = None) -> dict:
-        """Prompt the LLM for a specific task."""
+                             domain_name: str, mime_type: str | None = None, 
+                             conversation_history: list[dict] | None = None) -> tuple[dict, list[dict]]:
+        """Prompt the LLM for a specific task. Returns (parsed_content, updated_conversation_history)."""
         parsed_content = {}
         
         if domain_name == "groups.google.com" and task_type == "classification":
             # If the domain is 'groups.google.com", this is a Newsgroup Post. Don't bother inferencing.
             parsed_content["llm_content_flavour"] = "Newsgroup Post"
+            return parsed_content, conversation_history or []
         elif domain_name == "groups.yahoo.com" and task_type == "classification":
             # If the domain is 'groups.yahoo.com", this is a Mailing List Email. Don't bother inferencing.
             parsed_content["llm_content_flavour"] = "Mailing List Email"
+            return parsed_content, conversation_history or []
         else:
             prompt = self._resolve_prompt_for_task(content_type=content_type, task_type=task_type, 
                                                 domain_name=domain_name)
             schema = self._resolve_schema_for_task(content_type=content_type, task_type=task_type)
-            payload = self._resolve_payload_for_task(content_type=content_type, content=content, 
-                                                    prompt=prompt, schema=schema, mime_type=mime_type)
             
+            # Build messages based on conversation history
+            messages = []
+            if conversation_history:
+                # Use existing conversation history
+                messages.extend(conversation_history)
+                # Add the new task prompt
+                messages.append({"role": "user", "content": prompt})
+            else:
+                # This is the initial prompt - combine initial prompt + content
+                initial_prompt = self._resolve_prompt_for_task(content_type=content_type, task_type="initial", 
+                                                             domain_name=domain_name)
+                if content_type == "text" or content_type == "other":
+                    messages.append({
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": initial_prompt},
+                            {"type": "text", "text": content}
+                        ]
+                    })
+                elif content_type == "image":
+                    messages.append({
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": initial_prompt},
+                            {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{content}"}}
+                        ]
+                    })
+                # Add the actual task prompt as a follow-up
+                messages.append({"role": "user", "content": prompt})
+            
+            # Build payload with messages
+            payload = {
+                "model": self._text_model_name if content_type in ["text", "other"] else self._image_model_name,
+                "messages": messages
+            }
+            
+            # Add response format based on configuration
+            if self._response_format == "json_schema":
+                payload["response_format"] = {
+                    "type": "json_schema",
+                    "json_schema": {
+                        "name": "text_response",
+                        "strict": True,
+                        "schema": schema
+                    }
+                }
+            elif self._response_format == "json_object":
+                payload["response_format"] = {
+                    "type": "json_object"
+                }
+            elif self._response_format == "none":
+                # If response_format is "none", don't add response_format to payload at all
+                self._logger.debug("Response format is 'none', not adding response_format to payload.")
+            
+            # Add optional parameters based on content type
+            temperature = self._text_temperature if content_type in ["text", "other"] else self._image_temperature
+            if temperature is not None:
+                payload["temperature"] = temperature
+            if self._max_completion_tokens is not None:
+                payload["max_completion_tokens"] = self._max_completion_tokens
+            if self._reasoning_effort is not None:
+                payload["reasoning_effort"] = self._reasoning_effort
+            if self._cache_prompt:
+                payload["cache_prompt"] = self._cache_prompt
+                
             headers = {"Content-Type": "application/json"}
             if self._api_key:
                 headers["Authorization"] = f"Bearer {self._api_key}"
+                
+            self._logger.debug(f"LLM request payload: {json.dumps(payload, indent=2)}")
+            self._logger.debug(f"LLM request headers: {headers}")
             
             resp = requests.post(
                 f"{self._base_url_completions}/chat/completions",
@@ -237,10 +286,20 @@ class OpenAIManager:
                 json=payload,
                 timeout=self._default_timeout
             )
+            
+            self._logger.debug(f"LLM response status code: {resp.status_code}")
+            self._logger.debug(f"LLM response content: {resp.text}")
             resp.raise_for_status()
             
             llm_result = resp.json()
             parsed_content = self._parse_json_response(llm_result)
+            
+            # Update conversation history with the assistant's response
+            updated_history = messages.copy()
+            updated_history.append({
+                "role": "assistant",
+                "content": json.dumps(parsed_content)
+            })
                         
         summary_vector = self.embed_text(parsed_content.get("llm_summary", ""))
         combined_image_text = " ".join(parsed_content.get("llm_image_text", []))
@@ -258,7 +317,7 @@ class OpenAIManager:
             "llm_tags": parsed_content.get("llm_tags", None)
         }
         
-        return final_response
+        return final_response, updated_history
     
     def _merge_dicts(self, base: dict, updates: dict) -> dict:
         for key, value in updates.items():
@@ -270,33 +329,54 @@ class OpenAIManager:
         """Call OpenAI API for processing."""
         try:
             result = {}
-            
+            conversation_history = None
+
             # Classification
-            result = self._merge_dicts(result, self._prompt_llm_for_task(content_type=content_type, content=content, 
-                                      task_type="classification", domain_name=domain_name))
+            task_result, conversation_history = self._prompt_llm_for_task(
+                content_type=content_type, content=content, 
+                task_type="classification", domain_name=domain_name,
+                mime_type=mime_type, conversation_history=conversation_history
+            )
+            result = self._merge_dicts(result, task_result)
             
             # Summary
-            result = self._merge_dicts(result, self._prompt_llm_for_task(content_type=content_type, content=content,
-                                      task_type="summary", domain_name=domain_name))
+            task_result, conversation_history = self._prompt_llm_for_task(
+                content_type=content_type, content=content,
+                task_type="summary", domain_name=domain_name,
+                mime_type=mime_type, conversation_history=conversation_history
+            )
+            result = self._merge_dicts(result, task_result)
             
             # Tagging
-            result = self._merge_dicts(result, self._prompt_llm_for_task(content_type=content_type, content=content,
-                                      task_type="tagging", domain_name=domain_name))
+            task_result, conversation_history = self._prompt_llm_for_task(
+                content_type=content_type, content=content,
+                task_type="tagging", domain_name=domain_name,
+                mime_type=mime_type, conversation_history=conversation_history
+            )
+            result = self._merge_dicts(result, task_result)
             
             if content_type == "text":
                 # Date extraction
-                result = self._merge_dicts(result, self._prompt_llm_for_task(content_type=content_type, content=content,
-                                          task_type="date", domain_name=domain_name))
+                task_result, conversation_history = self._prompt_llm_for_task(
+                    content_type=content_type, content=content,
+                    task_type="date", domain_name=domain_name,
+                    conversation_history=conversation_history
+                )
+                result = self._merge_dicts(result, task_result)
             
             if content_type == "image":
                 # Image text extraction
-                result = self._merge_dicts(result, self._prompt_llm_for_task(content_type=content_type, content=content,
-                                          task_type="text_extraction", domain_name=domain_name, mime_type=mime_type))
+                task_result, conversation_history = self._prompt_llm_for_task(
+                    content_type=content_type, content=content,
+                    task_type="text_extraction", domain_name=domain_name,
+                    mime_type=mime_type, conversation_history=conversation_history
+                )
+                result = self._merge_dicts(result, task_result)
             
             # Return the responses
             return result
         except Exception as e:
-            self._logger.error(f"Error calling OpenAI for text file: {e}")
+            self._logger.error(f"Error calling OpenAI for {content_type} file: {e}")
             self._logger.exception(e)
             raise e
         
@@ -346,5 +426,4 @@ class OpenAIManager:
             )
         # Return a list of the chunk texts and their embeddings
         return chunk_vectors
-
     
