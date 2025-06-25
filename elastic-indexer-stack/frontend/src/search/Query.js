@@ -26,6 +26,11 @@ export function resolveQuery(requestState,
 
     const queryText = requestState.searchTerm;
     
+    // Early return if query is empty or whitespace-only
+    if (!queryText || !queryText.trim()) {
+        return;
+    }
+    
     if (RESERVED_CHARS.some(char => queryText.includes(char))) {
         requestBody.query = {
             bool: {
@@ -35,9 +40,8 @@ export function resolveQuery(requestState,
     }
     // Only perform semantic search if enabled AND service is available
     else if (paramsRef.current.enableSemanticSearch && 
-             vectorFields?.length && 
-             queryText && 
-             embeddingService.isEmbeddingServiceAvailable()) {
+             embeddingService.isEmbeddingServiceAvailable() &&
+             ((vectorFields && vectorFields.length > 0) || (nestedVectorFields && nestedVectorFields.length > 0))) {
         try {
             requestBody.knn = buildKnnQuery(queryText, embeddingModel, paramsRef, vectorFields, nestedVectorFields);
         }

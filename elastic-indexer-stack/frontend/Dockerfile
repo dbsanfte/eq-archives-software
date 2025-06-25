@@ -4,19 +4,20 @@ FROM node:22 AS build
 # Set working directory
 WORKDIR /app
 
-# Copy package manifests
-COPY package.json ./
-# If you have a package-lock.json, copy it too:
-COPY yarn.lock ./
+# Copy package manifests first for better layer caching
+COPY package.json yarn.lock ./
 
 # Install dependencies
-RUN yarn install
+RUN yarn install --frozen-lockfile
 
-# Copy the rest of the project files
+# Copy source files (test files excluded via .dockerignore)
 COPY . .
 
+# Run tests with coverage and fail if below 90%
+RUN yarn test --coverage --watchAll=false
+
 # Build the React application
-RUN npm run build
+RUN yarn build
 
 # Stage 2: Serve the app with NGINX
 FROM nginx:stable

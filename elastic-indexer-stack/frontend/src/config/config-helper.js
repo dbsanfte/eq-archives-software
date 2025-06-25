@@ -50,7 +50,10 @@ export function getThumbnailField() {
 }
 
 export function getStandardFacetFields() {
-  return [ ...getConfig().valueFacets, ...getConfig().recentFacets ].flat();
+  const config = getConfig();
+  const valueFacets = config.valueFacets || [];
+  const recentFacets = config.recentFacets || [];
+  return [...valueFacets, ...recentFacets].flat();
 }
 
 export function getDatePickerFacetFields() {

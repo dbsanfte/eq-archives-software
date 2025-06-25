@@ -1,3 +1,41 @@
-node_modules
-build
+# Test files
+*.test.js
+*.test.jsx
+*.test.ts
+*.test.tsx
+**/__tests__/
+**/test/
+**/tests/
+
+# Development files
 .git
+.gitignore
+README.md
+*.md
+.env.local
+.env.development
+.env.test
+
+# Node modules (will be installed via package.json)
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# IDE files
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Coverage reports
+coverage/
+.nyc_output
+
+# Build artifacts that shouldn't be copied
+build/
+dist/

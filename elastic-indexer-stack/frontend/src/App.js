@@ -71,7 +71,7 @@ export default function App() {
         mapContextToProps={({ wasSearched, isLoading, executeSearch }) => ({ wasSearched, isLoading, executeSearch })}
       >
         {({ wasSearched, isLoading, executeSearch }) => (
-          <div className="App" style={{ position: "relative" }}>
+          <div className="App" style={{ position: "relative" }} data-testid="app-container">
             {isLoading && (
               <Box
                 sx={{
