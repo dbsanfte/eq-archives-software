@@ -1,68 +1,116 @@
-name: CI/CD
+name: Frontend CI/CD
 
 on:
   pull_request:
-    branches: [ "master" ]
+    branches: [master]
+    paths:
+      - .github/workflows/elastic-indexer-stack-cicd.yml
+      - elastic-indexer-stack/frontend/**
+      - elastic-indexer-stack/k8s-manifests/**
+      - scripts/**
   push:
-    tags:
-      - v*
-  
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
 jobs:
-  build-and-push:
-    runs-on: eqvm  # The self-hosted runner label
-    strategy:
-      fail-fast: false
-      matrix:
-       include:
-         - repo: indexer
-           path: ./elastic-indexer-stack/indexer
-         - name: frontend
-           path: ./elastic-indexer-stack/frontend
+  build:
+    name: Test and build frontend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    outputs:
+      image: ${{ steps.publish.outputs.image }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      
-      - name: Login to Dockerhub
-        uses: docker/login-action@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Validate deployment scripts
+        run: |
+          bash -n scripts/deploy-frontend.sh scripts/smoke-frontend.sh
+          python3 -m py_compile scripts/frontend-secrets.py
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Log in to Docker Hub
+        if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Extract metadata (tags, labels) for Cardano-Docker
-        id: meta
-        uses: docker/metadata-action@v5
+      - name: Reuse an image already published for this commit
+        id: existing
+        if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
+        env:
+          IMAGE_TAG: dbsanfte/frontend:${{ github.sha }}
+        run: |
+          if docker pull "$IMAGE_TAG" > "$RUNNER_TEMP/frontend-pull.log" 2>&1; then
+            echo 'reuse=true' >> "$GITHUB_OUTPUT"
+          elif grep -Eq 'manifest unknown|manifest .* not found' "$RUNNER_TEMP/frontend-pull.log"; then
+            echo 'No image has been published for this commit yet.'
+          else
+            cat "$RUNNER_TEMP/frontend-pull.log"
+            exit 1
+          fi
+      - name: Test and build container
+        if: steps.existing.outputs.reuse != 'true'
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
-          images: |
-            dbsanfte/${{ matrix.repo_name }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=raw,pattern=${{ github.ref_name }}
+          context: elastic-indexer-stack/frontend
+          load: true
+          tags: dbsanfte/frontend:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,mode=max,scope=frontend
+      - name: Smoke test the built image
+        env:
+          IMAGE_TAG: dbsanfte/frontend:${{ github.sha }}
+        run: bash scripts/smoke-frontend.sh "$IMAGE_TAG"
+      - name: Publish the tested image
+        id: publish
+        if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
+        env:
+          IMAGE_TAG: dbsanfte/frontend:${{ github.sha }}
+          REUSE_IMAGE: ${{ steps.existing.outputs.reuse }}
+        run: |
+          if [[ "$REUSE_IMAGE" != 'true' ]]; then docker push "$IMAGE_TAG"; fi
+          image=$(docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE_TAG")
+          echo "image=dbsanfte/frontend@${image#*@}" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push Docker images to registry
-        uses: docker/build-push-action@v6
+  deploy:
+    name: Deploy frontend to eqvm
+    needs: build
+    if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
+    runs-on: [self-hosted, Linux, X64, eqvm]
+    timeout-minutes: 15
+    concurrency:
+      group: eqarchives-frontend-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          context: ${{ matrix.path }}
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-
-      # 4) Deploy to local k3s
-      #- name: Deploy to k3s
-      #  # If k3s is installed as `k3s kubectl`, adjust the commands accordingly
-      #  # Here we assume `kubectl` is available and properly configured via KUBECONFIG
-      #  run: |
-      #    kubectl apply -f ./elastic-indexer-stack/k8s-manifests/00-namespace.yaml
-      #    kubectl apply -f ./elastic-indexer-stack/k8s-manifests/01-pv-pvc.yaml
-      #    kubectl apply -f ./elastic-indexer-stack/k8s-manifests/02-elasticsearch.yaml
-      #    kubectl apply -f ./elastic-indexer-stack/k8s-manifests/03-rabbitmq.yaml
-      #    kubectl apply -f ./elastic-indexer-stack/k8s-manifests/04-file-searcher.yaml
-      #    kubectl apply -f ./elastic-indexer-stack/k8s-manifests/05-indexer.yaml
-      #
-      #    # Optionally, wait for the deployments/statefulsets to be ready
-      #    kubectl rollout status statefulset/elasticsearch -n eq-archive
-      #    kubectl rollout status statefulset/rabbitmq -n eq-archive
-      #    kubectl rollout status statefulset/file-searcher -n eq-archive
-      #    kubectl rollout status deployment/indexer -n eq-archive
+          persist-credentials: false
+      - name: Check this is still the current master commit
+        id: current
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          head=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/master" --jq '.object.sha')
+          if [[ "$head" == "$GITHUB_SHA" ]]; then
+            echo 'deploy=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'Skipping deployment: a newer commit is already on master.'
+          fi
+      - name: Apply manifests and verify the rollout
+        if: steps.current.outputs.deploy == 'true'
+        env:
+          IMAGE: ${{ needs.build.outputs.image }}
+          FRONTEND_ES_USERNAME: ${{ secrets.FRONTEND_ES_USERNAME }}
+          FRONTEND_ES_PASSWORD: ${{ secrets.FRONTEND_ES_PASSWORD }}
+          FRONTEND_OPENAI_API_KEY: ${{ secrets.FRONTEND_OPENAI_API_KEY }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          bash scripts/deploy-frontend.sh "$IMAGE"
+          echo "Deployed \`$IMAGE\` to https://search.eqarchives.org" >> "$GITHUB_STEP_SUMMARY"

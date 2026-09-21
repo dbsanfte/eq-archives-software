@@ -1,3 +1,10 @@
 node_modules
 build
 .git
+.env
+.env.*
+*.secret.txt
+*.kubeconfig
+*-secrets.yaml
+*-secrets.json
+coverage

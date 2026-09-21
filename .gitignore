@@ -4,3 +4,9 @@
 **/*.pyc
 **/*.pyo
 **/*.secret.txt
+.env
+.env.*
+!.env.example
+*.kubeconfig
+*-secrets.yaml
+*-secrets.json
