@@ -45,9 +45,10 @@ patches:
           checksum/frontend-secrets: "$secret_checksum"
 EOF
 "${kubectl[@]}" kustomize "$work_dir" > "$work_dir/frontend.yaml"
+if ! "${kubectl[@]}" get namespace eqarchives-es >/dev/null; then
+  "${kubectl[@]}" create namespace eqarchives-es
+fi
 "${kubectl[@]}" apply --dry-run=server -f "$work_dir/frontend.yaml" >/dev/null
-"${kubectl[@]}" create namespace eqarchives-es --dry-run=client -o yaml |
-  "${kubectl[@]}" apply -f -
 
 # Keep secret values off command lines, disk, logs, and last-applied annotations.
 python3 "$repo_dir/scripts/frontend-secrets.py" |
