@@ -216,7 +216,7 @@ def test_alternate_url_title_and_source_id_fallback():
     assert "archive-id" in result.url
 
 
-@pytest.mark.parametrize("failure", ["status", "timeout", "json", "missing", "partial", "shards", "huge"])
+@pytest.mark.parametrize("failure", ["status", "timeout", "json", "missing", "partial", "shards", "huge", "shape"])
 def test_es_failures_are_explicit_sanitized_and_never_partial_success(failure, monkeypatch):
     def es(request):
         if failure == "timeout":
@@ -229,6 +229,7 @@ def test_es_failures_are_explicit_sanitized_and_never_partial_success(failure, m
             "missing": httpx.Response(200, json={"error": "secret password"}),
             "partial": httpx.Response(200, json={"timed_out": True, "hits": {"hits": [HIT]}}),
             "shards": httpx.Response(200, json={"_shards": {"failed": 1}, "hits": {"hits": [HIT]}}),
+            "shape": httpx.Response(200, json=["secret password"]),
         }
         return values[failure]
 

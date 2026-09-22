@@ -32,7 +32,7 @@ def test_handshake_discovery_search_fetch_and_structured_output_over_http():
         assert rpc(client, "notifications/initialized", request_id=None).status_code == 202
         listed = rpc(client, "tools/list").json()["result"]["tools"]
         tools = {tool["name"]: tool for tool in listed}
-        assert set(tools) == {"search", "fetch"}
+        assert set(tools) == {"search", "fetch", "search_archive", "list_sources"}
         for tool in tools.values():
             assert tool["annotations"] == {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
             assert tool["_meta"]["securitySchemes"] == [{"type": "noauth"}]
@@ -101,7 +101,7 @@ def test_official_sdk_client_can_discover_search_and_fetch():
                 async with streamable_http_client("http://testserver/mcp", http_client=client) as streams:
                     async with ClientSession(*streams) as session:
                         assert (await session.initialize()).server_info.name == "EQ Archives"
-                        assert {tool.name for tool in (await session.list_tools()).tools} == {"search", "fetch"}
+                        assert {tool.name for tool in (await session.list_tools()).tools} == {"search", "fetch", "search_archive", "list_sources"}
                         result = await session.call_tool("search", {"query": "ancient cyclops"})
                         assert not result.is_error
                         document = await session.call_tool("fetch", {"id": result.structured_content["results"][0]["id"]})
