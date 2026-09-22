@@ -1,0 +1,334 @@
+/* The masthead uses local fonts and vector artwork; no external asset requests. */
+body {
+  margin: 0;
+}
+
+.App .sui-layout-header {
+  --archive-ink: #203e32;
+  --archive-muted: #58685d;
+  --archive-paper: #f7f5ee;
+  --archive-gold: #896a34;
+  padding: 0 32px 24px;
+  background: var(--archive-paper);
+  border-bottom: 1px solid #dce0d8;
+  color: var(--archive-ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.App .sui-layout-header__inner {
+  position: relative;
+  max-width: 1252px;
+  margin: 0 auto;
+}
+
+.archive-status-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 20px;
+  min-height: 36px;
+  padding: 7px 0;
+  border-bottom: 1px solid #dee2d8;
+  box-sizing: border-box;
+}
+
+.archive-status-bar .archive-status-bar__count,
+.archive-status-bar .archive-status-bar__rate {
+  color: var(--archive-muted);
+  font: 400 12px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.015em;
+}
+
+.archive-status-bar .archive-status-bar__revision {
+  color: var(--archive-muted);
+  font: 400 11px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace;
+  white-space: nowrap;
+}
+
+.archive-masthead {
+  padding: 20px 0 25px;
+}
+
+.archive-masthead__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.archive-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 11px;
+  flex-shrink: 0;
+  color: var(--archive-ink);
+  text-decoration: none;
+}
+
+.archive-brand img {
+  display: block;
+  width: 36px;
+  height: 36px;
+}
+
+.archive-brand span {
+  font: 600 24px/1.2 Georgia, "Times New Roman", serif;
+  letter-spacing: -0.055em;
+}
+
+.archive-resource-links {
+  display: flex;
+  align-items: center;
+  gap: 25px;
+}
+
+.archive-resource-links a {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  color: var(--archive-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  text-decoration: none;
+}
+
+.archive-resource-links a:hover {
+  color: var(--archive-ink);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.archive-masthead a:focus-visible {
+  outline: 2px solid var(--archive-gold);
+  outline-offset: 5px;
+  border-radius: 2px;
+}
+
+.archive-introduction {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding-top: 32px;
+}
+
+.archive-introduction__copy {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  min-width: 0;
+}
+
+.archive-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+  color: var(--archive-gold);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.16em;
+  line-height: 1.5;
+  text-transform: uppercase;
+}
+
+.archive-eyebrow::before {
+  content: "";
+  width: 22px;
+  height: 1px;
+  background: currentColor;
+}
+
+.archive-introduction h1 {
+  margin: 0;
+  color: var(--archive-ink);
+  font: 400 clamp(32px, 3.3vw, 44px)/1.15 Georgia, "Times New Roman", serif;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+
+.archive-introduction__description {
+  max-width: 560px;
+  margin: 14px 0 0;
+  color: var(--archive-muted);
+  font-size: 14px;
+  line-height: 1.7;
+  text-wrap: pretty;
+}
+
+.archive-introduction__map {
+  display: block;
+  flex-shrink: 0;
+  width: 330px;
+  height: auto;
+  margin: -18px 0 -12px;
+  opacity: 0.85;
+  pointer-events: none;
+}
+
+.App .sui-layout-header .sui-search-box__text-input {
+  min-height: 54px;
+  border: 1px solid #87978a;
+  border-radius: 5px;
+  background: #fff;
+  color: var(--archive-ink);
+  font-size: 15px;
+  box-shadow: 0 2px 5px rgb(32 62 50 / 3%);
+}
+
+.App .sui-layout-header .sui-search-box__text-input:focus {
+  outline: 2px solid var(--archive-ink);
+  outline-offset: 2px;
+  border-color: var(--archive-ink);
+}
+
+.App .sui-layout-header .sui-search-box__submit {
+  min-height: 54px;
+  padding-right: 27px;
+  padding-left: 27px;
+  border: 1px solid var(--archive-ink);
+  border-radius: 5px;
+  background: var(--archive-ink);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  box-shadow: none;
+}
+
+.App .sui-layout-header .sui-search-box__submit:hover {
+  background: #2e5140;
+}
+
+.App .sui-layout-header .sui-search-box__submit:focus-visible {
+  outline: 2px solid var(--archive-gold);
+  outline-offset: 3px;
+}
+
+.App .archive-search-option.MuiButton-root {
+  min-height: 36px;
+  padding: 4px 0;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--archive-muted);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+  box-shadow: none;
+}
+
+.App .archive-search-option.MuiButton-root:hover {
+  background: transparent;
+  color: var(--archive-ink);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  box-shadow: none;
+}
+
+.App .archive-search-option.MuiButton-root:focus-visible {
+  outline: 2px solid var(--archive-gold);
+  outline-offset: 4px;
+}
+
+@media (max-width: 900px) {
+  .archive-introduction__map {
+    width: 250px;
+  }
+
+  .archive-introduction h1 {
+    max-width: 430px;
+  }
+}
+
+@media (max-width: 650px) {
+  .App .sui-layout-header {
+    padding: 0 20px 18px;
+  }
+
+  .archive-masthead {
+    padding: 16px 0 22px;
+  }
+
+  .archive-brand {
+    gap: 8px;
+  }
+
+  .archive-brand img {
+    width: 30px;
+    height: 30px;
+  }
+
+  .archive-brand span {
+    font-size: 21px;
+  }
+
+  .archive-resource-links {
+    gap: 16px;
+  }
+
+  .archive-resource-links a {
+    gap: 5px;
+    min-height: 44px;
+    font-size: 12px;
+  }
+
+  .archive-resource-links__optional {
+    display: none;
+  }
+
+  .archive-introduction {
+    padding-top: 24px;
+  }
+
+  .archive-introduction__copy {
+    max-width: 440px;
+  }
+
+  .archive-introduction h1 {
+    max-width: 360px;
+    font-size: 34px;
+  }
+
+  .archive-introduction__description {
+    max-width: 380px;
+    margin-top: 12px;
+    font-size: 13px;
+    line-height: 1.65;
+  }
+
+  .archive-introduction__map {
+    display: none;
+  }
+
+  .App .sui-layout-header .sui-search-box__submit {
+    padding-right: 20px;
+    padding-left: 20px;
+  }
+}
+
+@media (max-width: 360px) {
+  .App .sui-layout-header {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  .archive-masthead__top {
+    gap: 10px;
+  }
+
+  .archive-resource-links {
+    gap: 10px;
+  }
+
+  .archive-resource-links svg {
+    display: none;
+  }
+
+  .archive-introduction h1 {
+    font-size: 31px;
+  }
+}

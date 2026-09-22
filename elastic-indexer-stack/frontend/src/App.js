@@ -92,6 +92,7 @@ export default function App() {
                   <HeaderContent />
                   <EnhancedSearchBox searchAsYouType={true} /> {/* We'll handle automatic searches ourselves */}
                   <Button
+                    className="archive-search-option"
                     variant="contained"
                     style={{ marginTop: "1rem" }}
                     onClick={() => setShowAdvanced(!showAdvanced)}
@@ -99,6 +100,7 @@ export default function App() {
                     Advanced...
                   </Button>
                   <Button
+                    className="archive-search-option"
                     variant="contained"
                     style={{ marginTop: "1rem", marginLeft: "1rem" }}
                     onClick={() => setShowSyntax(!showSyntax)}

@@ -65,29 +65,21 @@ export default function ArchiveStatusBar() {
 
   return (
     <Box
-      display="flex"
-      flexDirection={{ xs: "column", sm: "row" }}
-      flexWrap="wrap"
-      alignItems="center"
-      justifyContent={{ xs: "center", sm: "space-between" }}
-      gap={1}
-      p={2}
-      mb={2}
-      sx={{ marginBottom: "0px", paddingTop: "0px" }}
+      className="archive-status-bar"
+      aria-label="Archive status"
     >
-      <Typography variant="subtitle1">
+      <Typography className="archive-status-bar__count" variant="subtitle1">
         Documents Indexed: {docCount.toLocaleString()}
       </Typography>
       {indexRate !== null && indexRate > 0 && (
-        <Typography variant="subtitle1">
+        <Typography className="archive-status-bar__rate" variant="subtitle1">
           Indexing Rate: {indexRate.toFixed(2)} docs/min
         </Typography>
       )}
       <Typography
+        className="archive-status-bar__revision"
         variant="body2"
-        color="text.secondary"
         title={buildSha || "Local development build"}
-        sx={{ whiteSpace: "nowrap" }}
       >
         Build: {buildSha ? buildSha.slice(0, 7) : "development"}
       </Typography>
