@@ -33,16 +33,11 @@ describe('Connector', () => {
   describe('createConnector', () => {
     it('should create an ElasticsearchAPIConnector with correct configuration', () => {
       createConnector(mockParamsRef);
-      
+
       expect(ElasticsearchAPIConnector).toHaveBeenCalledWith(
         {
           host: `${window.location.protocol}//${window.location.host}/elasticsearch`,
-          index: 'test_index',
-          connectionOptions: {
-            headers: {
-              Authorization: `Basic ${btoa('test_user:test_pass')}`
-            }
-          }
+          index: 'test_index'
         },
         expect.any(Function)
       );
@@ -71,14 +66,14 @@ describe('Connector', () => {
 
     it('should handle empty search terms by applying filters', () => {
       const result = knnPostProcess(mockRequestBody, { ...mockRequestState, searchTerm: '' });
-      
+
       expect(resolveQuery).not.toHaveBeenCalled();
       expect(filterRegistry.applyFilters).toHaveBeenCalledWith(mockRequestBody);
     });
 
     it('should call resolveQuery when search term exists', () => {
       knnPostProcess(mockRequestBody, mockRequestState);
-      
+
       expect(resolveQuery).toHaveBeenCalledWith(
         mockRequestState,
         mockRequestBody,
@@ -92,11 +87,11 @@ describe('Connector', () => {
 
     it('should apply filters after query resolution', () => {
       knnPostProcess(mockRequestBody, mockRequestState);
-      
+
       // Check that both functions were called
       expect(resolveQuery).toHaveBeenCalled();
       expect(filterRegistry.applyFilters).toHaveBeenCalled();
-      
+
       // Check the order by comparing their invocation call order
       const resolveQueryCallOrder = resolveQuery.mock.invocationCallOrder[0];
       const applyFiltersCallOrder = filterRegistry.applyFilters.mock.invocationCallOrder[0];
@@ -109,26 +104,21 @@ describe('Connector', () => {
       const mockConnector = {};
       ElasticsearchAPIConnector.mockReturnValue(mockConnector);
       createConfig.mockReturnValue({ mockConfig: true });
-      
+
       const result = getSearchConfig(mockParamsRef);
-      
+
       // Verify ElasticsearchAPIConnector was called (which means createConnector was executed)
       expect(ElasticsearchAPIConnector).toHaveBeenCalledWith(
         {
           host: `${window.location.protocol}//${window.location.host}/elasticsearch`,
-          index: 'test_index',
-          connectionOptions: {
-            headers: {
-              Authorization: `Basic ${btoa('test_user:test_pass')}`
-            }
-          }
+          index: 'test_index'
         },
         expect.any(Function)
       );
-      
+
       // Verify createConfig was called with the connector
       expect(createConfig).toHaveBeenCalledWith(mockConnector);
-      
+
       // Verify the result is what createConfig returns
       expect(result).toEqual({ mockConfig: true });
     });

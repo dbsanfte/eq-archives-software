@@ -16,18 +16,10 @@ export default function ArchiveStatusBar() {
   const POLL_INTERVAL = 5000; // 5 seconds
   const MAX_SAMPLES = 30 / (POLL_INTERVAL / 1000); // 6 samples for 30 seconds
 
-  const { 
-    elasticsearch_username,
-    elasticsearch_password,
-    indexName 
-  } = getConfig();
+  const { indexName } = getConfig();
 
   const fetchStats = () => {
-    // Create basic auth header using the provided credentials
-    const authHeader = "Basic " + btoa(`${elasticsearch_username}:${elasticsearch_password}`);
-    fetch("/elasticsearch/" + indexName + "/_count", {
-      headers: { "Authorization": authHeader }
-    })
+    fetch("/elasticsearch/" + indexName + "/_count")
       .then((response) => response.json())
       .then((data) => {
         // Use count from the _count endpoint

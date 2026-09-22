@@ -1,6 +1,10 @@
 {
   "indexName": "eq-archive",
-  "searchFields": ["text_full", "llm_summary", "llm_image_text"],
+  "searchFields": [
+    "text_full",
+    "llm_summary",
+    "llm_image_text"
+  ],
   "resultFields": [
     "title",
     "llm_summary",
@@ -17,18 +21,43 @@
     "domain_name",
     "parent_id"
   ],
-  "querySuggestFields": ["text_full", "llm_summary", "llm_image_text"],
+  "querySuggestFields": [
+    "text_full",
+    "llm_summary",
+    "llm_image_text"
+  ],
   "titleField": "title",
   "urlField": "url",
   "thumbnailField": "thumbnail",
-  "sortFields": ["capture_date", "llm_guessed_date", "last_indexed"],
-  "valueFacets": ["domain_name", "llm_content_flavour", "file_type", "mime_type", "mailing_list_name", "llm_tags"],
-  "datePickerFacets": ["capture_date", "llm_guessed_date"],
-  "nestedDatePickerFacets": ["llm_extracted_dates"],
-  "vectorFields": ["llm_image_text_vector", "llm_summary_vector"],
-  "nestedVectorFields": ["text"],
-  "recentFacets": ["last_indexed"],
-  "embeddingModel": "text-embedding-nomic-embed-text-v1.5@q8_0",
-  "elasticsearch_username": "readonly",
-  "elasticsearch_password": "e3cc5c50-ec6a-11ef-af74-00155d4b6099"
+  "sortFields": [
+    "capture_date",
+    "llm_guessed_date",
+    "last_indexed"
+  ],
+  "valueFacets": [
+    "domain_name",
+    "llm_content_flavour",
+    "file_type",
+    "mime_type",
+    "mailing_list_name",
+    "llm_tags"
+  ],
+  "datePickerFacets": [
+    "capture_date",
+    "llm_guessed_date"
+  ],
+  "nestedDatePickerFacets": [
+    "llm_extracted_dates"
+  ],
+  "vectorFields": [
+    "llm_image_text_vector",
+    "llm_summary_vector"
+  ],
+  "nestedVectorFields": [
+    "text"
+  ],
+  "recentFacets": [
+    "last_indexed"
+  ],
+  "embeddingModel": "text-embedding-nomic-embed-text-v1.5@q8_0"
 }

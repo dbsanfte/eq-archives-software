@@ -13,8 +13,6 @@ filterRegistry.listFilters();
 
 export const createConnector = (paramsRef) => {
   const {
-    elasticsearch_username,
-    elasticsearch_password,
     indexName,
     vectorFields,
     nestedVectorFields,
@@ -27,7 +25,7 @@ export const createConnector = (paramsRef) => {
     // Debug: Log filter count at post-process time
     console.log(`[Connector] Post-processing - Filter count: ${filterRegistry.getFilterCount()}`);
     filterRegistry.listFilters();
-    
+
     // Make sure any requested sorting is applied, the default is just by _score:
     if (requestState.sortField && requestState.sortField !== "") {
         requestBody.sort[0] = {
@@ -41,18 +39,18 @@ export const createConnector = (paramsRef) => {
       requestBody = filterRegistry.applyFilters(requestBody);
       return requestBody;
     }
-    
+
     // Otherwise, resolve the query based on the search term
     resolveQuery(
-        requestState, 
-        requestBody, 
-        searchFields, 
-        paramsRef, 
+        requestState,
+        requestBody,
+        searchFields,
+        paramsRef,
         vectorFields,
-        nestedVectorFields, 
+        nestedVectorFields,
         embeddingModel
     );
-    
+
     // Apply any registered filters from our FilterRegistry service
     requestBody = filterRegistry.applyFilters(requestBody);
 
@@ -62,12 +60,7 @@ export const createConnector = (paramsRef) => {
   const connector = new ElasticsearchAPIConnector(
     {
       host,
-      index: indexName,
-      connectionOptions: {
-        headers: {
-          Authorization: "Basic " + btoa(elasticsearch_username + ":" + elasticsearch_password)
-        }
-      }
+      index: indexName
     },
     knnPostProcess
   );
