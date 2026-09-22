@@ -1,5 +1,5 @@
 import React from 'react';
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { useMediaQuery } from '@mui/material';
 import CustomResultView from './CustomResultView';
 import ButtonRow from './ButtonRow';
@@ -71,8 +71,7 @@ test.each(['<em>A matching passage</em>', ''])('keeps pending summaries out of c
   } else {
     expect(screen.getByText('Open the full text to explore this record.')).toBeInTheDocument();
   }
-  fireEvent.click(screen.getByRole('button', { name: 'Preview Full Text' }));
-  expect(screen.getByRole('heading', { name: 'Full archived text' })).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: 'Read document' })).toHaveAttribute('href', '/document?id=archive%2Fid+with+spaces');
 });
 
 test('omits blank labels and safely handles missing tag lists', () => {
@@ -84,13 +83,9 @@ test('omits blank labels and safely handles missing tag lists', () => {
   log.mockRestore();
 });
 
-test.each([false, true])('previews Markdown and opens alternate links on mobile=%s', async mobile => {
-  useMediaQuery.mockReturnValue(mobile);
+test('opens alternate source links from the result actions', () => {
   render(<ButtonRow result={result} />);
-  fireEvent.click(screen.getByRole('button', { name: 'Preview Full Text' }));
-  expect(screen.getByRole('heading', { name: 'Full archived text' })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(screen.getByRole('link', { name: 'Read document' })).toHaveAttribute('href', '/document?id=archive%2Fid+with+spaces');
   fireEvent.click(screen.getByRole('button', { name: 'Alternate Link' }));
   expect(window.open).toHaveBeenCalledWith(result.alternate_url.raw, '_blank', 'noopener,noreferrer');
 });
@@ -110,17 +105,14 @@ test('copies an encoded permalink and dismisses the confirmation', async () => {
   } finally { jest.useRealTimers(); }
 });
 
-test('handles missing optional links, missing text, and denied clipboard access', async () => {
+test('handles missing optional links, missing IDs, and denied clipboard access', async () => {
   const error = new Error('Clipboard denied');
   navigator.clipboard.writeText.mockRejectedValue(error);
   const log = jest.spyOn(console, 'error').mockImplementation(() => {});
   render(<ButtonRow result={{}} />);
   fireEvent.click(screen.getByRole('button', { name: 'Alternate Link' }));
   expect(window.open).not.toHaveBeenCalled();
-  fireEvent.click(screen.getByRole('button', { name: 'Preview Full Text' }));
-  expect(screen.getByRole('dialog')).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-  await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+  expect(screen.queryByRole('link', { name: 'Read document' })).not.toBeInTheDocument();
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy Permalink' })); });
   expect(window.alert).toHaveBeenCalledWith('Failed to copy permalink to clipboard');
   expect(log).toHaveBeenCalledWith('Failed to copy URL: ', error);
@@ -142,4 +134,12 @@ test('reader and copy links use the real ES identity, including reserved charact
   expect(link.searchParams.get('id')).toBe(exact);
   await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Copy Permalink' })));
   expect(navigator.clipboard.writeText).toHaveBeenCalledWith(link.href);
+});
+
+
+test('search results use the reader without a duplicate full-text preview button', () => {
+  render(<CustomResultView result={result} />);
+  expect(screen.getByRole('link', { name: 'Read document' })).toHaveAttribute('href', '/document?id=archive%2Fid+with+spaces');
+  expect(screen.queryByRole('button', { name: 'Preview Full Text' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
 });

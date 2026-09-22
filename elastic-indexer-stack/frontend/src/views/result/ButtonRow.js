@@ -2,16 +2,11 @@ import React, { useContext, useState } from "react";
 import PropTypes from "prop-types";
 import { Button, Snackbar } from "@mui/material";
 import { readerUrl, recordId, ReaderSearchContext } from "../reader/reader-utils";
-import DocumentPreview from "./DocumentPreview";
 
 const ButtonRow = ({ result }) => {
   const find = useContext(ReaderSearchContext);
   const href = readerUrl(recordId(result), { find });
-  const [previewOpen, setPreviewOpen] = useState(false);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
-
-  const handlePreviewOpen = () => setPreviewOpen(true);
-  const handlePreviewClose = () => setPreviewOpen(false);
 
   const handlePermalink = () => {
     const searchUrl = window.location.origin + href;
@@ -32,10 +27,7 @@ const ButtonRow = ({ result }) => {
   return (
     <>
       <div className="archive-result-actions">
-        {recordId(result) && <Button component="a" href={href} variant="contained">Read document</Button>}
-        <Button variant="outlined" onClick={handlePreviewOpen} className="archive-result-preview">
-          Preview Full Text
-        </Button>
+        {recordId(result) && <Button component="a" href={href} variant="contained" className="archive-result-reader">Read document</Button>}
         <Button
           variant="text"
           onClick={() => {
@@ -50,8 +42,6 @@ const ButtonRow = ({ result }) => {
           Copy Permalink
         </Button>
       </div>
-
-      <DocumentPreview open={previewOpen} onClose={handlePreviewClose} result={result} />
 
       {/* Notification for successful copy */}
       <Snackbar
@@ -70,9 +60,6 @@ ButtonRow.propTypes = {
       raw: PropTypes.string,
     }),
     alternate_url: PropTypes.shape({
-      raw: PropTypes.string,
-    }),
-    text_full: PropTypes.shape({
       raw: PropTypes.string,
     }),
   }).isRequired,
