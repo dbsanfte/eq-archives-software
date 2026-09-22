@@ -1,6 +1,7 @@
 {
   "name": "eqarchives-frontend",
   "version": "1.8.0",
+  "license": "AGPL-3.0-only",
   "private": true,
   "dependencies": {
     "@elastic/react-search-ui": "latest",

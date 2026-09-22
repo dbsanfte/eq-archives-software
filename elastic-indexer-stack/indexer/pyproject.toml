@@ -5,6 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "indexer"
 version = "0.0.1"
+license = "AGPL-3.0-only"
 
 [tool.pytest.ini_options]
 pythonpath = "src/indexer"
