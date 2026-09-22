@@ -122,7 +122,7 @@ bash scripts/smoke-embeddings.sh eqarchives-frontend:local
 - Browser tests mock API responses and use disposable containers with dummy
   credentials. They cover sort-menu overlap with empty and floating date labels
   at 320, 390, 768 and 1280 px, plus sorting and date-picker interaction. They also
-  verify lightweight result requests, on-demand full-text previews and the semantic
+  verify lightweight result requests, reader navigation and the semantic
   search toggle/keyword-query behavior at mobile and desktop widths. Grouped-capture
   regressions cover duplicates spanning raw batches, unique results across pages,
   the all-captures toggle and exact dated previews. Extend
@@ -229,10 +229,13 @@ ChatGPT/Claude or Deep Research validation after actually performing it.
   existing asynchronous input regression coverage when changing search controls.
 - Result cards request metadata and a short escaped `text_full` highlight; full
   text, OCR bodies, nested chunks and vectors are excluded from result `_source`.
-  Keep nested KNN ranking but do not return unused `inner_hits`. Full previews use
-  a size-one `ids` query through the existing search proxy and return only
-  `text_full`. Prefer the actual Elasticsearch `_meta.id`; preserve loading,
-  empty/error/retry states, cancellation and reuse while the card is mounted.
+  Keep nested KNN ranking but do not return unused `inner_hits`. **Read document**
+  is the sole full-text action on result cards; do not restore the redundant
+  **Preview Full Text** button or mount preview dialogs in result actions. The
+  reader occupies the full-width primary action row on phones. The separate
+  capture-history previews use a size-one `ids` query through the existing search
+  proxy and return only `text_full`. Prefer the actual Elasticsearch `_meta.id`;
+  preserve loading, empty/error/retry states and cancellation.
 - Repeated website captures group by exact original page by default. Preserve
   query strings, path case and protocol differences; never group by title or merge
   unrelated messages/attachments. `GroupedSearch.js` scans metadata in 50-record

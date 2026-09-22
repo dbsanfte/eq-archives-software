@@ -167,13 +167,13 @@ class FrontendBrowserTests(unittest.TestCase):
                 finally:
                     context.close()
 
-    def test_lightweight_search_and_on_demand_document_preview(self):
+    def test_lightweight_search_opens_the_reader_without_a_duplicate_preview(self):
         for width in (390, 1280):
             with self.subTest(width=width):
                 context = self.browser.new_context(viewport={"width": width, "height": 900})
                 try:
                     page = context.new_page()
-                    requests, previews, embeddings = [], [], []
+                    requests, documents, embeddings = [], [], []
                     source = {
                         "title": "Ancient Cyclops notes", "url": "https://example.org/source",
                         "llm_summary": "A useful archive summary", "text_full": "# Preserved source\n\nThe complete original document.",
@@ -188,9 +188,13 @@ class FrontendBrowserTests(unittest.TestCase):
                             return route.fulfill(json={"count": 1})
                         body = route.request.post_data_json
                         if 'ids' in body.get('query', {}):
-                            previews.append(body)
-                            self.assertEqual(body, {"size": 1, "_source": ["text_full"], "query": {"ids": {"values": [doc_id]}}})
-                            return route.fulfill(json={"hits": {"hits": [{"_id": doc_id, "_source": {"text_full": source['text_full']}}]}})
+                            documents.append(body)
+                            self.assertEqual(body['size'], 1)
+                            self.assertEqual(body['query']['ids']['values'], [doc_id])
+                            self.assertIn('text_full', body['_source'])
+                            self.assertIn('title', body['_source'])
+                            self.assertNotIn('text', body['_source'])
+                            return route.fulfill(json={"hits": {"hits": [{"_id": doc_id, "_source": {field: source[field] for field in body['_source'] if field in source}}]}})
                         requests.append(body)
                         selected = body['_source']
                         included = selected.get('includes', ['*'])
@@ -224,18 +228,17 @@ class FrontendBrowserTests(unittest.TestCase):
                     page.goto(self.base_url, wait_until='networkidle')
                     expect(page.get_by_role('link', name='Ancient Cyclops notes')).to_be_visible()
                     expect(page.get_by_text('A matching archive passage')).to_be_visible()
-                    self.assertEqual(previews, [])
-                    page.get_by_role('button', name='Preview Full Text').click()
-                    expect(page.get_by_role('heading', name='Preserved source')).to_be_visible()
-                    expect(page.get_by_text('The complete original document.')).to_be_visible()
-                    self.assertEqual(len(previews), 1)
-                    page.get_by_role('button', name='Close', exact=True).click()
-                    expect(page.get_by_role('dialog')).to_have_count(0)
-                    page.get_by_role('button', name='Preview Full Text').click()
-                    expect(page.get_by_role('heading', name='Preserved source')).to_be_visible()
-                    self.assertEqual(len(previews), 1)
-                    page.get_by_role('button', name='Close', exact=True).click()
-                    expect(page.get_by_role('dialog')).to_have_count(0)
+                    self.assertEqual(documents, [])
+                    expect(page.get_by_role('button', name='Preview Full Text', exact=True)).to_have_count(0)
+                    reader = page.get_by_role('link', name='Read document', exact=True)
+                    expect(reader).to_be_visible()
+                    self.assertEqual(parse_qs(urlparse(reader.get_attribute('href')).query)['id'], [doc_id])
+                    if width <= 650:
+                        actions = page.locator('.archive-result-actions').bounding_box()
+                        primary = reader.bounding_box()
+                        self.assertAlmostEqual(primary['width'], actions['width'], delta=1)
+                        self.assertGreaterEqual(page.get_by_role('button', name='Alternate Link', exact=True).bounding_box()['y'], primary['y'] + primary['height'])
+                    self.assertTrue(page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
 
                     def search(value):
                         with page.expect_response(lambda response: '/_search' in response.url and
@@ -256,7 +259,13 @@ class FrontendBrowserTests(unittest.TestCase):
                     search('cleric soloing')
                     self.assertEqual(len(embeddings), 1)
                     self.assertNotIn('knn', requests[-1])
-                    self.assertEqual(len(previews), 1)
+                    self.assertEqual(documents, [])
+                    reader.click()
+                    expect(page.get_by_role('heading', name='Preserved source', exact=True)).to_be_visible()
+                    expect(page.get_by_text('The complete original document.', exact=True)).to_be_visible()
+                    expect(page.get_by_role('dialog')).to_have_count(0)
+                    self.assertEqual(len(documents), 1)
+                    self.assertTrue(page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
                 finally:
                     context.close()
 

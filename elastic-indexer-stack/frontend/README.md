@@ -82,7 +82,8 @@ individual-record behavior.
 
 ## Document reader and comparisons
 
-**Read document** opens a dedicated reader with the complete indexed text,
+**Read document** is the full-text action on search result cards. It opens a
+dedicated reader with the complete indexed text,
 formatted Markdown or exact source text, literal find/highlight navigation,
 source links, capture provenance, citations and text downloads. The compact
 archive header retains the deployed build SHA and MCP guide. OCR is a separate,
@@ -251,10 +252,11 @@ Its original Apache-2.0 terms and attribution are retained in
 Result cards download metadata and one short highlighted text excerpt. Raw full
 text, OCR bodies, nested text chunks and embedding vectors stay out of result
 responses. Nested vector matching remains enabled without returning unused
-`inner_hits`. **Preview Full Text** fetches only the chosen document, using its
-exact Elasticsearch ID through the existing search proxy. The dialog supports
-loading, empty/error states and retry, cancels a closed request, and reuses a
-loaded document while its card is mounted.
+`inner_hits`. **Read document** loads the chosen document and its provenance by
+exact Elasticsearch ID through the existing search proxy. The main result actions
+link to the reader instead of mounting a preview dialog. The **Preview** action within
+capture history uses a lightweight text-only request with loading, empty/error,
+retry and cancellation states.
 
 Embedding preparation and query construction share their eligibility rules in
 `src/search/QueryPolicy.js`. Quoted/operator searches, disabled semantic search,
@@ -271,6 +273,7 @@ deployment. Missing static files return 404 rather than the SPA shell and do not
 receive an immutable cache policy. There is no shared API response cache.
 
 `scripts/smoke-frontend.sh` runs the real NGINX compression/cache regression.
-Browser tests verify compact result requests, on-demand preview loading, semantic
+Browser tests verify compact result requests, direct reader navigation, capture
+history previews, and semantic
 search and keyword-only behavior at mobile and desktop widths. Jest covers
 preview retries/cancellation, obsolete input, embedding deadlines and cache bounds.
