@@ -3,6 +3,7 @@
 
 import os
 import fnmatch
+from datetime import datetime, timedelta
 import unittest
 
 from playwright.sync_api import expect, sync_playwright
@@ -254,6 +255,93 @@ class FrontendBrowserTests(unittest.TestCase):
                     self.assertEqual(len(embeddings), 1)
                     self.assertNotIn('knn', requests[-1])
                     self.assertEqual(len(previews), 1)
+                finally:
+                    context.close()
+
+    def test_repeated_captures_group_across_pages_and_keep_individual_previews(self):
+        for width in (390, 1280):
+            with self.subTest(width=width):
+                context = self.browser.new_context(viewport={"width": width, "height": 950})
+                try:
+                    page = context.new_page()
+                    previews, searches, histories = [], [], []
+
+                    def hit(path, day, title):
+                        stamp = (datetime(2000, 1, 1) + timedelta(days=day)).strftime('%Y%m%d%H%M%S')
+                        return {"_id": f"websites/example.org/{stamp}/{path}", "_score": 1, "_source": {
+                            "title": title, "url": f"https://web.archive.org/web/{stamp}/http://example.org/{path}",
+                            "capture_date": (datetime(2000, 1, 1) + timedelta(days=day)).isoformat(),
+                            "llm_summary": "Archived source summary", "domain_name": "example.org"
+                        }}
+
+                    duplicate = [hit('thread?id=1', day, 'Repeated page') for day in range(60)]
+                    records = duplicate[:50] + [hit(f'thread?id={i}', 1, f'Distinct page {i}') for i in range(2, 26)] + duplicate[50:]
+                    # Duplicate captures straddle raw batches; query-string pages remain distinct.
+                    facets = {field: {"buckets": []} for field in (
+                        "domain_name", "llm_content_flavour", "file_type", "mime_type", "mailing_list_name", "llm_tags"
+                    )}
+                    facets["last_indexed"] = {"buckets": {}}
+
+                    def archive(route):
+                        if route.request.url.endswith('/_count'):
+                            return route.fulfill(json={"count": len(records)})
+                        body = route.request.post_data_json
+                        if 'ids' in body.get('query', {}):
+                            previews.append(body)
+                            requested = body['query']['ids']['values'][0]
+                            return route.fulfill(json={"hits": {"hits": [{"_id": requested, "_source": {"text_full": '# Selected capture\n\nExact source: ' + requested}}]}})
+                        if 'preference=archive-captures' in route.request.url:
+                            histories.append(body)
+                            self.assertNotIn('text_full', body['_source'])
+                            return route.fulfill(json={"hits": {"total": {"value": 2, "relation": "eq"}, "hits": [duplicate[59], duplicate[0]]}})
+                        searches.append(body)
+                        start = body.get('from', 0)
+                        batch = records[start:start + body['size']]
+                        route.fulfill(json={"hits": {"total": {"value": len(records), "relation": "eq"}, "hits": batch},
+                                            "aggregations": {"facet_bucket_all": {"doc_count": len(records), **facets}}})
+
+                    page.route('**/elasticsearch/**', archive)
+                    page.goto(self.base_url, wait_until='networkidle')
+                    expect(page.locator('.sui-result')).to_have_count(20)
+                    expect(page.get_by_role('link', name='Repeated page', exact=True)).to_have_count(1)
+                    expect(page.get_by_role('link', name='Distinct page 2', exact=True)).to_have_count(1)
+                    expect(page.get_by_text('Showing sources 1–20 · 84 matching captures')).to_be_visible()
+                    self.assertEqual(histories, [])
+                    self.assertEqual(previews, [])
+                    page.get_by_role('button', name='Next', exact=True).click()
+                    expect(page.locator('.sui-result')).to_have_count(5)
+                    expect(page.get_by_role('link', name='Repeated page', exact=True)).to_have_count(0)
+                    expect(page.get_by_role('button', name='Next', exact=True)).to_be_disabled()
+                    page.get_by_role('button', name='Previous', exact=True).click()
+                    expect(page.get_by_role('link', name='Repeated page', exact=True)).to_have_count(1)
+                    first = page.locator('.sui-result').first
+                    first.get_by_role('button', name='View captures', exact=True).click()
+                    expect(first.get_by_text('2000-02-29', exact=True)).to_be_visible()
+                    expect(first.get_by_text('2000-01-01', exact=True)).to_be_visible()
+                    first.get_by_role('button', name='Preview capture from 2000-01-01').click()
+                    expect(page.get_by_role('heading', name='Selected capture', exact=True)).to_be_visible()
+                    self.assertEqual(previews[-1]['query']['ids']['values'], [duplicate[0]['_id']])
+                    expect(page.get_by_role('heading', name='Capture · 2000-01-01')).to_be_visible()
+                    page.get_by_role('button', name='Close', exact=True).click()
+                    expect(page.get_by_role('dialog')).to_have_count(0)
+                    self.assertTrue(page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
+                    for link in first.locator('.archive-capture-actions a').all():
+                        bounds = link.bounding_box()
+                        self.assertLessEqual(bounds['x'] + bounds['width'], width)
+                    first.get_by_role('button', name='Hide captures (2)', exact=True).click()
+                    first.get_by_role('button', name='View captures (2)', exact=True).click()
+                    self.assertEqual(len(histories), 1)
+                    page.get_by_role('checkbox', name='Group repeated captures').uncheck()
+                    expect(page.get_by_role('link', name='Repeated page', exact=True)).to_have_count(20)
+                    page.get_by_role('checkbox', name='Group repeated captures').check()
+                    expect(page.get_by_role('link', name='Repeated page', exact=True)).to_have_count(1)
+                    expect(page.get_by_text('Showing sources 1–20 · 84 matching captures')).to_be_visible()
+                    self.assertTrue(all(body.get('from', 0) + body['size'] <= 1000 for body in searches))
+                    # An old ungrouped bookmark must not strand readers on an empty page.
+                    page.goto(self.base_url + '/?current=n_50_n', wait_until='networkidle')
+                    expect(page.locator('.sui-result')).to_have_count(5)
+                    expect(page.get_by_text('Page 2', exact=True)).to_be_visible()
+                    expect(page.get_by_role('button', name='Next', exact=True)).to_be_disabled()
                 finally:
                     context.close()
 

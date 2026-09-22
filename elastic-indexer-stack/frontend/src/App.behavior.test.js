@@ -43,7 +43,7 @@ jest.mock('./views/search/AdvancedSettings', () => ({
 beforeEach(() => {
   jest.clearAllMocks();
   getSearchConfig.mockReturnValue({ searchQuery: { facets: {} } });
-  mockSearchState = { wasSearched: true, isLoading: true, executeSearch: jest.fn() };
+  mockSearchState = { wasSearched: true, isLoading: true, executeSearch: jest.fn(), setCurrent: jest.fn(), totalResults: 10, pagingStart: 1, pagingEnd: 5 };
   jest.spyOn(window, 'scrollTo').mockImplementation(() => {});
 });
 afterEach(() => jest.restoreAllMocks());
@@ -72,4 +72,17 @@ test('renders before the first search even without optional search configuration
   expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
   expect(screen.queryByText('Sort results')).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Back to Top' })).not.toBeInTheDocument();
+});
+
+
+test('groups captures by default and resets pagination when showing every capture', () => {
+  render(<App />);
+  const toggle = screen.getByRole('checkbox', { name: 'Group repeated captures' });
+  expect(toggle).toBeChecked();
+  fireEvent.click(toggle);
+  expect(getSearchConfig.mock.calls[0][0].current.groupCaptures).toBe(false);
+  expect(mockSearchState.setCurrent).toHaveBeenCalledWith(1);
+  expect(screen.getByText('Page information')).toBeVisible();
+  fireEvent.click(toggle);
+  expect(getSearchConfig.mock.calls[0][0].current.groupCaptures).toBe(true);
 });

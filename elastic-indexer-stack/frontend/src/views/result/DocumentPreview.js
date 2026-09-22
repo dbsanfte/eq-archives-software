@@ -4,7 +4,7 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { DOCUMENT_UNAVAILABLE, fetchDocumentText } from '../../search/DocumentService';
 
-export default function DocumentPreview({ open, onClose, result }) {
+export default function DocumentPreview({ open, onClose, result, title = 'Preview Text' }) {
   const id = result._meta?.id || result.id?.raw;
   const inlineText = typeof result.text_full?.raw === 'string' ? result.text_full.raw : undefined;
   const [loaded, setLoaded] = useState(null);
@@ -32,7 +32,7 @@ export default function DocumentPreview({ open, onClose, result }) {
   const error = failure?.id === id ? failure?.message : null;
   return (
     <Dialog open={open} onClose={onClose} fullWidth maxWidth="md">
-      <DialogTitle>Preview Text</DialogTitle>
+      <DialogTitle>{title}</DialogTitle>
       <DialogContent dividers className="archive-preview-content">
         {text !== undefined ? (
           text ? <Markdown remarkPlugins={[remarkGfm]}>{text}</Markdown>

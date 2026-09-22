@@ -123,7 +123,9 @@ bash scripts/smoke-embeddings.sh eqarchives-frontend:local
   credentials. They cover sort-menu overlap with empty and floating date labels
   at 320, 390, 768 and 1280 px, plus sorting and date-picker interaction. They also
   verify lightweight result requests, on-demand full-text previews and the semantic
-  search toggle/keyword-query behavior at mobile and desktop widths. Extend
+  search toggle/keyword-query behavior at mobile and desktop widths. Grouped-capture
+  regressions cover duplicates spanning raw batches, unique results across pages,
+  the all-captures toggle and exact dated previews. Extend
   this suite for browser-dependent bugs. `PLAYWRIGHT_CHROMIUM_EXECUTABLE` can
   select an existing local Chromium binary; the default uses Playwright's install.
 - [smoke-embeddings.sh](scripts/smoke-embeddings.sh) downloads the pinned model,
@@ -231,6 +233,18 @@ ChatGPT/Claude or Deep Research validation after actually performing it.
   a size-one `ids` query through the existing search proxy and return only
   `text_full`. Prefer the actual Elasticsearch `_meta.id`; preserve loading,
   empty/error/retry states, cancellation and reuse while the card is mounted.
+- Repeated website captures group by exact original page by default. Preserve
+  query strings, path case and protocol differences; never group by title or merge
+  unrelated messages/attachments. `GroupedSearch.js` scans metadata in 50-record
+  batches within the existing 1,000-capture window and caches one active search.
+  Group representatives retain the selected search/sort order. Keep groups unique
+  across pages, invalidate on filters/sort/semantic settings, and stop superseded
+  scans. Counts/facets describe captures, not unique groups; use Previous/Next and
+  label browsing limits. This is live-index pagination, not a snapshot.
+  `CaptureService.js` loads dated history separately, including versions outside
+  current filters, with escaped exact-ID patterns and exact URL validation of
+  legacy candidates. Keep metadata/full text separate, exact preview IDs, retries,
+  cancellation, and the 1,000-record history bound. No index migration is needed.
 - Keep embedding eligibility shared between the input and query builder via
   `QueryPolicy.js`: blank/operator queries, disabled semantic search, missing
   vector fields and service cooldown must not fetch unused embeddings. Preserve

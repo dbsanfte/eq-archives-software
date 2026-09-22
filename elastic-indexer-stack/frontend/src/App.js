@@ -18,7 +18,7 @@ import {
   getDatePickerFacetFields,
   buildSortOptionsFromConfig
 } from "./config/config-helper";
-import { Box, Button, Collapse, CircularProgress, CssBaseline, ThemeProvider } from "@mui/material";
+import { Box, Button, Checkbox, FormControlLabel, Collapse, CircularProgress, CssBaseline, ThemeProvider } from "@mui/material";
 import { KeyboardArrowUp } from "@mui/icons-material";
 import CustomResultView from "./views/result/CustomResultView";
 import HeaderContent from "./views/HeaderContent"; 
@@ -30,13 +30,14 @@ import { getSearchConfig } from "./search/Connector";
 import DateRangeFacet from "./views/search/DateRangeFacet";
 import EnhancedSearchBox from "./views/search/EnhancedSearchBox";
 import archiveTheme from "./theme";
+import { CapturePaging, CaptureSummary } from "./views/search/CapturePaging";
 import fieldLabels from "./config/field-labels";
 import "./views/ArchiveTheme.css";
 
 export default function App() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showSyntax, setShowSyntax] = useState(false);
-  const [knnParams, setKnnParams] = useState(DEFAULT_KNN_PARAMS);
+  const [knnParams, setKnnParams] = useState({ ...DEFAULT_KNN_PARAMS, groupCaptures: true });
 
   const knnParamsRef = useRef(knnParams);
   useEffect(() => {
@@ -73,9 +74,9 @@ export default function App() {
       <CssBaseline />
       <SearchProvider config={config}>
         <WithSearch
-          mapContextToProps={({ wasSearched, isLoading, executeSearch }) => ({ wasSearched, isLoading, executeSearch })}
+          mapContextToProps={({ wasSearched, isLoading, executeSearch, setCurrent, totalResults, pagingStart, pagingEnd, rawResponse }) => ({ wasSearched, isLoading, executeSearch, setCurrent, totalResults, pagingStart, pagingEnd, rawResponse })}
         >
-          {({ wasSearched, isLoading, executeSearch }) => (
+          {({ wasSearched, isLoading, executeSearch, setCurrent, ...searchState }) => (
             <div className="App" style={{ position: "relative" }} data-testid="app-container">
               {isLoading && (
                 <Box
@@ -166,13 +167,21 @@ export default function App() {
                 }
                 bodyHeader={
                   <>
-                    {wasSearched && <PagingInfo />}
+                    {wasSearched && <div className="archive-group-controls">
+                      <FormControlLabel label="Group repeated captures" control={<Checkbox checked={knnParams.groupCaptures} onChange={event => {
+                        const next = { ...knnParamsRef.current, groupCaptures: event.target.checked };
+                        knnParamsRef.current = next;
+                        setKnnParams(next);
+                        setCurrent(1);
+                      }} />} />
+                      {knnParams.groupCaptures ? <CaptureSummary {...searchState} /> : <PagingInfo />}
+                    </div>}
                     {wasSearched && <ResultsPerPage />}
                   </>
                 }
                 bodyFooter={
                   <div>
-                    <Paging />
+                    <Paging view={knnParams.groupCaptures ? CapturePaging : undefined} isLoading={isLoading} />
                     {wasSearched && (
                       <Box sx={{ display: 'flex', justifyContent: 'center', marginTop: '1rem' }}>
                         <Button

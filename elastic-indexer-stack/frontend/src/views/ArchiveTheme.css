@@ -449,3 +449,26 @@
     padding: 16px;
   }
 }
+
+/* Repeated captures share a source card; each dated record stays accessible. */
+.archive-group-controls { min-width: 0; }
+.archive-group-controls .MuiFormControlLabel-label { font-size: 0.88rem; }
+.archive-group-summary { color: var(--archive-muted); font-size: 0.85rem; line-height: 1.6; }
+.archive-group-summary small { display: block; max-width: 38rem; font-size: 0.78rem; }
+.archive-group-paging { display: flex; justify-content: center; align-items: center; gap: 1rem; margin: 1.5rem 0; }
+.archive-captures { border-top: 1px solid var(--archive-border); margin-top: 1rem; padding-top: 0.5rem; }
+.archive-capture-history { padding: 0.5rem 0.5rem 0; }
+.archive-capture-history h3 { margin: 0 0 0.5rem; font-family: Georgia, serif; font-size: 1.15rem; color: var(--archive-ink); }
+.archive-original-url { overflow-wrap: anywhere; font-size: 0.82rem; margin: 0.5rem 0; color: var(--archive-muted); }
+.archive-capture-note { color: var(--archive-muted); font-size: 0.8rem; line-height: 1.6; }
+.archive-capture-list { list-style: none; margin: 1rem 0; padding: 0; }
+.archive-capture-list li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.8rem 0; border-bottom: 1px solid var(--archive-border); }
+.archive-capture-list li > div { min-width: 0; }
+.archive-capture-date { display: block; font-weight: 600; color: var(--archive-ink); font-variant-numeric: tabular-nums; }
+.archive-capture-title { display: block; font-size: 0.85rem; overflow-wrap: anywhere; margin-top: 0.2rem; }
+.archive-capture-actions { display: flex; align-items: center; flex-shrink: 0; gap: 0.7rem; font-size: 0.8rem; }
+.archive-capture-actions a { color: var(--archive-ink); }
+@media (max-width: 600px) {
+  .archive-capture-list li { align-items: flex-start; flex-direction: column; gap: 0.3rem; }
+  .archive-capture-history { padding-inline: 0; }
+}

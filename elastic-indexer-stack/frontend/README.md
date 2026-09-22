@@ -41,6 +41,45 @@ BROWSER_TEST_PYTHON="$PWD/.venv/bin/python" \
   bash scripts/smoke-frontend.sh eqarchives-frontend:local
 ```
 
+## Grouped captures
+
+Search results group repeated website captures by original page by default. The
+first matching capture in the selected relevance/date order represents the group.
+**View captures** opens the dated versions, newest first, with archive links and
+full-text previews of each exact record. This history includes versions outside
+the current query and filters. Disable **Group repeated captures** to return to
+individual results. The toggle applies to the current visit; grouping is the
+initial default.
+
+Identity comes from the original URL inside a timestamped Wayback URL, with the
+archive's `websites/<host>/<14-digit timestamp>/<path>` ID as a fallback. Hostname
+case and fragments are normalized; path case, protocol, query strings, trailing
+slashes, and `index.html` remain distinct. Messages, child attachments and records
+with unknown identity remain separate. Titles alone never identify a group.
+
+`GroupedSearch.js` scans lightweight results in batches of 50, caching one active
+search and retaining unique groups across pages. It fills the requested page plus
+a lookahead group, up to the existing 1,000-capture Elasticsearch browsing window.
+This requires no index migration or vector rewrite. Previous/Next navigation and
+capture counts avoid claiming an exact total of unique pages. Counts and facets
+still describe matching **captures**. Changing the query, filters, date filters,
+sort or semantic parameters invalidates the cache. Results come from the live
+index; this is not snapshot pagination.
+
+Capture history also pages in batches of 50, bounded at 1,000 candidate records.
+It requests only metadata; previews load full text on demand. Exact ID regexes
+escape Lucene operators. Older records without source IDs use a URL phrase lookup
+followed by exact original-page validation, so similar URLs cannot enter the
+history. Partial/error responses are rejected, collapsed histories cancel pending
+requests, and late responses cannot replace current content. Both browsing limits
+are labelled in the UI when reached.
+
+Jest covers identities, cross-page grouping, limits, filters, asynchronous races,
+history pagination/retry/cancellation and exact previews. Chromium covers grouped
+pagination, independent query-string URLs, the all-captures toggle and selecting a
+dated preview at phone and desktop widths. MCP tools retain their existing
+individual-record behavior.
+
 ## Browser configuration
 
 [`src/config/engine.json`](src/config/engine.json) controls the searchable fields
