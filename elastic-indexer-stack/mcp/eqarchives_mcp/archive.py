@@ -176,17 +176,21 @@ class Archive:
         if self.requests.locked():
             raise ToolError("Archive research is busy. Please retry shortly.")
         async with self.requests:
+            constrained = any(c in query for c in '"|+()') or bool(re.search(r"(^|\s)-\S", query))
             body = {
                 "size": 10, "timeout": "8s", "track_total_hits": False,
                 "_source": SEARCH_FIELDS,
                 "query": {"simple_query_string": {
                     "query": query, "fields": ["title^3", "text_full", "llm_image_text_full"],
-                    "default_operator": "or", "minimum_should_match": "2<60%",
+                    # OR can turn `cyclops -ring` into cyclops OR anything
+                    # without ring. Explicit syntax needs conjunctive defaults.
+                    "default_operator": "and" if constrained else "or",
+                    "minimum_should_match": "2<60%",
                     "flags": "AND|OR|NOT|PHRASE|PRECEDENCE|WHITESPACE|ESCAPE",
                 }},
             }
             # Explicit phrases/operators express constraints: retain lexical semantics.
-            if not any(c in query for c in '"|+()') and not re.search(r"(^|\s)-\S", query):
+            if not constrained:
                 vector = await self.embedding(query)
                 if vector is not None:
                     body["knn"] = [{

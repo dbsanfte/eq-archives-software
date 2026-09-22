@@ -21,7 +21,9 @@ sticky sessions. GET/DELETE return 405: there are no unsolicited events or sessi
 
 Search combines source-text/title retrieval with existing 768-dimensional Nomic
 vectors (source chunks, summaries and images). Explicit phrases and simple
-operators use lexical search so semantic matches do not bypass constraints.
+operators use lexical search with AND as the default join so excluded terms cannot
+broaden the search and semantic matches do not bypass constraints. Use `|` for
+explicit alternatives.
 Natural-language searches can find related material, not only exact words.
 Refine the query to investigate beyond the first ten results; this interface does
 not expose arbitrary Elasticsearch DSL, index names or pagination.
