@@ -1,0 +1,20 @@
+EQ Archives Search
+
+The EQ Archives version of this frontend is distributed under the GNU Affero
+General Public License, version 3 only (AGPL-3.0-only). See LICENSE.txt.
+
+This frontend includes code adapted from Elastic's App Search Reference UI:
+https://github.com/elastic/app-search-reference-ui-react
+
+Original copyright notice:
+Copyright 2019 Elasticsearch B.V.
+
+The original Elastic code is licensed under the Apache License, Version 2.0.
+The original license and notice are preserved verbatim in
+licenses/Elastic-Apache-2.0.txt. Those terms continue to apply to the upstream
+portions. EQ Archives has modified the application for archive search, semantic
+queries, filtering, document previews, and its deployment environment.
+
+Third-party dependencies retain their respective licenses. The software license
+does not grant rights to archived content, EverQuest names, logos, or other
+third-party artwork.

@@ -1,157 +1,142 @@
-## Contents
+# EQ Archives Search frontend
 
-- [Getting started](#getting-started-)
-- [Usage](#usage)
-- [FAQ](#faq-)
-- [License](#license-)
+The React application served at [search.eqarchives.org](https://search.eqarchives.org),
+built with Elastic Search UI and Material UI. See the [project README](../../README.md)
+for the architecture, indexing backend, and contribution guidance.
 
----
+## Development and tests
 
-## Getting started 🐣
-
-This is a generated search experience created with [Search UI](https://github.com/elastic/search-ui).
-
-To set up and run this project, follow the instructions below.
-
-Requires [npm](https://www.npmjs.com/).
-
-Dependencies:
-- Node v22
-- Yarn Classic v1.22.22 (`npm install -g yarn@1.22.22` if needed)
-
-One can leverage [NVM](https://github.com/nvm-sh/nvm) to install Node before proceeding to start the application by running the following commands:
+Use Node.js 22 and Yarn Classic 1.22.22. From this directory:
 
 ```bash
-# Run this to install Node 22
-nvm install 22
-
-# Run this to use the installed Node version 
-nvm use 22
-```
-
-Run the following commands to start this application:
-
-```bash
-# Run the `cd` command to change the current directory to the
-# location of your downloaded Reference UI. Replace the path
-# below with the actual path of your project.
-cd ~/Downloads/app-search-reference-ui
-
-# Run this to set everything up
 yarn install --frozen-lockfile
-
-# Run this to start your application and open it up in a new browser window
-npm start
+yarn start
 ```
 
-Run the test suite with `yarn test:ci --runInBand`. CI enforces the existing
-90% coverage thresholds before building the production image.
-
-Production deployment from `master` is documented in the
-[deployment guide](../k8s-manifests/README.md).
-
-## Usage
-
-### Updating configuration
-
-The project is configured via a JSON [config file](src/config/engine.json). This file has been automatically generated for you when downloading this project. If you would like to make configuration changes, there is no need to regenerate this app from your App Search Dashboard. Additional configuration can be made by modifying that file.
-
-You can simply open up the
-[engine.json](src/config/engine.json) file, update the [options](#config),
-and then restart this app.
-
-### Configuration options <a id="config"></a>
-
-The following is a complete list of options available for configuration in [engine.json](src/config/engine.json).
-
-| option               | value type    | required/optional | source                                                                                                                                                                                          |
-| -------------------- | ------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `engineName`         | String        | required          | Found in your App Search Dashboard.                                                                                                                                                             |
-| `endpointBase`       | String        | required*         | (*) Elastic Enterprise Search deployment URL, example: "http://127.0.0.1:3002".                                                                                                                 |
-| `searchKey`          | String        | required          | Found in your App Search Dashboard.                                                                                                                                                             |
-| `searchFields`       | Array[String] | required          | A list of fields that will be searched with your search term.                                                                                                                                   |
-| `resultFields`       | Array[String] | required          | A list of fields that will be displayed within your results.                                                                                                                                    |
-| `querySuggestFields` | Array[String] | optional          | A list of fields that will be searched and displayed as query suggestions.                                                                                                                      |
-| `titleField`         | String        | optional          | The field to display as the title in results.                                                                                                                                                   |
-| `urlField`           | String        | optional          | A field with a url to use as a link in results.                                                                                                                                                 |
-| `sortFields`         | Array[String] | optional          | A list of fields that will be used for sort options.                                                                                                                                            |
-| `facets`             | Array[String] | optional          | A list of fields that will be available as "facet" filters. Read more about facets within the [App Search documentation](https://www.elastic.co/guide/en/app-search/current/facets-guide.html). |
-
-## Building and embedding
-
-To embed this application into a website, it can be built into static assets using the following command:
-```
-npm run build
-```
-
-This will create two files in the `build` directory:
-```
-build/static/js/main.<hash>.js
-build/static/css/main.<hash>.css
-```
-
-Include the built static assets as well as an element with `id="root"`. For example:
-```html
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <script defer="defer" src="/static/js/main.<hash>.js"></script>
-    <link href="/static/css/main.<hash>.css" rel="stylesheet" />
-  </head>
-  <body>
-    <div id="root" class="app-container"></div>
-  </body>
-</html>
-```
-
-## Deploy and Share
-
-This app can be easily published to any server as static assets and served. We recommend [Netlify](https://www.netlify.com/), but you have other [options](https://facebook.github.io/create-react-app/docs/deployment) as well.
-
-To deploy:
-
-```
-npm run build
-npm install netlify-cli -g
-netlify deploy # enter ./build as the deploy path
-```
-
-You'll then simply follow the command prompt to log into Netlify and deploy your site. This can be completed in just a few minutes.
-
-### External configuration
-
-If you are embedding this app inside of another page, and you would like to
-source the configuration from outside of the `engine.json` file,
-you can simply write the configuration directly to `window.appConfig`.
-
-### If you are checking this project out directly from GitHub... <a id="github"></a>
-
-You can follow the previous steps, but then you will need to create and configure
-[engine.json](src/config/engine.json).
-
-To do so, make a copy of [engine.json.example](src/config/engine.json.example),
-rename it to `engine.json` and configure it with your Engine's specific details.
+The development server listens at `http://localhost:3000`. It serves the UI, but
+it does not provide the API proxy. For working search, use the NGINX container
+below or a local reverse proxy that sends `/elasticsearch/` and `/openai/` to
+that container while forwarding other requests to the development server.
+Keep upstream credentials in NGINX, outside the browser.
 
 ```bash
-cp src/config/engine.json.example src/config/engine.json
+yarn test:ci --runInBand
+yarn test:watch
 ```
 
-## Customization
+Tests use Jest and React Testing Library. Coverage must reach 90% for statements,
+branches, functions, and lines. `coverage/lcov.info` contains the coverage report.
 
-This project is built with [Search UI](https://github.com/elastic/search-ui), which is a React library for building search experiences. If you're interested in using this project as a base for your own, most of
-what you'll need can be found in the Search UI documentation.
+## Browser configuration
 
-## FAQ 🔮
+[`src/config/engine.json`](src/config/engine.json) controls the searchable fields
+and presentation. It is bundled into the application, so changes require a
+rebuild and every value is visible to site visitors.
 
-### Where do I report issues with this application?
+| Setting | Purpose |
+| --- | --- |
+| `indexName` | Elasticsearch index or alias; must match the NGINX `ELASTICSEARCH_INDEX` |
+| `searchFields`, `resultFields` | Fields to query and return |
+| `querySuggestFields` | Fields used by the suggestion configuration |
+| `titleField`, `urlField`, `thumbnailField` | Fields used to display results |
+| `sortFields` | Available sort fields |
+| `valueFacets`, `recentFacets` | Value and recent-indexing filters |
+| `datePickerFacets`, `nestedDatePickerFacets` | Date-range filters |
+| `vectorFields`, `nestedVectorFields` | Vector fields for semantic search |
+| `embeddingModel` | Model used to embed search queries; must match the indexed vectors |
 
-If something is not working as expected, please open an [issue](https://github.com/elastic/app-search-reference-ui-react/issues/new).
+Do not put Elasticsearch passwords or model API keys in this file or in
+`REACT_APP_*` variables. NGINX reads those credentials from runtime secret mounts.
 
+## Build and run the container
 
-### Where else can I go to get help?
+The [Dockerfile](Dockerfile) installs the locked dependencies, runs the tests,
+builds the React assets, and packages them with NGINX. To build from the repository
+root:
 
-You can checkout the [Elastic Enterprise Search community discuss forums](https://discuss.elastic.co/c/enterprise-search/84).
+```bash
+cd elastic-indexer-stack
+docker build \
+  --build-arg GIT_SHA="$(git rev-parse HEAD)" \
+  --tag eqarchives-frontend:local \
+  ./frontend
+```
 
-## License 📗
+Create an ignored `.env.frontend.local` file in `elastic-indexer-stack` with your
+upstream addresses, for example:
 
-[Apache-2.0](https://github.com/elastic/app-search-reference-ui-react/blob/master/LICENSE.txt) © [Elastic](https://github.com/elastic)
+```dotenv
+ELASTICSEARCH_URL=http://elasticsearch.example.test:9200
+ELASTICSEARCH_INDEX=eq-archive
+OPENAI_URL=http://models.example.test:8000
+```
+
+Replace the example hosts with services reachable from the container.
+`ELASTICSEARCH_URL` includes the port; `OPENAI_URL` is the model server URL
+**without** `/v1`. The proxy appends `/v1/embeddings` itself. A container's
+`localhost` refers to that container, not its host machine.
+
+Using your editor or secret store, create these files in the same directory.
+Each file should contain only the corresponding value:
+
+| Local file | Container secret | Purpose |
+| --- | --- | --- |
+| `elastic.readonly.username.secret.txt` | `/run/secrets/es_readonly_username` | Elasticsearch user with read access to the search index |
+| `elastic.readonly.password.secret.txt` | `/run/secrets/es_readonly_password` | That user's password |
+| `openai_api_key.secret.txt` | `/run/secrets/openai_api_key` | Model endpoint API key |
+
+All three files must be nonempty. The repository ignores `*.secret.txt` and local
+`.env.*` files. Restrict their permissions and start the container:
+
+```bash
+chmod 600 elastic.readonly.username.secret.txt \
+  elastic.readonly.password.secret.txt openai_api_key.secret.txt .env.frontend.local
+
+docker run --rm --name eqarchives-frontend \
+  --publish 127.0.0.1:3030:80 \
+  --env-file .env.frontend.local \
+  --mount "type=bind,src=$(pwd)/elastic.readonly.username.secret.txt,dst=/run/secrets/es_readonly_username,readonly" \
+  --mount "type=bind,src=$(pwd)/elastic.readonly.password.secret.txt,dst=/run/secrets/es_readonly_password,readonly" \
+  --mount "type=bind,src=$(pwd)/openai_api_key.secret.txt,dst=/run/secrets/openai_api_key,readonly" \
+  eqarchives-frontend:local
+```
+
+Open `http://localhost:3030`. `GET /healthz` checks that NGINX is serving; a search
+also verifies the Elasticsearch connection. The container does not provision
+Elasticsearch, indexed data, or model servers.
+
+## Static builds and revision display
+
+From the `frontend` directory:
+
+```bash
+REACT_APP_GIT_SHA="$(git rev-parse HEAD)" yarn build
+```
+
+The output is written to `build/`. A deployment must also serve the NGINX proxy
+routes in [nginx.conf.template](nginx.conf.template), or equivalent routes with
+server-side authentication. Serving the static files alone does not provide
+search access.
+
+The top status bar displays the first seven characters of the build revision,
+with the full SHA in its tooltip. Builds without a revision show
+`Build: development`. The container build accepts `GIT_SHA`; GitHub Actions sets
+it to the commit being deployed.
+
+## Production deployment
+
+Pull requests are tested and built automatically. Commits on `master` publish
+and deploy the tested image to k3s. See the
+[deployment guide](../k8s-manifests/README.md) for secrets, manifests, health
+checks, idempotence, and rollback.
+
+## License
+
+The EQ Archives frontend is distributed under **AGPL-3.0-only**. See
+[LICENSE.txt](LICENSE.txt), which contains the same license as the
+[project license](../../LICENSE).
+
+The application includes code adapted from Elastic's App Search Reference UI.
+Its original Apache-2.0 terms and attribution are retained in
+[NOTICE.txt](NOTICE.txt) and
+[licenses/Elastic-Apache-2.0.txt](licenses/Elastic-Apache-2.0.txt).
