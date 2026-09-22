@@ -2,6 +2,8 @@ import unittest
 from unittest.mock import patch, MagicMock, call
 from datetime import datetime, timezone, timedelta
 from indexer.file_finder import FileFinder
+import threading
+import queue
 
 class TestFileFinderInitialization(unittest.TestCase):
     @patch.dict('os.environ', {
@@ -35,7 +37,7 @@ class TestFileFinderInitialization(unittest.TestCase):
         self.assertEqual(finder._LOCAL_REPO_PATH, '/data/eq-archives')
         self.assertEqual(finder._SPARSE_CHECKOUT_PATHS, '')
         self.assertFalse(finder._REINDEXING_ENABLED)
-        self.assertEqual(finder._REINDEXING_INTERVAL, 86400)
+        self.assertEqual(finder._REINDEXING_INTERVAL, 2628000)
 
     def test_logger_initialization(self):
         es_manager = MagicMock()
@@ -83,10 +85,10 @@ class TestSparseCheckoutRepo(unittest.TestCase):
 
         finder._sparse_checkout_repo()
 
-        for path in ["path1", "path2"]:
+        for p in ["path1", "path2"]:
             mock_subprocess.assert_any_call([
                 "git", "-C", finder._LOCAL_REPO_PATH,
-                "sparse-checkout", "add", path
+                "sparse-checkout", "add", p
             ], check=True)
 
     @patch('subprocess.run')
@@ -101,7 +103,6 @@ class TestSparseCheckoutRepo(unittest.TestCase):
         mock_subprocess.assert_any_call(["git", "-C", finder._LOCAL_REPO_PATH, "pull"], check=True)
 
 class TestWalkAndQueue(unittest.TestCase):
-    
     @patch.object(FileFinder, '_sparse_checkout_repo')
     @patch('os.walk')
     @patch('indexer.file_finder.logging.getLogger')
@@ -112,7 +113,6 @@ class TestWalkAndQueue(unittest.TestCase):
     def test_walk_and_queue(self, mock_get_logger, mock_walk, mock_checkout):
         es_manager = MagicMock()
         es_manager.record_exists.return_value = False
-        es_manager.chunks_exist.return_value = False
         rabbitmq_manager = MagicMock()
         mock_logger = MagicMock()
         mock_get_logger.return_value = mock_logger
@@ -138,7 +138,6 @@ class TestWalkAndQueue(unittest.TestCase):
     def test_skip_hidden_files(self, mock_walk, mock_checkout):
         es_manager = MagicMock()
         es_manager.record_exists.return_value = False
-        es_manager.chunks_exist.return_value = False
         rabbitmq_manager = MagicMock()
         
         finder = FileFinder(es_manager, rabbitmq_manager)
@@ -193,19 +192,6 @@ class TestCheckAndQueueFile(unittest.TestCase):
         self.assertEqual(rabbitmq_manager.publish_message.call_count, 0)
         
     @patch('datetime.datetime')
-    def test_check_and_queue_chunks_exist_no_reindex(self, mock_datetime):
-        es_manager = MagicMock()
-        rabbitmq_manager = MagicMock()
-        finder = FileFinder(es_manager, rabbitmq_manager)
-        finder._REINDEXING_ENABLED = False
-
-        es_manager.record_exists.return_value = False
-        es_manager.chunks_exist.return_value = True
-        finder._check_and_queue_file('test/path')
-
-        self.assertEqual(rabbitmq_manager.publish_message.call_count, 0)
-
-    @patch('datetime.datetime')
     def test_check_and_queue_file_recently_indexed(self, mock_datetime):
         es_manager = MagicMock()
         rabbitmq_manager = MagicMock()
@@ -217,7 +203,7 @@ class TestCheckAndQueueFile(unittest.TestCase):
         last_indexed = now - timedelta(seconds=1800)  # Within interval
 
         es_manager.record_exists.return_value = True
-        doc = {'_source': {'last_indexed': last_indexed.isoformat()}}
+        doc = {'_source': {'last_indexed': last_indexed.isoformat(), 'llm_summary': 'summary'}}
         es_manager.get_document.return_value = doc
 
         finder._check_and_queue_file('test/path')
@@ -231,6 +217,8 @@ class TestCheckAndQueueFile(unittest.TestCase):
         finder = FileFinder(es_manager, rabbitmq_manager)
         finder._REINDEXING_ENABLED = True
         finder._REINDEXING_INTERVAL = 3600
+        # Initialize a fresh queue
+        finder._message_queue = queue.Queue()
 
         now = datetime.now(timezone.utc)
         last_indexed = now - timedelta(seconds=5400)  # Beyond interval
@@ -240,6 +228,9 @@ class TestCheckAndQueueFile(unittest.TestCase):
         es_manager.get_document.return_value = doc
 
         finder._check_and_queue_file('test/path')
+        
+        # Now publish the queued messages
+        finder._publish_queued_messages(drain_all=True)
 
         rabbitmq_manager.publish_message.assert_called_once_with(item={"file_path": "test/path"})
 
@@ -247,14 +238,19 @@ class TestCheckAndQueueFile(unittest.TestCase):
         es_manager = MagicMock()
         rabbitmq_manager = MagicMock()
         finder = FileFinder(es_manager, rabbitmq_manager)
+        # Initialize a fresh queue
+        finder._message_queue = queue.Queue()
 
         es_manager.record_exists.return_value = False
         es_manager.chunks_exist.return_value = False
         finder._check_and_queue_file('test/path')
+        
+        # Now publish the queued messages (this is what the main thread would do)
+        finder._publish_queued_messages(drain_all=True)
 
         rabbitmq_manager.publish_message.assert_called_once_with(item={"file_path": "test/path"})
 
-class TestSparseCheckoutRepo(unittest.TestCase):
+class TestSparseCheckoutRepoDetails(unittest.TestCase):
     @patch('subprocess.run')
     @patch('os.makedirs')
     @patch('os.path.exists', return_value=False)
@@ -374,3 +370,626 @@ class TestSparseCheckoutRepo(unittest.TestCase):
         pull_call = call(["git", "-C", finder._LOCAL_REPO_PATH, "pull"], check=True)
         self.assertIn(checkout_call, mock_run.call_args_list)
         self.assertIn(pull_call, mock_run.call_args_list)
+
+class TestCheckAndQueueFileLLMEnrichment(unittest.TestCase):
+    def test_skip_llm_enrichment_true_bypasses_enrichment_check(self):
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        finder = FileFinder(es_manager, rabbitmq_manager, skip_llm_enrichment=True)
+        finder._REINDEXING_ENABLED = False
+        
+        es_manager.record_exists.return_value = True
+        
+        # Document is indexed but not enriched
+        doc = {'_source': {'last_indexed': datetime.now(timezone.utc).isoformat()}}
+        es_manager.get_document.return_value = doc
+        
+        finder._check_and_queue_file('test/path')
+        
+        # File should not be queued since enrichment check is skipped and reindexing is disabled
+        rabbitmq_manager.publish_message.assert_not_called()
+
+    def test_file_with_missing_llm_summary_is_queued(self):
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        finder = FileFinder(es_manager, rabbitmq_manager)
+        # Initialize a fresh queue
+        finder._message_queue = queue.Queue()
+        
+        es_manager.record_exists.return_value = True
+        
+        # Document is indexed but has no llm_summary field
+        doc = {'_source': {'last_indexed': datetime.now(timezone.utc).isoformat()}}
+        es_manager.get_document.return_value = doc
+        
+        finder._check_and_queue_file('test/path')
+        
+        # Publish queued messages
+        finder._publish_queued_messages(drain_all=True)
+        
+        # File should be queued for enrichment
+        rabbitmq_manager.publish_message.assert_called_once_with(item={"file_path": "test/path"})
+
+    def test_file_with_placeholder_llm_summary_is_queued(self):
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        finder = FileFinder(es_manager, rabbitmq_manager)
+        # Initialize a fresh queue
+        finder._message_queue = queue.Queue()
+        
+        es_manager.record_exists.return_value = True
+        
+        # Document is indexed but has placeholder llm_summary
+        doc = {
+            '_source': {
+                'last_indexed': datetime.now(timezone.utc).isoformat(),
+                'llm_summary': "[ Still awaiting LLM Enrichment... ]"
+            }
+        }
+        es_manager.get_document.return_value = doc
+        
+        finder._check_and_queue_file('test/path')
+        
+        # Publish queued messages
+        finder._publish_queued_messages(drain_all=True)
+        
+        # File should be queued for enrichment
+        rabbitmq_manager.publish_message.assert_called_once_with(item={"file_path": "test/path"})
+
+    def test_enriched_file_with_always_enrich_true_is_queued(self):
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        finder = FileFinder(es_manager, rabbitmq_manager, always_do_llm_enrichment=True)
+        # Initialize a fresh queue
+        finder._message_queue = queue.Queue()
+        
+        es_manager.record_exists.return_value = True
+        
+        # Document is indexed and has a valid llm_summary
+        doc = {
+            '_source': {
+                'last_indexed': datetime.now(timezone.utc).isoformat(),
+                'llm_summary': "This is a proper summary."
+            }
+        }
+        es_manager.get_document.return_value = doc
+        
+        finder._check_and_queue_file('test/path')
+        
+        # Publish queued messages
+        finder._publish_queued_messages(drain_all=True)
+        
+        # File should be queued for re-enrichment
+        rabbitmq_manager.publish_message.assert_called_once_with(item={"file_path": "test/path"})
+
+    def test_enriched_file_not_queued_when_already_enriched(self):
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        finder = FileFinder(es_manager, rabbitmq_manager)
+        finder._REINDEXING_ENABLED = False
+        
+        es_manager.record_exists.return_value = True
+        
+        # Document is indexed and has a valid llm_summary
+        doc = {
+            '_source': {
+                'last_indexed': datetime.now(timezone.utc).isoformat(),
+                'llm_summary': "This is a proper summary."
+            }
+        }
+        es_manager.get_document.return_value = doc
+        
+        finder._check_and_queue_file('test/path')
+        
+        # File should not be queued since it's already enriched and reindexing is disabled
+        rabbitmq_manager.publish_message.assert_not_called()
+
+class TestShouldSkipFile(unittest.TestCase):
+    def setUp(self):
+        # Create a FileFinder instance with dummy managers and a mock logger
+        self.es_manager = MagicMock()
+        self.rabbitmq_manager = MagicMock()
+        self.mock_logger = MagicMock()
+        self.finder = FileFinder(self.es_manager, self.rabbitmq_manager, logger=self.mock_logger)
+    
+    def test_hidden_file(self):
+        # Files starting with a dot should be skipped.
+        filename = ".hidden.txt"
+        full_path = "/some/path/.hidden.txt"
+        relative_path = ".hidden.txt"
+        result = self.finder._should_skip_file(filename, full_path, relative_path)
+        self.assertTrue(result)
+        self.mock_logger.debug.assert_called_with("Skipping hidden file: .hidden.txt")
+        
+    def test_mailing_lists_non_json(self):
+        # In mailing-lists directory, non-json files should be skipped.
+        filename = "file.txt"
+        full_path = "/data/mailing-lists/file.txt"
+        relative_path = "mailing-lists/file.txt"
+        result = self.finder._should_skip_file(filename, full_path, relative_path)
+        self.assertTrue(result)
+        self.mock_logger.debug.assert_called_with("Skipping non-json mailing-list file: mailing-lists/file.txt")
+    
+    def test_mailing_lists_json(self):
+        # In mailing-lists directory, .json files should not be skipped.
+        filename = "file.json"
+        full_path = "/data/mailing-lists/file.json"
+        relative_path = "mailing-lists/file.json"
+        result = self.finder._should_skip_file(filename, full_path, relative_path)
+        self.assertFalse(result)
+    
+    def test_newsgroups_non_txt(self):
+        # In newsgroups directory, non-txt files should be skipped.
+        filename = "file.html"
+        full_path = "/data/newsgroups/file.html"
+        relative_path = "newsgroups/file.html"
+        result = self.finder._should_skip_file(filename, full_path, relative_path)
+        self.assertTrue(result)
+        self.mock_logger.debug.assert_called_with("Skipping non-txt newsgroups file: newsgroups/file.html")
+    
+    def test_newsgroups_txt(self):
+        # In newsgroups directory, .txt files should not be skipped.
+        filename = "file.txt"
+        full_path = "/data/newsgroups/file.txt"
+        relative_path = "newsgroups/file.txt"
+        result = self.finder._should_skip_file(filename, full_path, relative_path)
+        self.assertFalse(result)
+    
+    def test_non_special_file(self):
+        # Files that are not hidden and don't belong to mailing-lists or newsgroups should not be skipped.
+        filename = "document.pdf"
+        full_path = "/data/others/document.pdf"
+        relative_path = "others/document.pdf"
+        result = self.finder._should_skip_file(filename, full_path, relative_path)
+        self.assertFalse(result)
+
+class TestLLMEnrichmentFlags(unittest.TestCase):
+    def test_skip_llm_enrichment_default(self):
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        
+        finder = FileFinder(es_manager, rabbitmq_manager)
+        
+        self.assertFalse(finder._SKIP_LLM_ENRICHMENT)
+        self.assertFalse(finder._ALWAYS_DO_LLM_ENRICHMENT)
+        
+    def test_skip_llm_enrichment_constructor_param(self):
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        
+        finder = FileFinder(es_manager, rabbitmq_manager, skip_llm_enrichment=True)
+        
+        self.assertTrue(finder._SKIP_LLM_ENRICHMENT)
+        self.assertFalse(finder._ALWAYS_DO_LLM_ENRICHMENT)
+        
+    def test_always_do_llm_enrichment_constructor_param(self):
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        
+        finder = FileFinder(es_manager, rabbitmq_manager, always_do_llm_enrichment=True)
+        
+        self.assertFalse(finder._SKIP_LLM_ENRICHMENT)
+        self.assertTrue(finder._ALWAYS_DO_LLM_ENRICHMENT)
+        
+    @patch.dict('os.environ', {'SKIP_LLM_ENRICHMENT': 'true'})
+    def test_skip_llm_enrichment_env_var(self):
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        
+        finder = FileFinder(es_manager, rabbitmq_manager)
+        
+        self.assertTrue(finder._SKIP_LLM_ENRICHMENT)
+        
+    @patch.dict('os.environ', {'ALWAYS_DO_LLM_ENRICHMENT': 'true'})
+    def test_always_do_llm_enrichment_env_var(self):
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        
+        finder = FileFinder(es_manager, rabbitmq_manager)
+        
+        self.assertTrue(finder._ALWAYS_DO_LLM_ENRICHMENT)
+        
+    @patch.dict('os.environ', {'SKIP_LLM_ENRICHMENT': 'true'})
+    def test_env_var_overrides_constructor_param(self):
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        
+        finder = FileFinder(es_manager, rabbitmq_manager, skip_llm_enrichment=False)
+        
+        self.assertTrue(finder._SKIP_LLM_ENRICHMENT)
+        
+    @patch.dict('os.environ', {'SKIP_LLM_ENRICHMENT': 'false'})
+    def test_skip_llm_enrichment_env_var_false(self):
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        
+        finder = FileFinder(es_manager, rabbitmq_manager, skip_llm_enrichment=True)
+        
+        self.assertFalse(finder._SKIP_LLM_ENRICHMENT)
+
+class TestCacheTimestamp(unittest.TestCase):
+    def setUp(self):
+        self.es_manager = MagicMock()
+        self.rabbitmq_manager = MagicMock()
+        self.finder = FileFinder(self.es_manager, self.rabbitmq_manager)
+        self.test_file = "test/file.txt"
+        # Clear the queue before each test
+        self.finder._message_queue = queue.Queue()
+        
+    @patch('datetime.datetime')
+    def test_file_not_in_cache_gets_queued(self, mock_datetime):
+        # Setup
+        now = datetime(2025, 3, 18, tzinfo=timezone.utc)
+        mock_datetime.now.return_value = now
+        self.es_manager.record_exists.return_value = False
+        
+        # Test
+        self.finder._check_and_queue_file(self.test_file)
+        
+        # Now publish the queued messages (this is what the main thread would do)
+        self.finder._publish_queued_messages(drain_all=True)
+        
+        # Verify
+        self.rabbitmq_manager.publish_message.assert_called_once_with(item={"file_path": self.test_file})
+        self.assertIn(self.test_file, self.finder._enqueued_cache)
+        self.assertGreaterEqual(self.finder._enqueued_cache[self.test_file], int(now.timestamp()))
+        
+    @patch('datetime.datetime')
+    def test_recently_cached_file_skipped(self, mock_datetime):
+        # Setup
+        now = datetime(2025, 3, 18, tzinfo=timezone.utc)
+        mock_datetime.now.return_value = now
+        
+        # Simulate a file that was recently cached (10 minutes ago)
+        ten_min_ago = int((now - timedelta(minutes=10)).timestamp())
+        self.finder._enqueued_cache[self.test_file] = ten_min_ago
+        
+        # Test
+        self.finder._check_and_queue_file(self.test_file)
+        self.finder._publish_queued_messages(drain_all=True)
+        
+        # Verify no publish happened
+        self.rabbitmq_manager.publish_message.assert_not_called()
+        self.assertTrue(self.finder._message_queue.empty())
+        
+    @patch('datetime.datetime')
+    def test_old_cached_file_gets_requeued(self, mock_datetime):
+        # Setup
+        now = datetime(2025, 3, 18, tzinfo=timezone.utc)
+        mock_datetime.now.return_value = now
+        self.es_manager.record_exists.return_value = False
+        
+        # Simulate a file that was cached longer ago than the reindex interval
+        old_timestamp = int((now - timedelta(seconds=self.finder._REINDEXING_INTERVAL + 100)).timestamp())
+        self.finder._enqueued_cache[self.test_file] = old_timestamp
+        
+        # Test
+        self.finder._check_and_queue_file(self.test_file)
+        self.finder._publish_queued_messages(drain_all=True)
+        
+        # Verify
+        self.rabbitmq_manager.publish_message.assert_called_once_with(item={"file_path": self.test_file})
+        self.assertIn(self.test_file, self.finder._enqueued_cache)
+        self.assertGreaterEqual(self.finder._enqueued_cache[self.test_file], int(now.timestamp()))
+        
+    @patch('datetime.datetime')
+    def test_cache_updated_when_file_queued(self, mock_datetime):
+        # Setup
+        now = datetime(2025, 3, 18, tzinfo=timezone.utc)
+        mock_datetime.now.return_value = now
+        self.es_manager.record_exists.return_value = False
+        
+        # Test
+        self.finder._check_and_queue_file(self.test_file)
+        
+        # Verify cache was updated (no need to publish for this test)
+        self.assertGreaterEqual(self.finder._enqueued_cache[self.test_file], int(now.timestamp()))
+        
+    @patch('datetime.datetime')
+    def test_cache_respects_reindexing_interval(self, mock_datetime):
+        # Setup
+        now = datetime(2025, 3, 18, tzinfo=timezone.utc)
+        mock_datetime.now.return_value = now
+        self.es_manager.record_exists.return_value = False
+        
+        # Set a custom reindexing interval
+        custom_interval = 7200  # 2 hours
+        self.finder._REINDEXING_INTERVAL = custom_interval
+        
+        # Simulate a file cached exactly at the boundary
+        boundary_timestamp = int((now - timedelta(seconds=custom_interval)).timestamp())
+        self.finder._enqueued_cache[self.test_file] = boundary_timestamp
+        
+        # Test
+        self.finder._check_and_queue_file(self.test_file)
+        self.finder._publish_queued_messages(drain_all=True)
+        
+        # Verify file was queued (since it's exactly at the boundary)
+        self.rabbitmq_manager.publish_message.assert_called_once_with(item={"file_path": self.test_file})
+
+class TestQueuePublishing(unittest.TestCase):
+    def setUp(self):
+        self.es_manager = MagicMock()
+        self.rabbitmq_manager = MagicMock()
+        self.finder = FileFinder(self.es_manager, self.rabbitmq_manager)
+        self.finder._message_queue = queue.Queue()
+        
+    def test_queue_for_publishing(self):
+        # Test that _queue_for_publishing adds to the queue but doesn't call RabbitMQ
+        self.finder._queue_for_publishing("test/file.txt")
+        
+        # Verify the message is in the queue
+        self.assertFalse(self.finder._message_queue.empty())
+        
+        # Verify RabbitMQ not called yet
+        self.rabbitmq_manager.publish_message.assert_not_called()
+    
+    def test_publish_queued_messages(self):
+        # Add some test messages
+        test_files = ["test/file1.txt", "test/file2.txt", "test/file3.txt"]
+        for file in test_files:
+            self.finder._message_queue.put({"file_path": file})
+        
+        # Test partial publishing (only 2 out of 3)
+        self.finder._publish_queued_messages(drain_all=False, batch_size=2)
+        
+        # Verify 2 calls were made
+        self.assertEqual(self.rabbitmq_manager.publish_message.call_count, 2)
+        
+        # Test publishing the remaining message
+        self.finder._publish_queued_messages(drain_all=True)
+        
+        # Verify all messages were published
+        self.assertEqual(self.rabbitmq_manager.publish_message.call_count, 3)
+        self.assertTrue(self.finder._message_queue.empty())
+    
+    def test_publish_handles_exceptions(self):
+        # Setup RabbitMQ to fail
+        self.rabbitmq_manager.publish_message.side_effect = Exception("Test error")
+        self.finder._logger = MagicMock()
+        
+        # Add a message and try to publish
+        self.finder._message_queue.put({"file_path": "test/file.txt"})
+        self.finder._publish_queued_messages(drain_all=True)
+        
+        # Verify error was logged
+        self.finder._logger.error.assert_called()
+        self.finder._logger.exception.assert_called()
+
+class TestBatchedFutureProcessing(unittest.TestCase):
+    @patch.object(FileFinder, '_sparse_checkout_repo')
+    @patch('os.walk')
+    def test_max_pending_futures_respected(self, mock_walk, mock_checkout):
+        # Setup
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        finder = FileFinder(es_manager, rabbitmq_manager)
+        
+        # Override the _process_file method to add delay and track calls
+        original_process_file = finder._process_file
+        process_calls = []
+        
+        def slow_process_file(path):
+            process_calls.append(path)
+            # Call the original but add tracking
+            original_process_file(path)
+            
+        finder._process_file = slow_process_file
+        
+        # Prepare test data - 10 files
+        mock_walk.return_value = [
+            (finder._LOCAL_REPO_PATH, ['dir1'], ['file1.txt', 'file2.txt', 'file3.txt', 'file4.txt', 'file5.txt',
+                                'file6.txt', 'file7.txt', 'file8.txt', 'file9.txt', 'file10.txt']),
+        ]
+        
+        # Set a small max_pending_futures for testing
+        finder._max_workers = 2
+        
+        # Mock _process_completed_futures to track calls
+        original_process_completed = finder._process_completed_futures
+        process_completed_calls = []
+        
+        def mock_process_completed(active_futures):
+            process_completed_calls.append(len(active_futures))
+            original_process_completed(active_futures)
+            
+        finder._process_completed_futures = mock_process_completed
+        
+        # Test
+        finder.walk_and_queue()
+        
+        # Verify
+        # Ensure all files were processed
+        self.assertEqual(len(process_calls), 10)
+        
+        # Verify that _process_completed_futures was called when batch limit reached
+        self.assertTrue(any(count >= finder._max_workers * 3 for count in process_completed_calls), 
+                       f"Batching threshold never reached. Counts: {process_completed_calls}")
+
+    @patch.object(FileFinder, '_sparse_checkout_repo')
+    @patch('os.walk')
+    @patch('concurrent.futures.wait')
+    def test_process_completed_futures(self, mock_wait, mock_walk, mock_checkout):
+        # Setup
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        finder = FileFinder(es_manager, rabbitmq_manager)
+        
+        # Create mock futures
+        future1 = MagicMock()
+        future2 = MagicMock()
+        future3 = MagicMock()
+        
+        active_futures = [future1, future2, future3]
+        
+        # Configure mock_wait to return done futures
+        mock_wait.return_value = ([future1, future2], [future3])
+        
+        # Test
+        finder._process_completed_futures(active_futures)
+        
+        # Verify
+        mock_wait.assert_called_once()
+        future1.result.assert_called_once()
+        future2.result.assert_called_once()
+        future3.result.assert_not_called()
+        
+        # Check that completed futures were removed
+        self.assertEqual(len(active_futures), 1)
+        self.assertIn(future3, active_futures)
+
+    @patch.object(FileFinder, '_sparse_checkout_repo')
+    @patch('os.walk')
+    def test_exception_in_worker_thread(self, mock_walk, mock_checkout):
+        # Setup
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        finder = FileFinder(es_manager, rabbitmq_manager)
+        mock_logger = MagicMock()
+        finder._logger = mock_logger
+        
+        # Override the _process_file method to raise an exception
+        def failing_process_file(path):
+            if path == "file2.txt":
+                raise ValueError("Test error")
+                
+        finder._process_file = failing_process_file
+        
+        # Prepare test data
+        mock_walk.return_value = [
+            (finder._LOCAL_REPO_PATH, [], ['file1.txt', 'file2.txt', 'file3.txt']),
+        ]
+        
+        # Test
+        finder.walk_and_queue()
+        
+        # Verify
+        # Check that the error was logged
+        error_calls = [call for call in mock_logger.error.call_args_list if "Test error" in str(call)]
+        self.assertGreaterEqual(len(error_calls), 1)
+
+    @patch.object(FileFinder, '_sparse_checkout_repo')
+    @patch('os.walk')
+    def test_all_files_eventually_processed(self, mock_walk, mock_checkout):
+        # Setup
+        es_manager = MagicMock()
+        rabbitmq_manager = MagicMock()
+        finder = FileFinder(es_manager, rabbitmq_manager)
+        
+        # Track processed files
+        processed_files = []
+        def track_process(path):
+            processed_files.append(path)
+            
+        finder._process_file = track_process
+        
+        # Prepare test data - multiple directories
+        mock_walk.return_value = [
+            (finder._LOCAL_REPO_PATH, ['dir1'], ['file1.txt', 'file2.txt']),
+            (finder._LOCAL_REPO_PATH + '/dir1', [], ['file3.txt', 'file4.txt']),
+        ]
+        
+        # Test
+        finder.walk_and_queue()
+        
+        # Verify all files were processed - normalize paths before comparison
+        expected_files = ["file1.txt", "file2.txt", "dir1/file3.txt", "dir1/file4.txt"]
+        self.assertEqual(sorted(processed_files), sorted(expected_files))
+
+class TestThreadSafePublishing(unittest.TestCase):
+    def setUp(self):
+        self.es_manager = MagicMock()
+        self.rabbitmq_manager = MagicMock()
+        self.finder = FileFinder(self.es_manager, self.rabbitmq_manager)
+        self.finder._message_queue = queue.Queue()
+        self.finder._logger = MagicMock()
+        
+    def test_concurrent_queue_additions(self):
+        """Test that multiple threads can safely add to the queue concurrently"""
+        # Setup normal RabbitMQ mock
+        self.rabbitmq_manager.publish_message = MagicMock()
+        
+        # Define large number of concurrent operations
+        num_threads = 50
+        
+        # Create worker function that simulates checking and queueing a file
+        def worker_func(path):
+            # Each thread puts a unique message in the queue
+            self.finder._queue_for_publishing(f"path_{path}")
+        
+        # Run many threads concurrently
+        threads = []
+        for i in range(num_threads):
+            thread = threading.Thread(target=worker_func, args=(i,))
+            thread.start()
+            threads.append(thread)
+            
+        # Wait for all threads to complete
+        for thread in threads:
+            thread.join()
+        
+        # Verify the queue contains all messages
+        self.assertEqual(self.finder._message_queue.qsize(), num_threads)
+        
+        # Now publish all messages and verify count
+        self.finder._publish_queued_messages(drain_all=True)
+        self.assertEqual(self.rabbitmq_manager.publish_message.call_count, num_threads)
+        
+    def test_message_queue_task_done(self):
+        """Test that tasks are properly marked as done when published"""
+        # Replace the queue with a mock to verify task_done is called
+        mock_queue = MagicMock(spec=queue.Queue)
+        original_queue = self.finder._message_queue
+        self.finder._message_queue = mock_queue
+        
+        # Setup mock queue to simulate having items then being empty
+        mock_queue.empty.side_effect = [False, False, False, True]
+        mock_queue.get.side_effect = [
+            {"file_path": "file1.txt"},
+            {"file_path": "file2.txt"},
+            {"file_path": "file3.txt"},
+            queue.Empty()
+        ]
+        
+        # Publish messages
+        self.finder._publish_queued_messages(drain_all=True)
+        
+        # Verify task_done was called for each item
+        self.assertEqual(mock_queue.task_done.call_count, 3)
+        
+        # Restore original queue
+        self.finder._message_queue = original_queue
+            
+    @patch.object(FileFinder, '_publish_queued_messages')
+    def test_publish_called_at_appropriate_times(self, mock_publish):
+        """Test that publishing is called at appropriate times during walk_and_queue"""
+        # Setup
+        def mock_process_futures(active_futures):
+            # Clear all futures to break out of the while loop
+            active_futures.clear()
+            
+        self.finder._process_completed_futures = mock_process_futures
+        mock_walk = MagicMock()
+        mock_walk.return_value = [
+            (self.finder._LOCAL_REPO_PATH, ['dir1'], ['file1.txt']),
+            (self.finder._LOCAL_REPO_PATH + '/dir1', [], ['file2.txt'])
+        ]
+        
+        # Run with patched os.walk
+        with patch('os.walk', return_value=mock_walk.return_value):
+            with patch.object(FileFinder, '_sparse_checkout_repo'):
+                with patch('concurrent.futures.ThreadPoolExecutor'):
+                    self.finder.walk_and_queue()
+        
+        # Verify publishing was called:
+        # 1. After processing each directory
+        # 2. After processing completed futures
+        # 3. Final drain at the end
+        self.assertGreaterEqual(mock_publish.call_count, 3)
+        
+        # Verify final call was with drain_all=True
+        _, kwargs = mock_publish.call_args_list[-1]
+        self.assertTrue(kwargs.get('drain_all', False))
+
+if __name__ == '__main__':
+    unittest.main()

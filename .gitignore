@@ -10,3 +10,6 @@
 *.kubeconfig
 *-secrets.yaml
 *-secrets.json
+
+**/coverage.json
+**/.coverage

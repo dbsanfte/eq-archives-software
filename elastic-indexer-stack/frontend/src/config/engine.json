@@ -42,9 +42,12 @@
     "mailing_list_name",
     "llm_tags"
   ],
-  "historicalFacets": [
+  "datePickerFacets": [
     "capture_date",
     "llm_guessed_date"
+  ],
+  "nestedDatePickerFacets": [
+    "llm_extracted_dates"
   ],
   "vectorFields": [
     "llm_image_text_vector",

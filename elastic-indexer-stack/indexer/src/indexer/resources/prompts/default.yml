@@ -1,71 +1,180 @@
 domain_match_regex: .*
 
-text_prompt: |-
-  Below is a page archived from an old Everquest-related website. Describe and summarize it into the variable `llm_summary`.
-      
-  Categorize it into into one of the following content flavours into the variable `llm_content_flavour`:
-  - Forum Post
-  - Game News
-  - Zone Information
-  - Item Information
-  - Spell Information
-  - PvP Information
-  - Monster Information
-  - Strategy Guide
-  - Player Character Profile
-  - Guild Achievements
-  - Tradeskill Information
-  - Other 
+text_prompts: 
+  initial: |-
+    You are being supplied with an old Everquest-related website converted to Markdown. 
+    
+    Don't do anything yet, wait for further instructions.
+    
+    The content of the webpage follows:
+    ---
+    ---
 
-  Below is a list of content tags. Examine the content and decide how many of the tags apply. Add all the applicable tags to the list "llm_tags". 
-  - nerf: Discusses a change to the game that has diminished a specific class' abilities and effectiveness, making it less powerful
-  - patch: Discusses recent changes made to the game in a patch update
-  - exploit: Discusses players exploiting a specific bug in the game to their advantage during gameplay
-  - bug: Discusses a bug in the game
-  - guide: Provides a playing strategy or guide on how to do something in the game (Levelling, Questing, Tradeskilling, etc.)
-  - lore: Provides background story lore information about Everquest
-  - event: Discusses a special in-game special event run by the GMs or Guides in Everquest
-  - pvp: Discusses player versus player combat
-  - raid: Discusses raiding content, strategies for raiding, or raiding guilds
-  - quest: Discusses the specifics of a quest in the game
-  - drama: Discusses player or guild drama/politics in the game, especially arguments between players over in-game loot or competition for monster kills
-  - item: Discusses a specific item in the game, especially its stats and/or where to find it
-  - tradeskill: Discusses any of the various tradeskills in the game (Alchemy, Blacksmithing, Fletching, Tailoring, Tinkering, Spell Research, etc.)
-  - spell: Discusses a spell in the game, especially its effects and/or how to find/research it
-  - showeq: Discusses the use of the ShowEQ third-party software to cheat
-  - class-balance: Discusses the balance of classes in the game, specifically whether one class is overpowered or too weak compared to another
-  - forum: Content is from a web based forum, with topics and replies to that topic
-  - class-site: Content is from a class-specific website (bard, necro, warrior, etc.)
+  tagging: |-
+    Consider the main content of the page. Disregard links, headers, sidebars, and footers.
+    
+    Below is a list of content tags and descriptions:
 
-  Based on the text, guess the date of the content and store it as a timestamp into the variable `llm_guessed_date` in the format YYYY-MM-DD. If you can't guess, return an empty string.
+      - nerf: The page's main focus is a change to the game that has diminished a specific class' abilities and effectiveness, making it less powerful
+      - patch: The page's main focus is a patch to the Everquest game, or recent changes made to the game in a such a patch
+      - exploit: The page's main focus is players exploiting a specific bug in the game to their advantage during gameplay
+      - bug: The page's main focus is a bug in the game, or a discussion which mentions a bug in the game
+      - guide: The page's main focus is a playing strategy or guide on how to do something in the game (Levelling, Questing, Tradeskilling, etc.)
+      - lore: The page's main focus is background story lore information about Everquest of an RPG nature, such as the history of the world, etc.
+      - event: The page's main focus is an in-game special event run by the GMs or Guides in Everquest
+      - pvp: The page's main focus is player versus player combat
+      - raid: The page's main focus is raiding content, strategies for raiding, or raiding guilds
+      - quest: The page's main focus is the specifics of a quest in the game
+      - drama: The page's main focus is player or guild drama/politics in the game, especially arguments between players over in-game loot or competition for monster kills
+      - item: The page's main focus is a specific item in the game, especially its stats and/or where to find it
+      - tradeskill: The page's main focus is any of the various tradeskills in the game (Alchemy, Blacksmithing, Fletching, Tailoring, Tinkering, Spell Research, etc.)
+      - spell: The page's main focus is a spell in the game, especially its effects and/or how to find/research it
+      - showeq: Explicitly mentions the use of the ShowEQ third-party software to cheat
+      - class-balance: The page's main focus is the balance of classes in the game, specifically whether one class is overpowered or too weak compared to another
+      - forum: The page content is a discussion forum, with one or more discussion threads and replies to that thread
+    
+    Examine the main content of the page only, and decide how many of the above tags apply to it. Disregard links, headers, sidebars, and footers.
 
-  Respond in the following JSON format and always populate all fields: 
+    Add all the applicable tags to the list `llm_tags`. If none of the tags apply, leave the list empty. Do not duplicate tags, and do not add tags that are not in the list above.
+
+    Example response JSON:
+    ```json
+    {
+      "llm_tags": [ 
+        "tag1",
+        "tag2"
+      ] 
+    }
+    ```
+
+  classification: |-
+    Consider the principal content of the page, i.e. its main focus. Disregard links, headers, sidebars, and footers.
+
+    Categorise the principal content into into one of the following content flavours, and place it into the variable `llm_content_flavour`:
+    
+    - Forum Post
+    - Game News
+    - Zone Information
+    - Item Information
+    - Spell Information
+    - PvP Information
+    - Monster Information
+    - Tradeskill Information
+    - Strategy Guide
+    - Player Character Profile
+    - Other 
+
+    Respond in the following JSON format:
+
+    ```json
+    {
+      "llm_content_flavour": "..."
+    }
+    ```
+
+  date: |-
+    Perform the following two tasks:
   
-  {"llm_summary": "...", "llm_content_flavour": "...", "llm_guessed_date": "...", "llm_tags": [ ... ] }
+    1) Extract any dates you see in the content and put them into a json list of `llm_extracted_dates`, each with the JSON object format `{ "date": "YYYY-MM-DD" }`. 
 
-  The text of the page follows:
-  ---
+    2) From the dates extracted in step 1, guess the most likely last-updated date of the content. Put it into the string variable `llm_guessed_date` in the format "YYYY-MM-DD". 
 
-image_prompt: |-
-  Attached is an archived image from an old Everquest-related website. 
+    Respond in the following JSON format:
 
-  Categorize it into into one of the following content flavours into the variable `llm_content_flavour`:
-  - Game Screenshot
-  - Item Stats
-  - Monster
-  - Player Character Portrait
-  - Other
+    ```json
+    {
+      "llm_guessed_date": "YYYY-MM-DD",
+      "llm_extracted_dates": [
+        { "date": "YYYY-MM-DD" },
+        { "date": "YYYY-MM-DD" }
+      ]
+    }
+    ```
 
-  Extract any text from the image into the string array variable `llm_image_text`.
+    IMPORTANT: 
+    * If a date occurs multiple times, only include it once in `llm_extracted_dates`.
+    * `llm_guessed_date` MUST be one of the dates extracted in `llm_extracted_dates`. 
 
-  Below is a list of content tags. Examine the content and decide how many of the tags apply. Add all the applicable tags to the list "llm_tags". 
-  - screenshot: An in-game screenshot from the game Everquest itself
-  - item: A picture/screenshot of a specific item in the game, especially its stats and/or where to find it
-  - monster: A screenshot of a monster in the game
-  - art: The image is primarily artistic and not a game screenshot
-  - player: The image contains an Everquest player character
-          
-  Respond in the following JSON format: `{"llm_summary": "...", "llm_image_text": [...], "llm_content_flavour": "...", "llm_tags": [ ... ] }` and always populate all the fields.
+  summary: |-
+    Consider the main content of the page. Disregard links, headers, sidebars, and footers.
 
-  The image follows:
-  ---
+    Describe and summarise it 500 characters or less into the variable `llm_summary`. Do not include the page URL in the summary.
+
+    Respond in the following JSON format:
+  
+    ```json
+    {
+      "llm_summary": "..."
+    }
+    ```
+
+image_prompts: 
+  initial: |-
+    You are being supplied with an archived image from an Everquest-related website.
+    
+    Don't do anything yet, wait for further instructions.
+    
+    The image follows:
+    ---
+    ---
+
+  summary: |-
+    Describe and summarize the image into the variable `llm_summary`.
+
+    Respond in the following JSON format:
+    
+    ```json
+    {
+      "llm_summary": "..."
+    }
+    ```
+    
+  classification: |-
+    Categorize the image into into one of the following content flavours into the variable `llm_content_flavour`:
+    
+    - Game Screenshot
+    - Item Stats
+    - Monster
+    - Player Character Portrait
+    - Other
+
+    Respond in the following JSON format:
+    
+    ```json
+    {
+      "llm_content_flavour": "..."
+    }
+    ```
+
+  tagging: |-
+    Below is a list of content tags. Examine the image and decide if any of the tags apply. Add all the applicable tags to the list "llm_tags". 
+    - screenshot: An in-game screenshot from the game Everquest itself
+    - item: A picture/screenshot of a specific item in the game, especially its stats and/or where to find it
+    - monster: A screenshot of a monster in the game
+    - art: The image is primarily artistic and not a game screenshot
+    - player: The image contains an Everquest player character
+
+    Respond in the following JSON format:
+    
+    ```json
+    {
+      "llm_tags": [ 
+        "tag1",
+        "tag2"
+      ]
+    }
+    ```
+
+  text_extraction: |-
+    Extract any phrases from the image into the string array variable `llm_image_text`.
+
+    Respond in the following JSON format:
+    
+    ```json
+    {
+      "llm_image_text": [ 
+        "...",
+        "..." 
+      ]
+    }
+    ```

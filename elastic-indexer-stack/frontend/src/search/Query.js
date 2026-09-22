@@ -1,29 +1,47 @@
+import { embeddingService } from './EmbeddingService';
+
 // Logic for building Elasticsearch queries based on user input
 //
-// @param {string} queryText - The user's search query
+// @param {string} requestState - The current request state, before postprocessing
 // @param {object} requestBody - The request body to be sent to Elasticsearch
 // @param {array} searchFields - The fields to search for the query
 // @param {object} paramsRef - The reference to the search parameters
 // @param {array} vectorFields - The fields containing vector embeddings
 // @param {string} embeddingModel - The name of the embedding model
 // @returns {void}
-export function resolveQuery(queryText, 
+export function resolveQuery(requestState, 
                              requestBody, 
                              searchFields, 
                              paramsRef, 
                              vectorFields, 
                              nestedVectorFields, 
                              embeddingModel) {
-    // If query contains double quotes, build a custom query:
-    if (queryText.includes('"')) {
+    
+    // If query contains special operators or quotes, build a custom query:
+    const RESERVED_CHARS = [
+        '"', '<', '>', '=', '*', '^', '[', ']', '(', ')', '{', 
+        '}', '!', '+', '-', '&&', '|', ':', '~', '?', '\\', '/', 
+        "AND", "OR", "NOT", "TO"
+    ];
+
+    const queryText = requestState.searchTerm;
+    
+    // Early return if query is empty or whitespace-only
+    if (!queryText || !queryText.trim()) {
+        return;
+    }
+    
+    if (RESERVED_CHARS.some(char => queryText.includes(char))) {
         requestBody.query = {
             bool: {
                 should: buildExactMatchQuery(queryText, searchFields)
             }
         };
     }
-    else if (paramsRef.current.enableSemanticSearch && vectorFields?.length && queryText) {
-        // Perform semantic search if enabled:
+    // Only perform semantic search if enabled AND service is available
+    else if (paramsRef.current.enableSemanticSearch && 
+             embeddingService.isEmbeddingServiceAvailable() &&
+             ((vectorFields && vectorFields.length > 0) || (nestedVectorFields && nestedVectorFields.length > 0))) {
         try {
             requestBody.knn = buildKnnQuery(queryText, embeddingModel, paramsRef, vectorFields, nestedVectorFields);
         }
@@ -34,85 +52,63 @@ export function resolveQuery(queryText,
 }
 
 function buildKnnQuery(queryText, embeddingModel, paramsRef, vectorFields, nestedVectorFields) {
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", "/openai/v1/embeddings", false);
-    xhr.setRequestHeader("Content-Type", "application/json");
-    xhr.send(JSON.stringify({ input: [queryText], model: embeddingModel }));
-
+    // Get the embedding from cache instead of synchronous XHR
+    const vector = embeddingService.getEmbedding(queryText);
     let knnQuery = [];
-    if (xhr.status === 200) {
-        const data = JSON.parse(xhr.responseText);
-        const vector = data?.data?.[0].embedding;
-        if (vector) {
-            const { k, num_candidates, boost } = paramsRef.current;
-            // First query the top-level fields
-            if (vectorFields?.length) {
-                const vectorQuery = vectorFields.map(field => ({
-                    field,
-                    query_vector: vector,
-                    k,
-                    num_candidates,
-                    boost
-                }));
-                knnQuery = knnQuery.concat(vectorQuery);
-            }
+    
+    if (vector) {
+        const { k, num_candidates, boost } = paramsRef.current;
+        // First query the top-level fields
+        if (vectorFields?.length) {
+            const vectorQuery = vectorFields.map(field => ({
+                field,
+                query_vector: vector,
+                k,
+                num_candidates,
+                boost
+            }));
+            knnQuery = knnQuery.concat(vectorQuery);
+        }
 
-            // Then query the nested fields
-            if (nestedVectorFields?.length) {
-                const nestedQuery = nestedVectorFields.map(field => ({
-                    "field": field+".vector",
-                    query_vector: vector,
-                    k,
-                    num_candidates,
-                    boost,
-                    inner_hits: {
-                        _source: false,
-                        "fields": [field+".text_chunk"],
-                        highlight: {
-                            fields: {
-                                [field+".text_chunk"]: {}
-                            }
+        // Then query the nested fields
+        if (nestedVectorFields?.length) {
+            const nestedQuery = nestedVectorFields.map(field => ({
+                "field": field+".vector",
+                query_vector: vector,
+                k,
+                num_candidates,
+                boost,
+                inner_hits: {
+                    _source: false,
+                    "fields": [field+".text_chunk"],
+                    highlight: {
+                        fields: {
+                            [field+".text_chunk"]: {}
                         }
                     }
-                }));
-                knnQuery = knnQuery.concat(nestedQuery);
-            }
-        }
-        else {
-            console.error("No embedding found for query:", queryText);
+                }
+            }));
+            knnQuery = knnQuery.concat(nestedQuery);
         }
     }
     return knnQuery;
 }
 
 function buildExactMatchQuery(queryText, searchFields) {
-    let phrases = [];
-    const remaining = queryText.replace(/"([^"]+)"/g, (match, p1) => {
-        phrases.push(p1);
-        return "";
-    }).trim();
+    /* 
+        We now handle:
+        - Double-quoted phrases
+        - Logical operators: AND, OR, NOT
+        - Parentheses grouping
 
-    let shouldQueries = [];
-
-    if (remaining) {
-        shouldQueries.push({
-            multi_match: {
-                query: remaining,
-                fields: searchFields,
-                type: "best_fields",
-                operator: "and"
-            }
-        });
-    }
-
-    phrases.forEach(phrase => {
-        searchFields.forEach(field => {
-            shouldQueries.push({
-                match_phrase: {
-                    [field]: phrase
-                }
-            });
-        });
-    });
-    return shouldQueries;
+        We use Elasticsearch's 'query_string' to let ES parse and handle 
+        all operators, parentheses, and phrases correctly.
+    */
+    return [{
+        query_string: {
+            query: queryText,
+            fields: searchFields,
+            default_operator: "AND"
+        }
+    }];
 }

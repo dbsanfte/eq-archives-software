@@ -69,4 +69,8 @@ curl --fail --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 \
   --data '{"size":0,"query":{"match_all":{}}}' \
   https://search.eqarchives.org/elasticsearch/eq-archive/_search |
   python3 -c 'import json,sys; result=json.load(sys.stdin); assert "hits" in result and not result.get("error"), "Elasticsearch smoke check failed"'
+curl --fail --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 \
+  --max-time 30 --resolve search.eqarchives.org:443:127.0.0.1 \
+  https://search.eqarchives.org/elasticsearch/eq-archive/_count |
+  python3 -c 'import json,sys; result=json.load(sys.stdin); assert isinstance(result.get("count"), int) and not result.get("error"), "Archive count smoke check failed"'
 echo "Deployed and verified $image"

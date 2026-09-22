@@ -18,8 +18,9 @@ every push to `master`, relevant pull requests, and manual dispatches. Pull
 requests build and smoke-test on a GitHub-hosted runner, without production
 credentials or access to the VM. Only `master` publishes and deploys.
 
-The build uses locked dependencies and pinned base images, runs the available
-frontend tests, and smoke-tests the final NGINX image. That same image is pushed
+The build uses the frozen Yarn lockfile and pinned base images, runs the
+frontend tests with the configured 90% coverage thresholds, and smoke-tests the
+final NGINX image. That same image is pushed
 to Docker Hub as `dbsanfte/frontend:<git-sha>`. Deployment uses its immutable
 `sha256` digest, not `latest`. Re-running a commit reuses and smoke-tests its
 already published image instead of rebuilding or overwriting the tag.
@@ -35,7 +36,8 @@ Runs share one deployment concurrency group. A queued run checks that its commit
 is still the tip of `master` before applying anything. Deployment renders the
 image digest, validates the resources against the API, reconciles runtime
 secrets, applies the manifests, and waits for readiness. It then checks HTTPS and
-an authenticated Elasticsearch search through the production ingress.
+an authenticated Elasticsearch search and archive count through the production
+ingress.
 
 Reapplying the same digest, configuration, and secrets keeps the same pod
 template, so it does not trigger a rollout. There is no `rollout restart` or

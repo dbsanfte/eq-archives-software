@@ -3,6 +3,8 @@ services:
     image: rabbitmq:3.9-management
     container_name: rabbitmq
     restart: unless-stopped
+    deploy:
+      replicas: 0
     ports:
       - "5672:5672"
       - "15672:15672"
@@ -13,6 +15,8 @@ services:
     image: dbsanfte/indexer:latest
     container_name: file-finder
     restart: unless-stopped
+    deploy:
+      replicas: 0
     build:
       context: ./indexer
     command:
@@ -27,10 +31,13 @@ services:
       - ELASTICSEARCH_SSL_VERIFY_CERTS=false
       - ELASTICSEARCH_INDEX=eq-archive-0
       - REINDEXING_ENABLED=false
-      - SPARSE_CHECKOUT_PATHS=websites/eq.castersrealm.com,mailing-lists/EQ-Clerics,newsgroups
+      - SPARSE_CHECKOUT_PATHS=newsgroups,mailing-lists,websites/eq.castersrealm.com
+#     - SPARSE_CHECKOUT_PATHS=websites/eq.castersrealm.com
+#     - SPARSE_CHECKOUT_PATHS=mailing-lists/EQ-Clerics
       - GIT_REPO_URL=https://github.com/dbsanfte/eq-archives.git
       - LOCAL_REPO_PATH=/data/eq-archives
       - SLEEP_INTERVAL=3600
+      - SKIP_LLM_ENRICHMENT=true
     volumes:
       - eq-archives-volume:/data
     secrets:
@@ -41,7 +48,7 @@ services:
     image: dbsanfte/indexer:latest
     restart: unless-stopped
     deploy:
-      replicas: 1
+      replicas: 0
     command:
       - "--indexer"
     depends_on:
@@ -57,45 +64,13 @@ services:
       - LOCAL_REPO_PATH=/data/eq-archives
       - SKIP_IMAGE_FILES=true
       - SKIP_OTHER_FILES=true
-      - OPENAI_ENDPOINT=http://192.168.50.139:1234/v1
+      - OPENAI_ENDPOINT=http://192.168.50.81:8000/v1
       - OPENAI_API_KEY=lmstudio
-      - OPENAI_TEXT_MODEL_NAME=phi-4@q6_k
+      - OPENAI_TEXT_MODEL_NAME=phi-4-mini-instruct
       - OPENAI_TEXT_TEMPERATURE=0.015
       - OPENAI_IMAGE_MODEL_NAME=llava-v1.5-7b@q8_0
       - OPENAI_EMBEDDING_MODEL_NAME=text-embedding-nomic-embed-text-v1.5@q8_0
-    volumes:
-      - eq-archives-volume:/data
-    secrets:
-      - es_username
-      - es_password
-      - openai_api_key
-
-  indexer-2:
-    image: dbsanfte/indexer:latest
-    restart: unless-stopped
-    deploy:
-      replicas: 1
-    command:
-      - "--indexer"
-    depends_on:
-      - rabbitmq
-      - file-finder
-    environment:
-      - LOG_LEVEL=debug
-      - ELASTICSEARCH_HOST=http://192.168.50.100
-      - ELASTICSEARCH_PORT=31200
-      - ELASTICSEARCH_SSL_SHOW_WARN=false
-      - ELASTICSEARCH_SSL_VERIFY_CERTS=false
-      - ELASTICSEARCH_INDEX=eq-archive-0
-      - LOCAL_REPO_PATH=/data/eq-archives
-      - SKIP_IMAGE_FILES=true
-      - SKIP_OTHER_FILES=true
-      - OPENAI_ENDPOINT=http://192.168.50.145:1234/v1
-      - OPENAI_API_KEY=lmstudio
-      - OPENAI_TEXT_MODEL_NAME=phi-4@q6_k
-      - OPENAI_TEXT_TEMPERATURE=0.015
-      - OPENAI_IMAGE_MODEL_NAME=llava-v1.5-7b@q8_0
-      - OPENAI_EMBEDDING_MODEL_NAME=text-embedding-nomic-embed-text-v1.5@q8_0
+      - SKIP_LLM_ENRICHMENT=true
     volumes:
       - eq-archives-volume:/data
     secrets:
@@ -115,7 +90,7 @@ services:
     environment:
       - LOG_LEVEL=debug
       - ELASTICSEARCH_URL=http://192.168.50.100:31200
-      - OPENAI_URL=http://192.168.50.139:1234
+      - OPENAI_URL=http://192.168.50.81:8001
       - ELASTICSEARCH_INDEX=eq-archive
     secrets:
       - es_readonly_username

@@ -1,0 +1,31 @@
+{
+    "$id": "https://example.com/person.schema.json",
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "Response",
+    "type": "object",
+    "properties": {
+        "llm_content_flavour": {
+            "type": "string",
+            "enum": [
+                "Mailing List Email",
+                "Newsgroup Post",
+                "Forum Post",
+                "Game News",
+                "Zone Information",
+                "Item Information",
+                "Spell Information",
+                "PvP Information",
+                "Monster Information",
+                "Strategy Guide",
+                "Player Character Profile",
+                "Guild Achievements",
+                "Tradeskill Information",
+                "Other"
+            ],
+            "pattern": "^(?!\\\\s*$).+",
+            "description": "The content flavour."
+        }
+    }
+}
+
+

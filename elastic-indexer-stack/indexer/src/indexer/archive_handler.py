@@ -1,55 +1,71 @@
 import os
 import re
 import logging
-
-logger = logging.getLogger(__name__)
+import json
+import datetime
 
 class ArchiveHandler:
-    def __init__(self):
-        self.newsgroups_path = os.environ.get("NEWSGROUPS_PATH", "newsgroups/".replace("/", os.sep))
-        self.mailing_lists_path = os.environ.get("MAILING_LISTS_PATH", "mailing-lists/".replace("/", os.sep))
-        self.websites_path = os.environ.get("WEBSITES_PATH", "websites/".replace("/", os.sep))
+    def __init__(self, newsgroups_path: str=None, mailing_lists_path: str=None, 
+                 websites_path: str=None, logger: logging.Logger=None):
+        self._newsgroups_path = newsgroups_path or os.environ.get("NEWSGROUPS_PATH", "newsgroups/")
+        self._mailing_lists_path = mailing_lists_path or os.environ.get("MAILING_LISTS_PATH", "mailing-lists/")
+        self._websites_path = websites_path or os.environ.get("WEBSITES_PATH", "websites/")
+        self._logger = logger or logging.getLogger(__name__)
 
     def _strip_index_html_from_url(self, url: str) -> str:
         if "/index.html" in url:
             return re.sub(r'/index\.html$', '', url)
         return url
 
-    def _convert_to_archive_url(self, file_path: str) -> str:
+    def _convert_to_archive_url(self, relative_path: str) -> str:
         try:
-            if self.websites_path in file_path:
-                pieces = file_path.split(self.websites_path)
-                chop = pieces[1]
-                chop_pieces = chop.split(os.sep)
-                chop_domain = chop_pieces[1]
-                chop_date = chop_pieces[2]
-                chop_path_pieces = chop.split(f"{os.sep}{chop_date}{os.sep}")
-                if len(chop_path_pieces) < 2:
-                    return file_path
-                chop_path = chop_path_pieces[1]
-                final_url = f"https://web.archive.org/web/{chop_date}/http://{chop_domain}/{chop_path}"
+            relative_path = relative_path.replace(os.sep, '/')
+            if self._websites_path in relative_path:
+                self._logger.debug(f"Converting website file path to archive URL: {relative_path}")
+                # We will be passed a file path like this:
+                # websites/eq.castersrealm.com/20000612004545/cgi-bin/eq/postings.cgi
+                #
+                # We need to convert it to an archive URL like this:
+                # https://web.archive.org/web/20000612004545/http://eq.castersrealm.com/cgi-bin/eq/postings.cgi
+                #
+                # First we'll split on self.websites_path to get the domain and date parts, 
+                # everything after that will be the path. 
+                # 
+                pieces = relative_path.split(self._websites_path)
+                pieces_rest = pieces[1].split('/')
+                domain_piece = pieces_rest[0]
+                date_piece = pieces_rest[1]
+                path = "/".join(pieces_rest[2:])
+                final_url = f"https://web.archive.org/web/{date_piece}/http://{domain_piece}/{path}"
+                self._logger.debug(f"Converted website file path to archive URL: {final_url}")
                 return final_url
-            elif self.mailing_lists_path in file_path:
-                pieces = file_path.split(self.mailing_lists_path)
-                chop_pieces = pieces[1].split(os.sep)
-                chop_listname = chop_pieces[1]
-                chop_filename = chop_pieces[2].replace(".json", ".html")
-                return f"https://dbsanfte.github.io/eq-archives/mailing-lists/{chop_listname}/html/{chop_filename}"
-            elif self.newsgroups_path in file_path:
-                pieces = file_path.split(self.newsgroups_path)
-                subfolder_path = pieces[1].removeprefix(os.sep).replace(os.sep, "/")
-                return f"https://dbsanfte.github.io/eq-archives/newsgroups/{subfolder_path}"
+            elif self._mailing_lists_path in relative_path:
+                self._logger.debug(f"Converting mailing list file path to archive URL: {relative_path}")
+                pieces = relative_path.split(self._mailing_lists_path)
+                chop_pieces = pieces[1].split('/')
+                chop_listname = chop_pieces[0]
+                chop_filename = chop_pieces[1].replace(".json", ".html")
+                final_url = f"https://dbsanfte.github.io/eq-archives/mailing-lists/{chop_listname}/html/{chop_filename}"
+                self._logger.debug(f"Converted mailing list file path to archive URL: {final_url}")
+                return final_url
+            elif self._newsgroups_path in relative_path:
+                self._logger.debug(f"Converting newsgroup file path to archive URL: {relative_path}")
+                pieces = relative_path.split(self._newsgroups_path)
+                subfolder_path = pieces[1].removeprefix('/')
+                final_url = f"https://dbsanfte.github.io/eq-archives/newsgroups/{subfolder_path}"
+                self._logger.debug(f"Converted newsgroup file path to archive URL: {final_url}")
+                return final_url
             return ""
         except Exception as e:
-            logger.error(f"Error converting file path to archive URL: {e}")
-            logger.exception(e)
+            self._logger.error(f"Error converting file path of [{relative_path}] to archive URL: {e}")
+            self._logger.exception(e)
             return ""
 
     def _extract_domain_and_date(self, relative_path: str, full_path: str) -> tuple[str, str]:
         parts = relative_path.split(os.sep)
 
         if self._is_websites(parts):
-            return self._extract_websites(parts)
+            return self._extract_websites(relative_path)
         if self._is_newsgroups(parts):
             return self._extract_newsgroups(full_path)
         if self._is_mailing_lists(parts):
@@ -66,8 +82,16 @@ class ArchiveHandler:
     def _is_mailing_lists(self, parts: list[str]) -> bool:
         return len(parts) > 0 and parts[0] == "mailing-lists"
 
-    def _extract_websites(self, parts: list[str]) -> tuple[str, str]:
-        return parts[1], parts[2]
+    def _extract_websites(self, relative_path: str) -> tuple[str, str]:
+        relative_path = relative_path.replace(os.sep, '/')
+        # We will be passed a file path like this:
+        # websites/eq.castersrealm.com/20000612004545/cgi-bin/eq/postings.cgi
+        pieces = relative_path.split(self._websites_path)
+        pieces_rest = pieces[1].split('/')
+        domain_name = pieces_rest[0]
+        date = pieces_rest[1]
+        date_formatted = f"{date[:4]}-{date[4:6]}-{date[6:8]} {date[8:10]}:{date[10:12]}:{date[12:14]}"
+        return domain_name, date_formatted
 
     def _extract_newsgroups(self, full_path: str) -> tuple[str, str]:
         domain_name = "groups.google.com"
@@ -78,28 +102,37 @@ class ArchiveHandler:
                     if line.startswith('Date: '):
                         capture_date = line[6:].strip()
                         break
-            logger.debug(f"Extracted newsgroup date: {capture_date}")
+            self._logger.debug(f"Extracted newsgroup date: {capture_date}")
         except Exception as e:
-            logger.error(f"Error extracting newsgroup date from {full_path}: {e}")
-            logger.exception(e)
+            self._logger.error(f"Error extracting newsgroup date from {full_path}: {e}")
+            self._logger.exception(e)
         return domain_name, capture_date
 
     def _extract_mailing_lists(self, full_path: str) -> tuple[str, str]:
-        domain_name = "groups.yahoo.com"
-        capture_date = None
-        try:
-            with open(full_path, 'r') as file:
-                for line in file:
-                    if '<b>Date:</b>' in line:
-                        match = re.search(r'<b>Date:</b>\s*(.*?)\s*<br/>', line)
-                        if match:
-                            capture_date = match.group(1).strip()
-                            break
-            logger.debug(f"Extracted mailing list date: {capture_date}")
-        except Exception as e:
-            logger.error(f"Error extracting mailing list date from {full_path}: {e}")
-            logger.exception(e)
+        domain_name: str = "groups.yahoo.com"
+        capture_date: str = None
+        
+        with open(full_path, "r") as file:
+            content = file.read()
+            json_file = json.loads(content)
+        
+            # Try to get date from 'date' field, fall back to 'postDate' if needed
+            timestamp: str = None
+            if "date" in json_file["ygData"] and json_file["ygData"]["date"] is not None:
+                timestamp = json_file["ygData"]["date"]
+            elif "postDate" in json_file["ygData"] and json_file["ygData"]["postDate"] is not None:
+                timestamp = json_file["ygData"]["postDate"]
+            
+            if timestamp is not None and timestamp != "" and timestamp != "0":
+                capture_date = datetime.datetime.fromtimestamp(int(timestamp), 
+                                                        datetime.timezone.utc).isoformat()
+                self._logger.debug(f"Extracted mailing list date: {capture_date}")
+            else:
+                self._logger.warning(f"No date found in mailing list file: {full_path}")
         return domain_name, capture_date
+    
+    def get_mailing_list_date(self, full_path: str) -> str:
+        return self._extract_mailing_lists(full_path)[1]
 
     def _resolve_thumbnail_url(self, url: str, file_type: str) -> str:
         default = "thumbnails/other.webp"
@@ -122,10 +155,10 @@ class ArchiveHandler:
             else:
                 return "thumbnails/other.webp"
         
-        elif self.mailing_lists_path.replace(os.sep, '/') in url:
+        elif self._mailing_lists_path.replace(os.sep, '/') in url:
             return "thumbnails/mailing-list.webp"
         
-        elif self.newsgroups_path.replace(os.sep, '/') in url:
+        elif self._newsgroups_path.replace(os.sep, '/') in url:
             return "thumbnails/newsgroup.webp"
         
         if file_type == "image":

@@ -49,9 +49,20 @@ export function getThumbnailField() {
   return getConfig().thumbnailField;
 }
 
-export function getFacetFields() {
-  return [ ...getConfig().valueFacets, ...getConfig().historicalFacets, ...getConfig().recentFacets ].flat();
+export function getStandardFacetFields() {
+  const config = getConfig();
+  const valueFacets = config.valueFacets || [];
+  const recentFacets = config.recentFacets || [];
+  return [...valueFacets, ...recentFacets].flat();
 }
+
+export function getDatePickerFacetFields() {
+  return [ getConfig().datePickerFacets ].flat();
+}
+
+export function getNestedDatePickerFacetFields() {
+    return [ getConfig().nestedDatePickerFacets ].flat();
+  }
 
 export function getSortFields() {
   return getConfig().sortFields || [];
@@ -148,7 +159,22 @@ export function buildSearchOptionsFromConfig() {
   return searchOptions;
 }
 
-export function buildFacetConfigFromConfig() {
+export function buildDatePickerFacetConfigFromConfig() {
+    const config = getConfig();
+
+    const datePickerFacets = (config.datePickerFacets || []).reduce((acc, n) => {
+        acc = acc || {};
+        acc[n] = { 
+          type: "range",
+          ranges: []
+        };
+        return acc;
+      }, undefined);
+
+    return {...datePickerFacets};
+}
+
+export function buildStandardFacetConfigFromConfig() {
   const config = getConfig();
 
   const valueFacets = (config.valueFacets || []).reduce((acc, n) => {
@@ -159,27 +185,6 @@ export function buildFacetConfigFromConfig() {
     };
     return acc;
   }, undefined);
-
-  const historicalFacets = (config.historicalFacets || []).reduce((acc, n) => {
-    acc = acc || {};
-    acc[n] = { 
-      type: "range",
-      ranges: [
-        { from: new Date("1990-01-01").toISOString(), to: new Date("1998-12-31").toISOString(), name: "1998 and older" },
-        { from: new Date("1999-01-01").toISOString(), to: new Date("1999-12-31").toISOString(), name: "1999" },
-        { from: new Date("2000-01-01").toISOString(), to: new Date("2000-12-31").toISOString(), name: "2000" },
-        { from: new Date("2001-01-01").toISOString(), to: new Date("2001-12-31").toISOString(), name: "2001" },
-        { from: new Date("2002-01-01").toISOString(), to: new Date("2002-12-31").toISOString(), name: "2002" },
-        { from: new Date("2003-01-01").toISOString(), to: new Date("2003-12-31").toISOString(), name: "2003" },
-        { from: new Date("2004-01-01").toISOString(), to: new Date("2004-12-31").toISOString(), name: "2004" },
-        { from: new Date("2005-01-01").toISOString(), to: new Date("2005-12-31").toISOString(), name: "2005" },
-        { from: new Date("2006-01-01").toISOString(), to: new Date("2006-12-31").toISOString(), name: "2006" },
-        { from: new Date("2007-01-01").toISOString(), to: new Date("3000-12-31").toISOString(), name: "2007 and newer" }
-      ]
-    };
-    return acc;
-  }, undefined);
-    
 
   const recentFacets = (config.recentFacets || []).reduce((acc, n) => {
     acc = acc || {};
@@ -196,7 +201,7 @@ export function buildFacetConfigFromConfig() {
     return acc;
   }, undefined);
 
-  return {...valueFacets, ...historicalFacets, ...recentFacets};
+  return {...valueFacets, ...recentFacets};
 }
 
 export function buildSortOptionsFromConfig() {
@@ -209,12 +214,12 @@ export function buildSortOptionsFromConfig() {
     },
     ...(config.sortFields || []).reduce((acc, sortField) => {
       acc.push({
-        name: `${capitalizeFirstLetter(sortField)} ASC`,
+        name: `${capitalizeFirstLetter(sortField)} (Ascending)`,
         value: sortField,
         direction: "asc"
       });
       acc.push({
-        name: `${capitalizeFirstLetter(sortField)} DESC`,
+        name: `${capitalizeFirstLetter(sortField)} (Descending)`,
         value: sortField,
         direction: "desc"
       });
@@ -243,3 +248,5 @@ export function buildAutocompleteQueryConfig() {
     }
   };
 }
+
+  

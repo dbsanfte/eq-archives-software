@@ -1,8 +1,23 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import PropTypes from "prop-types";
-import { Box, Typography, FormControlLabel, Checkbox } from "@mui/material";
+import { Box, Typography, FormControlLabel, Checkbox, Tooltip } from "@mui/material";
+import { embeddingService } from "../../search/EmbeddingService";
 
 function SearchParameters({ values, onChange }) {
+  const [isServiceAvailable, setIsServiceAvailable] = useState(true);
+  
+  useEffect(() => {
+    // Check service availability initially
+    setIsServiceAvailable(embeddingService.isEmbeddingServiceAvailable());
+    
+    // Set up interval to check service availability
+    const checkInterval = setInterval(() => {
+      setIsServiceAvailable(embeddingService.isEmbeddingServiceAvailable());
+    }, 5000); // Check every 5 seconds
+    
+    return () => clearInterval(checkInterval);
+  }, []);
+
   const handleCheckboxChange = (e) => {
     onChange("enableSemanticSearch", e.target.checked);
   };
@@ -15,17 +30,25 @@ function SearchParameters({ values, onChange }) {
       <Typography variant="subtitle2" gutterBottom>
         Search Parameters
       </Typography>
-      <FormControlLabel
-        control={
-          <Checkbox
-            checked={values.enableSemanticSearch}
-            onChange={handleCheckboxChange}
-            name="enableSemanticSearch"
-            color="primary"
-          />
-        }
-        label="Enable semantic search"
-      />
+      <Tooltip title={!isServiceAvailable ? "Embedding service is currently unavailable" : ""}>
+        <FormControlLabel
+          control={
+            <Checkbox
+              checked={isServiceAvailable && values.enableSemanticSearch}
+              onChange={handleCheckboxChange}
+              name="enableSemanticSearch"
+              color="primary"
+              disabled={!isServiceAvailable}
+            />
+          }
+          label="Enable semantic search"
+        />
+      </Tooltip>
+      {!isServiceAvailable && (
+        <Typography variant="caption" color="error">
+          Semantic search is temporarily unavailable
+        </Typography>
+      )}
     </Box>
   );
 }

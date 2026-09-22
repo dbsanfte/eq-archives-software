@@ -16,16 +16,17 @@ To set up and run this project, follow the instructions below.
 Requires [npm](https://www.npmjs.com/).
 
 Dependencies:
-- Node v16.13.0
+- Node v22
+- Yarn Classic v1.22.22 (`npm install -g yarn@1.22.22` if needed)
 
 One can leverage [NVM](https://github.com/nvm-sh/nvm) to install Node before proceeding to start the application by running the following commands:
 
 ```bash
-# Run this to install Node 16.13.0
-nvm install 16.13.0
+# Run this to install Node 22
+nvm install 22
 
 # Run this to use the installed Node version 
-nvm use 16.13.0
+nvm use 22
 ```
 
 Run the following commands to start this application:
@@ -37,11 +38,17 @@ Run the following commands to start this application:
 cd ~/Downloads/app-search-reference-ui
 
 # Run this to set everything up
-npm install
+yarn install --frozen-lockfile
 
 # Run this to start your application and open it up in a new browser window
 npm start
 ```
+
+Run the test suite with `yarn test:ci --runInBand`. CI enforces the existing
+90% coverage thresholds before building the production image.
+
+Production deployment from `master` is documented in the
+[deployment guide](../k8s-manifests/README.md).
 
 ## Usage
 

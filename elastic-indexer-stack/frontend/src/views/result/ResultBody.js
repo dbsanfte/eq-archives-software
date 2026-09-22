@@ -13,10 +13,12 @@ function ResultBody({ result, summaryHTML, textHTML }) {
           <h3>Summary</h3>
           <div dangerouslySetInnerHTML={{ __html: summaryHTML }} />
         </section>
-        <section className="result-full-text">
-          <h3>Text Snippet</h3>
-          <div dangerouslySetInnerHTML={{ __html: textHTML }} />
-        </section>
+        {textHTML && textHTML !== "" && (
+          <section className="result-text-snippet">
+            <h3>Result Snippet</h3>
+            <div dangerouslySetInnerHTML={{ __html: textHTML }} />
+          </section>
+        )}
       </div>
     </div>
   );

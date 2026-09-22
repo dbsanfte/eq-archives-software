@@ -7,15 +7,29 @@ name = "indexer"
 version = "0.0.1"
 
 [tool.pytest.ini_options]
-pythonpath = "src"
+pythonpath = "src/indexer"
 testpaths = ["src/indexer/tests"]
 norecursedirs = ".git .tox .env .venv .vscode .pytest_cache node_modules"
 addopts = [
     "--import-mode=importlib",
-    "-v"
+    "-v",
+    "--cov=.",
+    "--cov-report=term-missing",
+    "--cov-report=json"
 ]
 
 [tool.coverage.run]
 omit = [
-    "**/test_*.py"
+    "**/test",
+    "**/test_*.py",
+    "**/main.py",
+    "**/setup.py",
+    "**/__init__.py",
+    "**/.venv",
+    "**/_pycache_",
+    "app/src/*.py"
 ]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true

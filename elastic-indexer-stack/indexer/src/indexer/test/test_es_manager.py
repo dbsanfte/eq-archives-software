@@ -4,8 +4,8 @@ import pytest
 from unittest.mock import Mock, patch
 from elastic_transport import ApiResponseMeta, HttpHeaders, NodeConfig
 from elasticsearch.exceptions import ConnectionError, RequestError, TransportError
-from indexer.es_manager import ElasticsearchManager
-from elasticsearch.exceptions import RequestError
+from indexer.es_manager import ElasticsearchManager, ES_FIELDS
+import datetime
 
 @pytest.fixture
 def mock_elasticsearch():
@@ -111,6 +111,29 @@ def test_create_index_template_existing(manager, mock_elasticsearch):
     manager._create_index_template()
     mock_elasticsearch.indices.put_index_template.assert_called_once()
 
+def test_create_index_template_includes_all_fields(manager, mock_elasticsearch):
+    mock_elasticsearch.ping.return_value = True
+    # Reset the flag to force template creation
+    manager._index_template_created = False
+    manager._create_index_template()
+    
+    expected_properties = {field: config["mapping"] for field, config in ES_FIELDS.items()}
+    
+    mock_elasticsearch.indices.put_index_template.assert_called_once()
+    _, put_kwargs = mock_elasticsearch.indices.put_index_template.call_args
+    assert put_kwargs["name"] == "eq-archive-index-template"
+    
+    template_body = put_kwargs["body"]
+    assert template_body.get("index_patterns") == ["eq-archive*"]
+    
+    template = template_body.get("template", {})
+    mappings = template.get("mappings", {})
+    properties = mappings.get("properties", {})
+    
+    for field, mapping in expected_properties.items():
+        assert field in properties, f"Field '{field}' is missing in the template"
+        assert properties[field] == mapping, f"Mapping for field '{field}' does not match"
+
 def test_initialize_es_index_new(manager, mock_elasticsearch):
     mock_elasticsearch.ping.return_value = True
     mock_elasticsearch.indices.exists.return_value = False
@@ -152,7 +175,6 @@ def test_chunks_exist_false(manager, mock_elasticsearch):
     )
 
 def test_chunks_exist_request_error(manager, mock_elasticsearch, caplog):
-
     mock_elasticsearch.search.side_effect = RequestError(
         400,
         ApiResponseMeta(400, "1.1", HttpHeaders(), 1, NodeConfig("http", "localhost", 1234)),
@@ -192,3 +214,28 @@ def test_get_client_doesnt_initialize_when_present(manager, mock_elasticsearch):
     mock_elasticsearch.indices.exists.assert_called_once()
     mock_elasticsearch.indices.create.assert_not_called()
     mock_elasticsearch.put_index_template.assert_not_called()
+
+def test_build_document_valid():
+    # Provide valid fields and leave out last_indexed so it's auto-set.
+    doc = ElasticsearchManager.build_document(id="123", title="Test Title")
+    # Check that provided fields match
+    assert doc["id"] == "123"
+    assert doc["title"] == "Test Title"
+    # Since last_indexed was not provided, it should be set automatically to a valid ISO timestamp.
+    try:
+        datetime.datetime.fromisoformat(doc["last_indexed"])
+    except (ValueError, TypeError):
+        pytest.fail("last_indexed is not a valid ISO formatted timestamp")
+
+def test_build_document_specified_last_indexed():
+    # Provide a specific last_indexed value
+    given_time = datetime.datetime(2023, 10, 10, tzinfo=datetime.timezone.utc).isoformat()
+    doc = ElasticsearchManager.build_document(id="456", title="Another Title", last_indexed=given_time)
+    assert doc["last_indexed"] == given_time
+
+def test_build_document_invalid_field():
+    # Pass an invalid field that is not defined in ES_FIELDS
+    with pytest.raises(ValueError) as excinfo:
+        ElasticsearchManager.build_document(id="789", title="Invalid Field Test", non_existent_field="oops")
+    assert "Invalid field(s): non_existent_field" in str(excinfo.value)
+

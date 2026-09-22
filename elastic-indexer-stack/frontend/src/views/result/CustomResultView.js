@@ -4,19 +4,18 @@ import TagRow from "./TagRow";
 import ResultBody from "./ResultBody";
 import ButtonRow from "./ButtonRow";
 
-const CustomResultView = (context, onClickLink) => {
+const CustomResultView = (context) => {
+  const { onClickLink } = context;
   const summary = context.result.llm_summary;
   let summaryHTML = "";
   if (summary?.raw) {
     summaryHTML = summary.raw;
   }
-  
+
   const text_full = context.result.text_full;
   let textHTML = "";
   if (text_full?.snippet) {
     textHTML = text_full.snippet;
-  } else if (text_full?.raw) {
-    textHTML = text_full.raw;
   }
 
   return (
@@ -43,14 +42,14 @@ const CustomResultView = (context, onClickLink) => {
       />
       {/* Tag Row providing llm_tags from metadata if any defined */}
       {context.result.llm_tags && <TagRow tags={context.result.llm_tags.raw} />}
-      
+
       {/* Main result body with summary and text */}
-      <ResultBody 
-        result={context.result} 
-        summaryHTML={summaryHTML} 
-        textHTML={textHTML} 
+      <ResultBody
+        result={context.result}
+        summaryHTML={summaryHTML}
+        textHTML={textHTML}
       />
-      
+
       {/* Button Row for further interactions */}
       <ButtonRow result={context.result} />
     </li>
