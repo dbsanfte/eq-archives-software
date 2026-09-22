@@ -79,6 +79,20 @@ def test_constraints_and_long_queries_use_lexical_search(query):
     assert run(make_archive(es, embed).search(query)).results == []
 
 
+@pytest.mark.parametrize("query", ["cyclops -ring", '"ancient cyclops" -ring', "cyclops +(ring|boots)"])
+def test_explicit_constraints_do_not_broaden_into_default_or_matches(query):
+    def es(request):
+        body = json.loads(request.content)
+        parsed = body["query"]["simple_query_string"]
+        # With default OR, ES interprets `cyclops -ring` as cyclops OR
+        # anything without ring. Require conjunction for explicit constraints.
+        assert parsed["default_operator"] == "and"
+        assert parsed["query"] == query and "knn" not in body
+        return httpx.Response(200, json={"hits": {"hits": []}})
+
+    assert run(make_archive(es).search(query)).results == []
+
+
 @pytest.mark.parametrize("bad", [[], {}, {"data": []}, {"data": [{}]}, {"data": [{"embedding": [0] * 768}]},
                                      {"data": [{"embedding": [True] * 768}]},
                                      {"data": [{"embedding": ["secret"] * 768}]}])

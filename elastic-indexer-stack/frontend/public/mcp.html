@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Connect ChatGPT or Claude to the EQ Archives MCP server for historical EverQuest research.">
+  <title>EQ Archives · Connect with MCP</title>
+  <link rel="icon" href="/images/archive-mark.svg" type="image/svg+xml">
+  <style>
+    :root { color-scheme: light; font: 15px/1.7 system-ui, sans-serif; color: #243e32; background: #f7f8f3; }
+    body { max-width: 940px; margin: 0 auto; padding: 24px 22px 64px; }
+    header { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-bottom: 1px solid #dce0d8; padding-bottom: 20px; }
+    .brand { display: inline-flex; align-items: center; gap: 12px; font: 600 24px Georgia, serif; text-decoration: none; }
+    h1, h2 { font-family: Georgia, serif; font-weight: 400; line-height: 1.2; }
+    h1 { font-size: clamp(32px, 5vw, 44px); max-width: 700px; margin: 12px 0 18px; }
+    h2 { font-size: 25px; margin-top: 0; }
+    a { color: #2e5140; text-underline-offset: 3px; }
+    a:focus-visible, button:focus-visible { outline: 2px solid #947b49; outline-offset: 4px; }
+    .eyebrow { margin: 36px 0 12px; color: #806b40; font-size: 11px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; }
+    .intro { max-width: 760px; color: #56685d; }
+    .endpoint { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 14px; padding: 18px; background: white; border: 1px solid #bdcbbf; border-radius: 6px; margin: 24px 0 6px; }
+    .endpoint p { margin: 0 0 4px; font-size: 12px; color: #56685d; }
+    code { overflow-wrap: anywhere; font-size: 14px; }
+    button { border: 1px solid #243e32; border-radius: 4px; color: white; background: #243e32; padding: 11px 16px; font: inherit; cursor: pointer; }
+    button:hover { background: #365745; }
+    #copy-status { min-height: 24px; margin: 0 0 16px; font-size: 13px; }
+    .connection-options { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    section { background: white; border: 1px solid #dce0d8; border-radius: 6px; padding: 24px; }
+    li { margin-bottom: 12px; padding-left: 3px; }
+    ol { padding-left: 20px; }
+    .note { color: #56685d; font-size: 13px; }
+    .research { margin-top: 28px; padding: 24px 0 0; border-top: 1px solid #dce0d8; }
+    blockquote { margin: 16px 0; border-left: 3px solid #9b885d; padding: 10px 18px; background: #eef1e8; }
+    details { margin-top: 24px; color: #56685d; }
+    summary { cursor: pointer; font-weight: 600; color: #243e32; }
+    footer { margin-top: 36px; border-top: 1px solid #dce0d8; padding-top: 18px; font-size: 13px; }
+    @media (max-width: 700px) { .connection-options { grid-template-columns: 1fr; } section { padding: 20px; } header > a:last-child { font-size: 13px; } }
+  </style>
+  <script src="/mcp-guide.js" defer></script>
+</head>
+<body>
+  <header><a class="brand" href="/"><img src="/images/archive-mark.svg" alt="" width="36" height="36">EQ Archives</a><a href="/">Back to search</a></header>
+  <main>
+    <p class="eyebrow">The archive, connected</p>
+    <h1>Bring EverQuest history into your conversations.</h1>
+    <p class="intro">MCP (Model Context Protocol) lets an AI assistant search EQ Archives and read preserved sources.
+      Connect ChatGPT or Claude to research historical websites, mailing lists and newsgroups, with links back to the evidence.</p>
+    <div class="endpoint">
+      <div><p>MCP server URL · Streamable HTTP · No authentication</p><code id="mcp-endpoint">https://search.eqarchives.org/mcp</code></div>
+      <button id="copy-endpoint" type="button" aria-label="Copy MCP server URL" hidden>Copy URL</button>
+    </div>
+    <p id="copy-status" role="status" aria-live="polite"></p>
+    <div class="connection-options">
+      <section aria-labelledby="chatgpt-heading">
+        <h2 id="chatgpt-heading">ChatGPT developer mode</h2>
+        <ol>
+          <li>Open <strong>Settings → Security and login</strong> and enable <strong>Developer mode</strong>.</li>
+          <li>Open <strong>Plugins</strong> and select the <strong>plus</strong> button to create a custom connection.</li>
+          <li>Name it <strong>EQ Archives</strong>, paste the MCP server URL above, and choose <strong>No authentication</strong>.</li>
+          <li>Create the connection, review the <strong>search</strong> and <strong>fetch</strong> tools, then select EQ Archives from the tools menu in a new chat.</li>
+        </ol>
+        <p class="note">Developer mode depends on your account and workspace settings. For a longer investigation, use the connection
+          as a Deep Research source when that option is available.</p>
+        <a href="https://developers.openai.com/plugins/deploy/connect-chatgpt">ChatGPT connection instructions ↗</a>
+      </section>
+      <section aria-labelledby="claude-heading">
+        <h2 id="claude-heading">Claude</h2>
+        <ol>
+          <li>In Claude on the web or desktop, open <strong>Customize → Connectors</strong>.</li>
+          <li>Select <strong>+ → Add custom connector</strong>.</li>
+          <li>Name it <strong>EQ Archives</strong> and paste the MCP server URL above. Leave the optional OAuth client fields empty.</li>
+          <li>Select <strong>Add</strong>, then enable EQ Archives for your conversation under <strong>+ → Connectors</strong>.</li>
+        </ol>
+        <p class="note">For Team or Enterprise, an owner first adds the server in <strong>Organization settings → Connectors</strong>.
+          Then members can connect to it. Account limits and workspace policies may apply.</p>
+        <a href="https://support.claude.com/en/articles/11175166-get-started-with-custom-connectors-using-remote-mcp">Claude connection instructions ↗</a>
+      </section>
+    </div>
+    <div class="research">
+      <h2>Start with a question</h2>
+      <blockquote>Use EQ Archives to research what players reported about camping the Ancient Cyclops for Journeyman’s Boots.
+        Compare several historical accounts, read the original sources, and cite them.</blockquote>
+      <p>The server offers two read-only tools: <strong>search</strong> finds sources and <strong>fetch</strong> retrieves their extracted text and provenance.
+        It cannot change the archive. No EQ Archives account or API key is needed.</p>
+      <p>Archive capture dates may differ from publication dates. Model-estimated dates and image transcriptions are labelled;
+        check them against the original. The collection and text extraction are incomplete.</p>
+    </div>
+    <details>
+      <summary>What information does the connection send?</summary>
+      <p>Your assistant sends the search queries and document IDs it selects to EQ Archives. The server does not request your full conversation,
+        name, email or assistant account credentials. Search embeddings are generated on the EQ Archives server.</p>
+      <p>A bounded memory cache reuses query embeddings for five minutes; entries are removed by eviction or a restart.
+        The MCP application does not write query bodies to logs. Infrastructure may record IP addresses, timestamps and errors.
+        Your assistant provider’s own data settings also apply. Use public research topics and avoid private information.</p>
+    </details>
+  </main>
+  <footer><a href="/">Search the archive</a> · <a href="https://github.com/dbsanfte/eq-archives-software">Source code (AGPLv3)</a> ·
+    <a href="https://github.com/dbsanfte/eq-archives-software/issues">Support and feedback</a></footer>
+</body>
+</html>

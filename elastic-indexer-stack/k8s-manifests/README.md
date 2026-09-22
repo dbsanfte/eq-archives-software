@@ -12,9 +12,12 @@ its data, Traefik, cert-manager, the `local-path` StorageClass, and the
 `00-elasticsearch.yaml` is a separate, manually managed backend reference;
 its secret placeholders must never be applied by this workflow.
 
-The read-only ChatGPT connector is Deployment/Service `eqarchives-mcp`, defined
+The public read-only MCP server is Deployment/Service `eqarchives-mcp`, defined
 in [`mcp.yaml`](mcp.yaml). Its exact `/mcp` HTTPS route takes precedence over the
-frontend's `/` route, using the existing certificate. It has separate rate and
+frontend's `/` route through explicit router priority, using the existing certificate.
+Traefik otherwise prioritizes rule-string length, so `PathPrefix(/)` can beat the
+shorter exact-path rule. CI reproduces this with a pinned Traefik container and
+the matches/priorities rendered from the real manifests. The service has separate rate and
 concurrency limits, one non-root replica, a read-only filesystem, projected
 credentials and zero-unavailable rolling updates. The [MCP guide](../mcp/README.md)
 documents its search/fetch contract and runtime limits.

@@ -14,7 +14,7 @@ archive itself lives in the separate
 - Keyword search with query syntax and optional semantic search using embeddings.
 - Filters for source, content type, tags, mailing list, and dates.
 - Full-text previews, archive links, and shareable document permalinks.
-- A read-only ChatGPT MCP connector for researching the archive with source citations.
+- A public, read-only MCP server for researching the archive in ChatGPT, Claude and other compatible assistants.
 - An archive status bar showing document count, indexing activity, and the
   frontend build's Git revision.
 - Python workers for extracting text and metadata, generating embeddings, and
@@ -33,7 +33,7 @@ flowchart LR
     Browser[React search UI] --> Proxy[NGINX]
     Proxy --> ES
     Proxy --> Embeddings[Local Nomic embeddings]
-    ChatGPT --> MCP[Read-only MCP search / fetch]
+    Assistants[ChatGPT / Claude / MCP clients] --> MCP[Read-only MCP search / fetch]
     MCP --> ES
     MCP --> Embeddings
 ```
@@ -53,7 +53,7 @@ browser configuration or JavaScript bundle.
 | Path | Purpose |
 | --- | --- |
 | [`elastic-indexer-stack/frontend/`](elastic-indexer-stack/frontend/) | React application, Jest tests, and NGINX container |
-| [`elastic-indexer-stack/mcp/`](elastic-indexer-stack/mcp/) | ChatGPT-compatible MCP search/fetch service, protocol tests and coverage |
+| [`elastic-indexer-stack/mcp/`](elastic-indexer-stack/mcp/) | Public MCP search/fetch service, protocol tests and coverage |
 | [`elastic-indexer-stack/indexer/`](elastic-indexer-stack/indexer/) | Python file finder, indexing workers, extraction handlers, and tests |
 | [`elastic-indexer-stack/indexer/src/indexer/resources/`](elastic-indexer-stack/indexer/src/indexer/resources/) | Enrichment prompts and response schemas |
 | [`elastic-indexer-stack/k8s-manifests/`](elastic-indexer-stack/k8s-manifests/) | Production frontend and Nomic embedding manifests, plus backend reference configuration |
@@ -61,15 +61,15 @@ browser configuration or JavaScript bundle.
 | [`scripts/`](scripts/) | Frontend deployment, runtime secret reconciliation, and smoke checks |
 | [`.github/workflows/elastic-indexer-stack-cicd.yml`](.github/workflows/elastic-indexer-stack-cicd.yml) | Frontend pull-request checks and deployment from `master` |
 
-## Research in ChatGPT
+## Connect through MCP
 
 Connect a custom MCP integration to **https://search.eqarchives.org/mcp**, using
 no authentication. The connector searches public archive sources and retrieves
 their full extracted text, source links and provenance. Read the
-[connection guide](https://search.eqarchives.org/chatgpt.html) for ChatGPT setup
-and sample research questions. Custom-connection availability depends on your
-ChatGPT account/workspace. Directory publication is a separate future step;
-[listing materials](docs/chatgpt-listing.md) are prepared.
+[connection guide](https://search.eqarchives.org/mcp.html) for ChatGPT developer
+mode, Claude setup and a sample research question. The MCP icon at the top right
+of the search site opens this screen. Custom-connection availability depends on
+your assistant account/workspace. Users connect directly to the public server.
 
 The [MCP service guide](elastic-indexer-stack/mcp/README.md) covers the contract,
 development, tests, resource limits and data handling. No OpenAI API key or paid
