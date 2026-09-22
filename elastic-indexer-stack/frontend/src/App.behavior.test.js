@@ -54,6 +54,8 @@ test('exposes search results, date facets, advanced options, syntax help and scr
   expect(screen.getByText('Sort results')).toBeInTheDocument();
   expect(screen.getByText('Captured date')).toBeInTheDocument();
   expect(screen.getByText('domain')).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Show detailed cards' }));
+  expect(screen.getByRole('button', { name: 'Show compact cards' })).toBeVisible();
   fireEvent.click(screen.getByRole('button', { name: 'Advanced...' }));
   fireEvent.click(screen.getByRole('button', { name: 'Neighbors: 10' }));
   expect(screen.getByRole('button', { name: 'Neighbors: 25' })).toBeInTheDocument();

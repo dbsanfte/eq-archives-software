@@ -59,6 +59,25 @@ test('reads the exact document with source provenance, find, citation, download 
   expect(fetch).toHaveBeenCalledTimes(1);
 });
 
+test('returns to the exact results URL and keeps that route through capture navigation', async () => {
+  const returnTo = '/?q=ancient%20cyclops&current=2&sortField=capture_date&filters%5B0%5Bfield%5D=domain_name';
+  fetchCaptures.mockResolvedValueOnce({
+    records: [{ _meta: { id: newer }, title: { raw: 'Later guide' }, capture_date: { raw: '2001-01-01' }, url: { raw: 'https://web.archive.org/web/20010101000000/http://example.org/path?q=1' } }],
+    nextOffset: null
+  });
+  read({ returnTo, find: 'Preserved' });
+  expect(await screen.findByRole('heading', { name: 'An archived guide' })).toBeVisible();
+  expect(screen.getByRole('link', { name: '← Back to results' })).toHaveAttribute('href', returnTo);
+  fireEvent.click(screen.getByRole('button', { name: 'Copy link' }));
+  await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1));
+  expect(new URL(navigator.clipboard.writeText.mock.calls[0][0]).searchParams.has('return')).toBe(false);
+  fireEvent.click(screen.getByRole('button', { name: 'View captures' }));
+  const readCapture = await screen.findByRole('link', { name: 'Read capture from 2001-01-01' });
+  expect(new URL(readCapture.href).searchParams.get('return')).toBe(returnTo);
+  const compare = screen.getByRole('link', { name: 'Compare capture from 2001-01-01 with selected capture' });
+  expect(new URL(compare.href).searchParams.get('return')).toBe(returnTo);
+});
+
 test.each([false, true])('offers manual copy when clipboard is missing or denied (%s)', async denied => {
   Object.defineProperty(navigator, 'clipboard', { configurable: true, value: denied ? { writeText: jest.fn().mockRejectedValue(new Error('denied')) } : undefined });
   render(<CopyAction label="Copy citation" text="Exact citation" />);

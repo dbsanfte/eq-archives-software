@@ -1,15 +1,16 @@
 import React, { useContext, useState } from "react";
 import PropTypes from "prop-types";
 import { Button, Snackbar } from "@mui/material";
-import { readerUrl, recordId, ReaderSearchContext } from "../reader/reader-utils";
+import { readerUrl, recordId, ReaderSearchContext, searchReturnLinkHandlers } from "../reader/reader-utils";
 
-const ButtonRow = ({ result }) => {
+const ButtonRow = ({ result, returnTo = '' }) => {
   const find = useContext(ReaderSearchContext);
-  const href = readerUrl(recordId(result), { find });
+  const href = readerUrl(recordId(result), { find, returnTo });
+  const permalink = readerUrl(recordId(result), { find });
   const [snackbarOpen, setSnackbarOpen] = useState(false);
 
   const handlePermalink = () => {
-    const searchUrl = window.location.origin + href;
+    const searchUrl = window.location.origin + permalink;
     Promise.resolve().then(() => navigator.clipboard.writeText(searchUrl))
       .then(() => {
         setSnackbarOpen(true);
@@ -27,7 +28,7 @@ const ButtonRow = ({ result }) => {
   return (
     <>
       <div className="archive-result-actions">
-        {recordId(result) && <Button component="a" href={href} variant="contained" className="archive-result-reader">Read document</Button>}
+        {recordId(result) && <Button component="a" href={href} {...searchReturnLinkHandlers} variant="contained" className="archive-result-reader">Read document</Button>}
         <Button
           variant="text"
           onClick={() => {
@@ -63,6 +64,7 @@ ButtonRow.propTypes = {
       raw: PropTypes.string,
     }),
   }).isRequired,
+  returnTo: PropTypes.string,
 };
 
 export default ButtonRow;

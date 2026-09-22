@@ -5,22 +5,54 @@ export const searchPhrase = term => (term || '').replace(/^"(.*)"$/, '$1');
 export const recordId = result => result?._meta?.id || result?.id?.raw || '';
 export const value = (result, field) => typeof result?.[field]?.raw === 'string' ? result[field].raw : '';
 
-export function readerUrl(id, { compare = '', find = '', part = '' } = {}) {
+// Reader return links only restore a search on this site, never an arbitrary URL.
+export function safeSearchReturnUrl(value) {
+  if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//') || value.includes('\\')) return '/';
+  try {
+    const url = new URL(value, window.location.origin);
+    return url.origin === window.location.origin && url.pathname === '/' && !url.hash
+      ? url.pathname + url.search : '/';
+  } catch (_) { return '/'; }
+}
+
+// Search UI updates history after rendering results. Refresh the link at
+// activation time so it carries the completed query, filters, sort and page.
+export function refreshSearchReturn(event) {
+  if (window.location.pathname !== '/') return;
+  const url = new URL(event.currentTarget.href, window.location.origin);
+  if (url.origin !== window.location.origin || url.pathname !== '/document') return;
+  const returnTo = safeSearchReturnUrl(window.location.pathname + window.location.search);
+  if (returnTo === '/') url.searchParams.delete('return');
+  else url.searchParams.set('return', returnTo);
+  event.currentTarget.setAttribute('href', url.pathname + url.search + url.hash);
+}
+
+export const searchReturnLinkHandlers = {
+  onClick: refreshSearchReturn,
+  onAuxClick: refreshSearchReturn,
+  onContextMenu: refreshSearchReturn,
+  onFocus: refreshSearchReturn,
+  onMouseEnter: refreshSearchReturn
+};
+
+export function readerUrl(id, { compare = '', find = '', part = '', returnTo = '' } = {}) {
   const params = new URLSearchParams({ id });
   if (compare) params.set('compare', compare);
   if (find) params.set('find', find);
   if (part) params.set('part', part);
+  const safeReturn = safeSearchReturnUrl(returnTo);
+  if (safeReturn !== '/') params.set('return', safeReturn);
   return `/document?${params}`;
 }
 
 // Archive timestamps without an explicit zone are UTC, including older records.
-export function comparisonUrl(selected, other) {
+export function comparisonUrl(selected, other, { returnTo = '' } = {}) {
   const time = record => {
     const date = value(record, 'capture_date');
     return Date.parse(/T\d{2}:\d{2}:\d{2}(?:\.\d+)?$/.test(date) ? date + 'Z' : date);
   };
   const [from, to] = time(other) < time(selected) ? [other, selected] : [selected, other];
-  return readerUrl(recordId(from), { compare: recordId(to) });
+  return readerUrl(recordId(from), { compare: recordId(to), returnTo });
 }
 
 // Resolve relative source links against the original page, retaining its capture.
