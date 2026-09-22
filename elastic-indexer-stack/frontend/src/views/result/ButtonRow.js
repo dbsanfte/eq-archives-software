@@ -1,14 +1,12 @@
 import React, { useState } from "react";
 import PropTypes from "prop-types";
-import { Button, Dialog, DialogTitle, DialogContent, DialogActions, Snackbar, useMediaQuery, useTheme } from "@mui/material";
+import { Button, Dialog, DialogTitle, DialogContent, DialogActions, Snackbar } from "@mui/material";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
 const ButtonRow = ({ result }) => {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
   const handlePreviewOpen = () => setPreviewOpen(true);
   const handlePreviewClose = () => setPreviewOpen(false);
@@ -40,60 +38,29 @@ const ButtonRow = ({ result }) => {
 
   return (
     <>
-      <div
-        style={{
-          marginTop: "1rem",
-          display: "flex",
-          flexDirection: isMobile ? "column" : "row",
-          justifyContent: "space-between",
-          alignItems: isMobile ? "stretch" : "flex-start",
-          gap: isMobile ? "0.75rem" : "0",
-          paddingLeft: "24px",
-          paddingRight: "24px"
-        }}
-      >
-        <div style={{ 
-          display: "flex", 
-          flexDirection: isMobile ? "column" : "row",
-          gap: isMobile ? "0.75rem" : "1rem", 
-          width: isMobile ? "100%" : "auto",
-          marginBottom: isMobile ? "0.75rem" : "0"
-        }}>
-          <Button 
-            variant="outlined" 
-            onClick={handlePreviewOpen}
-            fullWidth={isMobile}
-          >
-            Preview Full Text
-          </Button>
-          <Button
-            variant="outlined"
-            onClick={() => {
-              if (result.alternate_url?.raw) {
-                window.open(result.alternate_url.raw, "_blank", "noopener,noreferrer");
-              }
-            }}
-            fullWidth={isMobile}
-          >
-            Alternate Link
-          </Button>
-        </div>
-        <div style={{ width: isMobile ? "100%" : "auto" }}>
-          <Button 
-            variant="outlined" 
-            color="secondary" 
-            onClick={handlePermalink}
-            fullWidth={isMobile}
-          >
-            Copy Permalink
-          </Button>
-        </div>
+      <div className="archive-result-actions">
+        <Button variant="outlined" onClick={handlePreviewOpen} className="archive-result-preview">
+          Preview Full Text
+        </Button>
+        <Button
+          variant="text"
+          onClick={() => {
+            if (result.alternate_url?.raw) {
+              window.open(result.alternate_url.raw, "_blank", "noopener,noreferrer");
+            }
+          }}
+        >
+          Alternate Link
+        </Button>
+        <Button variant="text" onClick={handlePermalink} className="archive-result-permalink">
+          Copy Permalink
+        </Button>
       </div>
       
       {/* Markdown Text Preview Dialog */}
       <Dialog open={previewOpen} onClose={handlePreviewClose} fullWidth maxWidth="md">
         <DialogTitle>Preview Text</DialogTitle>
-        <DialogContent dividers>
+        <DialogContent dividers className="archive-preview-content">
           <Markdown remarkPlugins={[remarkGfm]}>
             {/* Use the raw text if it's a string, otherwise use an empty string */}
             {typeof result.text_full?.raw === "string" ? result.text_full.raw : ""}

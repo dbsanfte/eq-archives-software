@@ -40,8 +40,8 @@ test('renders result metadata, highlighted text, sorted tags, and the original l
   expect(onClickLink).toHaveBeenCalledTimes(1);
   expect(screen.getByText('A useful summary')).toBeInTheDocument();
   expect(screen.getByText('A matching passage')).toBeInTheDocument();
-  expect(screen.getByText('Capture Date: 2000-01-01')).toBeInTheDocument();
-  expect(screen.getByText('Guessed Date: 1999')).toBeInTheDocument();
+  expect(screen.getByText('Captured: 2000-01-01')).toBeInTheDocument();
+  expect(screen.getByText('Estimated: 1999')).toBeInTheDocument();
   const tags = [screen.getByText('Cleric'), screen.getByText('Wizard')];
   expect(tags[0].compareDocumentPosition(tags[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
@@ -52,12 +52,32 @@ test('renders incomplete archive metadata without an empty snippet section', () 
     url: { raw: 'https://example.org/' }, thumbnail: { raw: '/thumbnail.webp' }
   }} />);
   expect(screen.getByRole('link', { name: 'Minimal record' })).toBeInTheDocument();
-  expect(screen.queryByText('Result Snippet')).not.toBeInTheDocument();
+  expect(screen.queryByText('From the archive')).not.toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: 'Summary' })).not.toBeInTheDocument();
+  expect(screen.getByText('Open the full text to explore this record.')).toBeInTheDocument();
+});
+
+test.each(['<em>A matching passage</em>', ''])('keeps pending summaries out of cards while retaining available source text: %s', snippet => {
+  render(<CustomResultView result={{
+    ...result,
+    llm_summary: { raw: '[ Still awaiting LLM Enrichment... ]' },
+    text_full: { raw: '# Full archived text', snippet }
+  }} />);
+  expect(screen.queryByText(/awaiting LLM/)).not.toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: 'Summary' })).not.toBeInTheDocument();
+  if (snippet) {
+    expect(screen.getByText('A matching passage')).toBeInTheDocument();
+    expect(screen.queryByText('Open the full text to explore this record.')).not.toBeInTheDocument();
+  } else {
+    expect(screen.getByText('Open the full text to explore this record.')).toBeInTheDocument();
+  }
+  fireEvent.click(screen.getByRole('button', { name: 'Preview Full Text' }));
+  expect(screen.getByRole('heading', { name: 'Full archived text' })).toBeInTheDocument();
 });
 
 test('omits blank labels and safely handles missing tag lists', () => {
   render(<LabelRow flavour=" " mailingList=" " domain=" " captureDate=" " guessedDate=" " />);
-  expect(screen.queryByText(/Capture Date:/)).not.toBeInTheDocument();
+  expect(screen.queryByText(/Captured:/)).not.toBeInTheDocument();
   const log = jest.spyOn(console, 'error').mockImplementation(() => {});
   render(<TagRow tags={undefined} />);
   expect(screen.queryByText('Cleric')).not.toBeInTheDocument();

@@ -1,0 +1,449 @@
+/* Search UI uses native controls; share the palette with the MUI theme. */
+.App .sui-layout-body {
+  background: var(--archive-canvas);
+  border-top: 0;
+}
+
+.App .sui-layout-body::after {
+  display: none;
+}
+
+.App .sui-layout-body__inner {
+  max-width: 1316px;
+  padding: 0 32px;
+}
+
+.App .sui-layout-sidebar {
+  flex: 0 0 240px;
+  width: 240px;
+  margin-right: 32px;
+  padding: 32px 0;
+}
+
+.App .sui-layout-main {
+  flex: 1;
+  min-width: 0;
+  padding: 32px 0;
+}
+
+.App .sui-layout-main-header {
+  min-height: 38px;
+  gap: 12px;
+  margin-bottom: 20px;
+  color: var(--archive-muted);
+}
+
+.App .sui-paging-info,
+.App .sui-results-per-page {
+  color: var(--archive-muted);
+  font-size: 12px;
+}
+
+.App .sui-results-container {
+  margin: 0;
+}
+
+.App .sui-result {
+  padding: 24px;
+  border: 1px solid var(--archive-border);
+  border-radius: 8px;
+  background: var(--archive-surface);
+  box-shadow: 0 2px 5px rgb(32 62 50 / 3%);
+  overflow-wrap: anywhere;
+}
+
+.App .sui-result + .sui-result {
+  margin-top: 20px;
+}
+
+.App .sui-result__header {
+  align-items: flex-start;
+  gap: 20px;
+  padding: 0;
+}
+
+.archive-result-heading {
+  min-width: 0;
+  margin: 0;
+  font: 400 26px/1.3 Georgia, "Times New Roman", serif;
+  letter-spacing: -0.02em;
+}
+
+.App .sui-result__title {
+  color: var(--archive-ink);
+  font: inherit;
+  text-decoration: none;
+}
+
+.App .sui-result__title:hover {
+  text-decoration: underline;
+  text-decoration-color: #b8aa82;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+}
+
+.archive-result-thumbnail {
+  flex: 0 0 52px;
+  width: 52px;
+  height: 52px;
+  object-fit: contain;
+  border-radius: 5px;
+}
+
+.archive-result-labels,
+.archive-result-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.archive-result-tags {
+  margin-top: 8px;
+}
+
+.archive-result-labels:empty,
+.archive-result-tags:empty {
+  display: none;
+}
+
+.App .archive-result-label--estimated {
+  background: #f4eddd;
+  color: #79602d;
+}
+
+.App .sui-result em {
+  color: var(--archive-ink);
+  background: #f1e6c9;
+  font-weight: 600;
+  border-radius: 2px;
+}
+
+.App .sui-result em::after {
+  display: none;
+}
+
+.archive-result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--archive-border);
+}
+
+.archive-result-actions .MuiButton-root {
+  font-size: 12px;
+}
+
+.archive-result-actions .archive-result-permalink {
+  margin-left: auto;
+}
+
+.App .sui-facet__title,
+.App .sui-sorting__label {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--archive-ink);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.App .sui-facet + .sui-facet,
+.archive-date-facet {
+  padding-top: 20px;
+  border-top: 1px solid var(--archive-border);
+}
+
+.App .sui-facet-search__text-input,
+.App .sui-select__control {
+  min-height: 38px;
+  border: 1px solid #a8b5a3;
+  border-radius: 5px;
+  background: var(--archive-surface);
+  color: var(--archive-ink);
+  font-size: 13px;
+  box-shadow: none;
+}
+
+.App .sui-facet-search__text-input,
+.App select.sui-select {
+  padding: 8px 10px;
+}
+
+.App .sui-select {
+  color: var(--archive-ink);
+  font-size: 13px;
+}
+
+.App .sui-select__menu {
+  border: 1px solid var(--archive-border);
+  background: var(--archive-surface);
+  box-shadow: 0 6px 18px rgb(32 62 50 / 10%);
+}
+
+.App .sui-select__option--is-focused,
+.App .sui-select__option:hover {
+  background: var(--archive-sage);
+}
+
+.App .sui-select__option--is-selected {
+  background: var(--archive-ink);
+  color: var(--archive-surface);
+}
+
+.App .sui-select__option--is-selected:hover {
+  background: var(--archive-ink);
+}
+
+.App .sui-multi-checkbox-facet {
+  color: var(--archive-muted);
+}
+
+.App .sui-multi-checkbox-facet__option-label {
+  min-height: 32px;
+  gap: 8px;
+  padding: 3px 0;
+}
+
+.App .sui-multi-checkbox-facet__option-input-wrapper {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.App .sui-multi-checkbox-facet__checkbox {
+  accent-color: var(--archive-ink);
+  vertical-align: middle;
+}
+
+.App .sui-multi-checkbox-facet__option-count {
+  margin-left: 4px;
+  color: var(--archive-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.App .sui-facet-view-more {
+  min-height: 32px;
+  color: var(--archive-ink);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.App .sui-facet-view-more:hover {
+  background: var(--archive-sage);
+  outline: 0;
+}
+
+.App :is(a, button, input, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--archive-gold);
+  outline-offset: 3px;
+}
+
+.App .sui-facet-search__text-input:focus,
+.App .sui-select__control--is-focused {
+  border-color: var(--archive-ink);
+}
+
+.App .sui-paging {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 28px;
+}
+
+.App .sui-paging > li {
+  min-width: 36px;
+  height: 36px;
+  margin: 0;
+  border-radius: 5px;
+  line-height: 36px;
+  font-family: inherit;
+}
+
+.App .sui-paging > li > a,
+.App .sui-paging > li > button {
+  border-radius: 5px;
+  color: var(--archive-ink);
+}
+
+.App .sui-paging > li > a:hover,
+.App .sui-paging > li > button:hover {
+  background: var(--archive-sage);
+  color: var(--archive-ink);
+}
+
+.App .sui-paging .rc-pagination-item-active > a,
+.App .sui-paging .rc-pagination-item-active:hover > a {
+  background: var(--archive-ink);
+  color: var(--archive-surface);
+}
+
+.App .sui-paging .rc-pagination-disabled > button {
+  color: #a3aca0;
+}
+
+.App .sui-layout-sidebar-toggle {
+  min-height: 44px;
+  border-color: #a8b5a3;
+  border-radius: 5px;
+  background: var(--archive-surface);
+  color: var(--archive-ink);
+}
+
+.archive-settings-panel {
+  margin: 16px 0;
+  border: 1px solid var(--archive-border);
+  border-radius: 5px;
+  background: var(--archive-surface);
+}
+
+.archive-settings-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  max-width: 760px;
+  padding-top: 10px;
+}
+
+.archive-preview-content {
+  color: #3e4f43;
+  font-size: 15px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+
+.archive-preview-content :is(h1, h2, h3) {
+  color: var(--archive-ink);
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 400;
+  line-height: 1.3;
+}
+
+.archive-preview-content a {
+  color: var(--archive-ink);
+  text-underline-offset: 3px;
+}
+
+.archive-preview-content a:focus-visible {
+  outline: 2px solid var(--archive-gold);
+  outline-offset: 3px;
+}
+
+.archive-preview-content img {
+  max-width: 100%;
+  height: auto;
+}
+
+.archive-preview-content :is(pre, blockquote) {
+  margin: 16px 0;
+  padding: 12px 16px;
+  border-left: 2px solid #b8aa82;
+  background: var(--archive-paper);
+}
+
+.archive-preview-content pre {
+  overflow-x: auto;
+  font-size: 13px;
+}
+
+.archive-preview-content table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.archive-preview-content :is(th, td) {
+  padding: 8px 12px;
+  border: 1px solid var(--archive-border);
+}
+
+.archive-preview-content th {
+  background: var(--archive-sage);
+}
+
+@media (max-width: 800px) {
+  .App .sui-layout-sidebar {
+    width: 100%;
+    margin: 0;
+    padding: 0 24px 32px;
+    background: var(--archive-paper);
+  }
+
+  .App .sui-layout-main {
+    width: 100%;
+    padding-top: 20px;
+  }
+}
+
+@media (max-width: 650px) {
+  .App .sui-layout-body__inner {
+    padding: 0 20px;
+  }
+
+  .App .sui-result {
+    padding: 20px;
+  }
+
+  .archive-result-heading {
+    font-size: 23px;
+  }
+
+  .archive-result-thumbnail {
+    flex-basis: 42px;
+    width: 42px;
+    height: 42px;
+  }
+
+  .archive-result-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px 8px;
+  }
+
+  .archive-result-preview {
+    grid-column: 1 / -1;
+  }
+
+  .archive-result-actions .archive-result-permalink {
+    margin-left: 0;
+  }
+
+  .archive-settings-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .App .sui-layout-main-header {
+    flex-wrap: wrap;
+  }
+
+  .App .sui-multi-checkbox-facet__option-label,
+  .App .sui-facet-view-more,
+  .App .sui-select__control {
+    min-height: 44px;
+  }
+
+  .App .sui-paging {
+    gap: 2px;
+  }
+
+  .App .sui-paging > li {
+    min-width: 38px;
+    height: 44px;
+    line-height: 44px;
+  }
+}
+
+@media (max-width: 360px) {
+  .App .sui-layout-body__inner {
+    padding: 0 16px;
+  }
+
+  .App .sui-result {
+    padding: 16px;
+  }
+}

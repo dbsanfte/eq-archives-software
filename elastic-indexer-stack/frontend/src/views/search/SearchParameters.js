@@ -25,7 +25,7 @@ function SearchParameters({ values, onChange }) {
   return (
     <Box
       p={2}
-      sx={{ border: "1px solid #ccc", borderRadius: "4px", marginBottom: "1rem" }}
+      className="archive-settings-panel"
     >
       <Typography variant="subtitle2" gutterBottom>
         Search Parameters

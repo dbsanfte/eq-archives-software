@@ -82,7 +82,7 @@ test('builds value, date, recent-date, and nested-date facets plus sort choices'
   configure({
     indexName: 'archives', valueFacets: ['domain'], recentFacets: ['last_indexed'],
     datePickerFacets: ['capture_date'], nestedDatePickerFacets: ['extracted_dates'],
-    sortFields: ['capture_date']
+    sortFields: ['capture_date', 'title']
   });
   expect(helpers.getStandardFacetFields()).toEqual(['domain', 'last_indexed']);
   expect(helpers.getDatePickerFacetFields()).toEqual(['capture_date']);
@@ -96,11 +96,13 @@ test('builds value, date, recent-date, and nested-date facets plus sort choices'
   for (const range of facets.last_indexed.ranges) {
     expect(Date.parse(range.from)).toBeLessThan(Date.parse(range.to));
   }
-  expect(helpers.getSortFields()).toEqual(['capture_date']);
+  expect(helpers.getSortFields()).toEqual(['capture_date', 'title']);
   expect(helpers.buildSortOptionsFromConfig()).toEqual([
     { name: 'Relevance', value: '', direction: '' },
-    { name: 'Capture_date (Ascending)', value: 'capture_date', direction: 'asc' },
-    { name: 'Capture_date (Descending)', value: 'capture_date', direction: 'desc' }
+    { name: 'Captured date (Ascending)', value: 'capture_date', direction: 'asc' },
+    { name: 'Captured date (Descending)', value: 'capture_date', direction: 'desc' },
+    { name: 'Title (Ascending)', value: 'title', direction: 'asc' },
+    { name: 'Title (Descending)', value: 'title', direction: 'desc' }
   ]);
   configure({ indexName: 'archives' });
   expect(helpers.getStandardFacetFields()).toEqual([]);

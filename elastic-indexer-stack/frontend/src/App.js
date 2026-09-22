@@ -18,7 +18,7 @@ import {
   getDatePickerFacetFields,
   buildSortOptionsFromConfig
 } from "./config/config-helper";
-import { Box, Button, Collapse, CircularProgress } from "@mui/material";
+import { Box, Button, Collapse, CircularProgress, CssBaseline, ThemeProvider } from "@mui/material";
 import { KeyboardArrowUp } from "@mui/icons-material";
 import CustomResultView from "./views/result/CustomResultView";
 import HeaderContent from "./views/HeaderContent"; 
@@ -29,6 +29,9 @@ import SyntaxExamples from "./views/search/SyntaxExamples";
 import { getSearchConfig } from "./search/Connector";
 import DateRangeFacet from "./views/search/DateRangeFacet";
 import EnhancedSearchBox from "./views/search/EnhancedSearchBox";
+import archiveTheme from "./theme";
+import fieldLabels from "./config/field-labels";
+import "./views/ArchiveTheme.css";
 
 export default function App() {
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -66,126 +69,129 @@ export default function App() {
   }, [knnParamsRef]);
 
   return (
-    <SearchProvider config={config}>
-      <WithSearch 
-        mapContextToProps={({ wasSearched, isLoading, executeSearch }) => ({ wasSearched, isLoading, executeSearch })}
-      >
-        {({ wasSearched, isLoading, executeSearch }) => (
-          <div className="App" style={{ position: "relative" }} data-testid="app-container">
-            {isLoading && (
-              <Box
-                sx={{
-                  position: "absolute",
-                  top: "50%",
-                  left: "50%",
-                  transform: "translate(-50%, -50%)",
-                  zIndex: 999
-                }}
-              >
-                <CircularProgress size={80} />
-              </Box>
-            )}
-            <Layout
-              header={
-                <>
-                  <ArchiveStatusBar />
-                  <HeaderContent />
-                  <EnhancedSearchBox searchAsYouType={true} /> {/* We'll handle automatic searches ourselves */}
-                  <Button
-                    className="archive-search-option"
-                    variant="contained"
-                    style={{ marginTop: "1rem" }}
-                    onClick={() => setShowAdvanced(!showAdvanced)}
-                  >
-                    Advanced...
-                  </Button>
-                  <Button
-                    className="archive-search-option"
-                    variant="contained"
-                    style={{ marginTop: "1rem", marginLeft: "1rem" }}
-                    onClick={() => setShowSyntax(!showSyntax)}
-                  >
-                    Search Syntax...
-                  </Button>
-                  <Collapse in={showAdvanced}>
-                    <Box sx={{ marginTop: "1rem", marginBottom: "1rem" }}>
-                      <SearchParameters 
-                        values={knnParams} 
-                        onChange={handleParamChange} 
-                        onSearch={executeSearch} 
-                      />
-                    </Box>
-                    <AdvancedSettings values={knnParams} onChange={handleParamChange} />
-                  </Collapse>
-                  <Collapse in={showSyntax}>
-                    <Box sx={{ marginTop: "1rem", marginBottom: "1rem" }}>
-                      <SyntaxExamples />
-                    </Box>
-                  </Collapse>
-                </>
-              }
-              sideContent={
-                <div>
-                  {
-                    wasSearched && (
-                      <Sorting
-                        label="Sort by"
-                        sortOptions={buildSortOptionsFromConfig()}
-                      />
-                    )
-                  }
-                  {
-                    getDatePickerFacetFields().map(field => {
-                      // Use custom DateRangeFacet for historical date fields
-                      return <DateRangeFacet key={field} field={field} label={field} />;
-                    })
-                  }
-                  {
-                    getStandardFacetFields().map(field => {
-                      // Use default Facet for standard fields
-                      return <Facet key={field} field={field} label={field} isFilterable={true} />;
-                    })
-                  }
-                </div>
-              }
-              bodyContent={
-                <ErrorBoundary>                
-                  <Results
-                    titleField={getConfig().titleField}
-                    urlField={getConfig().urlField}
-                    thumbnailField={getConfig().thumbnailField}
-                    shouldTrackClickThrough={true}
-                    resultView={CustomResultView}
-                  />
-                </ErrorBoundary>
-              }
-              bodyHeader={
-                <>
-                  {wasSearched && <PagingInfo />}
-                  {wasSearched && <ResultsPerPage />}
-                </>
-              }
-              bodyFooter={
-                <div>
-                  <Paging />
-                  {wasSearched && (
-                    <Box sx={{ display: 'flex', justifyContent: 'center', marginTop: '1rem' }}>
-                      <Button
-                        variant="outlined"
-                        onClick={scrollToTop}
-                        startIcon={<KeyboardArrowUp />}
-                        sx={{ textTransform: 'none' }}
-                      >
-                        Back to Top
-                      </Button>
-                    </Box>
-                  )}
-                </div>
-              }
-            />
-          </div>
-        )}
-      </WithSearch>
-    </SearchProvider>
+    <ThemeProvider theme={archiveTheme}>
+      <CssBaseline />
+      <SearchProvider config={config}>
+        <WithSearch
+          mapContextToProps={({ wasSearched, isLoading, executeSearch }) => ({ wasSearched, isLoading, executeSearch })}
+        >
+          {({ wasSearched, isLoading, executeSearch }) => (
+            <div className="App" style={{ position: "relative" }} data-testid="app-container">
+              {isLoading && (
+                <Box
+                  sx={{
+                    position: "absolute",
+                    top: "50%",
+                    left: "50%",
+                    transform: "translate(-50%, -50%)",
+                    zIndex: 999
+                  }}
+                >
+                  <CircularProgress size={80} />
+                </Box>
+              )}
+              <Layout
+                header={
+                  <>
+                    <ArchiveStatusBar />
+                    <HeaderContent />
+                    <EnhancedSearchBox searchAsYouType={true} /> {/* We'll handle automatic searches ourselves */}
+                    <Button
+                      className="archive-search-option"
+                      variant="contained"
+                      style={{ marginTop: "1rem" }}
+                      onClick={() => setShowAdvanced(!showAdvanced)}
+                    >
+                      Advanced...
+                    </Button>
+                    <Button
+                      className="archive-search-option"
+                      variant="contained"
+                      style={{ marginTop: "1rem", marginLeft: "1rem" }}
+                      onClick={() => setShowSyntax(!showSyntax)}
+                    >
+                      Search Syntax...
+                    </Button>
+                    <Collapse in={showAdvanced}>
+                      <Box sx={{ marginTop: "1rem", marginBottom: "1rem" }}>
+                        <SearchParameters
+                          values={knnParams}
+                          onChange={handleParamChange}
+                          onSearch={executeSearch}
+                        />
+                      </Box>
+                      <AdvancedSettings values={knnParams} onChange={handleParamChange} />
+                    </Collapse>
+                    <Collapse in={showSyntax}>
+                      <Box sx={{ marginTop: "1rem", marginBottom: "1rem" }}>
+                        <SyntaxExamples />
+                      </Box>
+                    </Collapse>
+                  </>
+                }
+                sideContent={
+                  <div>
+                    {
+                      wasSearched && (
+                        <Sorting
+                          label="Sort by"
+                          sortOptions={buildSortOptionsFromConfig()}
+                        />
+                      )
+                    }
+                    {
+                      getDatePickerFacetFields().map(field => {
+                        // Use custom DateRangeFacet for historical date fields
+                        return <DateRangeFacet key={field} field={field} label={fieldLabels[field] || field} />;
+                      })
+                    }
+                    {
+                      getStandardFacetFields().map(field => {
+                        // Use default Facet for standard fields
+                        return <Facet key={field} field={field} label={fieldLabels[field] || field} isFilterable={true} />;
+                      })
+                    }
+                  </div>
+                }
+                bodyContent={
+                  <ErrorBoundary>
+                    <Results
+                      titleField={getConfig().titleField}
+                      urlField={getConfig().urlField}
+                      thumbnailField={getConfig().thumbnailField}
+                      shouldTrackClickThrough={true}
+                      resultView={CustomResultView}
+                    />
+                  </ErrorBoundary>
+                }
+                bodyHeader={
+                  <>
+                    {wasSearched && <PagingInfo />}
+                    {wasSearched && <ResultsPerPage />}
+                  </>
+                }
+                bodyFooter={
+                  <div>
+                    <Paging />
+                    {wasSearched && (
+                      <Box sx={{ display: 'flex', justifyContent: 'center', marginTop: '1rem' }}>
+                        <Button
+                          variant="outlined"
+                          onClick={scrollToTop}
+                          startIcon={<KeyboardArrowUp />}
+                          sx={{ textTransform: 'none' }}
+                        >
+                          Back to Top
+                        </Button>
+                      </Box>
+                    )}
+                  </div>
+                }
+              />
+            </div>
+          )}
+        </WithSearch>
+      </SearchProvider>
+    </ThemeProvider>
   );
 }

@@ -3,7 +3,7 @@ import { Box, Typography, List, ListItem, Link, useTheme, useMediaQuery } from "
 import SyntaxHighlighter from "react-syntax-highlighter";
 import { materialDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 
-function SyntaxExamples({}) {
+function SyntaxExamples() {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
 
@@ -54,18 +54,18 @@ capture_date:[1999-01-01 TO 1999-12-31]`
   return (
     <Box
       p={2}
+      className="archive-syntax-panel"
       sx={{ 
-        position: 'absolute',  // Position absolutely to overlay content
-        zIndex: 1000,          // High z-index to ensure it's above other elements
-        backgroundColor: 'rgba(255, 255, 255, 0.4)', // Translucent background
-        backdropFilter: 'blur(3px)',                // Slight blur effect for better readability
-        border: "1px solid rgba(204, 204, 204, 0.7)",
-        borderRadius: "4px", 
-        marginBottom: "1rem",
-        boxShadow: '0 6px 12px rgba(0, 0, 0, 0.15)', // Enhanced shadow for depth
-        width: 'calc(100% - 32px)',  // Account for padding
-        maxHeight: '80vh',           // Limit maximum height
-        overflowY: 'auto'            // Allow scrolling if content is tall
+        position: "absolute",
+        zIndex: 1000,
+        backgroundColor: "background.paper",
+        border: "1px solid",
+        borderColor: "divider",
+        borderRadius: 1,
+        boxShadow: "0 12px 36px rgb(32 62 50 / 12%)",
+        width: "100%",
+        maxHeight: "80vh",
+        overflowY: "auto"
       }}
     >
       <Typography variant="h4" gutterBottom>
@@ -79,8 +79,9 @@ capture_date:[1999-01-01 TO 1999-12-31]`
               language="json"
               style={materialDark}
               customStyle={{ 
-                backgroundColor: "rgba(0, 0, 0, 0.85)",  // Slightly translucent code blocks
-                padding: "0.5rem", 
+                backgroundColor: "#203e32",
+                color: "#f7f5ee",
+                padding: "1rem",
                 borderRadius: "4px", 
                 marginTop: "0.5rem",
                 ...(isMobile ? {
