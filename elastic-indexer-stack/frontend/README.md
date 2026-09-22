@@ -101,6 +101,12 @@ individual-record behavior.
 
 ## Document reader and comparisons
 
+Search cards show the short highlighted source excerpt before any generated
+summary. They start in a compact view with each **AI-generated summary** behind
+an expandable disclosure; **Show detailed cards** displays the complete summaries.
+The view choice lasts for the current search visit. Result cards still fetch only
+lightweight metadata and excerpts, not full document text.
+
 **Read document** is the full-text action on search result cards. It opens a
 dedicated reader with the complete indexed text,
 formatted Markdown or exact source text, literal find/highlight navigation,
@@ -116,7 +122,12 @@ Stable reader links use `/document?id=<opaque Elasticsearch ID>`. Optional
 `find=<literal phrase>` highlights a passage; `part=ocr` selects transcription.
 Result links carry the completed search term, so a newer unsubmitted input draft
 cannot change which query the displayed results represent. **Copy Permalink**
-now copies a reader link; older filtered-search links continue to work.
+copies a shareable reader link without the return path; older filtered-search
+links continue to work.
+Navigation from search results also carries a validated same-origin search URL
+in an optional `return` parameter. **Back to results** restores that exact query,
+filters, sort and page, including after a reader reload or capture comparison.
+Direct reader links without a valid return URL lead to the archive search page.
 
 **View captures → Compare** compares the selected capture with another version
 of the same exact original page. A comparison URL adds `compare=<second ID>`;

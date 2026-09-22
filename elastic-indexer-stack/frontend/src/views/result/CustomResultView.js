@@ -1,14 +1,17 @@
-import React, { useMemo } from "react";
+import React, { useContext, useMemo } from "react";
 import LabelRow from "./LabelRow";
 import TagRow from "./TagRow";
 import ResultBody from "./ResultBody";
 import ButtonRow from "./ButtonRow";
 import CaptureHistory from "./CaptureHistory";
 import { captureIdentity } from "../../search/CaptureIdentity";
+import ResultDisplayContext from "./ResultDisplayContext";
 
 const CustomResultView = (context) => {
   const { onClickLink } = context;
+  const compact = useContext(ResultDisplayContext);
   const identity = useMemo(() => captureIdentity(context.result), [context.result]);
+  const returnTo = window.location.pathname === '/' ? window.location.pathname + window.location.search : '';
   const summary = context.result.llm_summary;
   let summaryHTML = "";
   if (summary?.raw) {
@@ -55,11 +58,12 @@ const CustomResultView = (context) => {
       <ResultBody
         summaryHTML={summaryHTML}
         textHTML={textHTML}
+        compact={compact}
       />
 
       {/* Button Row for further interactions */}
-      <ButtonRow result={context.result} />
-      {identity && <CaptureHistory key={identity.key} identity={identity} compareWith={context.result} />}
+      <ButtonRow result={context.result} returnTo={returnTo} />
+      {identity && <CaptureHistory key={identity.key} identity={identity} compareWith={context.result} returnTo={returnTo} />}
     </li>
   );
 };

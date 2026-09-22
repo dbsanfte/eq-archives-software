@@ -325,7 +325,7 @@ class FrontendBrowserTests(unittest.TestCase):
                     context.close()
 
     def test_lightweight_search_opens_the_reader_without_a_duplicate_preview(self):
-        for width in (390, 1280):
+        for width in (320, 390, 1280):
             with self.subTest(width=width):
                 context = self.browser.new_context(viewport={"width": width, "height": 900})
                 try:
@@ -333,7 +333,7 @@ class FrontendBrowserTests(unittest.TestCase):
                     requests, documents, embeddings = [], [], []
                     source = {
                         "title": "Ancient Cyclops notes", "url": "https://example.org/source",
-                        "llm_summary": "A useful archive summary", "text_full": "# Preserved source\n\nThe complete original document.",
+                        "llm_summary": "A useful archive summary. " * 30, "text_full": "# Preserved source\n\nThe complete original document.",
                         "text": [{"text_chunk": "Unneeded chunk", "vector": [1, 2]}],
                         "llm_summary_vector": [1, 2], "capture_date": "2000-01-01T00:00:00Z",
                         "domain_name": "example.org", "llm_tags": ["Cyclops"]
@@ -368,6 +368,7 @@ class FrontendBrowserTests(unittest.TestCase):
                         facets = {field: {"buckets": []} for field in (
                             "domain_name", "llm_content_flavour", "file_type", "mime_type", "mailing_list_name", "llm_tags"
                         )}
+                        facets["domain_name"] = {"buckets": [{"key": "example.org", "doc_count": 1}]}
                         facets["last_indexed"] = {"buckets": {}}
                         route.fulfill(json={
                             "hits": {"total": {"value": 1, "relation": "eq"}, "hits": [{
@@ -385,6 +386,19 @@ class FrontendBrowserTests(unittest.TestCase):
                     page.goto(self.base_url, wait_until='networkidle')
                     expect(page.get_by_role('link', name='Ancient Cyclops notes')).to_be_visible()
                     expect(page.get_by_text('A matching archive passage')).to_be_visible()
+                    card = page.locator('.sui-result').first
+                    summary = card.locator('details.result-summary')
+                    self.assertFalse(summary.evaluate('element => element.open'))
+                    self.assertLess(card.locator('.result-text-snippet').bounding_box()['y'], summary.bounding_box()['y'])
+                    compact_height = card.bounding_box()['height']
+                    page.get_by_role('button', name='Show detailed cards', exact=True).click()
+                    expect(card.get_by_role('heading', name='AI-generated summary')).to_be_visible()
+                    self.assertGreater(card.bounding_box()['height'], compact_height)
+                    page.get_by_role('button', name='Show compact cards', exact=True).click()
+                    summary.locator('summary').click()
+                    self.assertTrue(summary.evaluate('element => element.open'))
+                    summary.locator('summary').click()
+                    self.assertFalse(summary.evaluate('element => element.open'))
                     self.assertEqual(documents, [])
                     expect(page.get_by_role('button', name='Preview Full Text', exact=True)).to_have_count(0)
                     reader = page.get_by_role('link', name='Read document', exact=True)
@@ -416,12 +430,46 @@ class FrontendBrowserTests(unittest.TestCase):
                     search('cleric soloing')
                     self.assertEqual(len(embeddings), 1)
                     self.assertNotIn('knn', requests[-1])
+                    show_filters = page.get_by_role('button', name='Show Filters', exact=True)
+                    if show_filters.is_visible():
+                        show_filters.click()
+                    sorting = page.locator('.sui-sorting')
+                    sorting.locator('.sui-select__control').click()
+                    with page.expect_response('**/elasticsearch/**/_search'):
+                        page.get_by_role('option', name='Captured date (Descending)', exact=True).click()
+                    source_filter = page.locator('.sui-multi-checkbox-facet').first.get_by_role('checkbox').first
+                    with page.expect_response('**/elasticsearch/**/_search'):
+                        source_filter.check()
+                    self.assertTrue(source_filter.is_checked())
+                    page.wait_for_url(lambda url: 'sort-field=' in str(url) and 'filters' in str(url) and 'cleric' in str(url))
+                    save_filters = page.get_by_role('button', name='Save Filters', exact=True)
+                    if save_filters.is_visible():
+                        save_filters.click()
                     self.assertEqual(documents, [])
+                    results_url = page.url
+                    results_path = urlparse(results_url).path + '?' + urlparse(results_url).query
+                    self.assertIn('sort-field=', results_url)
+                    self.assertIn('filters', results_url)
+                    reader.hover()
+                    self.assertEqual(parse_qs(urlparse(reader.get_attribute('href')).query)['return'], [results_path])
                     reader.click()
                     expect(page.get_by_role('heading', name='Preserved source', exact=True)).to_be_visible()
                     expect(page.get_by_text('The complete original document.', exact=True)).to_be_visible()
-                    expect(page.get_by_role('dialog')).to_have_count(0)
                     self.assertEqual(len(documents), 1)
+                    page.reload(wait_until='networkidle')
+                    back = page.get_by_role('link', name='← Back to results', exact=True)
+                    expect(back).to_have_attribute('href', results_path)
+                    back.click()
+                    expect(page.get_by_role('link', name='Ancient Cyclops notes')).to_be_visible()
+                    self.assertEqual(page.url, results_url)
+                    expect(page.locator('.sui-search-box__text-input')).to_have_value('cleric soloing')
+                    show_filters = page.get_by_role('button', name='Show Filters', exact=True)
+                    if show_filters.is_visible():
+                        show_filters.click()
+                    expect(page.locator('.sui-multi-checkbox-facet').first.get_by_role('checkbox').first).to_be_checked()
+                    expect(page.locator('.sui-sorting .sui-select__single-value')).to_have_text('Captured date (Descending)')
+                    expect(page.get_by_role('dialog')).to_have_count(0)
+                    self.assertEqual(len(documents), 2)
                     self.assertTrue(page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
                 finally:
                     context.close()
@@ -510,6 +558,12 @@ class FrontendBrowserTests(unittest.TestCase):
                     expect(page.locator('.sui-result')).to_have_count(5)
                     expect(page.get_by_text('Page 2', exact=True)).to_be_visible()
                     expect(page.get_by_role('button', name='Next', exact=True)).to_be_disabled()
+                    page_two = page.url
+                    page.locator('.sui-result').first.get_by_role('link', name='Read document', exact=True).click()
+                    expect(page.get_by_role('link', name='← Back to results', exact=True)).to_have_attribute('href', urlparse(page_two).path + '?' + urlparse(page_two).query)
+                    page.get_by_role('link', name='← Back to results', exact=True).click()
+                    expect(page.get_by_text('Page 2', exact=True)).to_be_visible()
+                    self.assertEqual(page.url, page_two)
                 finally:
                     context.close()
 
@@ -554,6 +608,8 @@ class FrontendBrowserTests(unittest.TestCase):
                     page.goto(self.base_url + '/?' + urlencode({'q': '"ancient cyclops"'}), wait_until='networkidle')
                     link = page.get_by_role('link', name='Read document', exact=True)
                     expect(link).to_be_visible()
+                    page.wait_for_url(lambda url: 'q=' in str(url) and 'size=' in str(url))
+                    results_url = page.url
                     self.assertEqual(parse_qs(urlparse(link.get_attribute('href')).query)['find'], ['ancient cyclops'])
                     requests.clear()
                     link.click()
@@ -605,6 +661,10 @@ class FrontendBrowserTests(unittest.TestCase):
                     self.assertTrue(page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
                     page.get_by_role('link', name='Back to document', exact=True).click()
                     expect(page.get_by_role('heading', name='Cyclops research guide, revised', exact=True)).to_be_visible()
+                    page.get_by_role('link', name='← Back to results', exact=True).click()
+                    expect(page.get_by_role('link', name='Cyclops research guide', exact=True)).to_be_visible()
+                    self.assertEqual(page.url, results_url)
+                    expect(page.locator('.sui-search-box__text-input')).to_have_value('"ancient cyclops"')
                     self.assertEqual(errors, [])
                 finally:
                     context.close()

@@ -2,6 +2,7 @@ import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { useMediaQuery } from '@mui/material';
 import CustomResultView from './CustomResultView';
+import ResultDisplayContext from './ResultDisplayContext';
 import ButtonRow from './ButtonRow';
 import LabelRow from './LabelRow';
 import TagRow from './TagRow';
@@ -32,18 +33,30 @@ beforeEach(() => {
 });
 afterEach(() => jest.restoreAllMocks());
 
-test('renders result metadata, highlighted text, sorted tags, and the original link', () => {
+test('renders source evidence before a collapsed AI summary, with full detail available', () => {
   const onClickLink = jest.fn(event => event.preventDefault());
   render(<CustomResultView result={result} onClickLink={onClickLink} />);
   expect(screen.getByRole('link', { name: 'An archived guide' })).toHaveAttribute('href', result.url.raw);
   fireEvent.click(screen.getByRole('link', { name: 'An archived guide' }));
   expect(onClickLink).toHaveBeenCalledTimes(1);
-  expect(screen.getByText('A useful summary')).toBeInTheDocument();
   expect(screen.getByText('A matching passage')).toBeInTheDocument();
+  const summary = screen.getByText('AI-generated summary').closest('details');
+  expect(summary).not.toHaveAttribute('open');
+  expect(screen.getByText('A matching passage').compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  fireEvent.click(screen.getByText('AI-generated summary'));
+  expect(summary).toHaveAttribute('open');
+  expect(screen.getByText('A useful summary')).toBeInTheDocument();
   expect(screen.getByText('Captured: 2000-01-01')).toBeInTheDocument();
   expect(screen.getByText('Estimated: 1999')).toBeInTheDocument();
   const tags = [screen.getByText('Cleric'), screen.getByText('Wizard')];
   expect(tags[0].compareDocumentPosition(tags[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+test('detailed cards display the complete AI summary after the source excerpt', () => {
+  render(<ResultDisplayContext.Provider value={false}><CustomResultView result={result} /></ResultDisplayContext.Provider>);
+  expect(screen.getByRole('heading', { name: 'AI-generated summary' }).closest('details')).toBeNull();
+  expect(screen.getByText('A useful summary')).toBeVisible();
+  expect(screen.getByText('A matching passage').compareDocumentPosition(screen.getByRole('heading', { name: 'AI-generated summary' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
 test('renders incomplete archive metadata without an empty snippet section', () => {
@@ -53,7 +66,7 @@ test('renders incomplete archive metadata without an empty snippet section', () 
   }} />);
   expect(screen.getByRole('link', { name: 'Minimal record' })).toBeInTheDocument();
   expect(screen.queryByText('From the archive')).not.toBeInTheDocument();
-  expect(screen.queryByRole('heading', { name: 'Summary' })).not.toBeInTheDocument();
+  expect(screen.queryByText('AI-generated summary')).not.toBeInTheDocument();
   expect(screen.getByText('Open the full text to explore this record.')).toBeInTheDocument();
 });
 
@@ -64,7 +77,7 @@ test.each(['<em>A matching passage</em>', ''])('keeps pending summaries out of c
     text_full: { raw: '# Full archived text', snippet }
   }} />);
   expect(screen.queryByText(/awaiting LLM/)).not.toBeInTheDocument();
-  expect(screen.queryByRole('heading', { name: 'Summary' })).not.toBeInTheDocument();
+  expect(screen.queryByText('AI-generated summary')).not.toBeInTheDocument();
   if (snippet) {
     expect(screen.getByText('A matching passage')).toBeInTheDocument();
     expect(screen.queryByText('Open the full text to explore this record.')).not.toBeInTheDocument();
@@ -103,6 +116,17 @@ test('copies an encoded permalink and dismisses the confirmation', async () => {
     act(() => jest.advanceTimersByTime(500));
     expect(screen.queryByText('Permalink copied to clipboard')).not.toBeInTheDocument();
   } finally { jest.useRealTimers(); }
+});
+
+test('reader navigation retains the results URL but copied permalinks stay stable', async () => {
+  const returnTo = '/?q=ancient%20cyclops&current=2&sortField=capture_date&filters%5B0%5D%5Bfield%5D=domain_name';
+  render(<ButtonRow result={result} returnTo={returnTo} />);
+  const reader = new URL(screen.getByRole('link', { name: 'Read document' }).href);
+  expect(reader.searchParams.get('return')).toBe(returnTo);
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Copy Permalink' })));
+  const copied = new URL(navigator.clipboard.writeText.mock.calls[0][0]);
+  expect(copied.searchParams.get('id')).toBe(result.id.raw);
+  expect(copied.searchParams.has('return')).toBe(false);
 });
 
 test('handles missing optional links, missing IDs, and denied clipboard access', async () => {

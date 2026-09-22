@@ -1,4 +1,4 @@
-import { citation, comparisonUrl, downloadText, highlightMarkdown, highlightParts, MAX_MARKS, readerUrl, recordId, searchPhrase, sourceLink, value } from './reader-utils';
+import { citation, comparisonUrl, downloadText, highlightMarkdown, highlightParts, MAX_MARKS, readerUrl, recordId, refreshSearchReturn, safeSearchReturnUrl, searchPhrase, sourceLink, value } from './reader-utils';
 
 test('reader URLs preserve opaque IDs and literal phrase searches', () => {
   const id = 'websites/example.org/20000101000000/a ?b=2#3%ü';
@@ -16,6 +16,31 @@ test('reader URLs preserve opaque IDs and literal phrase searches', () => {
   expect(recordId({ id: { raw: 'legacy' } })).toBe('legacy');
   expect(recordId()).toBe('');
   expect(value({ a: { raw: 123 } }, 'a')).toBe('');
+});
+
+test('reader links carry only internal search return URLs', () => {
+  const searchUrl = '/?q=ancient%20cyclops&current=2&filters%5B0%5D%5Bfield%5D=domain_name';
+  const parsed = new URL(readerUrl('exact/id', { returnTo: searchUrl }), window.location.origin);
+  expect(parsed.searchParams.get('return')).toBe(searchUrl);
+  expect(safeSearchReturnUrl(parsed.searchParams.get('return'))).toBe(searchUrl);
+  expect(new URL(comparisonUrl({ _meta: { id: 'from' } }, { _meta: { id: 'to' } }, { returnTo: searchUrl }), window.location.origin).searchParams.get('return')).toBe(searchUrl);
+  for (const unsafe of ['https://other.example/?q=secret', '//other.example/', '/admin', '/document?id=another', '/\\other.example/', '']) {
+    expect(safeSearchReturnUrl(unsafe)).toBe('/');
+    expect(new URL(readerUrl('exact/id', { returnTo: unsafe }), window.location.origin).searchParams.has('return')).toBe(false);
+  }
+});
+
+test('reader links capture the latest search URL when activated', () => {
+  const link = document.createElement('a');
+  link.href = readerUrl('exact/id', { returnTo: '/?q=older' });
+  window.history.replaceState({}, '', '/?q=newer&current=n_50_n&size=n_20_n');
+  try {
+    refreshSearchReturn({ currentTarget: link });
+    expect(new URL(link.href).searchParams.get('return')).toBe('/?q=newer&current=n_50_n&size=n_20_n');
+    window.history.replaceState({}, '', '/');
+    refreshSearchReturn({ currentTarget: link });
+    expect(new URL(link.href).searchParams.has('return')).toBe(false);
+  } finally { window.history.replaceState({}, '', '/'); }
 });
 
 test('resolves safe relative links within the historical capture', () => {

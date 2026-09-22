@@ -21,6 +21,7 @@ import {
 import { Box, Button, Checkbox, FormControlLabel, Collapse, CircularProgress, CssBaseline, ThemeProvider } from "@mui/material";
 import { KeyboardArrowUp } from "@mui/icons-material";
 import CustomResultView from "./views/result/CustomResultView";
+import ResultDisplayContext from "./views/result/ResultDisplayContext";
 import HeaderContent from "./views/HeaderContent"; 
 import ArchiveStatusBar from "./views/ArchiveStatusBar";
 import SearchParameters from "./views/search/SearchParameters"; 
@@ -39,6 +40,7 @@ import "./views/ArchiveTheme.css";
 function SearchApp() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showSyntax, setShowSyntax] = useState(false);
+  const [compactResults, setCompactResults] = useState(true);
   const [knnParams, setKnnParams] = useState({ ...DEFAULT_KNN_PARAMS, groupCaptures: true });
 
   const knnParamsRef = useRef(knnParams);
@@ -157,13 +159,15 @@ function SearchApp() {
                 bodyContent={
                   <ErrorBoundary>
                     <ReaderSearchContext.Provider value={searchPhrase(resultSearchTerm)}>
-                      <Results
-                      titleField={getConfig().titleField}
-                      urlField={getConfig().urlField}
-                      thumbnailField={getConfig().thumbnailField}
-                      shouldTrackClickThrough={true}
-                      resultView={CustomResultView}
-                      />
+                      <ResultDisplayContext.Provider value={compactResults}>
+                        <Results
+                          titleField={getConfig().titleField}
+                          urlField={getConfig().urlField}
+                          thumbnailField={getConfig().thumbnailField}
+                          shouldTrackClickThrough={true}
+                          resultView={CustomResultView}
+                        />
+                      </ResultDisplayContext.Provider>
                     </ReaderSearchContext.Provider>
                   </ErrorBoundary>
                 }
@@ -179,6 +183,12 @@ function SearchApp() {
                       {knnParams.groupCaptures ? <CaptureSummary {...searchState} /> : <PagingInfo />}
                     </div>}
                     {wasSearched && <ResultsPerPage />}
+                    {wasSearched && <Button
+                      className="archive-card-view-toggle"
+                      variant="outlined"
+                      size="small"
+                      onClick={() => setCompactResults(value => !value)}
+                    >{compactResults ? 'Show detailed cards' : 'Show compact cards'}</Button>}
                   </>
                 }
                 bodyFooter={

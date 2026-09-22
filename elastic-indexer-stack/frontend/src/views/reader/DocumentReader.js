@@ -4,7 +4,7 @@ import ArchiveStatusBar from '../ArchiveStatusBar';
 import HeaderContent from '../HeaderContent';
 import CaptureHistory from '../result/CaptureHistory';
 import { captureIdentity } from '../../search/CaptureIdentity';
-import { citation, downloadText, readerUrl, recordId, sourceLink, value } from './reader-utils';
+import { citation, downloadText, readerUrl, recordId, safeSearchReturnUrl, sourceLink, value } from './reader-utils';
 import useDocument from './useDocument';
 import ReaderText from './ReaderText';
 import Comparison from './Comparison';
@@ -30,7 +30,7 @@ function LoadState({ state, label }) {
     : <p role="status">Loading {label.toLowerCase()}…</p>;
 }
 
-function DocumentMeta({ record, heading }) {
+function DocumentMeta({ record, heading, returnTo }) {
   const url = sourceLink(value(record, 'url'));
   const alternate = sourceLink(value(record, 'alternate_url'));
   const identity = captureIdentity(record);
@@ -45,7 +45,7 @@ function DocumentMeta({ record, heading }) {
     </dl>
     <p className="reader-note">Capture dates record when content was archived, not necessarily when it was published.</p>
     <div className="reader-actions">
-      {heading && <Button component="a" href={readerUrl(recordId(record))}>Read this capture</Button>}
+      {heading && <Button component="a" href={readerUrl(recordId(record), { returnTo })}>Read this capture</Button>}
       {url && <a href={url} target="_blank" rel="noopener noreferrer">Open original archive ↗</a>}
       {alternate && alternate !== url && <a href={alternate} target="_blank" rel="noopener noreferrer">Alternate source ↗</a>}
     </div>
@@ -62,6 +62,7 @@ export default function DocumentReader({ search = window.location.search }) {
   const params = new URLSearchParams(search);
   const id = params.get('id') || '';
   const compare = params.get('compare') || '';
+  const returnTo = safeSearchReturnUrl(params.get('return'));
   const [find, setFind] = useState(params.get('find') || '');
   const [chosenPart, setPart] = useState(params.get('part') === 'ocr' ? 'ocr' : 'auto');
   const first = useDocument(id);
@@ -80,21 +81,21 @@ export default function DocumentReader({ search = window.location.search }) {
   const link = window.location.origin + readerUrl(id, { compare, find, part: part === 'ocr' ? 'ocr' : '' });
   return <div className="archive-reader">
     <div className="reader-shell"><ArchiveStatusBar /><HeaderContent compact />
-      <nav className="reader-breadcrumb" aria-label="Reader navigation"><a href="/">← Search the archive</a>{compare && <a href={readerUrl(id, { find })}>Back to document</a>}{record && <a href="#reader-content">{compare ? "Jump to changes" : "Jump to text"}</a>}</nav>
+      <nav className="reader-breadcrumb" aria-label="Reader navigation"><a href={returnTo}>{returnTo === '/' ? '← Search the archive' : '← Back to results'}</a>{compare && <a href={readerUrl(id, { find, returnTo })}>Back to document</a>}{record && <a href="#reader-content">{compare ? "Jump to changes" : "Jump to text"}</a>}</nav>
       <main id="reader-main">
         <p className="archive-eyebrow">{compare ? 'Across the years' : 'From the archive'}</p>
         <h1>{compare ? 'Compare captures' : record ? title : 'Document reader'}</h1>
         {!id ? <p role="alert">This link is missing a document ID. Open a document from the search results.</p>
           : !record ? <LoadState state={first} label="Document" /> : <>
             <div className={compare ? 'reader-capture-pair' : ''}>
-              <DocumentMeta record={record} heading={compare ? 'From' : undefined} />
+              <DocumentMeta record={record} heading={compare ? 'From' : undefined} returnTo={returnTo} />
               {compare && (compare === id ? <p role="alert">Choose two different captures to compare.</p>
-                : other ? <DocumentMeta record={other} heading="To" /> : <LoadState state={second} label="Comparison capture" />)}
+                : other ? <DocumentMeta record={other} heading="To" returnTo={returnTo} /> : <LoadState state={second} label="Comparison capture" />)}
             </div>
             <div className="reader-actions reader-toolbar">
               <CopyAction label="Copy link" text={link} />
               {!compare && <CopyAction label="Copy citation" text={citation(record, window.location.origin + readerUrl(id))} />}
-              {compare && <Button component="a" href={readerUrl(compare, { compare: id, find, part })}>Swap captures</Button>}
+              {compare && <Button component="a" href={readerUrl(compare, { compare: id, find, part, returnTo })}>Swap captures</Button>}
               {text && <Button onClick={() => downloadText(text, `${title}${compare ? '-from' : ''}${part === 'ocr' ? '-ocr' : ''}`)}>Download {compare ? 'from text' : 'text'}</Button>}
               {compare && otherText && <Button onClick={() => downloadText(otherText, `${value(other, 'title')}-to${part === 'ocr' ? '-ocr' : ''}`)}>Download to text</Button>}
             </div>
@@ -109,7 +110,7 @@ export default function DocumentReader({ search = window.location.search }) {
             </>}
             {compare && other && !comparable && <p role="alert">These records are not captures of the same original page. Choose a version from this document’s capture history.</p>}
             </div>
-            {identity && <CaptureHistory key={identity.key} identity={identity} compareWith={record} />}
+            {identity && <CaptureHistory key={identity.key} identity={identity} compareWith={record} returnTo={returnTo} />}
           </>}
       </main>
       <footer className="reader-footer">Preserved source text from the EverQuest community. Formatting may differ from the original page.</footer>

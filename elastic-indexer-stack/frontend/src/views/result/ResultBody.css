@@ -4,14 +4,14 @@
   font-size: 14px;
   line-height: 1.75;
 }
-  
+
 .App .sui-result__details {
   min-width: 0;
   padding: 0;
   color: #3e4f43;
 }
 
-.result-summary + .result-text-snippet {
+.result-text-snippet + .result-summary {
   margin-top: 20px;
 }
 
@@ -33,12 +33,12 @@
   color: var(--archive-ink);
   text-underline-offset: 3px;
 }
-  
+
 .App .sui-result__body img {
   max-width: 100%;
   height: auto;
 }
-  
+
 .App .sui-result__body pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -47,4 +47,16 @@
 .archive-result-placeholder {
   color: var(--archive-muted);
   font-size: 13px;
+}
+
+.result-summary--collapsed summary {
+  width: fit-content;
+  color: var(--archive-ink);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.result-summary--collapsed[open] summary {
+  margin-bottom: 8px;
 }
