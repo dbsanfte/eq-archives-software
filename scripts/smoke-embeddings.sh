@@ -2,6 +2,7 @@
 set -euo pipefail
 
 image=${1:?Usage: smoke-embeddings.sh FRONTEND_IMAGE}
+mcp_image=${2:-}
 repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 embedding_dir="$repo_dir/elastic-indexer-stack/k8s-manifests/embeddings"
 set -a
@@ -11,7 +12,11 @@ work_dir=$(mktemp -d)
 network="eqarchives-embedding-smoke-$$"
 embedding_id=''
 frontend_id=''
+mcp_id=''
+fixture_id=''
 cleanup() {
+  if [[ -n "$mcp_id" ]]; then docker rm -f "$mcp_id" >/dev/null; fi
+  if [[ -n "$fixture_id" ]]; then docker rm -f "$fixture_id" >/dev/null; fi
   if [[ -n "$frontend_id" ]]; then docker rm -f "$frontend_id" >/dev/null; fi
   if [[ -n "$embedding_id" ]]; then docker rm -f "$embedding_id" >/dev/null; fi
   docker network rm "$network" >/dev/null 2>&1 || true
@@ -90,3 +95,19 @@ PY
 python3 "$repo_dir/scripts/check-embeddings.py" \
   "http://$frontend_address/openai/v1/embeddings" --model "$MODEL_ALIAS"
 echo 'Model integrity, cache reuse, authentication, frontend proxy, dimensions, and oversized-input checks passed.'
+
+if [[ -n "$mcp_image" ]]; then
+  fixture_id=$(docker run --detach --network "$network" --network-alias archive-fixture \
+    --cap-drop ALL --security-opt no-new-privileges --read-only --memory 256m \
+    --mount "type=bind,source=$repo_dir/scripts/mcp-smoke-fixture.py,target=/fixture.py,readonly" \
+    --entrypoint python "$mcp_image" /fixture.py)
+  mcp_id=$(docker run --detach --network "$network" --publish 127.0.0.1::8080 \
+    --cap-drop ALL --security-opt no-new-privileges --read-only --memory 256m \
+    --mount "type=bind,source=$work_dir/secrets,target=/run/secrets,readonly" \
+    --env ELASTICSEARCH_URL=http://archive-fixture:9200 --env EMBEDDING_URL=http://nomic:8080 \
+    "$mcp_image")
+  mcp_address=$(docker port "$mcp_id" 8080/tcp)
+  curl --fail --silent --show-error --retry 15 --retry-all-errors --retry-delay 1 \
+    --max-time 5 "http://$mcp_address/healthz" >/dev/null
+  python3 "$repo_dir/scripts/check-mcp.py" "http://$mcp_address/mcp"
+fi

@@ -2,9 +2,14 @@
 set -euo pipefail
 
 # Run on eqvm, where the existing runner can access the local k3s API.
-image=${1:?Usage: deploy-frontend.sh dbsanfte/frontend@sha256:DIGEST}
+image=${1:?Usage: deploy-frontend.sh FRONTEND_DIGEST MCP_DIGEST}
+mcp_image=${2:?Supply the immutable MCP image digest as the second argument}
 if [[ ! "$image" =~ ^dbsanfte/frontend@sha256:[a-f0-9]{64}$ ]]; then
   echo 'Deployment requires an immutable dbsanfte/frontend image digest.' >&2
+  exit 1
+fi
+if [[ ! "$mcp_image" =~ ^dbsanfte/frontend@sha256:[a-f0-9]{64}$ ]]; then
+  echo 'Deployment requires an immutable MCP artifact from dbsanfte/frontend.' >&2
   exit 1
 fi
 : "${FRONTEND_ES_USERNAME:?Set FRONTEND_ES_USERNAME}"
@@ -20,7 +25,7 @@ trap 'rm -rf "$work_dir"' EXIT
 umask 077
 
 # Render all public resources and validate them before changing the cluster.
-cp "$repo_dir"/elastic-indexer-stack/k8s-manifests/{01-frontend.yaml,kustomization.yaml} "$work_dir/"
+cp "$repo_dir"/elastic-indexer-stack/k8s-manifests/{01-frontend.yaml,mcp.yaml,kustomization.yaml} "$work_dir/"
 cp -R "$repo_dir/elastic-indexer-stack/k8s-manifests/embeddings" "$work_dir/"
 source "$work_dir/embeddings/runtime.env"
 secret_checksum=$(python3 - <<'PY'
@@ -40,10 +45,21 @@ images:
   - name: ghcr.io/ggml-org/llama.cpp
     newName: ghcr.io/ggml-org/llama.cpp
     digest: ${LLAMA_IMAGE#*@}
+  - name: eqarchives-mcp
+    newName: dbsanfte/frontend
+    digest: ${mcp_image#*@}
   - name: squat/generic-device-plugin
     newName: squat/generic-device-plugin
     digest: ${DEVICE_PLUGIN_IMAGE#*@}
 patches:
+  - target:
+      kind: Deployment
+      name: eqarchives-mcp
+    patch: |-
+      - op: add
+        path: /spec/template/metadata/annotations
+        value:
+          checksum/archive-secrets: "$secret_checksum"
   - target:
       kind: Deployment
       name: search-eqarchives
@@ -93,6 +109,7 @@ print(max(pods, key=lambda p: p["metadata"]["creationTimestamp"])["metadata"]["n
 
 "${kubectl[@]}" apply -f "$work_dir/frontend.yaml" -l 'app.kubernetes.io/part-of!=eqarchives-embeddings'
 "${kubectl[@]}" -n eqarchives-es rollout status deployment/search-eqarchives --timeout=300s
+"${kubectl[@]}" -n eqarchives-es rollout status deployment/eqarchives-mcp --timeout=300s
 
 # Verify both NGINX and the authenticated Elasticsearch proxy through Traefik.
 # Resolve directly to this VM while still checking the real TLS certificate.
@@ -112,4 +129,5 @@ curl --fail --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 \
 python3 "$repo_dir/scripts/check-embeddings.py" \
   https://search.eqarchives.org/openai/v1/embeddings --model "$MODEL_ALIAS" \
   --search-url https://search.eqarchives.org/elasticsearch/eq-archive/_search
-echo "Deployed and verified $image"
+python3 "$repo_dir/scripts/check-mcp.py" https://search.eqarchives.org/mcp
+echo "Deployed and verified frontend $image and MCP $mcp_image"

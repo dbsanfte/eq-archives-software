@@ -10,6 +10,7 @@ export default function HeaderContent() {
           <span>EQ Archives</span>
         </a>
         <nav className="archive-resource-links" aria-label="Archive resources">
+          <a href="/chatgpt.html">ChatGPT</a>
           <a
             href="https://www.youtube.com/watch?v=DWXsCpAwKU4"
             target="_blank"

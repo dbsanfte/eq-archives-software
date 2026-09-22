@@ -3,3 +3,4 @@ kind: Kustomization
 resources:
   - 01-frontend.yaml
   - embeddings
+  - mcp.yaml
