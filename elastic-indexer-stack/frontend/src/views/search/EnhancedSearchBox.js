@@ -38,7 +38,7 @@ const EnhancedSearchBox = ({
 
     // Typing, submitting, navigating, or unmounting invalidates older work.
     if (requestRevision === revision.current) {
-      setSearchTerm(value);
+      setSearchTerm(value, { shouldClearFilters: false });
     }
   }, [setSearchTerm]);
 

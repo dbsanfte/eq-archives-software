@@ -3,6 +3,7 @@
 
 import os
 import fnmatch
+import json
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
@@ -135,6 +136,162 @@ class FrontendBrowserTests(unittest.TestCase):
             for filled_dates in (False, True):
                 with self.subTest(width=width, filled_dates=filled_dates):
                     self.check_sort_menu(width, filled_dates)
+
+    def test_date_ranges_persist_across_results_searches_reload_and_history(self):
+        for width, timezone in ((390, 'America/Los_Angeles'), (1280, 'Pacific/Auckland')):
+            with self.subTest(width=width, timezone=timezone):
+                context = self.browser.new_context(
+                    viewport={'width': width, 'height': 950}, timezone_id=timezone,
+                    is_mobile=width <= 800, has_touch=width <= 800,
+                )
+                try:
+                    page = context.new_page()
+                    requests, held, errors = [], [], []
+                    delay = False
+                    page.on('pageerror', lambda error: errors.append(str(error)))
+
+                    def archive(route):
+                        if route.request.url.endswith('/_search'):
+                            requests.append(route.request.post_data_json)
+                            if delay:
+                                held.append(route)
+                                return
+                        self.mock_elasticsearch(route)
+
+                    page.route('**/elasticsearch/**', archive)
+                    page.route('**/openai/v1/embeddings', lambda route: route.fulfill(
+                        json={'data': [{'embedding': [0.1] * 768}]}))
+                    page.goto(self.base_url, wait_until='networkidle')
+                    facets = page.locator('.archive-date-facet')
+                    fields = ('capture_date', 'llm_guessed_date')
+                    expected_ranges = {}
+                    month = page.evaluate("() => { const date = new Date(); return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`; }")
+                    display_month = f'{month[5:]}/{month[:4]}'
+
+                    def show_filters():
+                        button = page.get_by_role('button', name='Show Filters', exact=True)
+                        if button.is_visible() and not facets.first.is_visible():
+                            button.click()
+
+                    def hide_filters():
+                        button = page.get_by_role('button', name='Save Filters', exact=True)
+                        if button.is_visible():
+                            button.click()
+
+                    def choose(facet, index, day):
+                        if width <= 800:
+                            facet.locator('input').nth(index).click()
+                        else:
+                            facet.get_by_role('button', name='Choose date', exact=False).nth(index).click()
+                        dialog = page.get_by_role('dialog')
+                        expect(dialog).to_be_visible()
+                        dialog.evaluate('dialog => Promise.all(dialog.getAnimations({subtree:true}).map(a => a.finished))')
+                        page.get_by_role('gridcell', name=str(day), exact=True).click()
+                        confirm = page.get_by_role('button', name='OK', exact=True)
+                        if confirm.is_visible():
+                            confirm.click()
+                        expect(page.get_by_role('dialog', include_hidden=True)).to_have_count(0)
+
+                    def ranges(value):
+                        found = {}
+                        if isinstance(value, dict):
+                            found.update({k: v for k, v in value.get('range', {}).items() if k in fields})
+                            for child in value.values():
+                                found.update(ranges(child))
+                        elif isinstance(value, list):
+                            for child in value:
+                                found.update(ranges(child))
+                        return found
+
+                    def check_request():
+                        body = requests[-1]
+                        self.assertEqual(ranges(body.get('query')), expected_ranges)
+                        for branch in body.get('knn', []):
+                            self.assertEqual(ranges(branch.get('filter')), expected_ranges)
+                        if body.get('query', {}).get('bool', {}).get('should'):
+                            self.assertEqual(body['query']['bool']['minimum_should_match'], 1)
+
+                    def response():
+                        return page.expect_response(lambda reply: reply.url.endswith('/_search') and reply.status == 200)
+
+                    def apply(index, start=15):
+                        with response():
+                            facets.nth(index).get_by_role('button', name='Apply', exact=True).click()
+                        expected_ranges[fields[index]] = {'gte': f'{month}-{start:02d}T00:00:00.000Z',
+                                                          'lte': f'{month}-16T23:59:59.999Z'}
+                        check_request()
+
+                    show_filters()
+                    for index in range(2):
+                        choose(facets.nth(index), 0, 15)
+                        choose(facets.nth(index), 1, 16)
+                        apply(index)
+                    hide_filters()
+
+                    # Hold the result while a user edits the next range. Neither
+                    # its response nor another search may replace that draft.
+                    delay = True
+                    with page.expect_request('**/elasticsearch/**/_search'):
+                        page.locator('.sui-search-box__text-input').fill('"cleric"')
+                        page.locator('.sui-search-box__text-input').press('Enter')
+                    show_filters()
+                    choose(facets.first, 0, 14)
+                    expect(facets.first.locator('input').first).to_have_value(f'14/{display_month}')
+                    self.assertTrue(held)
+                    delay = False
+                    for route in held:
+                        self.mock_elasticsearch(route)
+                    expect(page.get_by_role('progressbar')).to_have_count(0)
+                    expect(facets.first.locator('input').first).to_have_value(f'14/{display_month}')
+                    check_request()
+                    hide_filters()
+
+                    for query in ('"wizard"', 'wizard research', ''):
+                        with response():
+                            page.locator('.sui-search-box__text-input').fill(query)
+                            page.locator('.sui-search-box__text-input').press('Enter')
+                        check_request()
+                        if query == 'wizard research':
+                            self.assertTrue(requests[-1]['knn'])
+                    show_filters()
+                    expect(facets.first.locator('input').first).to_have_value(f'14/{display_month}')
+                    apply(0, 14)
+                    page.locator('.sui-sorting .sui-select__control').click()
+                    with response():
+                        page.get_by_role('option', name='Captured date (Descending)', exact=True).click()
+                    check_request()
+                    hide_filters()
+                    page.wait_for_url(lambda url: f'{month}-14T00:00:00.000Z' in json.dumps(parse_qs(urlparse(str(url)).query)))
+                    page.reload(wait_until='networkidle')
+                    check_request()
+                    show_filters()
+                    expect(facets.first.locator('input').first).to_have_value(f'14/{display_month}')
+                    expect(facets.nth(1).locator('input').last).to_have_value(f'16/{display_month}')
+
+                    with response():
+                        facets.first.get_by_role('button', name='Clear', exact=True).click()
+                    original = expected_ranges.pop('capture_date')
+                    check_request()
+                    page.wait_for_url(lambda url: all(value != ['capture_date'] for key, value in
+                        parse_qs(urlparse(str(url)).query).items()
+                        if key.startswith('filters[') and key.endswith('[field]')))
+                    with response():
+                        page.go_back(wait_until='networkidle')
+                    expected_ranges['capture_date'] = original
+                    check_request()
+                    expect(facets.first.locator('input').first).to_have_value(f'14/{display_month}')
+                    with response():
+                        page.go_forward(wait_until='networkidle')
+                    expected_ranges.pop('capture_date')
+                    check_request()
+                    expect(facets.first.locator('input').first).to_have_value('')
+                    with response():
+                        facets.nth(1).get_by_role('button', name='Clear', exact=True).click()
+                    expected_ranges.clear()
+                    check_request()
+                    self.assertEqual(errors, [])
+                finally:
+                    context.close()
 
     def test_mcp_icon_and_connection_guide_work_on_mobile_and_desktop(self):
         for width in (320, 390, 1280):

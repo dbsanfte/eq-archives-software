@@ -207,6 +207,34 @@ describe.each([true, false])('with legacyRoot=%s', legacyRoot => {
     expect(searchedTerms(onSearch)).toEqual(['cleric', 'cleric soloing']);
   });
 
+  test('retains applied date ranges through typing, delayed results, submission and a blank search', async () => {
+    embeddingService.getEmbedding.mockReturnValue([1, 2]);
+    const { input, onSearch, driver } = mountSearch();
+    const range = { from: '2000-01-01T00:00:00.000Z', to: '2000-12-31T23:59:59.999Z', name: '2000' };
+    act(() => {
+      driver.getActions().setFilter('capture_date', range, 'range');
+      driver.getActions().setFilter('llm_guessed_date', range, 'range');
+    });
+    await tick();
+    const filters = driver.getState().filters;
+    const pending = deferred();
+    onSearch.mockReturnValueOnce(pending.promise);
+    type(input, 'cleric');
+    await tick(400);
+    await tick();
+    expect(driver.getState().filters).toEqual(filters);
+    type(input, 'wizard');
+    await act(async () => pending.resolve({ results: [], totalResults: 0, totalPages: 0 }));
+    expect(driver.getState().filters).toEqual(filters);
+    await act(async () => fireEvent.submit(input.closest('form')));
+    await tick();
+    type(input, '');
+    await tick(400);
+    await tick();
+    expect(searchedTerms(onSearch)).toEqual(['', 'cleric', 'wizard', '']);
+    for (const [state] of onSearch.mock.calls) expect(state.filters).toEqual(filters);
+  });
+
   test.each(['debounce', 'embedding'])('honors an external search term change during pending %s work', async phase => {
     const old = deferred();
     embeddingService.fetchEmbedding.mockReturnValueOnce(old.promise);

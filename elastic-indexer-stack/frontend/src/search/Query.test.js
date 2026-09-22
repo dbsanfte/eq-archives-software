@@ -41,6 +41,30 @@ describe('Query.js', () => {
     });
 
     describe('resolveQuery', () => {
+        test.each(['"cleric"', 'cleric'])('requires the text match and retains date filters for %s', query => {
+            requestState.searchTerm = query;
+            paramsRef.current.enableSemanticSearch = false;
+            const filter = [{ range: { capture_date: { gte: '2000-01-01', lte: '2000-12-31' } } }];
+            requestBody.query = { bool: { should: [{ match: { text_full: query } }], filter } };
+            resolveQuery(requestState, requestBody, searchFields, paramsRef, vectorFields, nestedVectorFields, embeddingModel);
+            expect(requestBody.query.bool.filter).toEqual(filter);
+            expect(requestBody.query.bool.minimum_should_match).toBe(1);
+        });
+
+        test('applies date and facet restrictions to every semantic branch as well as keyword results', () => {
+            embeddingService.isEmbeddingServiceAvailable.mockReturnValue(true);
+            embeddingService.getEmbedding.mockReturnValue([0.1, 0.2]);
+            const dates = [{ range: { capture_date: { gte: '2000-01-01', lte: '2000-12-31' } } },
+                { range: { llm_guessed_date: { gte: '1999-01-01', lte: '1999-12-31' } } }];
+            const facet = { term: { domain_name: 'example.org' } };
+            requestBody.query = { bool: { should: [{ match: { text_full: 'cleric' } }], filter: dates } };
+            requestBody.post_filter = facet;
+            resolveQuery(requestState, requestBody, searchFields, paramsRef, vectorFields, nestedVectorFields, embeddingModel);
+            expect(requestBody.query.bool.filter).toEqual(dates);
+            expect(requestBody.knn).toHaveLength(3);
+            for (const branch of requestBody.knn) expect(branch.filter).toEqual([...dates, facet]);
+        });
+
         describe('queries with reserved characters', () => {
             const reservedCharTests = [
                 { char: '"', query: '"exact phrase"', description: 'double quotes' },
@@ -70,6 +94,7 @@ describe('Query.js', () => {
 
                     expect(requestBody.query).toEqual({
                         bool: {
+                            minimum_should_match: 1,
                             should: [{
                                 query_string: {
                                     query: query,

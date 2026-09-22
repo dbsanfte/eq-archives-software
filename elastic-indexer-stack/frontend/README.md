@@ -41,6 +41,25 @@ BROWSER_TEST_PYTHON="$PWD/.venv/bin/python" \
   bash scripts/smoke-frontend.sh eqarchives-frontend:local
 ```
 
+## Date filters
+
+**Captured date** and **Estimated content date** ranges stay applied across searches,
+result updates, sorting and pagination. Choose both dates and click **Apply**
+(or press Enter); **Clear** removes that range. Both calendar days are included
+in UTC, including the end of the selected **To date**. Invalid or reversed
+ranges cannot be applied. Estimated dates remain model-generated estimates.
+
+Applied ranges are saved in the search URL, so bookmarks, reloads and browser
+back/forward restore them. Unapplied edits remain drafts while results load;
+reloading restores the applied range. Clearing the search text keeps filters.
+
+Search UI owns the applied filter state. The date controls replace ranges with
+`setFilter`, and new searches use `shouldClearFilters: false`. Query construction
+preserves those filters for quoted/operator queries and all semantic kNN branches;
+keyword matching remains required when a date filter is present. Jest and
+Chromium regressions cover delayed results, successive searches, both date fields,
+mobile filter toggling, URL history, complete-day bounds and timezone restoration.
+
 ## Grouped captures
 
 Search results group repeated website captures by original page by default. The
