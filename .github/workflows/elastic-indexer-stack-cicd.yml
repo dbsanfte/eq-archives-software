@@ -24,11 +24,12 @@ jobs:
           persist-credentials: false
       - name: Validate deployment scripts
         run: |
-          bash -n scripts/deploy-frontend.sh scripts/smoke-frontend.sh scripts/smoke-embeddings.sh
+          bash -n scripts/deploy-frontend.sh scripts/smoke-frontend.sh scripts/smoke-embeddings.sh scripts/wait-http.sh
           sh -n elastic-indexer-stack/k8s-manifests/embeddings/download-model.sh
           sh -n elastic-indexer-stack/k8s-manifests/embeddings/start-server.sh
           sh -n elastic-indexer-stack/k8s-manifests/embeddings/check-gpu.sh
-          python3 -m py_compile scripts/frontend-secrets.py scripts/check-embeddings.py scripts/test-frontend-browser.py scripts/check-mcp.py scripts/mcp-smoke-fixture.py scripts/render-ingress-test.py scripts/test-frontend-rollout.py
+          python3 -m py_compile scripts/frontend-secrets.py scripts/check-embeddings.py scripts/test-frontend-browser.py scripts/check-mcp.py scripts/mcp-smoke-fixture.py scripts/render-ingress-test.py scripts/test-frontend-rollout.py scripts/test-http-readiness.py
+          python3 scripts/test-http-readiness.py
           kubectl kustomize elastic-indexer-stack/k8s-manifests >/dev/null
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
       - name: Log in to Docker Hub

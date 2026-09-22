@@ -129,11 +129,12 @@ bash scripts/smoke-embeddings.sh eqarchives-frontend:local
 For deployment-script or manifest changes, also run the workflow's validation:
 
 ```bash
-bash -n scripts/deploy-frontend.sh scripts/smoke-frontend.sh scripts/smoke-embeddings.sh
+bash -n scripts/deploy-frontend.sh scripts/smoke-frontend.sh scripts/smoke-embeddings.sh scripts/wait-http.sh
 sh -n elastic-indexer-stack/k8s-manifests/embeddings/download-model.sh
 sh -n elastic-indexer-stack/k8s-manifests/embeddings/start-server.sh
 sh -n elastic-indexer-stack/k8s-manifests/embeddings/check-gpu.sh
 python3 -m py_compile scripts/frontend-secrets.py scripts/check-embeddings.py scripts/test-frontend-browser.py
+python3 scripts/test-http-readiness.py
 kubectl kustomize elastic-indexer-stack/k8s-manifests >/dev/null
 ```
 
@@ -186,6 +187,10 @@ and verifies continuous requests through real Traefik/NGINX containers. Preserve
 the frontend's 10-second preStop and 75-second total termination grace; the image
 uses SIGQUIT to drain requests after endpoint propagation. This regression fails
 when the old frontend stops immediately.
+
+Frontend container readiness uses `scripts/wait-http.sh` so transient startup
+connection resets are retried. `scripts/test-http-readiness.py` verifies recovery
+after a reset and rejection of a service that stays unhealthy.
 
 Preserve `search(query)` and `fetch(id)` compatibility, output schemas, read-only
 annotations and matching structured/JSON text results. Document IDs are opaque

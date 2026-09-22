@@ -18,8 +18,7 @@ container_id=$(docker run --detach --publish 127.0.0.1::80 \
   --env ELASTICSEARCH_INDEX=eq-archive \
   --env OPENAI_URL=http://127.0.0.1:1234 "$image")
 address=$(docker port "$container_id" 80/tcp)
-curl --fail --silent --show-error --retry 15 --retry-connrefused --retry-delay 1 \
-  --max-time 5 "http://$address/healthz" | grep -qx 'ok'
+bash "$(dirname "${BASH_SOURCE[0]}")/wait-http.sh" "http://$address/healthz" | grep -qx 'ok'
 curl --fail --silent --show-error "http://$address/" > "$work_dir/index.html"
 grep -q 'id="root"' "$work_dir/index.html"
 asset=$(python3 -c 'import re,sys; print(re.search(r"src=\"([^\"]+\.js)\"", open(sys.argv[1]).read()).group(1))' "$work_dir/index.html")

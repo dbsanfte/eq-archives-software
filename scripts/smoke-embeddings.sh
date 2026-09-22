@@ -73,8 +73,7 @@ frontend_id=$(docker run --detach --network "$network" --network-alias search-eq
   --env ELASTICSEARCH_URL=http://127.0.0.1:9200 \
   --env ELASTICSEARCH_INDEX=eq-archive --env OPENAI_URL=http://nomic:8080 "$image")
 frontend_address=$(docker port "$frontend_id" 80/tcp)
-curl --fail --silent --show-error --retry 15 --retry-connrefused --retry-delay 1 \
-  --max-time 5 "http://$frontend_address/healthz" >/dev/null
+bash "$repo_dir/scripts/wait-http.sh" "http://$frontend_address/healthz" >/dev/null
 python3 "$repo_dir/scripts/check-embeddings.py" \
   "http://$frontend_address/openai/v1/embeddings" --model "$MODEL_ALIAS"
 if docker exec "$embedding_id" /bin/sh /bootstrap/check-gpu.sh; then
