@@ -3,11 +3,6 @@ name: Frontend CI/CD
 on:
   pull_request:
     branches: [master]
-    paths:
-      - .github/workflows/elastic-indexer-stack-cicd.yml
-      - elastic-indexer-stack/frontend/**
-      - elastic-indexer-stack/k8s-manifests/**
-      - scripts/**
   push:
     branches: [master]
   workflow_dispatch:

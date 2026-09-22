@@ -14,7 +14,7 @@ frontend workflow.
 ## GitHub Actions
 
 [Frontend CI/CD](../../../.github/workflows/elastic-indexer-stack-cicd.yml) runs on
-every push to `master`, relevant pull requests, and manual dispatches. Pull
+every push to `master`, every pull request targeting `master`, and manual dispatches. Pull
 requests build and smoke-test on a GitHub-hosted runner, without production
 credentials or access to the VM. Only `master` publishes and deploys.
 
@@ -24,6 +24,14 @@ final NGINX image. That same image is pushed
 to Docker Hub as `dbsanfte/frontend:<git-sha>`. Deployment uses its immutable
 `sha256` digest, not `latest`. Re-running a commit reuses and smoke-tests its
 already published image instead of rebuilding or overwriting the tag.
+
+`master` requires a pull request with an up-to-date branch and a successful
+`Test and build frontend` check from GitHub Actions. That check enforces the
+configured 90% minimum coverage for statements, branches, functions, and lines.
+The rule applies to administrators as well; direct pushes, force pushes, and
+branch deletion are blocked. No additional reviewer approval is required.
+Keep this check enabled for every pull request: path filters could otherwise
+leave required checks pending indefinitely.
 
 Deployment runs on the existing self-hosted runner with labels
 `self-hosted`, `Linux`, `X64`, `eqvm`. It requires Docker for the runner's existing
@@ -72,11 +80,12 @@ The frontend now uses a dedicated `frontend-cicd` Elasticsearch user with the
 stored only in Actions secrets and the runtime Kubernetes Secret.
 
 The repository previously contained the legacy `readonly` user's password in
-the browser configuration. Removing it from the current tree does not remove it
-from old commits or previously published images. That shared legacy account is
-separate from the new frontend account; rotate its exposed password in
-Elasticsearch, `elastic-readonly-password-secret`, and any remaining consumers.
-Do not reintroduce the old browser credentials when merging old branches.
+the browser configuration. The exposed password was rotated on 2026-09-22 in
+Elasticsearch, `elastic-readonly-password-secret`, and the saved VM manifests.
+The old value is rejected; frontend service continued without pod restarts.
+Old commits and previously published images still contain the revoked value.
+This legacy account is separate from `frontend-cicd`. Do not reintroduce browser
+credentials or restore old secret values when merging old branches.
 
 ## Operations
 
