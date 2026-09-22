@@ -558,6 +558,7 @@ class FrontendBrowserTests(unittest.TestCase):
                     expect(page.locator('.sui-result')).to_have_count(5)
                     expect(page.get_by_text('Page 2', exact=True)).to_be_visible()
                     expect(page.get_by_role('button', name='Next', exact=True)).to_be_disabled()
+                    page.wait_for_url(lambda url: 'current=n_50_n' in str(url) and 'size=' in str(url))
                     page_two = page.url
                     page.locator('.sui-result').first.get_by_role('link', name='Read document', exact=True).click()
                     expect(page.get_by_role('link', name='← Back to results', exact=True)).to_have_attribute('href', urlparse(page_two).path + '?' + urlparse(page_two).query)
