@@ -6,7 +6,8 @@ RUN yarn install --frozen-lockfile --non-interactive
 FROM dependencies AS build
 COPY . .
 RUN CI=true yarn test:ci --runInBand
-RUN yarn build
+ARG GIT_SHA
+RUN REACT_APP_GIT_SHA="$GIT_SHA" yarn build
 
 FROM nginx:stable-alpine@sha256:ef8676b33d681f272ba429b27658bdd7e640963279714c96bddf1dc76307f7b6
 COPY nginx.conf.template /etc/nginx/frontend.conf.template

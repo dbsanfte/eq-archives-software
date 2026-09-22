@@ -3,6 +3,7 @@ import { Box, Typography } from "@mui/material";
 import { getConfig } from "../config/config-helper";
 
 export default function ArchiveStatusBar() {
+  const buildSha = process.env.REACT_APP_GIT_SHA;
   const [docCount, setDocCount] = useState(0);
   // Start with a null value to indicate indexing rate is not ready
   const [indexRate, setIndexRate] = useState(null);
@@ -66,6 +67,7 @@ export default function ArchiveStatusBar() {
     <Box
       display="flex"
       flexDirection={{ xs: "column", sm: "row" }}
+      flexWrap="wrap"
       alignItems="center"
       justifyContent={{ xs: "center", sm: "space-between" }}
       gap={1}
@@ -81,6 +83,14 @@ export default function ArchiveStatusBar() {
           Indexing Rate: {indexRate.toFixed(2)} docs/min
         </Typography>
       )}
+      <Typography
+        variant="body2"
+        color="text.secondary"
+        title={buildSha || "Local development build"}
+        sx={{ whiteSpace: "nowrap" }}
+      >
+        Build: {buildSha ? buildSha.slice(0, 7) : "development"}
+      </Typography>
     </Box>
   );
 }
