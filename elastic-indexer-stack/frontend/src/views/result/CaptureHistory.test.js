@@ -81,3 +81,32 @@ test('handles an unavailable history and non-string or missing dates', async () 
   expect(captureDate({ capture_date: { raw: 123 } })).toBe('Date unknown');
   expect(captureDate({ capture_date: { raw: 'unparsed' } })).toBe('Date unknown');
 });
+
+test('offers exact reader and chronological comparison links without self-comparison', async () => {
+  const older = { ...result, _meta: { id: 'websites/example.org/19990101000000/a?x=# y' }, capture_date: { raw: '1999-01-01' } };
+  const newer = { ...result, _meta: { id: 'websites/example.org/20010101000000/a' }, capture_date: { raw: '2001-01-01' } };
+  fetchCaptures.mockResolvedValueOnce({ ...page, records: [newer, result, older] });
+  render(<CaptureHistory identity={identity} compareWith={result} />);
+  toggle();
+  await screen.findByText('1999-01-01');
+  const read = new URL(screen.getByRole('link', { name: 'Read capture from 1999-01-01' }).href);
+  expect(read.searchParams.get('id')).toBe(older._meta.id);
+  const before = new URL(screen.getByRole('link', { name: 'Compare capture from 1999-01-01 with selected capture' }).href);
+  expect(before.searchParams.get('id')).toBe(older._meta.id);
+  expect(before.searchParams.get('compare')).toBe(result._meta.id);
+  const after = new URL(screen.getByRole('link', { name: 'Compare capture from 2001-01-01 with selected capture' }).href);
+  expect(after.searchParams.get('id')).toBe(result._meta.id);
+  expect(after.searchParams.get('compare')).toBe(newer._meta.id);
+  expect(screen.queryByRole('link', { name: 'Compare capture from 2000-01-01 with selected capture' })).not.toBeInTheDocument();
+});
+
+test('compares captures on the same day in timestamp order', async () => {
+  const earlier = { ...result, _meta: { id: 'websites/example.org/20000101090000/a' }, capture_date: { raw: '2000-01-01T09:00:00' } };
+  fetchCaptures.mockResolvedValueOnce({ ...page, records: [earlier] });
+  render(<CaptureHistory identity={identity} compareWith={result} />);
+  toggle();
+  const link = await screen.findByRole('link', { name: 'Compare capture from 2000-01-01 with selected capture' });
+  const comparison = new URL(link.href);
+  expect(comparison.searchParams.get('id')).toBe(earlier._meta.id);
+  expect(comparison.searchParams.get('compare')).toBe(result._meta.id);
+});

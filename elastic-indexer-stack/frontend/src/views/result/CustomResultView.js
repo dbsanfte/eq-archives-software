@@ -59,7 +59,7 @@ const CustomResultView = (context) => {
 
       {/* Button Row for further interactions */}
       <ButtonRow result={context.result} />
-      {identity && <CaptureHistory key={identity.key} identity={identity} />}
+      {identity && <CaptureHistory key={identity.key} identity={identity} compareWith={context.result} />}
     </li>
   );
 };

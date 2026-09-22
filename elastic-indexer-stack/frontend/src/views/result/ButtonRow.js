@@ -1,9 +1,12 @@
-import React, { useState } from "react";
+import React, { useContext, useState } from "react";
 import PropTypes from "prop-types";
 import { Button, Snackbar } from "@mui/material";
+import { readerUrl, recordId, ReaderSearchContext } from "../reader/reader-utils";
 import DocumentPreview from "./DocumentPreview";
 
 const ButtonRow = ({ result }) => {
+  const find = useContext(ReaderSearchContext);
+  const href = readerUrl(recordId(result), { find });
   const [previewOpen, setPreviewOpen] = useState(false);
   const [snackbarOpen, setSnackbarOpen] = useState(false);
 
@@ -11,17 +14,8 @@ const ButtonRow = ({ result }) => {
   const handlePreviewClose = () => setPreviewOpen(false);
 
   const handlePermalink = () => {
-    // Get base URL of the application
-    const baseUrl = window.location.origin;
-
-    // Construct filter query parameters in the correct format
-    const encodedId = encodeURIComponent(result.id?.raw || "");
-
-    // Build the search URL with the filter structure
-    const searchUrl = `${baseUrl}/?size=n_20_n&filters%5B0%5D%5Bfield%5D=id&filters%5B0%5D%5Bvalues%5D%5B0%5D=${encodedId}&filters%5B0%5D%5Btype%5D=all`;
-
-    // Copy the URL to clipboard
-    navigator.clipboard.writeText(searchUrl)
+    const searchUrl = window.location.origin + href;
+    Promise.resolve().then(() => navigator.clipboard.writeText(searchUrl))
       .then(() => {
         setSnackbarOpen(true);
       })
@@ -38,6 +32,7 @@ const ButtonRow = ({ result }) => {
   return (
     <>
       <div className="archive-result-actions">
+        {recordId(result) && <Button component="a" href={href} variant="contained">Read document</Button>}
         <Button variant="outlined" onClick={handlePreviewOpen} className="archive-result-preview">
           Preview Full Text
         </Button>

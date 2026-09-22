@@ -25,3 +25,7 @@ modelcontextprotocol/modelcontextprotocol at commit
 https://github.com/modelcontextprotocol/modelcontextprotocol
 Its upstream licensing notice is preserved in
 licenses/Model-Context-Protocol.txt. It identifies the supported protocol.
+
+Capture comparisons use jsdiff (https://github.com/kpdecker/jsdiff), distributed
+under the BSD 3-Clause license. Its notice and license are preserved in
+licenses/jsdiff-BSD-3-Clause.txt.

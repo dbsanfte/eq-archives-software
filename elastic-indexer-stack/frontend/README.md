@@ -80,6 +80,53 @@ pagination, independent query-string URLs, the all-captures toggle and selecting
 dated preview at phone and desktop widths. MCP tools retain their existing
 individual-record behavior.
 
+## Document reader and comparisons
+
+**Read document** opens a dedicated reader with the complete indexed text,
+formatted Markdown or exact source text, literal find/highlight navigation,
+source links, capture provenance, citations and text downloads. The compact
+archive header retains the deployed build SHA and MCP guide. OCR is a separate,
+labelled model-generated image transcription; estimated publication dates are
+also labelled. Neither reader nor comparison substitutes generated summaries for
+missing source text. Remote images become links rather than loading automatically.
+Relative links in Wayback captures resolve against the original page and retain
+the selected archive timestamp.
+
+Stable reader links use `/document?id=<opaque Elasticsearch ID>`. Optional
+`find=<literal phrase>` highlights a passage; `part=ocr` selects transcription.
+Result links carry the completed search term, so a newer unsubmitted input draft
+cannot change which query the displayed results represent. **Copy Permalink**
+now copies a reader link; older filtered-search links continue to work.
+
+**View captures → Compare** compares the selected capture with another version
+of the same exact original page. A comparison URL adds `compare=<second ID>`;
+**From** and **To** show the direction, and **Swap captures** reverses it. Unified
+line differences label additions/removals in text as well as color, support change
+navigation, and expand long unchanged sections. Each version remains available
+through its reader link and complete download. Missing text is explicitly
+unavailable, never treated as proof of an addition or deletion.
+
+The reader bypasses the search provider and fetches exact IDs using size-one
+queries through the existing same-origin proxy. `DocumentService.js` whitelists
+source/OCR and provenance fields; vectors, nested chunks and summaries are not
+requested. Aborted or superseded fetches/comparisons cannot replace current
+content. No server routes, index migration or new service is required: NGINX's
+existing SPA fallback serves direct reader/comparison links.
+
+For responsive browsing, documents over 500,000 characters use complete plain
+source text, and highlighting marks the first 1,000 matches. Interactive diffs
+are bounded to 1,000,000 combined characters, 20,000 combined lines, a 1-second
+algorithm deadline and 2,000 edits. Limits show an explicit fallback to full
+readers/downloads without silently truncating text or claiming identical content.
+The line comparison preserves whitespace and line endings. It compares indexed
+text, so differences may reflect extraction/navigation as well as page edits.
+
+Jest covers exact IDs, provenance, missing/partial/error/retry states, clipboard
+fallback, literal/Unicode highlighting, full-text downloads, source link safety,
+OCR, comparison limits and stale responses. Chromium covers entry from search,
+query highlights, source mode, downloads/citations, capture selection, directional
+diffs, swapping, direct reloads and mobile overflow at 320, 390 and 1280 px.
+
 ## Browser configuration
 
 [`src/config/engine.json`](src/config/engine.json) controls the searchable fields

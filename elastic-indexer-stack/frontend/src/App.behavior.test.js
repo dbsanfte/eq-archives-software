@@ -86,3 +86,13 @@ test('groups captures by default and resets pagination when showing every captur
   fireEvent.click(toggle);
   expect(getSearchConfig.mock.calls[0][0].current.groupCaptures).toBe(true);
 });
+
+test('opens a direct reader link without constructing a search connector', () => {
+  window.history.replaceState({}, '', '/document');
+  try {
+    render(<App />);
+    expect(screen.getByRole('heading', { name: 'Document reader' })).toBeVisible();
+    expect(screen.getByRole('alert')).toHaveTextContent('missing a document ID');
+    expect(getSearchConfig).not.toHaveBeenCalled();
+  } finally { window.history.replaceState({}, '', '/'); }
+});
