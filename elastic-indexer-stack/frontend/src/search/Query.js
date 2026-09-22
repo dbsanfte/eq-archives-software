@@ -25,10 +25,19 @@ export function resolveQuery(requestState,
         return;
     }
 
+    // Search UI has already built the filters from the request/URL state.
+    // Adding a bool filter makes `should` optional unless explicitly required.
+    const filters = requestBody.query?.bool?.filter;
+    if (requestBody.query?.bool?.should) {
+        requestBody.query.bool.minimum_should_match = 1;
+    }
+
     if (usesQuerySyntax(queryText)) {
         requestBody.query = {
             bool: {
-                should: buildExactMatchQuery(queryText, searchFields)
+                should: buildExactMatchQuery(queryText, searchFields),
+                minimum_should_match: 1,
+                ...(filters && { filter: filters })
             }
         };
     }
@@ -37,6 +46,12 @@ export function resolveQuery(requestState,
              embeddingService.isEmbeddingServiceAvailable()) {
         try {
             requestBody.knn = buildKnnQuery(queryText, embeddingModel, paramsRef, vectorFields, nestedVectorFields);
+            // Top-level kNN matches are ORed with keyword results. Restrict each
+            // vector branch too, including facets, before selecting candidates.
+            const knnFilters = [filters || [], requestBody.post_filter || []].flat();
+            if (knnFilters.length) {
+                requestBody.knn = requestBody.knn.map(query => ({ ...query, filter: knnFilters }));
+            }
         }
         catch (error) {
             console.error("Error during embedding fetch:", error);

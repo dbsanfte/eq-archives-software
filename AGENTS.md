@@ -227,6 +227,17 @@ ChatGPT/Claude or Deep Research validation after actually performing it.
   palette and mobile interactions consistent.
 - Search responses must not replace newer text the user is typing. Preserve the
   existing asynchronous input regression coverage when changing search controls.
+- Applied date ranges belong to Search UI's filter/URL state. New searches must
+  pass `shouldClearFilters: false`; do not keep a separate global date registry.
+  Preserve draft picker edits across results and equivalent filter objects, and
+  restore applied values on reload/history navigation. Define the date control's
+  `withSearch` wrapper at module scope so loading updates cannot remount it.
+  Apply replaces a range
+  atomically; Clear removes it from both requests and the URL. Date selections
+  include both UTC calendar days. Keep keyword matching required when filters
+  are present and apply those filters to every semantic kNN branch. Browser
+  regressions cover both date fields, delayed results, mobile filters, successive
+  searches, reload/back/forward and timezones on either side of UTC.
 - Result cards request metadata and a short escaped `text_full` highlight; full
   text, OCR bodies, nested chunks and vectors are excluded from result `_source`.
   Keep nested KNN ranking but do not return unused `inner_hits`. **Read document**
