@@ -186,6 +186,15 @@ exact ES IDs, never filesystem paths or URLs. Do not silently truncate source
 text or substitute generated summaries; keep OCR/date estimates labelled.
 Never expose upstream credentials, errors, vectors or arbitrary Elasticsearch DSL.
 Keep retrieval/cache limits appropriate for the shared single-slot model server.
+The additive `search_archive` tool provides keyword research with exact source
+filters, inclusive UTC capture/estimated-publication dates, sorting and a bounded
+1,000-result window (1–50 results per page). Preserve the explicit lower-bound
+total and limit-reached signals. Pagination uses the live index; do not claim
+snapshot consistency. Keep replica preference and legacy-record tie ordering.
+`list_sources` discovers domain/mailing-list/file-type values with composite
+aggregation paging (1–100 values), using ES's returned after-key. Both tools share
+retrieval limits and must not call the embedding service. Cover filtering, invalid
+dates, pagination boundaries and old search/fetch compatibility with regressions.
 The user chose direct public MCP access with a top-right MCP icon and a connection
 screen for ChatGPT developer mode and Claude. Do not prepare or submit an official
 OpenAI directory listing unless requested later. Only claim account-level

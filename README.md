@@ -14,7 +14,7 @@ archive itself lives in the separate
 - Keyword search with query syntax and optional semantic search using embeddings.
 - Filters for source, content type, tags, mailing list, and dates.
 - Full-text previews, archive links, and shareable document permalinks.
-- A public, read-only MCP server for researching the archive in ChatGPT, Claude and other compatible assistants.
+- A public, read-only MCP server for researching the archive in ChatGPT, Claude and other compatible assistants, with source/date filters, paged results and source discovery.
 - An archive status bar showing document count, indexing activity, and the
   frontend build's Git revision.
 - Python workers for extracting text and metadata, generating embeddings, and

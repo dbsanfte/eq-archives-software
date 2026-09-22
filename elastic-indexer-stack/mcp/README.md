@@ -12,8 +12,10 @@ there is no official OpenAI directory submission or publisher account dependency
 | --- | --- | --- |
 | `search` | `query`: 1–1000 characters | `results`: up to ten `{id, title, url}` sources |
 | `fetch` | `id`: exact search result ID, 1–2048 characters | `{id, title, text, url, metadata}` |
+| `search_archive` | `query`, `filters`, `offset`, `limit`, `sort` | Paged keyword results with provenance, bounded totals and `next_offset` |
+| `list_sources` | `source_type`, `query`, `filters`, `after`, `limit` | Exact source values and matching document counts, with `next_after` |
 
-Both tools declare output schemas, read-only/non-destructive/idempotent annotations,
+All tools declare output schemas, read-only/non-destructive/idempotent annotations,
 and anonymous authentication metadata. Results are returned in `structuredContent`
 and as the same JSON in a text item, following OpenAI's
 [research MCP contract](https://developers.openai.com/api/docs/mcp).
@@ -26,8 +28,8 @@ operators use lexical search with AND as the default join so excluded terms cann
 broaden the search and semantic matches do not bypass constraints. Use `|` for
 explicit alternatives.
 Natural-language searches can find related material, not only exact words.
-Refine the query to investigate beyond the first ten results; this interface does
-not expose arbitrary Elasticsearch DSL, index names or pagination.
+The original `search(query)` and `fetch(id)` input/output contracts remain unchanged.
+Use `search_archive` to investigate beyond the first ten results.
 
 `fetch` uses an exact Elasticsearch ID query. Archive paths remain IDs, never
 filesystem paths or request URLs. Original extracted text is returned without
@@ -35,6 +37,67 @@ snippet truncation. Image transcriptions and estimated dates are clearly labelle
 generated summaries are not substituted for source text. Source URLs are preferred
 for citations, with encoded search permalinks as a fallback. Very large upstream
 responses over 8 MiB fail explicitly rather than returning a silently cut-off source.
+
+## Filtered research and source discovery
+
+`search_archive` uses keyword matching, including the same phrase/operator rules,
+without semantic broadening or embedding requests. Empty `query` browses the
+filtered archive. Filters are optional:
+
+- `domains`, `mailing_lists`, `file_types`: up to ten exact values per category.
+  Values within a category are OR; different categories are AND. Discover values
+  with `list_sources` instead of guessing. Domain prefixes such as `www` matter.
+- `date_field`: `capture_date` (default) or `estimated_publication_date`.
+  The latter filters `llm_guessed_date`, a model estimate, not a verified date.
+- `date_from`, `date_to`: inclusive UTC calendar days in `YYYY-MM-DD` form.
+  Either bound can be omitted. Impossible or reversed dates are rejected.
+  A date range excludes documents without that date.
+
+`limit` defaults to 20 and allows 1–50 results; `offset` defaults to zero.
+Pass `next_offset` with unchanged query/filters/sort/limit to continue. `sort`
+accepts `relevance`, `capture_date_asc`, `capture_date_desc`,
+`estimated_publication_date_asc` and `estimated_publication_date_desc`.
+Unknown dates sort last. Archive IDs break ties; a fixed replica preference and
+document-order fallback retain legacy records missing an ID field.
+Pagination reads the live index, not a frozen snapshot: indexing changes can
+shift pages. Deduplicate by returned ID when collecting a long-running study.
+
+The shared public server exposes a **1,000-result window per search**, trimming
+the last page to that boundary. `total.relation` is `eq` for an exact count and
+`gte` for a lower bound (counting is bounded at 1,001). `has_more` can remain true
+when `next_offset` is null: `limit_reached=true` explicitly asks the caller to
+narrow the query or filters, rather than implying the archive is exhausted.
+Result metadata includes source/date provenance; full text remains in `fetch`.
+
+`list_sources` accepts `source_type` of `domain` (default), `mailing_list` or
+`file_type`, plus the same optional keyword query and filters. It returns
+alphabetically ordered values and matching document counts, omitting empty/missing
+values. `limit` defaults to 20 and allows 1–100; pass `next_after` as `after` with
+unchanged source type/query/filters to continue. The cursor comes from
+Elasticsearch's composite aggregation, not the last displayed value. A final page
+can be empty. Source discovery does not use embeddings or hold server sessions.
+
+For example, discover mailing lists with
+`list_sources(source_type="mailing_list", query="ancient cyclops")`, then call
+`search_archive` with:
+
+```json
+{
+  "query": "\"ancient cyclops\"",
+  "filters": {
+    "mailing_lists": ["eq_wizards"],
+    "date_field": "estimated_publication_date",
+    "date_from": "1999-01-01",
+    "date_to": "2001-12-31"
+  },
+  "limit": 20,
+  "offset": 0,
+  "sort": "estimated_publication_date_asc"
+}
+```
+
+Fetch selected IDs to check the original evidence and date estimates. Neither
+tool accepts arbitrary Elasticsearch DSL, field names, index names or URLs.
 
 ## Local development and tests
 
@@ -49,7 +112,8 @@ python3 -m venv .venv
 
 Tests exercise retrieval, query constraints, unavailable/busy embeddings, cache
 expiry/eviction, source fidelity, missing IDs, sanitized failures, credentials,
-HTTP initialization, tool discovery, schemas, invalid input, body limits, origin
+inclusive date/source filters, legacy records, paged results/source values,
+window limits, HTTP initialization, tool discovery, schemas, invalid input, body limits, origin
 validation and client lifetime across requests. Branch coverage is enabled and the
 combined coverage gate is **90%**. The Docker build runs this same suite before
 producing a non-root runtime without the test dependencies.
@@ -108,8 +172,10 @@ Upstream/proxy operational logging is separate. Public descriptions must not pro
 retention periods for infrastructure that has not been audited.
 
 After deployment, run `python3 scripts/check-mcp.py https://search.eqarchives.org/mcp`
-from the repository root. This validates discovery, search, full-text fetch and a
-missing document against the real public archive. An official SDK client can also
+from the repository root. This validates discovery, search, full-text fetch,
+missing documents, consecutive research pages, source discovery/filtering and
+inclusive capture dates against the real public archive. The smoke query must
+match at least 14 records and two domains. An official SDK client can also
 connect with `mcp.client.streamable_http.streamable_http_client` and `ClientSession`.
 Actual ChatGPT/Claude account availability and model behavior must be checked from
 an eligible account; a protocol smoke test does not certify these. The service is
