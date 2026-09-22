@@ -15,7 +15,9 @@ frontend_id=''
 mcp_id=''
 fixture_id=''
 traefik_id=''
+replacement_id=''
 cleanup() {
+  if [[ -n "$replacement_id" ]]; then docker rm -f "$replacement_id" >/dev/null; fi
   if [[ -n "$traefik_id" ]]; then docker rm -f "$traefik_id" >/dev/null; fi
   if [[ -n "$mcp_id" ]]; then docker rm -f "$mcp_id" >/dev/null; fi
   if [[ -n "$fixture_id" ]]; then docker rm -f "$fixture_id" >/dev/null; fi
@@ -116,13 +118,14 @@ if [[ -n "$mcp_image" ]]; then
   # Reproduce Traefik's rule ordering using the matches and priorities from the
   # actual manifests. PathPrefix(`/`) can outrank Path(`/mcp`) by rule length.
   source "$repo_dir/scripts/routing-test.env"
+  mkdir "$work_dir/routing"
   "${DEPLOYMENT_TEST_PYTHON:-python3}" "$repo_dir/scripts/render-ingress-test.py" \
     "$repo_dir/elastic-indexer-stack/k8s-manifests/01-frontend.yaml" \
-    "$repo_dir/elastic-indexer-stack/k8s-manifests/mcp.yaml" > "$work_dir/routes.json"
+    "$repo_dir/elastic-indexer-stack/k8s-manifests/mcp.yaml" > "$work_dir/routing/routes.yaml"
   traefik_id=$(docker run --detach --network "$network" --publish 127.0.0.1::8081 \
     --user 65532:65532 --cap-drop ALL --security-opt no-new-privileges --read-only --memory 128m \
-    --mount "type=bind,source=$work_dir/routes.json,target=/etc/traefik/routes.json,readonly" \
-    "$TRAEFIK_TEST_IMAGE" --providers.file.filename=/etc/traefik/routes.json \
+    --mount "type=bind,source=$work_dir/routing,target=/etc/traefik/dynamic,readonly" \
+    "$TRAEFIK_TEST_IMAGE" --providers.file.directory=/etc/traefik/dynamic \
     --entrypoints.web.address=:8081 --log.level=ERROR)
   traefik_address=$(docker port "$traefik_id" 8081/tcp)
   curl --fail --silent --show-error --retry 15 --retry-all-errors --retry-delay 1 \
@@ -131,4 +134,16 @@ if [[ -n "$mcp_image" ]]; then
   curl --fail --silent --show-error --max-time 5 -H 'Host: search.eqarchives.org' \
     "http://$traefik_address/" | grep -q 'id="root"'
   echo 'Production ingress rules route MCP and frontend requests to their respective containers.'
+
+  replacement_id=$(docker run --detach --network "$network" --network-alias search-eqarchives-next \
+    --publish 127.0.0.1::80 --mount "type=bind,source=$work_dir/secrets,target=/run/secrets,readonly" \
+    --env ELASTICSEARCH_URL=http://127.0.0.1:9200 \
+    --env ELASTICSEARCH_INDEX=eq-archive --env OPENAI_URL=http://nomic:8080 "$image")
+  replacement_address=$(docker port "$replacement_id" 80/tcp)
+  curl --fail --silent --show-error --retry 15 --retry-all-errors --retry-delay 1 \
+    --max-time 5 "http://$replacement_address/healthz" >/dev/null
+  "${DEPLOYMENT_TEST_PYTHON:-python3}" "$repo_dir/scripts/test-frontend-rollout.py" \
+    "$repo_dir/elastic-indexer-stack/k8s-manifests/01-frontend.yaml" \
+    "$work_dir/routing/routes.yaml" "$frontend_id" "http://$traefik_address" http://search-eqarchives-next:80
+  python3 "$repo_dir/scripts/check-mcp.py" "http://$traefik_address/mcp" --host search.eqarchives.org
 fi

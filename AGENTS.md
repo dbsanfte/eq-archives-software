@@ -180,6 +180,13 @@ Keep MCP's explicit ingress priority: the root `PathPrefix` rule is longer than 
 exact MCP rule and otherwise wins Traefik's default ordering. After deployment run
 `python3 scripts/check-mcp.py https://search.eqarchives.org/mcp`.
 
+The same container integration runs `scripts/test-frontend-rollout.py`: it executes
+the frontend manifest's actual preStop command, delays the ingress endpoint update,
+and verifies continuous requests through real Traefik/NGINX containers. Preserve
+the frontend's 10-second preStop and 75-second total termination grace; the image
+uses SIGQUIT to drain requests after endpoint propagation. This regression fails
+when the old frontend stops immediately.
+
 Preserve `search(query)` and `fetch(id)` compatibility, output schemas, read-only
 annotations and matching structured/JSON text results. Document IDs are opaque
 exact ES IDs, never filesystem paths or URLs. Do not silently truncate source
