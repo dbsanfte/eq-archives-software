@@ -95,7 +95,7 @@ export default function App() {
                   <>
                     <ArchiveStatusBar />
                     <HeaderContent />
-                    <EnhancedSearchBox searchAsYouType={true} /> {/* We'll handle automatic searches ourselves */}
+                    <EnhancedSearchBox searchAsYouType={true} enableSemanticSearch={knnParams.enableSemanticSearch} /> {/* We'll handle automatic searches ourselves */}
                     <Button
                       className="archive-search-option"
                       variant="contained"

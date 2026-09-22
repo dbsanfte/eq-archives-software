@@ -2,6 +2,7 @@
 """Browser regressions against the built frontend, with isolated API fixtures."""
 
 import os
+import fnmatch
 import unittest
 
 from playwright.sync_api import expect, sync_playwright
@@ -160,6 +161,99 @@ class FrontendBrowserTests(unittest.TestCase):
                     self.assertEqual(page.evaluate("navigator.clipboard.readText()"), "https://search.eqarchives.org/mcp")
                     page.get_by_role("link", name="EQ Archives", exact=True).click()
                     expect(page.locator(".sui-search-box__text-input")).to_be_visible()
+                finally:
+                    context.close()
+
+    def test_lightweight_search_and_on_demand_document_preview(self):
+        for width in (390, 1280):
+            with self.subTest(width=width):
+                context = self.browser.new_context(viewport={"width": width, "height": 900})
+                try:
+                    page = context.new_page()
+                    requests, previews, embeddings = [], [], []
+                    source = {
+                        "title": "Ancient Cyclops notes", "url": "https://example.org/source",
+                        "llm_summary": "A useful archive summary", "text_full": "# Preserved source\n\nThe complete original document.",
+                        "text": [{"text_chunk": "Unneeded chunk", "vector": [1, 2]}],
+                        "llm_summary_vector": [1, 2], "capture_date": "2000-01-01T00:00:00Z",
+                        "domain_name": "example.org", "llm_tags": ["Cyclops"]
+                    }
+                    doc_id = "archives/source with spaces?#.txt"
+
+                    def archive(route):
+                        if route.request.url.endswith('/_count'):
+                            return route.fulfill(json={"count": 1})
+                        body = route.request.post_data_json
+                        if 'ids' in body.get('query', {}):
+                            previews.append(body)
+                            self.assertEqual(body, {"size": 1, "_source": ["text_full"], "query": {"ids": {"values": [doc_id]}}})
+                            return route.fulfill(json={"hits": {"hits": [{"_id": doc_id, "_source": {"text_full": source['text_full']}}]}})
+                        requests.append(body)
+                        selected = body['_source']
+                        included = selected.get('includes', ['*'])
+                        excluded = selected.get('excludes', [])
+                        fields = {key: value for key, value in source.items()
+                                  if any(fnmatch.fnmatchcase(key, item) for item in included)
+                                  and not any(fnmatch.fnmatchcase(key, item) for item in excluded)}
+                        self.assertNotIn('text_full', fields)
+                        self.assertNotIn('text', fields)
+                        self.assertNotIn('llm_summary_vector', fields)
+                        self.assertEqual(body['highlight']['encoder'], 'html')
+                        self.assertEqual(body['highlight']['fields']['text_full']['number_of_fragments'], 1)
+                        self.assertTrue(all('inner_hits' not in query for query in body.get('knn', [])))
+                        facets = {field: {"buckets": []} for field in (
+                            "domain_name", "llm_content_flavour", "file_type", "mime_type", "mailing_list_name", "llm_tags"
+                        )}
+                        facets["last_indexed"] = {"buckets": {}}
+                        route.fulfill(json={
+                            "hits": {"total": {"value": 1, "relation": "eq"}, "hits": [{
+                                "_id": doc_id, "_score": 1, "_source": fields,
+                                "highlight": {"text_full": ["A <em>matching</em> archive passage"]}
+                            }]}, "aggregations": {"facet_bucket_all": {"doc_count": 1, **facets}}
+                        })
+
+                    def embed(route):
+                        embeddings.append(route.request.post_data_json)
+                        route.fulfill(json={"data": [{"embedding": [0.1] * 768}]})
+
+                    page.route('**/elasticsearch/**', archive)
+                    page.route('**/openai/v1/embeddings', embed)
+                    page.goto(self.base_url, wait_until='networkidle')
+                    expect(page.get_by_role('link', name='Ancient Cyclops notes')).to_be_visible()
+                    expect(page.get_by_text('A matching archive passage')).to_be_visible()
+                    self.assertEqual(previews, [])
+                    page.get_by_role('button', name='Preview Full Text').click()
+                    expect(page.get_by_role('heading', name='Preserved source')).to_be_visible()
+                    expect(page.get_by_text('The complete original document.')).to_be_visible()
+                    self.assertEqual(len(previews), 1)
+                    page.get_by_role('button', name='Close', exact=True).click()
+                    expect(page.get_by_role('dialog')).to_have_count(0)
+                    page.get_by_role('button', name='Preview Full Text').click()
+                    expect(page.get_by_role('heading', name='Preserved source')).to_be_visible()
+                    self.assertEqual(len(previews), 1)
+                    page.get_by_role('button', name='Close', exact=True).click()
+                    expect(page.get_by_role('dialog')).to_have_count(0)
+
+                    def search(value):
+                        with page.expect_response(lambda response: '/_search' in response.url and
+                                                  value in str(response.request.post_data_json) and response.status == 200):
+                            page.locator('.sui-search-box__text-input').fill(value)
+                            page.locator('.sui-search-box__text-input').press('Enter')
+                        expect(page.locator('.sui-search-box__text-input')).to_have_value(value)
+
+                    search('ancient cyclops')
+                    self.assertEqual(len(embeddings), 1)
+                    self.assertEqual(embeddings[0]['input'], ['search_query: ancient cyclops'])
+                    self.assertIn('knn', requests[-1])
+                    search('"ancient cyclops"')
+                    self.assertEqual(len(embeddings), 1)
+                    self.assertNotIn('knn', requests[-1])
+                    page.get_by_role('button', name='Advanced...', exact=True).click()
+                    page.get_by_role('checkbox', name='Enable semantic search').uncheck()
+                    search('cleric soloing')
+                    self.assertEqual(len(embeddings), 1)
+                    self.assertNotIn('knn', requests[-1])
+                    self.assertEqual(len(previews), 1)
                 finally:
                     context.close()
 

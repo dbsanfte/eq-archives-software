@@ -22,7 +22,7 @@ describe('Query.js', () => {
     beforeEach(() => {
         // Reset all mocks
         jest.clearAllMocks();
-        
+
         // Setup default test data
         requestState = { searchTerm: 'test query' };
         requestBody = {};
@@ -65,9 +65,9 @@ describe('Query.js', () => {
             reservedCharTests.forEach(({ char, query, description }) => {
                 test(`should build exact match query for ${description}`, () => {
                     requestState.searchTerm = query;
-                    
+
                     resolveQuery(requestState, requestBody, searchFields, paramsRef, vectorFields, nestedVectorFields, embeddingModel);
-                    
+
                     expect(requestBody.query).toEqual({
                         bool: {
                             should: [{
@@ -92,9 +92,9 @@ describe('Query.js', () => {
 
             test('should build KNN query when semantic search is enabled and service is available', () => {
                 requestState.searchTerm = 'simple query';
-                
+
                 resolveQuery(requestState, requestBody, searchFields, paramsRef, vectorFields, nestedVectorFields, embeddingModel);
-                
+
                 expect(embeddingService.getEmbedding).toHaveBeenCalledWith('simple query');
                 expect(requestBody.knn).toHaveLength(3); // 2 vector fields + 1 nested field
                 expect(requestBody.query).toBeUndefined();
@@ -104,9 +104,9 @@ describe('Query.js', () => {
                 requestState.searchTerm = 'vector search';
                 const expectedVector = [0.1, 0.2, 0.3];
                 embeddingService.getEmbedding.mockReturnValue(expectedVector);
-                
+
                 resolveQuery(requestState, requestBody, searchFields, paramsRef, vectorFields, nestedVectorFields, embeddingModel);
-                
+
                 expect(requestBody.knn).toEqual(expect.arrayContaining([
                     {
                         field: 'title_vector',
@@ -125,29 +125,20 @@ describe('Query.js', () => {
                 ]));
             });
 
-            test('should include nested vector field queries with inner_hits', () => {
+            test('keeps nested vector matching without returning unused full text chunks', () => {
                 requestState.searchTerm = 'nested search';
                 const expectedVector = [0.1, 0.2, 0.3];
                 embeddingService.getEmbedding.mockReturnValue(expectedVector);
-                
+
                 resolveQuery(requestState, requestBody, searchFields, paramsRef, vectorFields, nestedVectorFields, embeddingModel);
-                
+
                 expect(requestBody.knn).toEqual(expect.arrayContaining([
                     {
                         field: 'chunks.vector',
                         query_vector: expectedVector,
                         k: 10,
                         num_candidates: 100,
-                        boost: 1.0,
-                        inner_hits: {
-                            _source: false,
-                            fields: ['chunks.text_chunk'],
-                            highlight: {
-                                fields: {
-                                    'chunks.text_chunk': {}
-                                }
-                            }
-                        }
+                        boost: 1.0
                     }
                 ]));
             });
@@ -155,9 +146,9 @@ describe('Query.js', () => {
             test('should not build KNN query when semantic search is disabled', () => {
                 paramsRef.current.enableSemanticSearch = false;
                 requestState.searchTerm = 'simple query';
-                
+
                 resolveQuery(requestState, requestBody, searchFields, paramsRef, vectorFields, nestedVectorFields, embeddingModel);
-                
+
                 expect(embeddingService.getEmbedding).not.toHaveBeenCalled();
                 expect(requestBody.knn).toBeUndefined();
                 expect(requestBody.query).toBeUndefined();
@@ -166,9 +157,9 @@ describe('Query.js', () => {
             test('should not build KNN query when embedding service is unavailable', () => {
                 embeddingService.isEmbeddingServiceAvailable.mockReturnValue(false);
                 requestState.searchTerm = 'simple query';
-                
+
                 resolveQuery(requestState, requestBody, searchFields, paramsRef, vectorFields, nestedVectorFields, embeddingModel);
-                
+
                 expect(embeddingService.getEmbedding).not.toHaveBeenCalled();
                 expect(requestBody.knn).toBeUndefined();
                 expect(requestBody.query).toBeUndefined();
@@ -176,9 +167,9 @@ describe('Query.js', () => {
 
             test('should not build KNN query when no vector fields are provided', () => {
                 requestState.searchTerm = 'simple query';
-                
+
                 resolveQuery(requestState, requestBody, searchFields, paramsRef, [], [], embeddingModel);
-                
+
                 expect(embeddingService.getEmbedding).not.toHaveBeenCalled();
                 expect(requestBody.knn).toBeUndefined();
                 expect(requestBody.query).toBeUndefined();
@@ -186,9 +177,9 @@ describe('Query.js', () => {
 
             test('should not build KNN query when search term is empty', () => {
                 requestState.searchTerm = '';
-                
+
                 resolveQuery(requestState, requestBody, searchFields, paramsRef, vectorFields, nestedVectorFields, embeddingModel);
-                
+
                 expect(embeddingService.getEmbedding).not.toHaveBeenCalled();
                 expect(requestBody.knn).toBeUndefined();
                 expect(requestBody.query).toBeUndefined();
@@ -196,9 +187,9 @@ describe('Query.js', () => {
 
             test('should handle null/undefined vector fields gracefully', () => {
                 requestState.searchTerm = 'simple query';
-                
+
                 resolveQuery(requestState, requestBody, searchFields, paramsRef, null, undefined, embeddingModel);
-                
+
                 expect(embeddingService.getEmbedding).not.toHaveBeenCalled();
                 expect(requestBody.knn).toBeUndefined();
             });
@@ -206,9 +197,9 @@ describe('Query.js', () => {
             test('should handle missing embedding gracefully', () => {
                 embeddingService.getEmbedding.mockReturnValue(null);
                 requestState.searchTerm = 'simple query';
-                
+
                 resolveQuery(requestState, requestBody, searchFields, paramsRef, vectorFields, nestedVectorFields, embeddingModel);
-                
+
                 expect(requestBody.knn).toEqual([]);
             });
 
@@ -218,12 +209,12 @@ describe('Query.js', () => {
                 });
                 requestState.searchTerm = 'simple query';
                 const consoleSpy = jest.spyOn(console, 'error').mockImplementation();
-                
+
                 resolveQuery(requestState, requestBody, searchFields, paramsRef, vectorFields, nestedVectorFields, embeddingModel);
-                
+
                 expect(consoleSpy).toHaveBeenCalledWith('Error during embedding fetch:', expect.any(Error));
                 expect(requestBody.knn).toBeUndefined();
-                
+
                 consoleSpy.mockRestore();
             });
 
@@ -236,9 +227,9 @@ describe('Query.js', () => {
                 };
                 requestState.searchTerm = 'custom params';
                 embeddingService.getEmbedding.mockReturnValue([0.1, 0.2]);
-                
+
                 resolveQuery(requestState, requestBody, searchFields, paramsRef, vectorFields, nestedVectorFields, embeddingModel);
-                
+
                 expect(requestBody.knn[0]).toMatchObject({
                     k: 5,
                     num_candidates: 50,
@@ -250,27 +241,27 @@ describe('Query.js', () => {
         describe('edge cases', () => {
             test('should handle whitespace-only search terms', () => {
                 requestState.searchTerm = '   ';
-                
+
                 resolveQuery(requestState, requestBody, searchFields, paramsRef, vectorFields, nestedVectorFields, embeddingModel);
-                
+
                 expect(requestBody.query).toBeUndefined();
                 expect(requestBody.knn).toBeUndefined();
             });
 
             test('should handle null search term', () => {
                 requestState.searchTerm = null;
-                
+
                 resolveQuery(requestState, requestBody, searchFields, paramsRef, vectorFields, nestedVectorFields, embeddingModel);
-                
+
                 expect(requestBody.query).toBeUndefined();
                 expect(requestBody.knn).toBeUndefined();
             });
 
             test('should handle undefined search term', () => {
                 requestState.searchTerm = undefined;
-                
+
                 resolveQuery(requestState, requestBody, searchFields, paramsRef, vectorFields, nestedVectorFields, embeddingModel);
-                
+
                 expect(requestBody.query).toBeUndefined();
                 expect(requestBody.knn).toBeUndefined();
             });
@@ -279,9 +270,9 @@ describe('Query.js', () => {
                 requestState.searchTerm = 'test AND query';
                 embeddingService.isEmbeddingServiceAvailable.mockReturnValue(true);
                 embeddingService.getEmbedding.mockReturnValue([0.1, 0.2, 0.3]);
-                
+
                 resolveQuery(requestState, requestBody, searchFields, paramsRef, vectorFields, nestedVectorFields, embeddingModel);
-                
+
                 expect(requestBody.query).toBeDefined();
                 expect(requestBody.knn).toBeUndefined();
                 expect(embeddingService.getEmbedding).not.toHaveBeenCalled();
@@ -292,9 +283,9 @@ describe('Query.js', () => {
                 requestState.searchTerm = 'multi nested';
                 embeddingService.isEmbeddingServiceAvailable.mockReturnValue(true);
                 embeddingService.getEmbedding.mockReturnValue([0.1, 0.2]);
-                
+
                 resolveQuery(requestState, requestBody, searchFields, paramsRef, vectorFields, nestedVectorFields, embeddingModel);
-                
+
                 expect(requestBody.knn).toHaveLength(5); // 2 vector + 3 nested
                 expect(requestBody.knn.filter(q => q.field.endsWith('.vector'))).toHaveLength(3);
             });
@@ -302,9 +293,9 @@ describe('Query.js', () => {
             test('should handle empty search fields array', () => {
                 requestState.searchTerm = '"exact phrase"';
                 searchFields = [];
-                
+
                 resolveQuery(requestState, requestBody, [], paramsRef, vectorFields, nestedVectorFields, embeddingModel);
-                
+
                 expect(requestBody.query.bool.should[0].query_string.fields).toEqual([]);
             });
         });
