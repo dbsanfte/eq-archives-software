@@ -23,8 +23,12 @@ jobs:
           persist-credentials: false
       - name: Validate deployment scripts
         run: |
-          bash -n scripts/deploy-frontend.sh scripts/smoke-frontend.sh
-          python3 -m py_compile scripts/frontend-secrets.py
+          bash -n scripts/deploy-frontend.sh scripts/smoke-frontend.sh scripts/smoke-embeddings.sh
+          sh -n elastic-indexer-stack/k8s-manifests/embeddings/download-model.sh
+          sh -n elastic-indexer-stack/k8s-manifests/embeddings/start-server.sh
+          sh -n elastic-indexer-stack/k8s-manifests/embeddings/check-gpu.sh
+          python3 -m py_compile scripts/frontend-secrets.py scripts/check-embeddings.py
+          kubectl kustomize elastic-indexer-stack/k8s-manifests >/dev/null
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
       - name: Log in to Docker Hub
         if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
@@ -65,6 +69,10 @@ jobs:
           IMAGE_TAG: dbsanfte/frontend:${{ github.sha }}
           EXPECTED_GIT_SHA: ${{ github.sha }}
         run: bash scripts/smoke-frontend.sh "$IMAGE_TAG"
+      - name: Test the Nomic service through the frontend proxy
+        env:
+          IMAGE_TAG: dbsanfte/frontend:${{ github.sha }}
+        run: bash scripts/smoke-embeddings.sh "$IMAGE_TAG"
       - name: Publish the tested image
         id: publish
         if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
@@ -83,7 +91,7 @@ jobs:
     needs: build
     if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
     runs-on: [self-hosted, Linux, X64, eqvm]
-    timeout-minutes: 15
+    timeout-minutes: 25
     concurrency:
       group: eqarchives-frontend-production
       cancel-in-progress: false

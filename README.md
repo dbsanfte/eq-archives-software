@@ -5,7 +5,7 @@ a search portal for historical EverQuest websites, mailing lists, and newsgroup
 discussions preserved by EQ Archives.
 
 This repository contains the search application, the workers that turn archived
-files into searchable documents, and the frontend deployment configuration. The
+files into searchable documents, and the frontend and embedding deployment configuration. The
 archive itself lives in the separate
 [eq-archives repository](https://github.com/dbsanfte/eq-archives).
 
@@ -31,7 +31,7 @@ flowchart LR
     Worker --> Models[Embedding and language models]
     Browser[React search UI] --> Proxy[NGINX]
     Proxy --> ES
-    Proxy --> Models
+    Proxy --> Embeddings[Local Nomic embeddings]
 ```
 
 The file finder updates a local archive checkout and queues files for processing.
@@ -51,7 +51,7 @@ browser configuration or JavaScript bundle.
 | [`elastic-indexer-stack/frontend/`](elastic-indexer-stack/frontend/) | React application, Jest tests, and NGINX container |
 | [`elastic-indexer-stack/indexer/`](elastic-indexer-stack/indexer/) | Python file finder, indexing workers, extraction handlers, and tests |
 | [`elastic-indexer-stack/indexer/src/indexer/resources/`](elastic-indexer-stack/indexer/src/indexer/resources/) | Enrichment prompts and response schemas |
-| [`elastic-indexer-stack/k8s-manifests/`](elastic-indexer-stack/k8s-manifests/) | Production frontend manifests and backend reference configuration |
+| [`elastic-indexer-stack/k8s-manifests/`](elastic-indexer-stack/k8s-manifests/) | Production frontend and Nomic embedding manifests, plus backend reference configuration |
 | [`elastic-indexer-stack/docker-compose.yml`](elastic-indexer-stack/docker-compose.yml) | Reference Compose configuration for the services |
 | [`scripts/`](scripts/) | Frontend deployment, runtime secret reconciliation, and smoke checks |
 | [`.github/workflows/elastic-indexer-stack-cicd.yml`](.github/workflows/elastic-indexer-stack-cicd.yml) | Frontend pull-request checks and deployment from `master` |
@@ -162,19 +162,28 @@ the index or alias containing the indexed documents consistent.
 The existing Compose file is a deployment reference with environment-specific
 addresses and zero replicas for the backend services. Adapt the addresses,
 secrets, index names, and replica counts before using it for your own stack.
-Elasticsearch and the model servers must be provisioned separately.
+Elasticsearch and enrichment model servers must be provisioned separately.
+The production frontend deployment below provisions its own Nomic embedding service.
 
 ## Deployment
 
-The frontend deploys automatically from `master` to the production **k3s** cluster.
-Pull requests run tests, enforce coverage, build the container, and smoke-test
-it on a GitHub-hosted runner. Only `master` publishes an image and deploys through
-the VM's self-hosted runner.
+The frontend and a local **llama.cpp / Nomic Embed v1.5 Q8_0** service deploy
+automatically from `master` to the production **k3s** cluster. Nomic uses eqvm's
+Radeon iGPU through Vulkan and returns normalized 768-dimensional vectors.
+The model is pinned to a Hugging Face revision and SHA-256, downloaded into a
+persistent cache, and served only inside the cluster. NGINX forwards the public
+`/openai/v1/embeddings` route with its runtime API key. The frontend adds Nomic's
+`search_query:` prefix; this instance accepts up to 512 tokens per input.
+
+Pull requests run tests, enforce coverage, build the frontend, and exercise the
+real Nomic server on CPU through NGINX on a GitHub-hosted runner. Only `master`
+publishes an image and deploys through the VM's self-hosted runner.
 
 Deployments use immutable image digests and rolling readiness checks. Reapplying
 the same image, configuration, and secrets does not restart the pods. The
-frontend workflow manages frontend resources; archive ingestion, Elasticsearch,
-and model services have separate lifecycles.
+workflow verifies GPU offload and embeddings before updating the frontend, then
+checks a vector-only search through the public proxy. Archive ingestion,
+Elasticsearch, and enrichment model services have separate lifecycles.
 
 See the [deployment guide](elastic-indexer-stack/k8s-manifests/README.md) for
 prerequisites, Actions secrets, manifests, verification, and rollback.

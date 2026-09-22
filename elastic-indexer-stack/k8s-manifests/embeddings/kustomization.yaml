@@ -1,0 +1,17 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: eqarchives-es
+commonLabels:
+  app.kubernetes.io/part-of: eqarchives-embeddings
+resources:
+  - device-plugin.yaml
+  - deployment.yaml
+configMapGenerator:
+  - name: nomic-embedding-config
+    envs:
+      - runtime.env
+  - name: nomic-embedding-scripts
+    files:
+      - download-model.sh
+      - start-server.sh
+      - check-gpu.sh

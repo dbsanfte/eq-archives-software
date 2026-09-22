@@ -1,0 +1,63 @@
+# Advertise only eqvm's Vulkan render device. Two shared allocations allow the
+# old and new embedding pods to coexist during a zero-unavailable rollout.
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: eqarchives-vulkan-device-plugin
+spec:
+  selector:
+    matchLabels:
+      app: eqarchives-vulkan-device-plugin
+  template:
+    metadata:
+      labels:
+        app: eqarchives-vulkan-device-plugin
+    spec:
+      automountServiceAccountToken: false
+      nodeSelector:
+        kubernetes.io/hostname: eqvm
+      containers:
+        - name: device-plugin
+          image: squat/generic-device-plugin:deploy-via-ci
+          args:
+            - --domain=eqarchives.org
+            - --device={"name":"igpu","groups":[{"count":2,"paths":[{"path":"/dev/dri/renderD128"}]}]}
+          ports:
+            - name: health
+              containerPort: 8080
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+          securityContext:
+            runAsUser: 0
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+            seccompProfile:
+              type: RuntimeDefault
+          readinessProbe:
+            tcpSocket:
+              port: health
+          livenessProbe:
+            tcpSocket:
+              port: health
+          volumeMounts:
+            - name: device-plugins
+              mountPath: /var/lib/kubelet/device-plugins
+            - name: render-devices
+              mountPath: /dev/dri
+              readOnly: true
+      volumes:
+        - name: device-plugins
+          hostPath:
+            path: /var/lib/kubelet/device-plugins
+            type: Directory
+        - name: render-devices
+          hostPath:
+            path: /dev/dri
+            type: Directory

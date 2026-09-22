@@ -45,6 +45,11 @@ rebuild and every value is visible to site visitors.
 | `vectorFields`, `nestedVectorFields` | Vector fields for semantic search |
 | `embeddingModel` | Model used to embed search queries; must match the indexed vectors |
 
+For Nomic Embed v1.5, the embedding client adds `search_query:` to the request
+text while keeping its cache keyed by the original search. The production
+deployment provides a local Q8_0 model under the existing
+`text-embedding-nomic-embed-text-v1.5@q8_0` alias, with a 512-token input limit.
+
 Do not put Elasticsearch passwords or model API keys in this file or in
 `REACT_APP_*` variables. NGINX reads those credentials from runtime secret mounts.
 
@@ -126,7 +131,7 @@ it to the commit being deployed.
 ## Production deployment
 
 Pull requests are tested and built automatically. Commits on `master` publish
-and deploy the tested image to k3s. See the
+and deploy the tested image and a Vulkan-backed Nomic embedding service to k3s. See the
 [deployment guide](../k8s-manifests/README.md) for secrets, manifests, health
 checks, idempotence, and rollback.
 
