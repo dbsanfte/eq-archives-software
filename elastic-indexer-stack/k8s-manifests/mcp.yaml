@@ -136,6 +136,9 @@ metadata:
   name: eqarchives-mcp
   namespace: eqarchives-es
   annotations:
+    # Traefik's default priority is rule-string length. The root PathPrefix
+    # expression is longer than Path(`/mcp`), so specificity needs an override.
+    traefik.ingress.kubernetes.io/router.priority: '100'
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
     traefik.ingress.kubernetes.io/router.tls: 'true'
     traefik.ingress.kubernetes.io/router.middlewares: eqarchives-es-securityheaders@kubernetescrd,eqarchives-es-mcp-ratelimit@kubernetescrd,eqarchives-es-mcp-inflight@kubernetescrd

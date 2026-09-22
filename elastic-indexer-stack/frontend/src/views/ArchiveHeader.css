@@ -48,8 +48,8 @@ body {
 }
 
 .archive-masthead__top {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
@@ -80,6 +80,27 @@ body {
   flex-wrap: wrap;
   align-items: center;
   gap: 25px;
+  justify-self: end;
+}
+
+.archive-mcp-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: 1px solid #dce0d8;
+  border-radius: 6px;
+  justify-self: end;
+}
+
+.archive-mcp-link:hover {
+  background: #e9ede3;
+  border-color: #87978a;
+}
+
+.archive-mcp-link img {
+  display: block;
 }
 
 .archive-resource-links a {
@@ -243,6 +264,20 @@ body {
 }
 
 @media (max-width: 650px) {
+  .archive-masthead__top {
+    grid-template-columns: 1fr auto;
+    row-gap: 6px;
+  }
+
+  .archive-mcp-link {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .archive-resource-links {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
   .App .sui-layout-header {
     padding: 0 20px 18px;
   }

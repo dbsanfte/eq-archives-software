@@ -10,7 +10,6 @@ export default function HeaderContent() {
           <span>EQ Archives</span>
         </a>
         <nav className="archive-resource-links" aria-label="Archive resources">
-          <a href="/chatgpt.html">ChatGPT</a>
           <a
             href="https://www.youtube.com/watch?v=DWXsCpAwKU4"
             target="_blank"
@@ -35,6 +34,9 @@ export default function HeaderContent() {
             </svg>
           </a>
         </nav>
+        <a className="archive-mcp-link" href="/mcp.html" aria-label="Connect with MCP" title="Connect with MCP">
+          <img src="/images/mcp.svg" width="24" height="24" alt="" />
+        </a>
       </div>
       <div className="archive-introduction">
         <div className="archive-introduction__copy">

@@ -64,7 +64,7 @@ def test_invalid_input_and_write_tools_are_rejected(name, args):
 
 def test_transport_blocks_bad_origins_hosts_content_types_and_large_bodies():
     with TestClient(create_app(make_archive())) as client:
-        for origin in ("https://chatgpt.com", "https://search.eqarchives.org", "http://localhost:6274"):
+        for origin in ("https://chatgpt.com", "https://claude.ai", "https://search.eqarchives.org", "http://localhost:6274"):
             response = client.post("/mcp", headers={**HEADERS, "Origin": origin}, json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
             assert response.status_code == 200
         assert client.post("/mcp", headers={**HEADERS, "Origin": "https://attacker.invalid"}, json={}).status_code == 403

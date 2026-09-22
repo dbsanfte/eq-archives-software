@@ -132,27 +132,48 @@ class FrontendBrowserTests(unittest.TestCase):
                 with self.subTest(width=width, filled_dates=filled_dates):
                     self.check_sort_menu(width, filled_dates)
 
-    def test_chatgpt_guide_navigation_fits_mobile_and_desktop(self):
+    def test_mcp_icon_and_connection_guide_work_on_mobile_and_desktop(self):
         for width in (320, 390, 1280):
             with self.subTest(width=width):
-                context = self.browser.new_context(viewport={"width": width, "height": 900})
+                context = self.browser.new_context(viewport={"width": width, "height": 900}, permissions=["clipboard-read", "clipboard-write"])
                 try:
                     page = context.new_page()
                     page.route("**/elasticsearch/**", self.mock_elasticsearch)
                     page.goto(self.base_url, wait_until="networkidle")
-                    link = page.get_by_role("link", name="ChatGPT", exact=True)
+                    link = page.get_by_role("link", name="Connect with MCP", exact=True)
                     expect(link).to_be_visible()
                     bounds = link.bounding_box()
                     self.assertGreaterEqual(bounds["x"], 0)
                     self.assertLessEqual(bounds["x"] + bounds["width"], width)
+                    brand = page.get_by_role("link", name="EQ Archives home").bounding_box()
+                    self.assertGreater(bounds["x"], brand["x"] + brand["width"])
+                    self.assertLess(abs((bounds["y"] + bounds["height"] / 2) - (brand["y"] + brand["height"] / 2)), 2)
+                    self.assertTrue(link.locator("img").evaluate("img => img.complete && img.naturalWidth > 0"))
                     link.click()
-                    expect(page.get_by_role("heading", level=1)).to_have_text("Research EverQuest in ChatGPT.")
+                    expect(page.get_by_role("heading", level=1)).to_have_text("Bring EverQuest history into your conversations.")
+                    expect(page.get_by_role("heading", name="ChatGPT developer mode", exact=True)).to_be_visible()
+                    expect(page.get_by_role("heading", name="Claude", exact=True)).to_be_visible()
                     expect(page.locator("code")).to_have_text("https://search.eqarchives.org/mcp")
                     self.assertTrue(page.evaluate("document.documentElement.scrollWidth <= innerWidth"))
+                    page.get_by_role("button", name="Copy MCP server URL").click()
+                    expect(page.get_by_role("status")).to_have_text("MCP server URL copied.")
+                    self.assertEqual(page.evaluate("navigator.clipboard.readText()"), "https://search.eqarchives.org/mcp")
                     page.get_by_role("link", name="EQ Archives", exact=True).click()
                     expect(page.locator(".sui-search-box__text-input")).to_be_visible()
                 finally:
                     context.close()
+
+    def test_mcp_guide_handles_blocked_clipboard_and_legacy_link(self):
+        context = self.browser.new_context()
+        try:
+            page = context.new_page()
+            page.add_init_script("Object.defineProperty(navigator, 'clipboard', {value: {writeText: () => Promise.reject(new Error('blocked'))}})")
+            page.goto(self.base_url + "/chatgpt.html")
+            expect(page).to_have_url(self.base_url + "/mcp.html")
+            page.get_by_role("button", name="Copy MCP server URL").click()
+            expect(page.get_by_role("status")).to_have_text("Select and copy the server URL above.")
+        finally:
+            context.close()
 
 
 if __name__ == "__main__":

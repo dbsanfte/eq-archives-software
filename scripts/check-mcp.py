@@ -6,12 +6,16 @@ import json
 import urllib.request
 
 
-def check(endpoint, query):
+def check(endpoint, query, host=None):
     def rpc(method, params=None):
-        request = urllib.request.Request(endpoint, method="POST", headers={
+        headers = {
             "Content-Type": "application/json", "Accept": "application/json, text/event-stream",
             "MCP-Protocol-Version": "2025-11-25",
-        }, data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}}).encode())
+        }
+        if host:
+            headers["Host"] = host
+        request = urllib.request.Request(endpoint, method="POST", headers=headers,
+            data=json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}}).encode())
         with urllib.request.urlopen(request, timeout=30) as response:
             assert "mcp-session-id" not in response.headers, "MCP must remain stateless"
             body = json.load(response)
@@ -50,5 +54,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("endpoint")
     parser.add_argument("--query", default="ancient cyclops")
+    parser.add_argument("--host", help="Override Host for an isolated ingress routing check")
     args = parser.parse_args()
-    check(args.endpoint, args.query)
+    check(args.endpoint, args.query, args.host)

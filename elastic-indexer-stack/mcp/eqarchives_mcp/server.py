@@ -1,4 +1,4 @@
-"""Anonymous Streamable HTTP MCP server for ChatGPT research."""
+"""Anonymous Streamable HTTP MCP server for archive research."""
 
 from contextlib import asynccontextmanager
 import logging
@@ -58,7 +58,7 @@ def create_app(archive: Archive | None = None):
     # emits both structuredContent and its JSON text representation from these models.
     security = TransportSecuritySettings(
         allowed_hosts=["search.eqarchives.org", "search.eqarchives.org:443", "localhost:*", "127.0.0.1:*", "testserver"],
-        allowed_origins=["https://search.eqarchives.org", "https://chatgpt.com", "https://chat.openai.com", "http://localhost:*", "http://127.0.0.1:*"],
+        allowed_origins=["https://search.eqarchives.org", "https://chatgpt.com", "https://chat.openai.com", "https://claude.ai", "http://localhost:*", "http://127.0.0.1:*"],
     )
     app = server.streamable_http_app(
         stateless_http=True, json_response=True, max_request_body_size=16 * 1024,

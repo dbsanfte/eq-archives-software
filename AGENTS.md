@@ -19,7 +19,7 @@ digests, dependency versions, or credentials into new files.
 | --- | --- |
 | Architecture, backend setup and environment variables | [README.md](README.md) |
 | Frontend development, container configuration and browser tests | [Frontend guide](elastic-indexer-stack/frontend/README.md) |
-| ChatGPT MCP contract, tests, limits and publication | [MCP guide](elastic-indexer-stack/mcp/README.md), [listing materials](docs/chatgpt-listing.md), [public connection guide](elastic-indexer-stack/frontend/public/chatgpt.html) |
+| Public MCP contract, tests, limits and connection instructions | [MCP guide](elastic-indexer-stack/mcp/README.md), [public connection screen](elastic-indexer-stack/frontend/public/mcp.html) |
 | Deployment, prerequisites, credentials and rollback | [Deployment guide](elastic-indexer-stack/k8s-manifests/README.md) |
 | Required checks and production delivery | [Frontend CI/CD](.github/workflows/elastic-indexer-stack-cicd.yml) |
 | Frontend build and coverage configuration | [Dockerfile](elastic-indexer-stack/frontend/Dockerfile), [package.json](elastic-indexer-stack/frontend/package.json), [Jest configuration](elastic-indexer-stack/frontend/jest.config.js) |
@@ -161,7 +161,7 @@ test work isolated from live ingestion. Both worker modes require configured
 Elasticsearch, RabbitMQ, model endpoints and a shared archive checkout; see the
 root README for environment variables and secret mounts.
 
-### ChatGPT MCP service
+### Public MCP service
 
 The service in `elastic-indexer-stack/mcp` uses Python 3.13 in production and
 supports 3.10+ for local development. Install its hash-locked
@@ -173,7 +173,11 @@ The MCP Docker build runs these tests before creating the production runtime.
 
 Pass an MCP image as the second argument to `scripts/smoke-embeddings.sh` to
 exercise the real MCP container with CPU Nomic and the isolated Elasticsearch
-fixture; CI always does this. After deployment run
+fixture and the production ingress rules in an isolated Traefik container; CI always
+does this. The routing test uses `scripts/deployment-test-requirements.txt`,
+`DEPLOYMENT_TEST_PYTHON` and the pinned test image in `scripts/routing-test.env`.
+Keep MCP's explicit ingress priority: the root `PathPrefix` rule is longer than the
+exact MCP rule and otherwise wins Traefik's default ordering. After deployment run
 `python3 scripts/check-mcp.py https://search.eqarchives.org/mcp`.
 
 Preserve `search(query)` and `fetch(id)` compatibility, output schemas, read-only
@@ -182,8 +186,10 @@ exact ES IDs, never filesystem paths or URLs. Do not silently truncate source
 text or substitute generated summaries; keep OCR/date estimates labelled.
 Never expose upstream credentials, errors, vectors or arbitrary Elasticsearch DSL.
 Keep retrieval/cache limits appropriate for the shared single-slot model server.
-Directory submission is separate from deployment; only claim account-level
-ChatGPT/Deep Research validation after actually performing it.
+The user chose direct public MCP access with a top-right MCP icon and a connection
+screen for ChatGPT developer mode and Claude. Do not prepare or submit an official
+OpenAI directory listing unless requested later. Only claim account-level
+ChatGPT/Claude or Deep Research validation after actually performing it.
 
 ## Application constraints
 

@@ -1,9 +1,10 @@
-# EQ Archives MCP connector
+# EQ Archives MCP server
 
 Public endpoint: **https://search.eqarchives.org/mcp** (Streamable HTTP, anonymous,
-read-only). The [connection guide](https://search.eqarchives.org/chatgpt.html)
-explains custom ChatGPT connections. Public directory submission is a separate
-step; [listing materials](../../docs/chatgpt-listing.md) are prepared for it.
+read-only). The [connection guide](https://search.eqarchives.org/mcp.html)
+explains ChatGPT developer mode and custom connections in Claude. The top-right
+MCP icon on the search site opens the guide. Users connect directly to this server;
+there is no official OpenAI directory submission or publisher account dependency.
 
 ## Contract
 
@@ -77,12 +78,16 @@ python3 scripts/check-mcp.py http://127.0.0.1:8080/mcp
 
 The existing required `Test and build frontend` check also builds/tests this service.
 `scripts/smoke-embeddings.sh FRONTEND_IMAGE MCP_IMAGE` checks the actual MCP container
-against the real CPU Nomic service and an isolated Elasticsearch fixture. Master
+against the real CPU Nomic service and an isolated Elasticsearch fixture. It also
+tests the actual ingress rules/priorities with the same pinned Traefik release as
+eqvm. Install `scripts/deployment-test-requirements.txt` and set
+`DEPLOYMENT_TEST_PYTHON` if needed for the routing test renderer. Master
 publishes `dbsanfte/frontend:mcp-<git-sha>` alongside the frontend artifact in the
 existing registry repository. Kustomize resolves their two digests independently.
 
 The `eqarchives-mcp` Deployment/Service and exact `/mcp` HTTPS Ingress are managed
-by [`mcp.yaml`](../k8s-manifests/mcp.yaml). One replica rolls with zero unavailable;
+by [`mcp.yaml`](../k8s-manifests/mcp.yaml). Explicit route priority prevents the
+frontend's longer `PathPrefix` rule from capturing `/mcp`. One replica rolls with zero unavailable;
 the frontend's routing and four replicas remain separate. Secrets are projected
 from the existing read-only account and shared model key. Credential checksums
 trigger a rollout only when values change. Normal connector changes do not restart
@@ -97,8 +102,8 @@ traffic to five requests/second with a burst of twenty and eight in-flight reque
 The cache is process-local; a rolling update can briefly have two active instances.
 
 These limits protect the shared single-slot embedding service; they are not an
-authenticated per-user quota. Review traffic/capacity before promoting the public
-listing. The service does not log request bodies or intentionally store conversations.
+authenticated per-user quota. Review traffic/capacity as public usage grows.
+The service does not log request bodies or intentionally store conversations.
 Upstream/proxy operational logging is separate. Public descriptions must not promise
 retention periods for infrastructure that has not been audited.
 
@@ -106,6 +111,6 @@ After deployment, run `python3 scripts/check-mcp.py https://search.eqarchives.or
 from the repository root. This validates discovery, search, full-text fetch and a
 missing document against the real public archive. An official SDK client can also
 connect with `mcp.client.streamable_http.streamable_http_client` and `ClientSession`.
-Validate an actual ChatGPT conversation and Deep Research run from an eligible account
-before directory submission; a protocol smoke test cannot certify account availability
-or model behavior.
+Actual ChatGPT/Claude account availability and model behavior must be checked from
+an eligible account; a protocol smoke test does not certify these. The service is
+published directly at its HTTPS endpoint rather than through a provider directory.

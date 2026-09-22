@@ -18,3 +18,10 @@ queries, filtering, document previews, and its deployment environment.
 Third-party dependencies retain their respective licenses. The software license
 does not grant rights to archived content, EverQuest names, logos, or other
 third-party artwork.
+
+The unmodified MCP icon in public/images/mcp.svg comes from docs/favicon.svg in
+modelcontextprotocol/modelcontextprotocol at commit
+24efd6e7cbd7a074e6b3b781eb370891df40afad:
+https://github.com/modelcontextprotocol/modelcontextprotocol
+Its upstream licensing notice is preserved in
+licenses/Model-Context-Protocol.txt. It identifies the supported protocol.
