@@ -33,3 +33,7 @@ if grep -Eq 'ci-password-never-a-real-secret|ci-placeholder|elasticsearch_passwo
   exit 1
 fi
 echo 'Frontend health, HTML, JavaScript, build revision, and credential isolation checks passed.'
+if [[ -n "${BROWSER_TEST_PYTHON:-}" ]]; then
+  FRONTEND_BASE_URL="http://$address" "$BROWSER_TEST_PYTHON" \
+    "$(dirname "${BASH_SOURCE[0]}")/test-frontend-browser.py"
+fi

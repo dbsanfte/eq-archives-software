@@ -27,6 +27,20 @@ yarn test:watch
 Tests use Jest and React Testing Library. Coverage must reach 90% for statements,
 branches, functions, and lines. `coverage/lcov.info` contains the coverage report.
 
+CI also runs Chromium regression tests against the built NGINX image. These
+check that the sort menu covers both date labels at phone, tablet, and desktop
+widths, including floating labels after dates are entered. Search responses are
+mocked in the browser, so these tests need no running backend or real credentials.
+To run them locally, from the repository root after building the image below:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r scripts/browser-test-requirements.txt
+.venv/bin/playwright install --with-deps chromium
+BROWSER_TEST_PYTHON="$PWD/.venv/bin/python" \
+  bash scripts/smoke-frontend.sh eqarchives-frontend:local
+```
+
 ## Browser configuration
 
 [`src/config/engine.json`](src/config/engine.json) controls the searchable fields
