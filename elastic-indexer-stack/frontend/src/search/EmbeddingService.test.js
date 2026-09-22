@@ -13,10 +13,10 @@ describe('EmbeddingService', () => {
     embeddingService.pendingQueries.clear();
     embeddingService.isServiceAvailable = true;
     embeddingService.lastFailureTime = null;
-    
+
     // Clear fetch mocks
     fetch.mockClear();
-    
+
     // Clear DOM
     document.body.innerHTML = '';
   });
@@ -39,7 +39,7 @@ describe('EmbeddingService', () => {
     it('returns cached embedding when available', async () => {
       const testVector = [0.1, 0.2, 0.3];
       embeddingService.cache.set('test query', testVector);
-      
+
       const result = await embeddingService.fetchEmbedding('test query');
       expect(result).toEqual(testVector);
       expect(fetch).not.toHaveBeenCalled();
@@ -50,9 +50,9 @@ describe('EmbeddingService', () => {
         data: [{ embedding: [0.4, 0.5, 0.6] }]
       };
       fetch.mockResolvedValueOnce({
-        json: () => Promise.resolve(mockResponse)
+        ok: true, json: () => Promise.resolve(mockResponse)
       });
-      
+
       const result = await embeddingService.fetchEmbedding('new query');
       expect(result).toEqual([0.4, 0.5, 0.6]);
       expect(fetch).toHaveBeenCalledWith(
@@ -68,7 +68,7 @@ describe('EmbeddingService', () => {
     it('adds the Nomic query prefix while caching the original search text', async () => {
       const model = 'text-embedding-nomic-embed-text-v1.5@q8_0';
       const vector = [0.4, 0.5, 0.6];
-      fetch.mockResolvedValueOnce({ json: async () => ({ data: [{ embedding: vector }] }) });
+      fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ embedding: vector }] }) });
 
       await embeddingService.fetchEmbedding('ancient cyclops', model);
 
@@ -79,13 +79,13 @@ describe('EmbeddingService', () => {
     });
 
     it('preserves the input for other embedding models', async () => {
-      fetch.mockResolvedValueOnce({ json: async () => ({ data: [{ embedding: [1, 0, 0] }] }) });
+      fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ embedding: [1, 0, 0] }] }) });
       await embeddingService.fetchEmbedding('ancient cyclops', 'another-embedding-model');
       expect(JSON.parse(fetch.mock.calls[0][1].body).input).toEqual(['ancient cyclops']);
     });
 
     it('handles API timeout', async () => {
-      fetch.mockImplementationOnce(() => new Promise(resolve => 
+      fetch.mockImplementationOnce(() => new Promise(resolve =>
         setTimeout(() => resolve({ json: () => ({}) }), 6000)
       ));
 
@@ -96,7 +96,7 @@ describe('EmbeddingService', () => {
 
     it('handles API errors', async () => {
       fetch.mockRejectedValueOnce(new Error('API error'));
-      
+
       const result = await embeddingService.fetchEmbedding('error query');
       expect(result).toBeNull();
       expect(embeddingService.isServiceAvailable).toBe(false);
@@ -105,7 +105,7 @@ describe('EmbeddingService', () => {
     it('skips requests during cooldown period', async () => {
       embeddingService.isServiceAvailable = false;
       embeddingService.lastFailureTime = Date.now() - 30000; // 30s ago
-      
+
       const result = await embeddingService.fetchEmbedding('test');
       expect(result).toBeNull();
       expect(fetch).not.toHaveBeenCalled();
@@ -114,10 +114,10 @@ describe('EmbeddingService', () => {
     it('retries after cooldown period', async () => {
       embeddingService.isServiceAvailable = false;
       embeddingService.lastFailureTime = Date.now() - 70000; // 70s ago
-      
+
       const mockResponse = { data: [{ embedding: [0.7, 0.8, 0.9] }] };
-      fetch.mockResolvedValueOnce({ json: () => Promise.resolve(mockResponse) });
-      
+      fetch.mockResolvedValueOnce({ ok: true, json: () => Promise.resolve(mockResponse) });
+
       const result = await embeddingService.fetchEmbedding('retry query');
       expect(result).toEqual([0.7, 0.8, 0.9]);
       expect(embeddingService.isServiceAvailable).toBe(true);
@@ -163,9 +163,9 @@ describe('EmbeddingService', () => {
       embeddingService.showNotification('Test notification', 'warning', 5000);
       const notifications = document.querySelectorAll('#embedding-service-notifications > div');
       expect(notifications.length).toBe(1);
-      
+
       jest.advanceTimersByTime(6000);
-      
+
       // Notification should be removed after 6s (5s duration + 0.5s fade)
       expect(document.querySelectorAll('#embedding-service-notifications > div').length).toBe(0);
     });
@@ -183,7 +183,7 @@ describe('EmbeddingService', () => {
       for (let i = 0; i < 60; i++) {
         embeddingService.cache.set(`query-${i}`, new Array(128).fill(0));
       }
-      
+
       embeddingService.clearOldEmbeddings(50);
       expect(embeddingService.cache.size).toBe(50);
       expect(embeddingService.cache.has('query-0')).toBe(false);
@@ -193,7 +193,7 @@ describe('EmbeddingService', () => {
     it('shouldRetryService respects cooldown', () => {
       embeddingService.lastFailureTime = Date.now();
       expect(embeddingService.shouldRetryService()).toBe(false);
-      
+
       // Advance time past cooldown
       const realNow = Date.now;
       Date.now = jest.fn(() => realNow() + 61000);
@@ -205,12 +205,78 @@ describe('EmbeddingService', () => {
       embeddingService.isServiceAvailable = false;
       embeddingService.lastFailureTime = Date.now();
       expect(embeddingService.isEmbeddingServiceAvailable()).toBe(false);
-      
+
       // After cooldown period
       const realNow = Date.now;
       Date.now = jest.fn(() => realNow() + 61000);
       expect(embeddingService.isEmbeddingServiceAvailable()).toBe(true);
       Date.now = realNow;
     });
+  });
+});
+describe('embedding request lifecycle', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    fetch.mockReset();
+    embeddingService.cache.clear();
+    embeddingService.isServiceAvailable = true;
+    embeddingService.lastFailureTime = null;
+  });
+  afterEach(() => { jest.clearAllTimers(); jest.useRealTimers(); jest.restoreAllMocks(); });
+
+  test('cancels obsolete work without disabling semantic search or caching a late response', async () => {
+    let resolve;
+    fetch.mockReturnValueOnce(new Promise(done => { resolve = done; }));
+    const controller = new AbortController();
+    const pending = embeddingService.fetchEmbedding('obsolete', 'model', { signal: controller.signal });
+    controller.abort();
+    await jest.advanceTimersByTimeAsync(5001);
+    expect(await pending).toBeNull();
+    expect(embeddingService.isEmbeddingServiceAvailable()).toBe(true);
+    expect(fetch.mock.calls[0][1].signal.aborted).toBe(true);
+    resolve({ ok: true, json: async () => ({ data: [{ embedding: [1, 2] }] }) });
+    await Promise.resolve();
+    expect(embeddingService.getEmbedding('obsolete')).toBeUndefined();
+  });
+
+  test('does not start a request for an already-cancelled draft', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    expect(await embeddingService.fetchEmbedding('old', 'model', { signal: controller.signal })).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  test('bounds the cache automatically after successful requests', async () => {
+    for (let i = 0; i < 50; i++) embeddingService.cache.set(`old-${i}`, [1, 2]);
+    fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ embedding: [3, 4] }] }) });
+    await embeddingService.fetchEmbedding('new');
+    expect(embeddingService.cache.size).toBe(50);
+    expect(embeddingService.getEmbedding('old-0')).toBeUndefined();
+    expect(embeddingService.getEmbedding('new')).toEqual([3, 4]);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  test('times out a stalled response body and aborts the network request', async () => {
+    fetch.mockResolvedValueOnce({ ok: true, json: () => new Promise(() => {}) });
+    const log = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const pending = embeddingService.fetchEmbedding('stalled body');
+    await jest.advanceTimersByTimeAsync(5001);
+    expect(await pending).toBeNull();
+    expect(fetch.mock.calls[0][1].signal.aborted).toBe(true);
+    expect(embeddingService.isServiceAvailable).toBe(false);
+    expect(log).toHaveBeenCalled();
+  });
+
+  test.each([
+    { ok: false, json: async () => ({ data: [{ embedding: [1] }] }) },
+    { ok: true, json: async () => ({ data: [] }) },
+    { ok: true, json: async () => ({ data: [{ embedding: [] }] }) },
+    { ok: true, json: async () => ({ data: [{ embedding: [NaN] }] }) }
+  ])('never caches unsuccessful or malformed responses', async response => {
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+    fetch.mockResolvedValueOnce(response);
+    expect(await embeddingService.fetchEmbedding('invalid')).toBeNull();
+    expect(embeddingService.getEmbedding('invalid')).toBeUndefined();
+    expect(embeddingService.isServiceAvailable).toBe(false);
   });
 });

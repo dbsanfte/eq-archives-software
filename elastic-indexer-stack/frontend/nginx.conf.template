@@ -3,6 +3,13 @@ server {
     server_name localhost;
     root /usr/share/nginx/html;
 
+    gzip on;
+    gzip_vary on;
+    gzip_proxied any;
+    gzip_comp_level 5;
+    gzip_min_length 1024;
+    gzip_types application/javascript application/json text/css text/plain image/svg+xml;
+
     location = /healthz {
         access_log off;
         default_type text/plain;
@@ -10,7 +17,21 @@ server {
     }
 
     location / {
+        # HTML and unversioned assets must discover the next deployment.
+        add_header Cache-Control "no-cache" always;
         try_files $uri /index.html;
+    }
+
+    # The build embeds a content hash in these filenames. Only successful
+    # responses get the long cache lifetime; a missing asset must remain a 404.
+    location ~* "^/static/.+\.[0-9a-f]{8,}\.[a-z0-9.]+$" {
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        try_files $uri =404;
+    }
+
+    location /static/ {
+        add_header Cache-Control "no-cache";
+        try_files $uri =404;
     }
 
     location /elasticsearch/$ELASTICSEARCH_INDEX/_search {

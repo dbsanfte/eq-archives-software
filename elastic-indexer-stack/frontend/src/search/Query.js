@@ -1,4 +1,5 @@
 import { embeddingService } from './EmbeddingService';
+import { usesQuerySyntax, shouldUseSemanticSearch } from './QueryPolicy';
 
 // Logic for building Elasticsearch queries based on user input
 //
@@ -9,29 +10,22 @@ import { embeddingService } from './EmbeddingService';
 // @param {array} vectorFields - The fields containing vector embeddings
 // @param {string} embeddingModel - The name of the embedding model
 // @returns {void}
-export function resolveQuery(requestState, 
-                             requestBody, 
-                             searchFields, 
-                             paramsRef, 
-                             vectorFields, 
-                             nestedVectorFields, 
+export function resolveQuery(requestState,
+                             requestBody,
+                             searchFields,
+                             paramsRef,
+                             vectorFields,
+                             nestedVectorFields,
                              embeddingModel) {
-    
-    // If query contains special operators or quotes, build a custom query:
-    const RESERVED_CHARS = [
-        '"', '<', '>', '=', '*', '^', '[', ']', '(', ')', '{', 
-        '}', '!', '+', '-', '&&', '|', ':', '~', '?', '\\', '/', 
-        "AND", "OR", "NOT", "TO"
-    ];
 
     const queryText = requestState.searchTerm;
-    
+
     // Early return if query is empty or whitespace-only
     if (!queryText || !queryText.trim()) {
         return;
     }
-    
-    if (RESERVED_CHARS.some(char => queryText.includes(char))) {
+
+    if (usesQuerySyntax(queryText)) {
         requestBody.query = {
             bool: {
                 should: buildExactMatchQuery(queryText, searchFields)
@@ -39,9 +33,8 @@ export function resolveQuery(requestState,
         };
     }
     // Only perform semantic search if enabled AND service is available
-    else if (paramsRef.current.enableSemanticSearch && 
-             embeddingService.isEmbeddingServiceAvailable() &&
-             ((vectorFields && vectorFields.length > 0) || (nestedVectorFields && nestedVectorFields.length > 0))) {
+    else if (shouldUseSemanticSearch(queryText, paramsRef.current.enableSemanticSearch, vectorFields, nestedVectorFields) &&
+             embeddingService.isEmbeddingServiceAvailable()) {
         try {
             requestBody.knn = buildKnnQuery(queryText, embeddingModel, paramsRef, vectorFields, nestedVectorFields);
         }
@@ -55,7 +48,7 @@ function buildKnnQuery(queryText, embeddingModel, paramsRef, vectorFields, neste
     // Get the embedding from cache instead of synchronous XHR
     const vector = embeddingService.getEmbedding(queryText);
     let knnQuery = [];
-    
+
     if (vector) {
         const { k, num_candidates, boost } = paramsRef.current;
         // First query the top-level fields
@@ -77,16 +70,7 @@ function buildKnnQuery(queryText, embeddingModel, paramsRef, vectorFields, neste
                 query_vector: vector,
                 k,
                 num_candidates,
-                boost,
-                inner_hits: {
-                    _source: false,
-                    "fields": [field+".text_chunk"],
-                    highlight: {
-                        fields: {
-                            [field+".text_chunk"]: {}
-                        }
-                    }
-                }
+                boost
             }));
             knnQuery = knnQuery.concat(nestedQuery);
         }
@@ -95,13 +79,13 @@ function buildKnnQuery(queryText, embeddingModel, paramsRef, vectorFields, neste
 }
 
 function buildExactMatchQuery(queryText, searchFields) {
-    /* 
+    /*
         We now handle:
         - Double-quoted phrases
         - Logical operators: AND, OR, NOT
         - Parentheses grouping
 
-        We use Elasticsearch's 'query_string' to let ES parse and handle 
+        We use Elasticsearch's 'query_string' to let ES parse and handle
         all operators, parentheses, and phrases correctly.
     */
     return [{

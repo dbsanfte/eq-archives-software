@@ -4,12 +4,13 @@ import { SearchProvider } from '@elastic/react-search-ui';
 import { SearchDriver } from '@elastic/search-ui';
 import EnhancedSearchBox from './EnhancedSearchBox';
 import { embeddingService } from '../../search/EmbeddingService';
+import { getConfig } from '../../config/config-helper';
 
 jest.mock('../../config/config-helper', () => ({
-  getConfig: () => ({ embeddingModel: 'local-model' })
+  getConfig: jest.fn()
 }));
 jest.mock('../../search/EmbeddingService', () => ({
-  embeddingService: { getEmbedding: jest.fn(), fetchEmbedding: jest.fn() }
+  embeddingService: { getEmbedding: jest.fn(), fetchEmbedding: jest.fn(), isEmbeddingServiceAvailable: jest.fn() }
 }));
 
 function deferred() {
@@ -26,6 +27,8 @@ const searchedTerms = onSearch => onSearch.mock.calls.map(([state]) => state.sea
 beforeEach(() => {
   jest.useFakeTimers();
   jest.resetAllMocks();
+  getConfig.mockReturnValue({ embeddingModel: 'local-model', vectorFields: ['vector'] });
+  embeddingService.isEmbeddingServiceAvailable.mockReturnValue(true);
   embeddingService.getEmbedding.mockReturnValue(null);
   embeddingService.fetchEmbedding.mockResolvedValue([1, 2]);
 });
@@ -55,6 +58,42 @@ describe.each([true, false])('with legacyRoot=%s', legacyRoot => {
     return { ...mounted, driver, onSearch, input };
   }
 
+  test.each(['"ancient cyclops"', 'cleric AND wizard', 'cleric*'])('runs operator searches without requesting an unused embedding: %s', async value => {
+    const { input, onSearch } = mountSearch();
+    type(input, value);
+    await tick(400);
+    await tick();
+    expect(embeddingService.fetchEmbedding).not.toHaveBeenCalled();
+    expect(searchedTerms(onSearch)).toEqual([value]);
+  });
+
+  test.each(['disabled', 'no vectors', 'cooldown'])('searches without embedding work when semantic search is %s', async reason => {
+    if (reason === 'no vectors') getConfig.mockReturnValue({ embeddingModel: 'local-model' });
+    if (reason === 'cooldown') embeddingService.isEmbeddingServiceAvailable.mockReturnValue(false);
+    const { input, onSearch } = mountSearch({ enableSemanticSearch: reason !== 'disabled' });
+    type(input, 'ancient cyclops');
+    await tick(400);
+    await tick();
+    expect(embeddingService.fetchEmbedding).not.toHaveBeenCalled();
+    expect(searchedTerms(onSearch)).toEqual(['ancient cyclops']);
+  });
+
+  test('aborts obsolete embedding requests while keeping the newest draft searchable', async () => {
+    const old = deferred();
+    embeddingService.fetchEmbedding.mockReturnValueOnce(old.promise);
+    const { input, onSearch } = mountSearch();
+    type(input, 'cleric');
+    await tick(400);
+    const signal = embeddingService.fetchEmbedding.mock.calls[0][2].signal;
+    type(input, 'cleric soloing');
+    expect(signal.aborted).toBe(true);
+    await finish(old);
+    await tick(400);
+    await tick();
+    expect(input).toHaveValue('cleric soloing');
+    expect(searchedTerms(onSearch)).toEqual(['cleric soloing']);
+  });
+
   test('keeps newer typing when an older embedding completes before the next debounce', async () => {
     const old = deferred();
     embeddingService.fetchEmbedding.mockReturnValueOnce(old.promise);
@@ -78,7 +117,7 @@ describe.each([true, false])('with legacyRoot=%s', legacyRoot => {
     await tick(400);
     type(input, 'cleric soloing');
     await tick(400);
-    expect(embeddingService.fetchEmbedding).toHaveBeenLastCalledWith('cleric soloing', 'local-model');
+    expect(embeddingService.fetchEmbedding).toHaveBeenLastCalledWith('cleric soloing', 'local-model', { signal: expect.any(AbortSignal) });
     for (const request of order === 'old first' ? [old, latest] : [latest, old]) {
       await finish(request);
       expect(input).toHaveValue('cleric soloing');

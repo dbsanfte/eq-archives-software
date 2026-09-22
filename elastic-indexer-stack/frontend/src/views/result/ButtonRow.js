@@ -1,8 +1,7 @@
 import React, { useState } from "react";
 import PropTypes from "prop-types";
-import { Button, Dialog, DialogTitle, DialogContent, DialogActions, Snackbar } from "@mui/material";
-import Markdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { Button, Snackbar } from "@mui/material";
+import DocumentPreview from "./DocumentPreview";
 
 const ButtonRow = ({ result }) => {
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -14,13 +13,13 @@ const ButtonRow = ({ result }) => {
   const handlePermalink = () => {
     // Get base URL of the application
     const baseUrl = window.location.origin;
-    
+
     // Construct filter query parameters in the correct format
     const encodedId = encodeURIComponent(result.id?.raw || "");
-    
+
     // Build the search URL with the filter structure
     const searchUrl = `${baseUrl}/?size=n_20_n&filters%5B0%5D%5Bfield%5D=id&filters%5B0%5D%5Bvalues%5D%5B0%5D=${encodedId}&filters%5B0%5D%5Btype%5D=all`;
-    
+
     // Copy the URL to clipboard
     navigator.clipboard.writeText(searchUrl)
       .then(() => {
@@ -56,23 +55,9 @@ const ButtonRow = ({ result }) => {
           Copy Permalink
         </Button>
       </div>
-      
-      {/* Markdown Text Preview Dialog */}
-      <Dialog open={previewOpen} onClose={handlePreviewClose} fullWidth maxWidth="md">
-        <DialogTitle>Preview Text</DialogTitle>
-        <DialogContent dividers className="archive-preview-content">
-          <Markdown remarkPlugins={[remarkGfm]}>
-            {/* Use the raw text if it's a string, otherwise use an empty string */}
-            {typeof result.text_full?.raw === "string" ? result.text_full.raw : ""}
-          </Markdown>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handlePreviewClose} color="primary">
-            Close
-          </Button>
-        </DialogActions>
-      </Dialog>
-      
+
+      <DocumentPreview open={previewOpen} onClose={handlePreviewClose} result={result} />
+
       {/* Notification for successful copy */}
       <Snackbar
         open={snackbarOpen}

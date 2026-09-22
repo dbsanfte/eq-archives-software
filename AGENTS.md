@@ -113,12 +113,17 @@ bash scripts/smoke-embeddings.sh eqarchives-frontend:local
 ```
 
 - [smoke-frontend.sh](scripts/smoke-frontend.sh) checks NGINX health, assets, build
-  revision and credential isolation. Setting `BROWSER_TEST_PYTHON` also runs the
+  revision and credential isolation. It also runs `scripts/check-static-assets.py`
+  against NGINX: gzip must preserve JS/CSS contents, fingerprinted assets must be
+  immutable/cacheable, mutable pages must revalidate, and missing assets must be
+  genuine 404s. Setting `BROWSER_TEST_PYTHON` also runs the
   [Chromium regressions](scripts/test-frontend-browser.py); CI always sets it.
   Without it, the script performs only the container smoke checks.
 - Browser tests mock API responses and use disposable containers with dummy
   credentials. They cover sort-menu overlap with empty and floating date labels
-  at 320, 390, 768 and 1280 px, plus sorting and date-picker interaction. Extend
+  at 320, 390, 768 and 1280 px, plus sorting and date-picker interaction. They also
+  verify lightweight result requests, on-demand full-text previews and the semantic
+  search toggle/keyword-query behavior at mobile and desktop widths. Extend
   this suite for browser-dependent bugs. `PLAYWRIGHT_CHROMIUM_EXECUTABLE` can
   select an existing local Chromium binary; the default uses Playwright's install.
 - [smoke-embeddings.sh](scripts/smoke-embeddings.sh) downloads the pinned model,
@@ -220,6 +225,21 @@ ChatGPT/Claude or Deep Research validation after actually performing it.
   palette and mobile interactions consistent.
 - Search responses must not replace newer text the user is typing. Preserve the
   existing asynchronous input regression coverage when changing search controls.
+- Result cards request metadata and a short escaped `text_full` highlight; full
+  text, OCR bodies, nested chunks and vectors are excluded from result `_source`.
+  Keep nested KNN ranking but do not return unused `inner_hits`. Full previews use
+  a size-one `ids` query through the existing search proxy and return only
+  `text_full`. Prefer the actual Elasticsearch `_meta.id`; preserve loading,
+  empty/error/retry states, cancellation and reuse while the card is mounted.
+- Keep embedding eligibility shared between the input and query builder via
+  `QueryPolicy.js`: blank/operator queries, disabled semantic search, missing
+  vector fields and service cooldown must not fetch unused embeddings. Preserve
+  abort behavior for obsolete drafts, the response-body deadline and the bounded
+  50-entry browser cache; cancellation must not mark the service unavailable.
+- NGINX compresses JS/CSS/JSON/text/SVG responses. Only successful content-hashed
+  `/static/` assets get a one-year immutable cache policy; HTML, guides and
+  unversioned assets revalidate. Do not cache API responses or missing assets as
+  immutable, or return the SPA shell for missing static assets.
 - The status bar exposes the deployed Git SHA. The Docker `GIT_SHA` argument
   becomes `REACT_APP_GIT_SHA`; retain the display and bundle smoke check.
 - [engine.json](elastic-indexer-stack/frontend/src/config/engine.json) and all

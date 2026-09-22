@@ -22,6 +22,16 @@ export const createConnector = (paramsRef) => {
   const host = `${window.location.protocol}//${window.location.host}/elasticsearch`;
 
   const knnPostProcess = (requestBody, requestState) => {
+    // Search UI includes snippet fields in _source as well. Keep full source text
+    // and vectors on the server; the preview fetches its one document on demand.
+    requestBody._source = {
+      ...requestBody._source,
+      excludes: ["text", "text_full", "llm_image_text", "*_vector", "*.vector"]
+    };
+    requestBody.highlight = {
+      encoder: "html",
+      fields: { text_full: { fragment_size: 240, number_of_fragments: 1, no_match_size: 240 } }
+    };
     // Debug: Log filter count at post-process time
     console.log(`[Connector] Post-processing - Filter count: ${filterRegistry.getFilterCount()}`);
     filterRegistry.listFilters();

@@ -159,3 +159,32 @@ The application includes code adapted from Elastic's App Search Reference UI.
 Its original Apache-2.0 terms and attribution are retained in
 [NOTICE.txt](NOTICE.txt) and
 [licenses/Elastic-Apache-2.0.txt](licenses/Elastic-Apache-2.0.txt).
+
+## Search performance
+
+Result cards download metadata and one short highlighted text excerpt. Raw full
+text, OCR bodies, nested text chunks and embedding vectors stay out of result
+responses. Nested vector matching remains enabled without returning unused
+`inner_hits`. **Preview Full Text** fetches only the chosen document, using its
+exact Elasticsearch ID through the existing search proxy. The dialog supports
+loading, empty/error states and retry, cancels a closed request, and reuses a
+loaded document while its card is mounted.
+
+Embedding preparation and query construction share their eligibility rules in
+`src/search/QueryPolicy.js`. Quoted/operator searches, disabled semantic search,
+empty input, absent vector fields and an active service cooldown skip embedding
+requests. New input and navigation abort obsolete requests. A five-second deadline
+covers both headers and the body; failures fall back to keyword search. Completed
+embeddings are retained in a bounded 50-entry browser cache. This cache is local
+to the browser; MCP retains its own bounded cache.
+
+NGINX enables gzip for JavaScript, CSS, JSON, text and SVG. Content-hashed files
+under `/static/` use `Cache-Control: public, max-age=31536000, immutable`; HTML,
+connection guides and unversioned assets use `no-cache` so they revalidate after a
+deployment. Missing static files return 404 rather than the SPA shell and do not
+receive an immutable cache policy. There is no shared API response cache.
+
+`scripts/smoke-frontend.sh` runs the real NGINX compression/cache regression.
+Browser tests verify compact result requests, on-demand preview loading, semantic
+search and keyword-only behavior at mobile and desktop widths. Jest covers
+preview retries/cancellation, obsolete input, embedding deadlines and cache bounds.
