@@ -24,8 +24,12 @@ curl --fail --silent --show-error "http://$address/" > "$work_dir/index.html"
 grep -q 'id="root"' "$work_dir/index.html"
 asset=$(python3 -c 'import re,sys; print(re.search(r"src=\"([^\"]+\.js)\"", open(sys.argv[1]).read()).group(1))' "$work_dir/index.html")
 curl --fail --silent --show-error "http://$address$asset" > "$work_dir/app.js"
+if [[ -n "${EXPECTED_GIT_SHA:-}" ]] && ! grep -Fq "$EXPECTED_GIT_SHA" "$work_dir/app.js"; then
+  echo 'Browser bundle does not contain the expected Git revision.' >&2
+  exit 1
+fi
 if grep -Eq 'ci-password-never-a-real-secret|ci-placeholder|elasticsearch_password' "$work_dir/app.js"; then
   echo 'Browser bundle contains server credential configuration.' >&2
   exit 1
 fi
-echo 'Frontend health, HTML, JavaScript, and credential isolation checks passed.'
+echo 'Frontend health, HTML, JavaScript, build revision, and credential isolation checks passed.'

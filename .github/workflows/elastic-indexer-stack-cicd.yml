@@ -53,6 +53,8 @@ jobs:
           context: elastic-indexer-stack/frontend
           load: true
           tags: dbsanfte/frontend:${{ github.sha }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -61,6 +63,7 @@ jobs:
       - name: Smoke test the built image
         env:
           IMAGE_TAG: dbsanfte/frontend:${{ github.sha }}
+          EXPECTED_GIT_SHA: ${{ github.sha }}
         run: bash scripts/smoke-frontend.sh "$IMAGE_TAG"
       - name: Publish the tested image
         id: publish

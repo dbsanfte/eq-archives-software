@@ -25,6 +25,11 @@ to Docker Hub as `dbsanfte/frontend:<git-sha>`. Deployment uses its immutable
 `sha256` digest, not `latest`. Re-running a commit reuses and smoke-tests its
 already published image instead of rebuilding or overwriting the tag.
 
+The top archive status bar shows the deployed build's seven-character Git SHA;
+hover over it for the full revision. CI passes the commit through the Docker
+`GIT_SHA` build argument and verifies that the browser bundle contains it. Local
+builds without that argument display `Build: development`.
+
 `master` requires a pull request with an up-to-date branch and a successful
 `Test and build frontend` check from GitHub Actions. That check enforces the
 configured 90% minimum coverage for statements, branches, functions, and lines.
