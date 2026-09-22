@@ -14,6 +14,7 @@ archive itself lives in the separate
 - Keyword search with query syntax and optional semantic search using embeddings.
 - Filters for source, content type, tags, mailing list, and dates.
 - Full-text previews, archive links, and shareable document permalinks.
+- A read-only ChatGPT MCP connector for researching the archive with source citations.
 - An archive status bar showing document count, indexing activity, and the
   frontend build's Git revision.
 - Python workers for extracting text and metadata, generating embeddings, and
@@ -32,6 +33,9 @@ flowchart LR
     Browser[React search UI] --> Proxy[NGINX]
     Proxy --> ES
     Proxy --> Embeddings[Local Nomic embeddings]
+    ChatGPT --> MCP[Read-only MCP search / fetch]
+    MCP --> ES
+    MCP --> Embeddings
 ```
 
 The file finder updates a local archive checkout and queues files for processing.
@@ -49,12 +53,28 @@ browser configuration or JavaScript bundle.
 | Path | Purpose |
 | --- | --- |
 | [`elastic-indexer-stack/frontend/`](elastic-indexer-stack/frontend/) | React application, Jest tests, and NGINX container |
+| [`elastic-indexer-stack/mcp/`](elastic-indexer-stack/mcp/) | ChatGPT-compatible MCP search/fetch service, protocol tests and coverage |
 | [`elastic-indexer-stack/indexer/`](elastic-indexer-stack/indexer/) | Python file finder, indexing workers, extraction handlers, and tests |
 | [`elastic-indexer-stack/indexer/src/indexer/resources/`](elastic-indexer-stack/indexer/src/indexer/resources/) | Enrichment prompts and response schemas |
 | [`elastic-indexer-stack/k8s-manifests/`](elastic-indexer-stack/k8s-manifests/) | Production frontend and Nomic embedding manifests, plus backend reference configuration |
 | [`elastic-indexer-stack/docker-compose.yml`](elastic-indexer-stack/docker-compose.yml) | Reference Compose configuration for the services |
 | [`scripts/`](scripts/) | Frontend deployment, runtime secret reconciliation, and smoke checks |
 | [`.github/workflows/elastic-indexer-stack-cicd.yml`](.github/workflows/elastic-indexer-stack-cicd.yml) | Frontend pull-request checks and deployment from `master` |
+
+## Research in ChatGPT
+
+Connect a custom MCP integration to **https://search.eqarchives.org/mcp**, using
+no authentication. The connector searches public archive sources and retrieves
+their full extracted text, source links and provenance. Read the
+[connection guide](https://search.eqarchives.org/chatgpt.html) for ChatGPT setup
+and sample research questions. Custom-connection availability depends on your
+ChatGPT account/workspace. Directory publication is a separate future step;
+[listing materials](docs/chatgpt-listing.md) are prepared.
+
+The [MCP service guide](elastic-indexer-stack/mcp/README.md) covers the contract,
+development, tests, resource limits and data handling. No OpenAI API key or paid
+OpenAI API call is needed to operate this connector; it uses the existing archive
+index and local Nomic service.
 
 ## Frontend development
 
@@ -167,7 +187,7 @@ The production frontend deployment below provisions its own Nomic embedding serv
 
 ## Deployment
 
-The frontend and a local **llama.cpp / Nomic Embed v1.5 Q8_0** service deploy
+The frontend, read-only MCP connector and local **llama.cpp / Nomic Embed v1.5 Q8_0** service deploy
 automatically from `master` to the production **k3s** cluster. Nomic uses eqvm's
 Radeon iGPU through Vulkan and returns normalized 768-dimensional vectors.
 The model is pinned to a Hugging Face revision and SHA-256, downloaded into a
@@ -175,9 +195,9 @@ persistent cache, and served only inside the cluster. NGINX forwards the public
 `/openai/v1/embeddings` route with its runtime API key. The frontend adds Nomic's
 `search_query:` prefix; this instance accepts up to 512 tokens per input.
 
-Pull requests run tests, enforce coverage, build the frontend, and exercise the
-real Nomic server on CPU through NGINX on a GitHub-hosted runner. Only `master`
-publishes an image and deploys through the VM's self-hosted runner.
+Pull requests run tests, enforce coverage, build the frontend and MCP containers,
+and exercise the real Nomic server on CPU through both services on a GitHub-hosted
+runner. Only `master` publishes images and deploys through the VM's self-hosted runner.
 
 Deployments use immutable image digests and rolling readiness checks. Reapplying
 the same image, configuration, and secrets does not restart the pods. The

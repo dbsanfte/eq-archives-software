@@ -1,4 +1,4 @@
-# Frontend and embedding deployment
+# Frontend, MCP and embedding deployment
 
 `01-frontend.yaml` captures the production frontend on **eqvm**, which runs
 single-node **k3s** directly (not k3d). It manages the existing four-replica
@@ -11,6 +11,13 @@ its data, Traefik, cert-manager, the `local-path` StorageClass, and the
 `letsencrypt-prod` ClusterIssuer are existing prerequisites.
 `00-elasticsearch.yaml` is a separate, manually managed backend reference;
 its secret placeholders must never be applied by this workflow.
+
+The read-only ChatGPT connector is Deployment/Service `eqarchives-mcp`, defined
+in [`mcp.yaml`](mcp.yaml). Its exact `/mcp` HTTPS route takes precedence over the
+frontend's `/` route, using the existing certificate. It has separate rate and
+concurrency limits, one non-root replica, a read-only filesystem, projected
+credentials and zero-unavailable rolling updates. The [MCP guide](../mcp/README.md)
+documents its search/fetch contract and runtime limits.
 
 ## Nomic embedding service
 
@@ -67,6 +74,16 @@ input is rejected without breaking subsequent requests. That same frontend image
 to Docker Hub as `dbsanfte/frontend:<git-sha>`. Deployment uses its immutable
 `sha256` digest, not `latest`. Re-running a commit reuses and smoke-tests its
 already published image instead of rebuilding or overwriting the tag.
+
+The same required job builds the MCP image, enforces its 90% coverage gate,
+tests the protocol and runs the actual container against CPU Nomic and a fake
+Elasticsearch service. Master publishes this second artifact under
+`dbsanfte/frontend:mcp-<git-sha>` in the existing Docker Hub repository, avoiding
+new registry credentials. The deploy script takes **both immutable image digests**;
+the `eqarchives-mcp` placeholder is independently replaced with its artifact.
+The final deployment check exercises public MCP discovery, search, fetch and a
+missing-source error against the real archive. MCP uses the existing restricted
+ES account and embedding key; its credential checksum triggers a rolling update.
 
 The top archive status bar shows the deployed build's seven-character Git SHA;
 hover over it for the full revision. CI passes the commit through the Docker
@@ -148,6 +165,7 @@ gh run list --repo dbsanfte/eq-archives-software \
   --workflow elastic-indexer-stack-cicd.yml
 sudo kubectl -n eqarchives-es rollout status deployment/search-eqarchives
 sudo kubectl -n eqarchives-es rollout status deployment/nomic-embeddings
+sudo kubectl -n eqarchives-es rollout status deployment/eqarchives-mcp
 sudo kubectl -n eqarchives-es logs deployment/nomic-embeddings -c download-model
 ```
 
@@ -155,7 +173,10 @@ For a manual deployment on eqvm, export the five secret variables from a trusted
 source and invoke the same script with a known image digest:
 
 ```sh
-bash scripts/deploy-frontend.sh dbsanfte/frontend@sha256:FULL_IMAGE_DIGEST
+bash scripts/deploy-frontend.sh \
+  dbsanfte/frontend@sha256:FRONTEND_IMAGE_DIGEST \
+  dbsanfte/frontend@sha256:MCP_IMAGE_DIGEST
+python3 scripts/check-mcp.py https://search.eqarchives.org/mcp
 ```
 
 Do not apply the manifests directly: their images are deliberate placeholders
@@ -175,6 +196,10 @@ device plugin in place. The preceding hashed ConfigMaps remain available for
 the previous pod template; an API-key rollback must also coordinate the key
 used by NGINX and the model server.
 
+For an MCP-only rollback, use
+`sudo kubectl -n eqarchives-es rollout undo deployment/eqarchives-mcp`, then
+revert the change through a tested PR. It does not change frontend or model pods.
+
 To confirm a repeat deployment is a no-op, compare the Deployment generation,
-revision annotation, and pod UIDs for both deployments before and after invoking
-the script twice with the same image digest and secret values.
+revision annotation, and pod UIDs for all three deployments before and after invoking
+the script twice with the same two image digests and secret values.

@@ -132,6 +132,28 @@ class FrontendBrowserTests(unittest.TestCase):
                 with self.subTest(width=width, filled_dates=filled_dates):
                     self.check_sort_menu(width, filled_dates)
 
+    def test_chatgpt_guide_navigation_fits_mobile_and_desktop(self):
+        for width in (320, 390, 1280):
+            with self.subTest(width=width):
+                context = self.browser.new_context(viewport={"width": width, "height": 900})
+                try:
+                    page = context.new_page()
+                    page.route("**/elasticsearch/**", self.mock_elasticsearch)
+                    page.goto(self.base_url, wait_until="networkidle")
+                    link = page.get_by_role("link", name="ChatGPT", exact=True)
+                    expect(link).to_be_visible()
+                    bounds = link.bounding_box()
+                    self.assertGreaterEqual(bounds["x"], 0)
+                    self.assertLessEqual(bounds["x"] + bounds["width"], width)
+                    link.click()
+                    expect(page.get_by_role("heading", level=1)).to_have_text("Research EverQuest in ChatGPT.")
+                    expect(page.locator("code")).to_have_text("https://search.eqarchives.org/mcp")
+                    self.assertTrue(page.evaluate("document.documentElement.scrollWidth <= innerWidth"))
+                    page.get_by_role("link", name="EQ Archives", exact=True).click()
+                    expect(page.locator(".sui-search-box__text-input")).to_be_visible()
+                finally:
+                    context.close()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

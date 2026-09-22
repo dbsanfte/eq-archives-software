@@ -19,6 +19,7 @@ digests, dependency versions, or credentials into new files.
 | --- | --- |
 | Architecture, backend setup and environment variables | [README.md](README.md) |
 | Frontend development, container configuration and browser tests | [Frontend guide](elastic-indexer-stack/frontend/README.md) |
+| ChatGPT MCP contract, tests, limits and publication | [MCP guide](elastic-indexer-stack/mcp/README.md), [listing materials](docs/chatgpt-listing.md), [public connection guide](elastic-indexer-stack/frontend/public/chatgpt.html) |
 | Deployment, prerequisites, credentials and rollback | [Deployment guide](elastic-indexer-stack/k8s-manifests/README.md) |
 | Required checks and production delivery | [Frontend CI/CD](.github/workflows/elastic-indexer-stack-cicd.yml) |
 | Frontend build and coverage configuration | [Dockerfile](elastic-indexer-stack/frontend/Dockerfile), [package.json](elastic-indexer-stack/frontend/package.json), [Jest configuration](elastic-indexer-stack/frontend/jest.config.js) |
@@ -160,6 +161,30 @@ test work isolated from live ingestion. Both worker modes require configured
 Elasticsearch, RabbitMQ, model endpoints and a shared archive checkout; see the
 root README for environment variables and secret mounts.
 
+### ChatGPT MCP service
+
+The service in `elastic-indexer-stack/mcp` uses Python 3.13 in production and
+supports 3.10+ for local development. Install its hash-locked
+`requirements-dev.txt` and run `python -m pytest` from that directory. Tests
+include HTTP initialization, tool schemas, search/fetch behavior, source fidelity,
+embedding fallback, cache behavior, credential isolation and request limits.
+Branch coverage is enabled with a 90% combined coverage threshold; do not lower it.
+The MCP Docker build runs these tests before creating the production runtime.
+
+Pass an MCP image as the second argument to `scripts/smoke-embeddings.sh` to
+exercise the real MCP container with CPU Nomic and the isolated Elasticsearch
+fixture; CI always does this. After deployment run
+`python3 scripts/check-mcp.py https://search.eqarchives.org/mcp`.
+
+Preserve `search(query)` and `fetch(id)` compatibility, output schemas, read-only
+annotations and matching structured/JSON text results. Document IDs are opaque
+exact ES IDs, never filesystem paths or URLs. Do not silently truncate source
+text or substitute generated summaries; keep OCR/date estimates labelled.
+Never expose upstream credentials, errors, vectors or arbitrary Elasticsearch DSL.
+Keep retrieval/cache limits appropriate for the shared single-slot model server.
+Directory submission is separate from deployment; only claim account-level
+ChatGPT/Deep Research validation after actually performing it.
+
 ## Application constraints
 
 - React uses Elastic Search UI and Material UI. Shared appearance is defined in
@@ -190,12 +215,14 @@ There is no release-please workflow or release/tag prerequisite.
 
 The required build job runs on GitHub-hosted `ubuntu-24.04`. It validates scripts
 and Kustomize, builds the frontend with Jest/coverage, runs container and browser
-checks, and exercises the real Nomic service on CPU. PRs get no production secrets
+checks, builds/tests MCP with coverage, and exercises both containers with the real
+Nomic service on CPU. PRs get no production secrets
 or self-hosted execution. Keep this required check present on every normal PR;
 path-based workflow skipping can leave required checks pending.
 
-Only `master` publishes `dbsanfte/frontend:<full-git-sha>` to Docker Hub and
-deploys its immutable image digest. A rerun reuses an already published image
+Only `master` publishes `dbsanfte/frontend:<full-git-sha>` and the MCP artifact
+`dbsanfte/frontend:mcp-<full-git-sha>` to Docker Hub and deploys their independent
+immutable image digests. A rerun reuses an already published image
 for that SHA and repeats smoke checks. Base images, third-party actions and the
 embedding runtime/model are pinned; update those pins deliberately.
 
@@ -207,8 +234,9 @@ a cluster-admin credential stored in GitHub. Deployments are serialized in the
 A queued run checks that its SHA still matches `master` before touching the cluster.
 
 The deploy script validates rendered resources, reconciles secrets, brings up
-and verifies Nomic/GPU service, then rolls the frontend. It checks HTTPS, search,
-document count, embeddings and a vector-only search through the production proxy.
+and verifies Nomic/GPU service, then rolls the frontend and MCP service. It checks
+HTTPS, search, document count, embeddings and a vector-only search through the
+production proxy, followed by public MCP discovery/search/fetch checks.
 Repeated deployment of the same image/configuration/secrets must leave Deployment
 generations, revisions and pod UIDs unchanged. Do not add timestamp annotations
 or routine `rollout restart` calls. Configuration hashes and credential checksums
@@ -230,6 +258,7 @@ available for builds and isolated checks. Production resources are in namespace
 | TLS | cert-manager, existing `letsencrypt-prod` ClusterIssuer; certificate Secrets remain cluster-managed |
 | Elasticsearch | Existing service `elasticsearch.eqarchives-es.svc.cluster.local:9200`, index `eq-archive`; managed separately from frontend CI |
 | Embeddings | Deployment/Service `nomic-embeddings`, one replica, internal endpoint `http://nomic-embeddings.eqarchives-es.svc.cluster.local:8080`, zero-unavailable rolling updates |
+| MCP connector | Deployment/Service `eqarchives-mcp`, one replica, port 8080, exact public `/mcp` HTTPS ingress, zero-unavailable rolling updates; uses the existing read-only ES/model credentials |
 | Model cache | PVC `nomic-embedding-models`, 1 GiB on existing `local-path` storage; reproducible model cache, not archive storage |
 | GPU access | DaemonSet `eqarchives-vulkan-device-plugin`, AMD Radeon Vulkan device `/dev/dri/renderD128`, supplemental render GID 109 |
 
@@ -242,7 +271,7 @@ are not separate physical GPUs. Neither inference nor the device plugin requires
 privileged mode. The pinned runtime rejects oversized inputs with HTTP 500 but
 remains usable afterward; capacity changes need explicit testing.
 
-The root Kustomization manages the frontend and embedding resources only.
+The root Kustomization manages frontend, MCP and embedding resources only.
 [00-elasticsearch.yaml](elastic-indexer-stack/k8s-manifests/00-elasticsearch.yaml)
 and [docker-compose.yml](elastic-indexer-stack/docker-compose.yml) are backend
 references with environment-specific settings/placeholders, not a deployment
@@ -300,8 +329,8 @@ gh workflow run elastic-indexer-stack-cicd.yml \
 ```
 
 For an authorized manual deployment, load the five secret environment variables
-from a trusted source and run `scripts/deploy-frontend.sh` with a known immutable
-`dbsanfte/frontend@sha256:...` image. Use this script instead of applying the raw
+from a trusted source and run `scripts/deploy-frontend.sh` with two known immutable
+`dbsanfte/frontend@sha256:...` images: frontend first, MCP second. Use this script instead of applying the raw
 manifests: their `deploy-via-ci` images are intentional placeholders. Full manual
 deployment and idempotence procedures are in the deployment guide.
 
