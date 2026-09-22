@@ -245,6 +245,23 @@ ChatGPT/Claude or Deep Research validation after actually performing it.
   current filters, with escaped exact-ID patterns and exact URL validation of
   legacy candidates. Keep metadata/full text separate, exact preview IDs, retries,
   cancellation, and the 1,000-record history bound. No index migration is needed.
+- Dedicated readers use `/document?id=<exact ES ID>`; comparisons add
+  `compare=<second ID>`, with optional `find` and `part=ocr`. Route readers before
+  mounting the search provider so they do not launch searches or embeddings.
+  Preserve exact `_meta.id` links, the completed `resultSearchTerm` context, and
+  the legacy filtered-search links. Reader retrieval whitelists source/OCR and
+  provenance through the existing proxy; keep the old lightweight preview
+  contract separate. Aborted or superseded requests must not replace current
+  content. Keep full source downloads, manual clipboard fallback, safe Markdown
+  links and explicit OCR/estimated-date labels. Never auto-load source images or
+  substitute generated summaries. Relative Wayback links must retain the capture.
+  Comparisons require the same exact original-page identity, preserve whitespace
+  and line endings, label additions/removals, and distinguish missing source from
+  deleted text. Keep asynchronous bounded diffs (1M combined characters, 20K
+  lines, 1s, 2K edits), complete-reader/download fallbacks, 500K-character Markdown
+  fallback and the 1K highlight limit explicit; never silently truncate text.
+  Reader browser regressions cover 320/390/1280 px, exact links, query highlights,
+  source text/downloads, citations, dated comparisons, swap and direct reload.
 - Keep embedding eligibility shared between the input and query builder via
   `QueryPolicy.js`: blank/operator queries, disabled semantic search, missing
   vector fields and service cooldown must not fetch unused embeddings. Preserve

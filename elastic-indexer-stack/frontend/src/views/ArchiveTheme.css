@@ -466,7 +466,7 @@
 .archive-capture-list li > div { min-width: 0; }
 .archive-capture-date { display: block; font-weight: 600; color: var(--archive-ink); font-variant-numeric: tabular-nums; }
 .archive-capture-title { display: block; font-size: 0.85rem; overflow-wrap: anywhere; margin-top: 0.2rem; }
-.archive-capture-actions { display: flex; align-items: center; flex-shrink: 0; gap: 0.7rem; font-size: 0.8rem; }
+.archive-capture-actions { display: flex; flex-wrap: wrap; align-items: center; flex-shrink: 0; max-width: 100%; gap: 0.7rem; font-size: 0.8rem; }
 .archive-capture-actions a { color: var(--archive-ink); }
 @media (max-width: 600px) {
   .archive-capture-list li { align-items: flex-start; flex-direction: column; gap: 0.3rem; }

@@ -31,10 +31,12 @@ import DateRangeFacet from "./views/search/DateRangeFacet";
 import EnhancedSearchBox from "./views/search/EnhancedSearchBox";
 import archiveTheme from "./theme";
 import { CapturePaging, CaptureSummary } from "./views/search/CapturePaging";
+import DocumentReader from "./views/reader/DocumentReader";
+import { ReaderSearchContext, searchPhrase } from "./views/reader/reader-utils";
 import fieldLabels from "./config/field-labels";
 import "./views/ArchiveTheme.css";
 
-export default function App() {
+function SearchApp() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showSyntax, setShowSyntax] = useState(false);
   const [knnParams, setKnnParams] = useState({ ...DEFAULT_KNN_PARAMS, groupCaptures: true });
@@ -70,13 +72,11 @@ export default function App() {
   }, [knnParamsRef]);
 
   return (
-    <ThemeProvider theme={archiveTheme}>
-      <CssBaseline />
       <SearchProvider config={config}>
         <WithSearch
-          mapContextToProps={({ wasSearched, isLoading, executeSearch, setCurrent, totalResults, pagingStart, pagingEnd, rawResponse }) => ({ wasSearched, isLoading, executeSearch, setCurrent, totalResults, pagingStart, pagingEnd, rawResponse })}
+          mapContextToProps={({ wasSearched, isLoading, executeSearch, setCurrent, totalResults, pagingStart, pagingEnd, rawResponse, resultSearchTerm }) => ({ wasSearched, isLoading, executeSearch, setCurrent, totalResults, pagingStart, pagingEnd, rawResponse, resultSearchTerm })}
         >
-          {({ wasSearched, isLoading, executeSearch, setCurrent, ...searchState }) => (
+          {({ wasSearched, isLoading, executeSearch, setCurrent, resultSearchTerm, ...searchState }) => (
             <div className="App" style={{ position: "relative" }} data-testid="app-container">
               {isLoading && (
                 <Box
@@ -156,13 +156,15 @@ export default function App() {
                 }
                 bodyContent={
                   <ErrorBoundary>
-                    <Results
+                    <ReaderSearchContext.Provider value={searchPhrase(resultSearchTerm)}>
+                      <Results
                       titleField={getConfig().titleField}
                       urlField={getConfig().urlField}
                       thumbnailField={getConfig().thumbnailField}
                       shouldTrackClickThrough={true}
                       resultView={CustomResultView}
-                    />
+                      />
+                    </ReaderSearchContext.Provider>
                   </ErrorBoundary>
                 }
                 bodyHeader={
@@ -201,6 +203,11 @@ export default function App() {
           )}
         </WithSearch>
       </SearchProvider>
-    </ThemeProvider>
   );
+}
+
+export default function App() {
+  return <ThemeProvider theme={archiveTheme}><CssBaseline />
+    {/^\/document\/?$/.test(window.location.pathname) ? <DocumentReader /> : <SearchApp />}
+  </ThemeProvider>;
 }

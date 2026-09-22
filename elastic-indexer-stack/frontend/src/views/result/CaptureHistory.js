@@ -1,6 +1,7 @@
-import React, { useEffect, useId, useState } from 'react';
+import React, { useContext, useEffect, useId, useState } from 'react';
 import { Button } from '@mui/material';
 import { fetchCaptures } from '../../search/CaptureService';
+import { comparisonUrl, readerUrl, recordId, ReaderSearchContext } from '../reader/reader-utils';
 import DocumentPreview from './DocumentPreview';
 
 export function captureDate(result) {
@@ -8,7 +9,8 @@ export function captureDate(result) {
   return typeof date === 'string' && /^\d{4}-\d{2}-\d{2}/.test(date) ? date.slice(0, 10) : 'Date unknown';
 }
 
-export default function CaptureHistory({ identity }) {
+export default function CaptureHistory({ identity, compareWith }) {
+  const find = useContext(ReaderSearchContext);
   const regionId = useId();
   const [open, setOpen] = useState(false);
   const [records, setRecords] = useState([]);
@@ -45,6 +47,8 @@ export default function CaptureHistory({ identity }) {
           {records.map(result => <li key={result._meta.id}>
             <div><span className="archive-capture-date">{captureDate(result)}</span><span className="archive-capture-title">{result.title?.raw || 'Untitled capture'}</span></div>
             <div className="archive-capture-actions">
+              <a href={readerUrl(recordId(result), { find })} aria-label={`Read capture from ${captureDate(result)}`}>Read</a>
+              {recordId(compareWith) && recordId(result) !== recordId(compareWith) && <a href={comparisonUrl(compareWith, result)} aria-label={`Compare capture from ${captureDate(result)} with selected capture`}>Compare</a>}
               {/^(https?):\/\//i.test(result.url?.raw) && <a href={result.url.raw} target="_blank" rel="noopener noreferrer" aria-label={`Open capture from ${captureDate(result)}`}>Open archive</a>}
               <Button onClick={() => setPreview(result)} aria-label={`Preview capture from ${captureDate(result)}`}>Preview</Button>
             </div>

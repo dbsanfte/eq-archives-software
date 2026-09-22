@@ -4,6 +4,8 @@
 import os
 import fnmatch
 from datetime import datetime, timedelta
+from pathlib import Path
+from urllib.parse import parse_qs, urlencode, urlparse
 import unittest
 
 from playwright.sync_api import expect, sync_playwright
@@ -342,6 +344,102 @@ class FrontendBrowserTests(unittest.TestCase):
                     expect(page.locator('.sui-result')).to_have_count(5)
                     expect(page.get_by_text('Page 2', exact=True)).to_be_visible()
                     expect(page.get_by_role('button', name='Next', exact=True)).to_be_disabled()
+                finally:
+                    context.close()
+
+    def test_document_reader_and_capture_comparisons(self):
+        for width in (320, 390, 1280):
+            with self.subTest(width=width):
+                context = self.browser.new_context(viewport={"width": width, "height": 950}, permissions=["clipboard-read", "clipboard-write"])
+                try:
+                    page = context.new_page()
+                    errors, requests, embeddings = [], [], []
+                    page.on('pageerror', lambda error: errors.append(str(error)))
+                    first_id = 'websites/example.org/20000101000000/guide?a=1&b=2'
+                    second_id = 'websites/example.org/20010101000000/guide?a=1&b=2'
+                    text = '# Preserved guide\n\nAncient cyclops. Ancient cyclops.\n\n[Related page](../spells)\n\n![Historical image](picture.png)\n\nOld advice\n'
+                    later = text.replace('Old advice', 'New advice')
+                    records = {
+                        first_id: {"title": "Cyclops research guide", "url": "https://web.archive.org/web/20000101000000/http://example.org/guide?a=1&b=2", "capture_date": "2000-01-01T00:00:00Z", "llm_guessed_date": "1999-01-01", "domain_name": "example.org", "text_full": text, "llm_image_text_full": "Old OCR"},
+                        second_id: {"title": "Cyclops research guide, revised", "url": "https://web.archive.org/web/20010101000000/http://example.org/guide?a=1&b=2", "capture_date": "2001-01-01T00:00:00Z", "domain_name": "example.org", "text_full": later, "llm_image_text_full": "New OCR"},
+                    }
+                    facets = {field: {"buckets": []} for field in (
+                        "domain_name", "llm_content_flavour", "file_type", "mime_type", "mailing_list_name", "llm_tags"
+                    )}
+                    facets["last_indexed"] = {"buckets": {}}
+
+                    def archive(route):
+                        if route.request.url.endswith('/_count'):
+                            return route.fulfill(json={"count": 2})
+                        body = route.request.post_data_json
+                        requests.append(body)
+                        if 'ids' in body.get('query', {}):
+                            selected = body['query']['ids']['values'][0]
+                            self.assertEqual(body['size'], 1)
+                            self.assertNotIn('llm_summary', body['_source'])
+                            self.assertNotIn('text', body['_source'])
+                            return route.fulfill(json={"hits": {"hits": [{"_id": selected, "_source": records[selected]}]}})
+                        chosen = [second_id, first_id] if 'preference=archive-captures' in route.request.url else [first_id]
+                        hits = [{"_id": selected, "_source": {field: value for field, value in records[selected].items() if field not in ('text_full', 'llm_image_text_full')}, "_score": 1} for selected in chosen]
+                        route.fulfill(json={"hits": {"total": {"value": len(hits), "relation": "eq"}, "hits": hits}, "aggregations": {"facet_bucket_all": {"doc_count": 2, **facets}}})
+
+                    page.route('**/elasticsearch/**', archive)
+                    page.route('**/openai/v1/embeddings', lambda route: (embeddings.append(True), route.fulfill(json={"data": [{"embedding": [0.1] * 768}]})))
+                    page.goto(self.base_url + '/?' + urlencode({'q': '"ancient cyclops"'}), wait_until='networkidle')
+                    link = page.get_by_role('link', name='Read document', exact=True)
+                    expect(link).to_be_visible()
+                    self.assertEqual(parse_qs(urlparse(link.get_attribute('href')).query)['find'], ['ancient cyclops'])
+                    requests.clear()
+                    link.click()
+                    expect(page.get_by_role('heading', name='Cyclops research guide', exact=True)).to_be_visible()
+                    expect(page.get_by_role('heading', name='Preserved guide', exact=True)).to_be_visible()
+                    expect(page.get_by_text('1 of 2 matches', exact=True)).to_be_visible()
+                    page.get_by_role('link', name='Jump to text', exact=True).click()
+                    expect(page.get_by_role('searchbox', name='Find in document')).to_be_visible()
+                    expect(page.locator('.reader-body img')).to_have_count(0)
+                    expect(page.get_by_role('link', name='Related page')).to_have_attribute('href', 'https://web.archive.org/web/20000101000000/http://example.org/spells')
+                    page.get_by_role('button', name='Next match', exact=True).click()
+                    expect(page.get_by_text('2 of 2 matches', exact=True)).to_be_visible()
+                    self.assertEqual(page.locator('mark.reader-match-active').count(), 1)
+                    search = page.get_by_role('searchbox', name='Find in document')
+                    search.fill('wrong')
+                    search.fill('Old advice')
+                    expect(search).to_have_value('Old advice')
+                    expect(page.get_by_text('1 of 1 matches', exact=True)).to_be_visible()
+                    page.get_by_role('checkbox', name='Source text', exact=True).check()
+                    self.assertEqual(page.locator('.reader-body pre').text_content(), text)
+                    page.get_by_role('button', name='Copy citation', exact=True).click()
+                    expect(page.get_by_text('Copied.', exact=True)).to_be_visible()
+                    self.assertIn('Captured 2000-01-01T00:00:00Z (archive timestamp)', page.evaluate('navigator.clipboard.readText()'))
+                    with page.expect_download() as download:
+                        page.get_by_role('button', name='Download text', exact=True).click()
+                    self.assertEqual(Path(download.value.path()).read_bytes(), text.encode())
+                    page.get_by_role('combobox', name='Text to view').select_option('ocr')
+                    expect(page.get_by_text('Old OCR', exact=True)).to_be_visible()
+                    expect(page.get_by_text('Image transcription (OCR) is model-generated and may contain errors. Check the original images when citing it.')).to_be_visible()
+                    self.assertTrue(all('ids' in request.get('query', {}) for request in requests), requests)
+                    self.assertEqual(embeddings, [])
+                    page.get_by_role('button', name='View captures', exact=True).click()
+                    comparison = page.get_by_role('link', name='Compare capture from 2001-01-01 with selected capture', exact=True)
+                    expect(comparison).to_be_visible()
+                    self.assertTrue(page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
+                    comparison.click()
+                    expect(page.get_by_role('heading', name='Compare captures', exact=True)).to_be_visible()
+                    expect(page.get_by_text('1 added · 1 removed lines', exact=True)).to_be_visible()
+                    page.get_by_role('link', name='Jump to changes', exact=True).click()
+                    expect(page.locator('.reader-removed pre')).to_have_text('Old advice\n')
+                    expect(page.locator('.reader-added pre')).to_have_text('New advice\n')
+                    page.get_by_role('button', name='Next change', exact=True).click()
+                    expect(page.locator('.reader-removed')).to_be_focused()
+                    page.get_by_role('link', name='Swap captures', exact=True).click()
+                    expect(page.locator('.reader-removed pre')).to_have_text('New advice\n')
+                    expect(page.locator('.reader-added pre')).to_have_text('Old advice\n')
+                    page.reload(wait_until='networkidle')
+                    expect(page.get_by_role('heading', name='Compare captures', exact=True)).to_be_visible()
+                    self.assertTrue(page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
+                    page.get_by_role('link', name='Back to document', exact=True).click()
+                    expect(page.get_by_role('heading', name='Cyclops research guide, revised', exact=True)).to_be_visible()
+                    self.assertEqual(errors, [])
                 finally:
                     context.close()
 

@@ -1,7 +1,7 @@
 import React from "react";
 import "./ArchiveHeader.css";
 
-export default function HeaderContent() {
+export default function HeaderContent({ compact = false }) {
   return (
     <header className="archive-masthead">
       <div className="archive-masthead__top">
@@ -38,7 +38,7 @@ export default function HeaderContent() {
           <img src="/images/mcp.svg" width="24" height="24" alt="" />
         </a>
       </div>
-      <div className="archive-introduction">
+      {!compact && <div className="archive-introduction">
         <div className="archive-introduction__copy">
           <p className="archive-eyebrow">The EverQuest collection</p>
           <h1>Rediscover early EverQuest.</h1>
@@ -55,7 +55,7 @@ export default function HeaderContent() {
           alt=""
           aria-hidden="true"
         />
-      </div>
+      </div>}
     </header>
   );
 }

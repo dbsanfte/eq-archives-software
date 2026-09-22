@@ -102,7 +102,7 @@ test('copies an encoded permalink and dismisses the confirmation', async () => {
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy Permalink' })); });
     const copied = new URL(navigator.clipboard.writeText.mock.calls[0][0]);
     expect(copied.origin).toBe(window.location.origin);
-    expect(copied.searchParams.get('filters[0][values][0]')).toBe(result.id.raw);
+    expect(copied.searchParams.get('id')).toBe(result.id.raw);
     expect(screen.getByText('Permalink copied to clipboard')).toBeInTheDocument();
     act(() => jest.advanceTimersByTime(4000));
     act(() => jest.advanceTimersByTime(500));
@@ -132,4 +132,14 @@ test.each([false, true])('keeps query syntax examples available on mobile=%s', m
   expect(screen.getByText('Syntax Examples')).toBeInTheDocument();
   expect(screen.getByText('Date range filtering:')).toBeInTheDocument();
   expect(screen.getByRole('link')).toHaveAttribute('href', expect.stringContaining('query-string-syntax'));
+});
+
+test('reader and copy links use the real ES identity, including reserved characters', async () => {
+  const exact = 'actual/id?# ü%';
+  render(<ButtonRow result={{ ...result, _meta: { id: exact } }} />);
+  const link = new URL(screen.getByRole('link', { name: 'Read document' }).href);
+  expect(link.pathname).toBe('/document');
+  expect(link.searchParams.get('id')).toBe(exact);
+  await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Copy Permalink' })));
+  expect(navigator.clipboard.writeText).toHaveBeenCalledWith(link.href);
 });
