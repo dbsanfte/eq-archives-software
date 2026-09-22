@@ -65,6 +65,25 @@ describe('EmbeddingService', () => {
       );
     });
 
+    it('adds the Nomic query prefix while caching the original search text', async () => {
+      const model = 'text-embedding-nomic-embed-text-v1.5@q8_0';
+      const vector = [0.4, 0.5, 0.6];
+      fetch.mockResolvedValueOnce({ json: async () => ({ data: [{ embedding: vector }] }) });
+
+      await embeddingService.fetchEmbedding('ancient cyclops', model);
+
+      expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
+        input: ['search_query: ancient cyclops'], model
+      });
+      expect(embeddingService.getEmbedding('ancient cyclops')).toEqual(vector);
+    });
+
+    it('preserves the input for other embedding models', async () => {
+      fetch.mockResolvedValueOnce({ json: async () => ({ data: [{ embedding: [1, 0, 0] }] }) });
+      await embeddingService.fetchEmbedding('ancient cyclops', 'another-embedding-model');
+      expect(JSON.parse(fetch.mock.calls[0][1].body).input).toEqual(['ancient cyclops']);
+    });
+
     it('handles API timeout', async () => {
       fetch.mockImplementationOnce(() => new Promise(resolve => 
         setTimeout(() => resolve({ json: () => ({}) }), 6000)

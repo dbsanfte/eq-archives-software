@@ -1,0 +1,166 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nomic-embedding-models
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: local-path
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nomic-embeddings
+spec:
+  type: ClusterIP
+  selector:
+    app: nomic-embeddings
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nomic-embeddings
+spec:
+  replicas: 1
+  revisionHistoryLimit: 5
+  progressDeadlineSeconds: 900
+  minReadySeconds: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app: nomic-embeddings
+  template:
+    metadata:
+      labels:
+        app: nomic-embeddings
+    spec:
+      automountServiceAccountToken: false
+      nodeSelector:
+        kubernetes.io/hostname: eqvm
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        # eqvm's render group owns /dev/dri/renderD128.
+        supplementalGroups: [109]
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: download-model
+          image: ghcr.io/ggml-org/llama.cpp:deploy-via-ci
+          command: [/bin/sh, /bootstrap/download-model.sh]
+          envFrom:
+            - configMapRef:
+                name: nomic-embedding-config
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: '1'
+              memory: 256Mi
+          volumeMounts:
+            - name: models
+              mountPath: /models
+            - name: bootstrap
+              mountPath: /bootstrap
+              readOnly: true
+      containers:
+        - name: llama-server
+          image: ghcr.io/ggml-org/llama.cpp:deploy-via-ci
+          command: [/bin/sh, /bootstrap/start-server.sh]
+          envFrom:
+            - configMapRef:
+                name: nomic-embedding-config
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+              eqarchives.org/igpu: 1
+            limits:
+              memory: 1Gi
+              eqarchives.org/igpu: 1
+          startupProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 2
+            timeoutSeconds: 2
+            failureThreshold: 60
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 5
+            timeoutSeconds: 2
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            periodSeconds: 15
+            timeoutSeconds: 5
+          lifecycle:
+            preStop:
+              exec:
+                command: [/bin/sh, -c, sleep 5]
+          volumeMounts:
+            - name: models
+              mountPath: /models
+              readOnly: true
+            - name: bootstrap
+              mountPath: /bootstrap
+              readOnly: true
+            - name: api-key
+              mountPath: /run/secrets
+              readOnly: true
+            - name: cache
+              mountPath: /cache
+            - name: tmp
+              mountPath: /tmp
+      terminationGracePeriodSeconds: 30
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: nomic-embedding-models
+        - name: bootstrap
+          configMap:
+            name: nomic-embedding-scripts
+        - name: api-key
+          secret:
+            secretName: search-eqarchives-secrets
+            defaultMode: 288 # 0440; readable through the pod's fsGroup
+            items:
+              - key: openai_api_key
+                path: openai_api_key
+        - name: cache
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 128Mi

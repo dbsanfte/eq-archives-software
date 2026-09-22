@@ -152,7 +152,7 @@ spec:
         - name: ELASTICSEARCH_URL
           value: http://elasticsearch.eqarchives-es.svc.cluster.local:9200
         - name: OPENAI_URL
-          value: http://192.168.50.146:1234
+          value: http://nomic-embeddings.eqarchives-es.svc.cluster.local:8080
         - name: ELASTICSEARCH_INDEX
           value: eq-archive
         image: dbsanfte/frontend:deploy-via-ci

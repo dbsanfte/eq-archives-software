@@ -1,15 +1,55 @@
-# Frontend deployment
+# Frontend and embedding deployment
 
 `01-frontend.yaml` captures the production frontend on **eqvm**, which runs
 single-node **k3s** directly (not k3d). It manages the existing four-replica
 `search-eqarchives` Deployment, Service, Traefik routing and middleware, and
 cert-manager Certificates in `eqarchives-es`.
 
-The Kustomization deliberately includes only frontend resources. Elasticsearch,
-its data, the embedding server, Traefik, and the `letsencrypt-prod` ClusterIssuer
-are existing prerequisites. `00-elasticsearch.yaml` is a separate, manually
-managed backend reference; its secret placeholders must never be applied by the
-frontend workflow.
+The Kustomization also manages the cluster-local `nomic-embeddings` Deployment,
+Service, model-cache PVC, configuration, and Vulkan device plugin. Elasticsearch,
+its data, Traefik, cert-manager, the `local-path` StorageClass, and the
+`letsencrypt-prod` ClusterIssuer are existing prerequisites.
+`00-elasticsearch.yaml` is a separate, manually managed backend reference;
+its secret placeholders must never be applied by this workflow.
+
+## Nomic embedding service
+
+The service uses the official [llama.cpp Vulkan image](https://github.com/ggml-org/llama.cpp/blob/master/docs/docker.md)
+and [Nomic Embed v1.5 Q8_0 GGUF](https://huggingface.co/nomic-ai/nomic-embed-text-v1.5-GGUF).
+Public image digests, the exact model revision and download URL, and its SHA-256
+are in [`embeddings/runtime.env`](embeddings/runtime.env). No mutable image or
+model tag is used by the deployment script. The init container verifies the
+139 MiB model on every startup, reuses a valid cached copy, and downloads into a
+temporary file before publishing it atomically. The 1 GiB `local-path` PVC stores
+only a reproducible model cache, not archive data.
+
+The model runs as UID 1000 with mean pooling, normalized 768-dimensional output,
+512-token context/batch sizes, one server slot, and eight host threads. All
+13 layers are offloaded through Vulkan. Requests use the existing alias
+`text-embedding-nomic-embed-text-v1.5@q8_0`. The frontend supplies Nomic's
+`search_query:` prefix. There is no new public ingress: NGINX forwards only the
+existing embedding route to `nomic-embeddings.eqarchives-es.svc.cluster.local:8080`.
+The model server reads the same API key from a restricted Secret projection;
+it receives no Elasticsearch credentials. Health probes do not require a key.
+
+The pinned [generic device plugin](https://github.com/squat/generic-device-plugin)
+advertises `/dev/dri/renderD128` as two shared `eqarchives.org/igpu` allocations
+on `eqvm`. This permits one replacement pod to start while the old pod remains
+ready; it does not represent two physical GPUs or provide memory partitioning.
+The plugin mounts only the render-device directory and kubelet's device-plugin
+socket directory. Neither it nor llama.cpp uses privileged mode. The inference
+pod belongs to eqvm's render group (GID 109). Other hosts need corresponding
+node, render-device, group, and storage settings; no ROCm installation is needed
+for this Vulkan configuration.
+
+Model and script ConfigMap hashes trigger a rollout when their content changes;
+the API-key checksum triggers one when the key changes. Normal frontend commits
+leave the model pod and cached model unchanged. The model deployment uses
+`maxUnavailable: 0`, readiness checks, and a short drain period before shutdown.
+Inputs exceeding 512 tokens are rejected; this pinned llama.cpp build reports
+HTTP 500 with an `input ... is too large to process` error. The service remains
+usable for subsequent requests. Larger contexts or indexing batch workloads
+need separate configuration and capacity testing.
 
 ## GitHub Actions
 
@@ -20,7 +60,10 @@ credentials or access to the VM. Only `master` publishes and deploys.
 
 The build uses the frozen Yarn lockfile and pinned base images, runs the
 frontend tests with the configured 90% coverage thresholds, and smoke-tests the
-final NGINX image. That same image is pushed
+final NGINX image. It also downloads and verifies the pinned model, proves cache
+reuse without network access, runs the real llama.cpp server on CPU, checks API
+authentication and a valid embedding through NGINX, and verifies that an oversized
+input is rejected without breaking subsequent requests. That same frontend image is pushed
 to Docker Hub as `dbsanfte/frontend:<git-sha>`. Deployment uses its immutable
 `sha256` digest, not `latest`. Re-running a commit reuses and smoke-tests its
 already published image instead of rebuilding or overwriting the tag.
@@ -48,9 +91,11 @@ access to `master` restricted to trusted maintainers.
 Runs share one deployment concurrency group. A queued run checks that its commit
 is still the tip of `master` before applying anything. Deployment renders the
 image digest, validates the resources against the API, reconciles runtime
-secrets, applies the manifests, and waits for readiness. It then checks HTTPS and
-an authenticated Elasticsearch search and archive count through the production
-ingress.
+secrets, then reconciles the device plugin and embedding service. It confirms
+readiness, GPU allocation/compute counters in the running server, and an authenticated embedding before applying the
+frontend resources. It then checks HTTPS, an authenticated Elasticsearch search,
+archive count, public embeddings, and a vector-only search through the production
+ingress. A failed model startup leaves frontend routing unchanged.
 
 Reapplying the same digest, configuration, and secrets keeps the same pod
 template, so it does not trigger a rollout. There is no `rollout restart` or
@@ -70,7 +115,7 @@ it from a trusted secret store. Never put values in command arguments or git.
 | `DOCKERHUB_TOKEN` | Docker Hub token with image push/pull permission |
 | `FRONTEND_ES_USERNAME` | Elasticsearch user with read access to `eq-archive` |
 | `FRONTEND_ES_PASSWORD` | That user's password |
-| `FRONTEND_OPENAI_API_KEY` | Key passed to the existing embedding endpoint |
+| `FRONTEND_OPENAI_API_KEY` | Shared key for NGINX and the cluster-local Nomic server |
 
 The deployment reconciles `search-eqarchives-secrets` and
 `dockerhub-pull-secret` from these values using a pipe and server-side apply.
@@ -102,6 +147,8 @@ gh workflow run elastic-indexer-stack-cicd.yml \
 gh run list --repo dbsanfte/eq-archives-software \
   --workflow elastic-indexer-stack-cicd.yml
 sudo kubectl -n eqarchives-es rollout status deployment/search-eqarchives
+sudo kubectl -n eqarchives-es rollout status deployment/nomic-embeddings
+sudo kubectl -n eqarchives-es logs deployment/nomic-embeddings -c download-model
 ```
 
 For a manual deployment on eqvm, export the five secret variables from a trusted
@@ -111,8 +158,8 @@ source and invoke the same script with a known image digest:
 bash scripts/deploy-frontend.sh dbsanfte/frontend@sha256:FULL_IMAGE_DIGEST
 ```
 
-Do not apply `01-frontend.yaml` directly: its image is a deliberate placeholder
-that the script replaces. Do not apply the entire manifests directory.
+Do not apply the manifests directly: their images are deliberate placeholders
+that the script replaces with pinned digests. Do not apply the entire manifests directory.
 
 A failed rollout makes the workflow fail. Readiness and `maxUnavailable: 0`
 preserve healthy old pods during a failed container rollout. For immediate
@@ -121,6 +168,13 @@ restores the preceding pod template (provided its runtime credentials still
 work). Then revert the faulty change on `master` to make the recovery permanent.
 Ingress and secret changes are not undone by `rollout undo`.
 
+For an embedding-specific rollback, use
+`sudo kubectl -n eqarchives-es rollout undo deployment/nomic-embeddings`, then
+revert the corresponding configuration change on `master`. Leave the PVC and
+device plugin in place. The preceding hashed ConfigMaps remain available for
+the previous pod template; an API-key rollback must also coordinate the key
+used by NGINX and the model server.
+
 To confirm a repeat deployment is a no-op, compare the Deployment generation,
-revision annotation, and pod UIDs before and after invoking the script twice
-with the same image digest and secret values.
+revision annotation, and pod UIDs for both deployments before and after invoking
+the script twice with the same image digest and secret values.

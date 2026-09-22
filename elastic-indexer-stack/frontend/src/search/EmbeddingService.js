@@ -30,11 +30,16 @@ class EmbeddingService {
         setTimeout(() => reject(new Error("Embedding request timed out")), this.FETCH_TIMEOUT);
       });
       
+      // Nomic requires a task prefix; keep the cache keyed by the user query.
+      const input = model?.includes('nomic-embed-text-v1.5')
+        ? `search_query: ${query}`
+        : query;
+
       // Create the actual fetch promise
       const fetchPromise = fetch("/openai/v1/embeddings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input: [query], model })
+        body: JSON.stringify({ input: [input], model })
       });
       
       // Race between fetch and timeout
