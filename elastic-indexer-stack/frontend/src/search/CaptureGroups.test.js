@@ -83,6 +83,8 @@ test('supports empty results, unknown IDs, all-capture mode, and retries a faile
   expect((await search(state, {})).results).toEqual([]);
   enabled = false;
   expect((await search(state, {})).rawResponse).toBeUndefined();
+  fetch.mockRejectedValueOnce(new Error('individual search failed'));
+  await expect(search(state, {})).rejects.toThrow('individual search failed');
   enabled = true;
   fetch.mockRejectedValueOnce(new Error('offline'));
   await expect(search(state, {})).rejects.toThrow('offline');
@@ -140,4 +142,49 @@ test('a failed superseded batch cannot surface an error over the newer results',
   reject(new Error('old request failed'));
   await expect(old).resolves.toBeDefined();
   expect((await search({ ...state, searchTerm: 'new' }, {})).results[0].title.raw).toBe('new');
+});
+
+test('overlapping searches that need multiple batches cannot clear each other’s next batch', async () => {
+  const records = ['a', 'b', 'c', 'd'].flatMap(path => Array.from({ length: 50 }, (_, i) => record(path, String(20000101000000 + i))));
+  const fetch = makeSearch(records);
+  const search = createGroupedSearch(fetch, () => ({}));
+  const first = search(state, {});
+  const overlapping = search(state, {});
+  const results = await Promise.all([first, overlapping]);
+  expect(results[0].results.map(r => r.title.raw)).toEqual(['a', 'b']);
+  expect(results[1].results).toEqual(results[0].results);
+  const next = await search({ ...state, current: 2 }, {});
+  expect(next.results.map(r => r.title.raw)).toEqual(['c', 'd']);
+  expect(fetch.mock.calls.map(([s]) => s.current)).toEqual([1, 2, 3, 4]);
+});
+
+test('a late failure cannot cover a newer cached page of the same search', async () => {
+  let reject, started;
+  const pending = new Promise(done => { started = done; });
+  const fetch = makeSearch(Array.from({ length: 100 }, (_, i) => record(`page${i}`)));
+  const original = fetch.getMockImplementation();
+  fetch.mockImplementationOnce(original).mockImplementationOnce(() => {
+    started();
+    return new Promise((_, fail) => { reject = fail; });
+  });
+  const search = createGroupedSearch(fetch, () => ({}));
+  const old = search({ ...state, current: 40 }, {});
+  await pending;
+  const latest = await search(state, {});
+  reject(new Error('late batch failed'));
+  await expect(old).resolves.toBeDefined();
+  expect(latest.results.map(r => r.title.raw)).toEqual(['page0', 'page1']);
+  expect(fetch).toHaveBeenCalledTimes(2);
+});
+
+test('switching back to grouping suppresses obsolete failures from individual-capture mode', async () => {
+  let reject, enabled = false;
+  const fetch = makeSearch([record('new')]);
+  fetch.mockImplementationOnce(() => new Promise((_, fail) => { reject = fail; }));
+  const search = createGroupedSearch(fetch, () => ({ enabled }));
+  const old = search(state, {});
+  enabled = true;
+  await search(state, {});
+  reject(new Error('obsolete individual search'));
+  await expect(old).resolves.toBeDefined();
 });

@@ -8,11 +8,16 @@ const BATCH_SIZE = 50;
 // full documents. Representatives retain the user's search/sort order.
 export function createGroupedSearch(search, getContext) {
   let active;
+  let latestRequest = 0;
   return async (state, queryConfig) => {
+    const request = ++latestRequest;
     const context = getContext(state);
     if (context.enabled === false) {
       active = null;
-      return search(state, queryConfig);
+      try { return await search(state, queryConfig); } catch (error) {
+        if (request === latestRequest) throw error;
+        return { results: [], totalResults: 0 };
+      }
     }
     const { current = 1, resultsPerPage = 20, searchTerm, filters, sortField, sortDirection, sortList } = state;
     const key = JSON.stringify({ searchTerm, filters, sortField, sortDirection, sortList, queryConfig, context });
@@ -34,11 +39,17 @@ export function createGroupedSearch(search, getContext) {
           cache.done = response.results.length < BATCH_SIZE || cache.scanned >= response.totalResults || cache.scanned >= CAPTURE_WINDOW;
         })();
       }
-      try { await cache.flight; } catch (error) {
+      const flight = cache.flight;
+      try { await flight; } catch (error) {
         // Search UI ignores stale successes, but surfaces stale rejections. Stop
         // obsolete scans quietly so an old failure cannot cover newer results.
-        if (active === cache) throw error;
-      } finally { cache.flight = null; }
+        if (request === latestRequest) throw error;
+        break;
+      } finally {
+        // Another waiter may already have started the next batch. Only clear
+        // the promise this request awaited, or parallel scans can skip records.
+        if (cache.flight === flight) cache.flight = null;
+      }
     }
     // Old links may point past the final page once duplicate captures collapse.
     const page = cache.done ? Math.min(current, Math.max(1, Math.ceil(cache.groups.size / resultsPerPage))) : current;
