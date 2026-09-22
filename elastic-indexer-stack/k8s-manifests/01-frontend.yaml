@@ -191,9 +191,15 @@ spec:
             port: http
           periodSeconds: 2
           failureThreshold: 30
+        lifecycle:
+          preStop:
+            exec:
+              # Keep accepting requests while endpoint removal reaches Traefik.
+              command: ["sleep", "10"]
       imagePullSecrets:
       - name: dockerhub-pull-secret
-      terminationGracePeriodSeconds: 30
+      # Endpoint propagation + NGINX SIGQUIT draining (proxy timeout up to 60s).
+      terminationGracePeriodSeconds: 75
       volumes:
       - name: secrets-volume
         secret:

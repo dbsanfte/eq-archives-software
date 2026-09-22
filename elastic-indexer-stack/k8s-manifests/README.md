@@ -122,6 +122,12 @@ template, so it does not trigger a rollout. There is no `rollout restart` or
 timestamp annotation. A runtime secret checksum triggers a rolling update when
 credentials change. The rolling strategy keeps all four existing replicas
 available until replacements pass readiness checks.
+Terminating frontend pods continue serving for ten seconds while endpoint removal
+propagates to Traefik, then the NGINX image's SIGQUIT drains active requests. The
+75-second total grace period includes this delay and the longest proxy timeout.
+CI's [handover regression](../../scripts/test-frontend-rollout.py) runs the actual
+manifest hook in a real container while delaying the router's endpoint update;
+it verifies uninterrupted health requests and continued MCP routing.
 
 ## Secrets
 
