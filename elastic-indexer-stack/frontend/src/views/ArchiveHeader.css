@@ -4,10 +4,6 @@ body {
 }
 
 .App .sui-layout-header {
-  --archive-ink: #203e32;
-  --archive-muted: #58685d;
-  --archive-paper: #f7f5ee;
-  --archive-gold: #896a34;
   padding: 0 32px 24px;
   background: var(--archive-paper);
   border-bottom: 1px solid #dce0d8;

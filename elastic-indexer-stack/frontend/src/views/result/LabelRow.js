@@ -2,55 +2,29 @@ import React from "react";
 import PropTypes from "prop-types";
 import { Chip, Box } from "@mui/material";
 
-const LabelRow = ({ flavour, mailingList, domain, captureDate, guessedDate }) => {
-  return (
-    <Box
-      sx={{
-        marginTop: "1rem",
-        display: "flex",
-        gap: "1rem",
-        flexWrap: "wrap",
-        paddingLeft: "24px"
-      }}
-    >
-      {flavour && String(flavour).trim() !== "" && (
-        <Chip
-          label={`${flavour}`}
-          sx={{ backgroundColor: "#9c27b0", color: "#fff" }}
-          tooltip={"LLM Content Flavour"}
-        />
-      )}
-      {mailingList && String(mailingList).trim() !== "" && (
-        <Chip
-          label={`${mailingList}`}
-          sx={{ backgroundColor: "#f44336", color: "#fff" }}
-          tooltip={"Yahoo Mailing List Name"}
-        />
-      )}
-      {domain && domain.trim() !== "" && (
-        <Chip
-          label={`${domain}`}
-          sx={{ backgroundColor: "#2196f3", color: "#fff" }}
-          tooltip={"Domain Name"}
-        />
-      )}
-      {captureDate && captureDate.trim() !== "" && (
-        <Chip
-          label={`Capture Date: ${captureDate}`}
-          sx={{ backgroundColor: "#4caf50", color: "#fff" }}
-          tooltip={"Date of Capture (reliable)"}
-        />
-      )}
-      {guessedDate && String(guessedDate).trim() !== "" && (
-        <Chip
-          label={`Guessed Date: ${guessedDate}`}
-          sx={{ backgroundColor: "#ff9800", color: "#fff" }}
-          tooltip={"Guessed Content Date from LLM (unreliable)"}
-        />
-      )}
-    </Box>
-  );
-};
+const LabelRow = ({ flavour, mailingList, domain, captureDate, guessedDate }) => (
+  <Box className="archive-result-labels">
+    {flavour && String(flavour).trim() !== "" && (
+      <Chip label={`${flavour}`} title="Suggested content type" />
+    )}
+    {mailingList && String(mailingList).trim() !== "" && (
+      <Chip label={`${mailingList}`} title="Yahoo mailing list" />
+    )}
+    {domain && domain.trim() !== "" && (
+      <Chip label={`${domain}`} title="Source domain" />
+    )}
+    {captureDate && captureDate.trim() !== "" && (
+      <Chip label={`Captured: ${captureDate}`} title="Date this page was captured" />
+    )}
+    {guessedDate && String(guessedDate).trim() !== "" && (
+      <Chip
+        className="archive-result-label--estimated"
+        label={`Estimated: ${guessedDate}`}
+        title="Estimated content date, inferred by AI; may be inaccurate"
+      />
+    )}
+  </Box>
+);
 
 LabelRow.propTypes = {
   flavour: PropTypes.any,

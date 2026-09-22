@@ -233,7 +233,7 @@ function DateRangeFacetView({ label, field, filters, addFilter, removeFilter }) 
   const showActiveFilterBox = hasActiveFilter || hasActiveDirectFilter;
 
   return (
-    <Box sx={{ mb: 3, mt: "32px" }}>
+    <Box className="archive-date-facet" sx={{ mb: 3, mt: "32px" }}>
       <Typography 
         fontSize="12px"
         sx={{ mb: 1 }}
@@ -254,7 +254,7 @@ function DateRangeFacetView({ label, field, filters, addFilter, removeFilter }) 
                 size: 'small', 
                 fullWidth: true, 
                 inputProps: { style: { fontSize: '13px' } },
-                InputLabelProps: { style: { fontSize: '13px', zIndex: 0 } },
+                InputLabelProps: { style: { fontSize: '13px' } },
                 placeholder: "DD/MM/YYYY",
                 onKeyDown: (event) => {
                   if (event.key === 'Enter') {
@@ -285,7 +285,7 @@ function DateRangeFacetView({ label, field, filters, addFilter, removeFilter }) 
                 size: 'small', 
                 fullWidth: true, 
                 inputProps: { style: { fontSize: '13px' } },
-                InputLabelProps: { style: { fontSize: '13px', zIndex: 0 } },
+                InputLabelProps: { style: { fontSize: '13px' } },
                 placeholder: "DD/MM/YYYY",
                 onKeyDown: (event) => {
                   if (event.key === 'Enter') {
@@ -323,7 +323,7 @@ function DateRangeFacetView({ label, field, filters, addFilter, removeFilter }) 
       </Box>
 
       {showActiveFilterBox && (
-        <Box sx={{ mt: 1, bgcolor: '#f0f7ff', p: 1, borderRadius: 1 }}>
+        <Box sx={{ mt: 1, bgcolor: 'var(--archive-sage)', p: 1, borderRadius: 1 }}>
           <Typography variant="caption">
             Active filter: {fromDate && toDate ? 
               `${fromDate.toLocaleDateString()} - ${toDate.toLocaleDateString()}` :

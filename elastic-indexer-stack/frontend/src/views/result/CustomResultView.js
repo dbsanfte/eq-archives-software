@@ -22,15 +22,20 @@ const CustomResultView = (context) => {
     <li className="sui-result">
       {/* Header with link to source URL */}
       <div className="sui-result__header">
-        <a
-          className="sui-result__title sui-result__title-link"
-          onClick={onClickLink}
-          href={context.result.url.raw}
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          {context.result.title.raw}
-        </a>
+        <h2 className="archive-result-heading">
+          <a
+            className="sui-result__title sui-result__title-link"
+            onClick={onClickLink}
+            href={context.result.url.raw}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {context.result.title.raw}
+          </a>
+        </h2>
+        {context.result.thumbnail?.raw && (
+          <img className="archive-result-thumbnail" src={context.result.thumbnail.raw} alt="" loading="lazy" />
+        )}
       </div>
       {/* Label Row providing metadata labels for the result */}
       <LabelRow
@@ -45,7 +50,6 @@ const CustomResultView = (context) => {
 
       {/* Main result body with summary and text */}
       <ResultBody
-        result={context.result}
         summaryHTML={summaryHTML}
         textHTML={textHTML}
       />

@@ -52,7 +52,7 @@ test('exposes search results, date facets, advanced options, syntax help and scr
   render(<App />);
   expect(screen.getByRole('progressbar')).toBeInTheDocument();
   expect(screen.getByText('Sort results')).toBeInTheDocument();
-  expect(screen.getByText('capture_date')).toBeInTheDocument();
+  expect(screen.getByText('Captured date')).toBeInTheDocument();
   expect(screen.getByText('domain')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Advanced...' }));
   fireEvent.click(screen.getByRole('button', { name: 'Neighbors: 10' }));

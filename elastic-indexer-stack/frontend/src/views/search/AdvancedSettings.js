@@ -29,39 +29,39 @@ export default function AdvancedSettings({ onChange, values }) {
   };
 
   return (
-    <Box p={2} sx={{ border: "1px solid #ccc", borderRadius: "4px", marginTop: "1rem" }}>
+    <Box p={2} className="archive-settings-panel">
       <Typography variant="subtitle2" gutterBottom>
         Vector Search Parameters
       </Typography>
-      <TextField
-        label="k"
-        variant="outlined"
-        size="small"
-        value={localValues.k}
-        onChange={(e) => handleFieldChange("k", e.target.value)}
-        onBlur={(e) => handleFieldBlur("k", e.target.value)}
-        style={{ marginRight: "1rem" }}
-        disabled={!values.enableSemanticSearch}
-      />
-      <TextField
-        label="num_candidates"
-        variant="outlined"
-        size="small"
-        value={localValues.num_candidates}
-        onChange={(e) => handleFieldChange("num_candidates", e.target.value)}
-        onBlur={(e) => handleFieldBlur("num_candidates", e.target.value)}
-        style={{ marginRight: "1rem" }}
-        disabled={!values.enableSemanticSearch}
-      />
-      <TextField
-        label="boost"
-        variant="outlined"
-        size="small"
-        value={localValues.boost}
-        onChange={(e) => handleFieldChange("boost", e.target.value)}
-        onBlur={(e) => handleFieldBlur("boost", e.target.value)}
-        disabled={!values.enableSemanticSearch}
-      />
+      <Box className="archive-settings-fields">
+        <TextField
+          label="k"
+          variant="outlined"
+          size="small"
+          value={localValues.k}
+          onChange={(e) => handleFieldChange("k", e.target.value)}
+          onBlur={(e) => handleFieldBlur("k", e.target.value)}
+          disabled={!values.enableSemanticSearch}
+        />
+        <TextField
+          label="num_candidates"
+          variant="outlined"
+          size="small"
+          value={localValues.num_candidates}
+          onChange={(e) => handleFieldChange("num_candidates", e.target.value)}
+          onBlur={(e) => handleFieldBlur("num_candidates", e.target.value)}
+          disabled={!values.enableSemanticSearch}
+        />
+        <TextField
+          label="boost"
+          variant="outlined"
+          size="small"
+          value={localValues.boost}
+          onChange={(e) => handleFieldChange("boost", e.target.value)}
+          onBlur={(e) => handleFieldBlur("boost", e.target.value)}
+          disabled={!values.enableSemanticSearch}
+        />
+      </Box>
     </Box>
   );
 }

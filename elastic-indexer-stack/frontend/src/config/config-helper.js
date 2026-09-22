@@ -1,4 +1,5 @@
 import config from "../config/engine.json";
+import fieldLabels from "./field-labels";
 
 /**
  * This file abstracts most logic around the configuration of the Reference UI.
@@ -214,12 +215,12 @@ export function buildSortOptionsFromConfig() {
     },
     ...(config.sortFields || []).reduce((acc, sortField) => {
       acc.push({
-        name: `${capitalizeFirstLetter(sortField)} (Ascending)`,
+        name: `${fieldLabels[sortField] || capitalizeFirstLetter(sortField)} (Ascending)`,
         value: sortField,
         direction: "asc"
       });
       acc.push({
-        name: `${capitalizeFirstLetter(sortField)} (Descending)`,
+        name: `${fieldLabels[sortField] || capitalizeFirstLetter(sortField)} (Descending)`,
         value: sortField,
         direction: "desc"
       });
