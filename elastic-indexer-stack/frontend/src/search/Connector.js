@@ -6,6 +6,8 @@ import { getConfig } from "../config/config-helper";
 import { createConfig } from "../config/Config";
 import { resolveQuery } from "./Query";
 import filterRegistry from './FilterRegistry';
+import { createGroupedSearch } from './GroupedSearch';
+import { embeddingService } from './EmbeddingService';
 
 // Debug: Log filter count at module load time
 console.log(`[Connector] Module loaded - Filter count: ${filterRegistry.getFilterCount()}`);
@@ -43,6 +45,10 @@ export const createConnector = (paramsRef) => {
         };
     }
 
+    // Resolve score/date ties consistently while browsing the live index.
+    requestBody.sort = [...(requestBody.sort || [{ _score: 'desc' }]),
+      { id: { order: 'asc', missing: '_last' } }, { _doc: 'asc' }];
+
     // If no search term is provided, return the request body as is
     if (!requestState.searchTerm) {
       // Apply any registered filters from our FilterRegistry service
@@ -75,6 +81,14 @@ export const createConnector = (paramsRef) => {
     knnPostProcess
   );
 
+  if (connector.onSearch) {
+    connector.onSearch = createGroupedSearch(connector.onSearch.bind(connector), state => ({
+      enabled: paramsRef.current.groupCaptures !== false,
+      params: paramsRef.current,
+      dateFilters: filterRegistry.applyFilters({}),
+      embedding: embeddingService.getEmbedding(state.searchTerm)
+    }));
+  }
   return connector;
 };
 

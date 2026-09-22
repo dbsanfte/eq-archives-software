@@ -1,11 +1,14 @@
-import React from "react";
+import React, { useMemo } from "react";
 import LabelRow from "./LabelRow";
 import TagRow from "./TagRow";
 import ResultBody from "./ResultBody";
 import ButtonRow from "./ButtonRow";
+import CaptureHistory from "./CaptureHistory";
+import { captureIdentity } from "../../search/CaptureIdentity";
 
 const CustomResultView = (context) => {
   const { onClickLink } = context;
+  const identity = useMemo(() => captureIdentity(context.result), [context.result]);
   const summary = context.result.llm_summary;
   let summaryHTML = "";
   if (summary?.raw) {
@@ -56,6 +59,7 @@ const CustomResultView = (context) => {
 
       {/* Button Row for further interactions */}
       <ButtonRow result={context.result} />
+      {identity && <CaptureHistory key={identity.key} identity={identity} />}
     </li>
   );
 };

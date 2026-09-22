@@ -124,3 +124,23 @@ describe('Connector', () => {
     });
   });
 });
+
+it('groups actual connector responses by default and honors the all-captures toggle', async () => {
+  const result = stamp => ({ _meta: { id: `websites/example.org/${stamp}/a` }, title: { raw: 'same page' } });
+  const onSearch = jest.fn().mockResolvedValue({ results: [result('20000101000000'), result('20010101000000')], totalResults: 2 });
+  ElasticsearchAPIConnector.mockReturnValueOnce({ onSearch });
+  const params = { current: { groupCaptures: true } };
+  const connector = createConnector(params);
+  const state = { searchTerm: 'cleric', current: 1, resultsPerPage: 20 };
+  expect((await connector.onSearch(state, {})).results).toHaveLength(1);
+  params.current = { groupCaptures: false };
+  expect((await connector.onSearch(state, {})).results).toHaveLength(2);
+});
+
+it('retains the selected sort and resolves ties by ID when browsing batches', () => {
+  createConnector({ current: {} });
+  const postProcess = ElasticsearchAPIConnector.mock.calls.at(-1)[1];
+  filterRegistry.applyFilters.mockImplementation(body => body);
+  const request = postProcess({ sort: [{ _score: 'desc' }] }, { searchTerm: '', sortField: 'capture_date', sortDirection: 'asc' });
+  expect(request.sort).toEqual([{ capture_date: 'asc' }, { id: { order: 'asc', missing: '_last' } }, { _doc: 'asc' }]);
+});
