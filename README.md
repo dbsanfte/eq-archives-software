@@ -191,10 +191,10 @@ prerequisites, Actions secrets, manifests, verification, and rollback.
 ## Contributing
 
 Open an [issue](https://github.com/dbsanfte/eq-archives-software/issues) for bugs
-or proposed changes, and submit pull requests against `master`. Include
-regression tests for changes to application behaviour and update the relevant
-documentation. The protected branch requires an up-to-date PR and the passing
-`Test and build frontend` check.
+or proposed changes, and submit pull requests against `master`. Include a
+regression test for every bug fix, using browser tests for layout and stacking
+issues, and update the relevant documentation. The protected branch requires
+an up-to-date PR and the passing `Test and build frontend` check.
 
 Use placeholders in examples. Keep credentials in local ignored files, runtime
 secret mounts, or GitHub Actions secrets. Browser configuration is public and

@@ -180,6 +180,8 @@
 }
 
 .App .sui-select__menu {
+  /* MUI date labels use z-index: 1, so menus must paint above them. */
+  z-index: 2;
   border: 1px solid var(--archive-border);
   background: var(--archive-surface);
   box-shadow: 0 6px 18px rgb(32 62 50 / 10%);
