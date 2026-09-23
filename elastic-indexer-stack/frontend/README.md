@@ -102,10 +102,9 @@ individual-record behavior.
 ## Document reader and comparisons
 
 Search cards show the short highlighted source excerpt before any generated
-summary. They start in a compact view with each **AI-generated summary** behind
-an expandable disclosure; **Show detailed cards** displays the complete summaries.
-The view choice lasts for the current search visit. Result cards still fetch only
-lightweight metadata and excerpts, not full document text.
+summary. They use a compact view with each **AI-generated summary** behind
+an expandable disclosure. Result cards still fetch only lightweight metadata
+and excerpts, not full document text.
 
 **Read document** is the full-text action on search result cards. It opens a
 dedicated reader with the complete indexed text,

@@ -2,7 +2,7 @@ import React from "react";
 import PropTypes from "prop-types";
 import "./ResultBody.css";
 
-function ResultBody({ summaryHTML, textHTML, compact }) {
+function ResultBody({ summaryHTML, textHTML }) {
   // Older records carry a processing placeholder instead of a summary.
   const hasSummary = summaryHTML && summaryHTML.trim() !== "[ Still awaiting LLM Enrichment... ]";
 
@@ -15,17 +15,12 @@ function ResultBody({ summaryHTML, textHTML, compact }) {
             <div dangerouslySetInnerHTML={{ __html: textHTML }} />
           </section>
         )}
-        {hasSummary && (compact ? (
+        {hasSummary && (
           <details className="result-summary result-summary--collapsed">
             <summary>AI-generated summary</summary>
             <div dangerouslySetInnerHTML={{ __html: summaryHTML }} />
           </details>
-        ) : (
-          <section className="result-summary">
-            <h3>AI-generated summary</h3>
-            <div dangerouslySetInnerHTML={{ __html: summaryHTML }} />
-          </section>
-        ))}
+        )}
         {!hasSummary && !textHTML && (
           <p className="archive-result-placeholder">Open the full text to explore this record.</p>
         )}
@@ -36,8 +31,7 @@ function ResultBody({ summaryHTML, textHTML, compact }) {
 
 ResultBody.propTypes = {
   summaryHTML: PropTypes.string.isRequired,
-  textHTML: PropTypes.string.isRequired,
-  compact: PropTypes.bool.isRequired
+  textHTML: PropTypes.string.isRequired
 };
 
 export default ResultBody;

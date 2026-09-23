@@ -2,7 +2,6 @@ import React from 'react';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { useMediaQuery } from '@mui/material';
 import CustomResultView from './CustomResultView';
-import ResultDisplayContext from './ResultDisplayContext';
 import ButtonRow from './ButtonRow';
 import LabelRow from './LabelRow';
 import TagRow from './TagRow';
@@ -50,13 +49,6 @@ test('renders source evidence before a collapsed AI summary, with full detail av
   expect(screen.getByText('Estimated: 1999')).toBeInTheDocument();
   const tags = [screen.getByText('Cleric'), screen.getByText('Wizard')];
   expect(tags[0].compareDocumentPosition(tags[1]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-});
-
-test('detailed cards display the complete AI summary after the source excerpt', () => {
-  render(<ResultDisplayContext.Provider value={false}><CustomResultView result={result} /></ResultDisplayContext.Provider>);
-  expect(screen.getByRole('heading', { name: 'AI-generated summary' }).closest('details')).toBeNull();
-  expect(screen.getByText('A useful summary')).toBeVisible();
-  expect(screen.getByText('A matching passage').compareDocumentPosition(screen.getByRole('heading', { name: 'AI-generated summary' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
 test('renders incomplete archive metadata without an empty snippet section', () => {
