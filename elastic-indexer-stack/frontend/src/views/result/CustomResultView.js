@@ -1,15 +1,13 @@
-import React, { useContext, useMemo } from "react";
+import React, { useMemo } from "react";
 import LabelRow from "./LabelRow";
 import TagRow from "./TagRow";
 import ResultBody from "./ResultBody";
 import ButtonRow from "./ButtonRow";
 import CaptureHistory from "./CaptureHistory";
 import { captureIdentity } from "../../search/CaptureIdentity";
-import ResultDisplayContext from "./ResultDisplayContext";
 
 const CustomResultView = (context) => {
   const { onClickLink } = context;
-  const compact = useContext(ResultDisplayContext);
   const identity = useMemo(() => captureIdentity(context.result), [context.result]);
   const returnTo = window.location.pathname === '/' ? window.location.pathname + window.location.search : '';
   const summary = context.result.llm_summary;
@@ -58,7 +56,6 @@ const CustomResultView = (context) => {
       <ResultBody
         summaryHTML={summaryHTML}
         textHTML={textHTML}
-        compact={compact}
       />
 
       {/* Button Row for further interactions */}

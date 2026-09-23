@@ -390,11 +390,8 @@ class FrontendBrowserTests(unittest.TestCase):
                     summary = card.locator('details.result-summary')
                     self.assertFalse(summary.evaluate('element => element.open'))
                     self.assertLess(card.locator('.result-text-snippet').bounding_box()['y'], summary.bounding_box()['y'])
-                    compact_height = card.bounding_box()['height']
-                    page.get_by_role('button', name='Show detailed cards', exact=True).click()
-                    expect(card.get_by_role('heading', name='AI-generated summary')).to_be_visible()
-                    self.assertGreater(card.bounding_box()['height'], compact_height)
-                    page.get_by_role('button', name='Show compact cards', exact=True).click()
+                    expect(page.get_by_role('button', name='Show detailed cards', exact=True)).to_have_count(0)
+                    expect(page.get_by_role('button', name='Show compact cards', exact=True)).to_have_count(0)
                     summary.locator('summary').click()
                     self.assertTrue(summary.evaluate('element => element.open'))
                     summary.locator('summary').click()
