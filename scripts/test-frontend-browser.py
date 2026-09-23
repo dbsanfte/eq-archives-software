@@ -293,6 +293,59 @@ class FrontendBrowserTests(unittest.TestCase):
                 finally:
                     context.close()
 
+    def test_results_per_page_keeps_its_selected_value_visible_on_mobile(self):
+        facets = {field: {"buckets": []} for field in (
+            "domain_name", "llm_content_flavour", "file_type", "mime_type",
+            "mailing_list_name", "llm_tags"
+        )}
+        facets["last_indexed"] = {"buckets": {}}
+
+        def archive(route):
+            if route.request.url.endswith('/_count'):
+                return route.fulfill(json={"count": 1})
+            return route.fulfill(json={
+                "hits": {"total": {"value": 10000, "relation": "gte"}, "hits": [{
+                    "_id": "website/one", "_score": 1,
+                    "_source": {"title": "One source", "url": "https://example.org/one"}
+                }]},
+                "aggregations": {"facet_bucket_all": {"doc_count": 10000, **facets}}
+            })
+
+        for width in (320, 390, 600, 768, 1280):
+            with self.subTest(width=width):
+                context = self.browser.new_context(
+                    viewport={"width": width, "height": 900},
+                    is_mobile=width <= 800, has_touch=width <= 800,
+                )
+                try:
+                    page = context.new_page()
+                    page.route('**/elasticsearch/**', archive)
+                    page.goto(self.base_url, wait_until='networkidle')
+                    expect(page.get_by_text('Showing sources 1–1 · 10,000+ matching captures')).to_be_visible()
+                    per_page = page.locator('.sui-results-per-page')
+                    selected = per_page.locator('.sui-select__single-value')
+
+                    def assert_selected_value(value):
+                        expect(selected).to_have_text(value)
+                        # React Select can keep the text in the DOM while clipping it to zero width.
+                        visible_width, text_width = selected.evaluate('''element => {
+                            const range = document.createRange();
+                            range.selectNodeContents(element);
+                            return [element.getBoundingClientRect().width, range.getBoundingClientRect().width];
+                        }''')
+                        self.assertGreaterEqual(visible_width + 0.5, text_width)
+                        self.assertTrue(page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
+
+                    assert_selected_value('20')
+                    if width <= 650:
+                        summary = page.locator('.archive-group-controls').bounding_box()
+                        self.assertGreaterEqual(per_page.bounding_box()['y'], summary['y'] + summary['height'])
+                    per_page.locator('.sui-select__control').click()
+                    per_page.get_by_role('option', name='40').click()
+                    assert_selected_value('40')
+                finally:
+                    context.close()
+
     def test_mcp_icon_and_connection_guide_work_on_mobile_and_desktop(self):
         for width in (320, 390, 1280):
             with self.subTest(width=width):

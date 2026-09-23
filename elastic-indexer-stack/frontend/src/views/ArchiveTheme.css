@@ -423,6 +423,20 @@
     flex-wrap: wrap;
   }
 
+  .App .sui-layout-main-header__inner {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .App .sui-results-per-page {
+    align-self: flex-start;
+  }
+
+  .App .sui-results-per-page .sui-select {
+    min-width: 84px;
+  }
+
   .App .sui-multi-checkbox-facet__option-label,
   .App .sui-facet-view-more,
   .App .sui-select__control {
