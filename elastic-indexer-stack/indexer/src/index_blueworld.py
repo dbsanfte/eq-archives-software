@@ -143,7 +143,7 @@ def main() -> int:
         return 0
     os.environ["SKIP_LLM_ENRICHMENT"] = "true"
     os.environ["LOCAL_REPO_PATH"] = str(args.repo)
-    es_manager = ElasticsearchManager()
+    es_manager = ElasticsearchManager(manage_index=False)
     embedder = BoundedArchiveEmbedder()
     indexer = Indexer(es_manager, embedder)
     indexed, skipped = index_paths(args.repo, paths, indexer, es_manager, args.limit)

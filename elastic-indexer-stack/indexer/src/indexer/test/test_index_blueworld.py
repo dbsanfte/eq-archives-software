@@ -1,11 +1,12 @@
 import hashlib
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
 import index_blueworld as recovery_job
+from indexer.es_manager import ElasticsearchManager
 
 
 def test_split_text_preserves_all_characters():
@@ -93,3 +94,14 @@ def test_index_paths_fails_if_document_is_empty(tmp_path):
     with pytest.raises(ValueError, match="unexpected generated documents"):
         recovery_job.index_paths(tmp_path, [path], indexer, es_manager)
     es_manager.get_client.return_value.index.assert_not_called()
+
+
+def test_recovery_connection_does_not_change_existing_index_settings():
+    with patch("indexer.es_manager.Elasticsearch") as factory:
+        client = factory.return_value
+        client.ping.return_value = True
+        manager = ElasticsearchManager(host="http://elasticsearch", port="9200",
+                                       manage_index=False)
+        assert manager.get_client() is client
+        client.indices.put_index_template.assert_not_called()
+        client.indices.create.assert_not_called()

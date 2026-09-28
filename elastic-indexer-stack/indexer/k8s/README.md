@@ -7,6 +7,7 @@ Kustomization. It reads the existing archive checkout on eqvm at
 the existing `eq-archive` Elasticsearch index. It uses the cluster's Nomic
 embedding service with the document prefix and 768-dimensional vectors.
 `SKIP_LLM_ENRICHMENT=true` prevents summaries, tags and other LLM work.
+The Job leaves the existing Elasticsearch index template and mappings untouched.
 
 The job verifies all files against the recovery manifest before indexing. It
 uses each archive-relative path as the Elasticsearch document ID, skips IDs

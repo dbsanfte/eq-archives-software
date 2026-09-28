@@ -145,7 +145,8 @@ class ElasticsearchManager:
         es_request_timeout: int=300, 
         ssl_verify_certs: bool=True, 
         ssl_show_warn: bool=True,
-        logger: logging.Logger=None
+        logger: logging.Logger=None,
+        manage_index: bool=True
     ):
         self._host = host or os.environ.get("ELASTICSEARCH_HOST", "http://elasticsearch")
         self._port = port or os.environ.get("ELASTICSEARCH_PORT", "9200")
@@ -167,6 +168,7 @@ class ElasticsearchManager:
         self._ssl_show_warn = os.environ.get("ELASTICSEARCH_SSL_SHOW_WARN", ssl_show_warn)
         self._es_client = es_client
         self._logger = logger or logging.getLogger(__name__)
+        self._manage_index = manage_index
 
     def _create_client(self):
         if self._es_client is not None:
@@ -190,8 +192,9 @@ class ElasticsearchManager:
             raise exceptions.ConnectionError("Could not ping Elasticsearch.")
         self._logger.info("Successfully connected to Elasticsearch.")
         self._es_client = es
-        self._create_index_template()
-        self._initialize_es_index()
+        if self._manage_index:
+            self._create_index_template()
+            self._initialize_es_index()
         return es
 
     def get_client(self):
