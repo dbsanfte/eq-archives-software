@@ -21,7 +21,7 @@ the raw Pages URLs return HTTP 200:
 
 ```bash
 docker build --tag eqarchives-indexer:blueworld-recovery elastic-indexer-stack/indexer
-docker save eqarchives-indexer:blueworld-recovery | sudo -n k3s ctr images import -
+docker save eqarchives-indexer:blueworld-recovery | sudo -n k3s ctr -n k8s.io images import -
 sudo -n kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml apply \
   -f elastic-indexer-stack/indexer/k8s/blueworld-index-job.yaml
 sudo -n kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml -n eqarchives-es \
