@@ -187,6 +187,12 @@ secrets, index names, and replica counts before using it for your own stack.
 Elasticsearch and enrichment model servers must be provisioned separately.
 The production frontend deployment below provisions its own Nomic embedding service.
 
+For the one-off BlueWorld newsgroup recovery, the
+[Kubernetes indexing Job](elastic-indexer-stack/indexer/k8s/README.md) validates
+the recovered source manifest and indexes only those articles from the existing
+eqvm archive checkout. It uses the deployed Nomic service and skips LLM
+enrichment; it does not require RabbitMQ or the file-finder loop.
+
 ## Deployment
 
 The frontend, read-only MCP connector and local **llama.cpp / Nomic Embed v1.5 Q8_0** service deploy
