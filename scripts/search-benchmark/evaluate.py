@@ -31,9 +31,11 @@ def scores(ranking, pool, ratings, collapse=False):
     complete50 = unjudged == 0
     top_grades = [ratings.get(hit["_id"], 0) for hit in top]
     ideal = dcg(sorted(known.values(), reverse=True)[:10])
+    ideal50 = dcg(sorted(known.values(), reverse=True)[:50])
     first = next((rank for rank, grade in enumerate(top_grades, 1) if grade >= 2), None)
     found = {key(hit) for hit in ranked[:50] if ratings.get(hit["_id"], 0) >= 2}
     return {"ndcg10": dcg(top_grades) / ideal if complete10 and ideal else None,
+            "ndcg50": dcg([ratings.get(hit["_id"], 0) for hit in ranked[:50]]) / ideal50 if complete50 and ideal50 else None,
             "precision10": sum(grade >= 2 for grade in top_grades) / 10 if complete10 else None,
             "mrr10": (1 / first if first else 0) if complete10 and relevant else None,
             "pooled_recall50": len(found & relevant) / len(relevant) if complete50 and relevant else None,
@@ -52,6 +54,38 @@ def paired_interval(differences, seed=20261005):
     generator = random.Random(seed)
     means = sorted(statistics.mean(generator.choices(differences, k=len(differences))) for _ in range(1000))
     return {"mean": statistics.mean(differences), "ci95": [percentile(means, 0.025), percentile(means, 0.975)], "queries": len(differences)}
+
+
+def average_ranking(by_config, query_ids):
+    """Descriptive ranking over the same judged queries for every configuration."""
+    if not by_config:
+        return {"query_ids": [], "leaderboard": [], "winners": []}
+    common = sorted(qid for qid in query_ids if all(qid in rows and rows[qid]["grouped"]["ndcg10"] is not None for rows in by_config.values()))
+    if not common:
+        return {"query_ids": common, "leaderboard": [], "winners": []}
+    entries = [{"config_id": config_id, "mean_ndcg10": statistics.mean(rows[qid]["grouped"]["ndcg10"] for qid in common)}
+               for config_id, rows in by_config.items()]
+    entries.sort(key=lambda row: (-row["mean_ndcg10"], row["config_id"]))
+    winners = [row["config_id"] for row in entries if math.isclose(row["mean_ndcg10"], entries[0]["mean_ndcg10"], rel_tol=0, abs_tol=1e-12)]
+    return {"query_ids": common, "leaderboard": entries, "winners": winners}
+
+
+def resolved_parameters(config, contract):
+    """Pin an experiment to the defaults recorded with its retrieval snapshot."""
+    defaults, engine = contract.get("defaults", {}), contract.get("engine", {})
+    mode = config.get("mode", "hybrid")
+    fields = config.get("lexical_fields", {field: 1 for field in engine.get("searchFields", [])})
+    result = {"id": config["id"], "mode": mode, "enableSemanticSearch": mode != "lexical", "lexical_fields": fields,
+              "operator_queries": "retain native lexical constraints"}
+    if mode != "lexical":
+        result.update({name: config.get(name, defaults.get(name)) for name in ("k", "num_candidates", "boost")})
+        result["vector_fields"] = config.get("vector_fields", {
+            field: 1 for field in engine.get("vectorFields", []) + [path + ".vector" for path in engine.get("nestedVectorFields", [])]})
+        if "similarity" in config:
+            result["similarity"] = config["similarity"]
+    if mode == "rrf":
+        result["rrf_constant"] = config.get("rrf_constant", 60)
+    return result
 
 
 def valid_ratings(directory, paths, allow_model):
@@ -94,6 +128,7 @@ def report(args):
                "es_ms": run["es_ms"], "request_ms": run["request_ms"], "window_reached": run["window_reached"]}
         if manifest.get("depth", 50) < 50:
             for mode in ("raw", "grouped"):
+                row[mode]["ndcg50"] = None
                 row[mode]["pooled_recall50"] = None
         records.append(row)
     for config in manifest["configs"]:
@@ -105,8 +140,9 @@ def report(args):
             for mode in ("raw", "grouped"):
                 value[mode] = {metric: statistics.mean([row[mode][metric] for row in rows if row[mode][metric] is not None])
                                if any(row[mode][metric] is not None for row in rows) else None
-                               for metric in ("ndcg10", "precision10", "mrr10", "pooled_recall50", "judged_fraction50")}
+                               for metric in ("ndcg10", "ndcg50", "precision10", "mrr10", "pooled_recall50", "judged_fraction50")}
                 value[mode]["scorable_queries"] = sum(row[mode]["ndcg10"] is not None for row in rows)
+                value[mode]["scorable_queries50"] = sum(row[mode]["ndcg50"] is not None for row in rows)
             for category in sorted({row["category"] for row in rows}):
                 values = [row["grouped"]["ndcg10"] for row in rows if row["category"] == category and row["grouped"]["ndcg10"] is not None]
                 value["by_category"][category] = {"queries": len(values), "ndcg10": statistics.mean(values) if values else None}
@@ -128,24 +164,38 @@ def report(args):
     all_tune = {qid for qid, q in queries.items() if q["split"] == "tune"}
     comparable = [qid for qid in all_tune if all(rows[qid]["grouped"]["ndcg10"] is not None for rows in by_config.values())]
     winner = max(by_config, key=lambda config_id: statistics.mean(by_config[config_id][qid]["grouped"]["ndcg10"] for qid in comparable)) if comparable else None
+    observed = average_ranking(by_config, queries)
+    parameters = {config["id"]: resolved_parameters(config, manifest.get("frontend_contract", {})) for config in manifest["configs"]}
     origin_counts = {kind: sum(origin == kind for docs in origins.values() for origin in docs.values()) for kind in ("human", "model")}
     result = {"manifest_sha256": digest(manifest), "rating_origins": origin_counts, "summary": summary, "comparisons": comparison, "per_query": records,
               "tune_winner": winner, "common_scorable_tune_queries": len(comparable),
+              "tune_winner_parameters": parameters.get(winner),
+              "observed_average_ranking": observed,
+              "observed_average_winner_parameters": [parameters[config_id] for config_id in observed["winners"]],
               "recommendation_status": "provisional: model judgments need human calibration and completed-corpus validation" if origin_counts["model"] else ("human judgments; verify corpus coverage and regressions before changing defaults" if origin_counts["human"] else "unjudged: collect source-based judgments before selecting defaults"),
               "limitations": ["Recall is relative to the pooled judgments, not exhaustive corpus recall.",
                               "Top-10 metrics require complete top-10 judgments; recall@50 requires complete top-50 judgments. Partial deeper pools remain explicit.",
+                              "NDCG@50 requires complete top-50 judgments and a collection depth of at least 50.",
+                              "The observed average leaderboard uses all common scorable queries; it is descriptive and is not a held-out selection result.",
                               "No-relevant-in-pool queries have undefined NDCG and are reported through precision and coverage.",
                               "Latency measures sequential search requests under current cluster load; it excludes browser painting, facets and cold embedding time.",
                               "Native lexical constraints remain active even for the semantic-only experiment."]}
     save(directory / "report.json", result)
     lines = ["# Search relevance pilot", "", f"Cohort: {manifest['cohort_count']['value']:,} documents; {len(queries)} queries; {len(manifest['configs'])} configurations.",
              f"Judgments: {origin_counts['human']} human, {origin_counts['model']} model.", "", "## Grouped results", "",
-             "| Configuration | Tune NDCG@10 | Validation NDCG@10 | P@10 | P95 search ms |",
-             "| --- | ---: | ---: | ---: | ---: |"]
+             "| Configuration | Tune NDCG@10 | Validation NDCG@10 | All NDCG@50 | P@10 | Pooled recall@50 | P95 search ms |",
+             "| --- | ---: | ---: | ---: | ---: | ---: | ---: |"]
     def fmt(value):
         return f"{value:.3f}" if value is not None else "unjudged"
     for config_id, values in summary.items():
-        lines.append(f"| {config_id} | {fmt(values['tune']['grouped']['ndcg10'])} | {fmt(values['validation']['grouped']['ndcg10'])} | {fmt(values['all']['grouped']['precision10'])} | {fmt(values['all']['p95_ms'])} |")
+        lines.append(f"| {config_id} | {fmt(values['tune']['grouped']['ndcg10'])} | {fmt(values['validation']['grouped']['ndcg10'])} | {fmt(values['all']['grouped']['ndcg50'])} | {fmt(values['all']['grouped']['precision10'])} | {fmt(values['all']['grouped']['pooled_recall50'])} | {fmt(values['all']['p95_ms'])} |")
+    lines += ["", "## Observed average ranking", "",
+              f"Mean grouped NDCG@10 over {len(observed['query_ids'])} common scorable queries. This describes all observed queries, including validation; the tuning selection remains separate.", "",
+              "| Rank | Configuration | Average NDCG@10 |", "| ---: | --- | ---: |"]
+    for rank, entry in enumerate(observed["leaderboard"], 1):
+        lines.append(f"| {rank} | {entry['config_id']} | {fmt(entry['mean_ndcg10'])} |")
+    lines += ["", "Best observed average: " + (", ".join(observed["winners"]) or "unjudged") + ".", "", "Resolved parameters:", "", "```json",
+              json.dumps(result["observed_average_winner_parameters"], indent=2), "```"]
     lines += ["", f"Tune winner on {len(comparable)} common scorable queries: {winner or 'none; judgments needed'}.",
               result["recommendation_status"], "", "## Limits", ""] + ["- " + text for text in result["limitations"]]
     lines += ["", "## Validation differences from " + args.baseline, ""]
@@ -155,7 +205,7 @@ def report(args):
             lines.append(f"- {config_id}: {interval['mean']:+.3f}; paired bootstrap 95% interval [{interval['ci95'][0]:+.3f}, {interval['ci95'][1]:+.3f}], {interval['queries']} queries.")
     lines.append("")
     (directory / "report.md").write_text("\n".join(lines))
-    print(f"Report written; {origin_counts['human']} human and {origin_counts['model']} model ratings. Tune winner: {winner or 'unjudged'}.")
+    print(f"Report written; {origin_counts['human']} human and {origin_counts['model']} model ratings. Tune winner: {winner or 'unjudged'}. Best observed average: {', '.join(observed['winners']) or 'unjudged'}.")
 
 
 def review(args):

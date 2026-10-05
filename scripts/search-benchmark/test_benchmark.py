@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 from ann import exact_documents
 from benchmark import BenchmarkError, Elasticsearch, HTTP, Snapshot, build_body, digest, filter_matches, grouped, load, rrf, save, validate_suite, validate_vector
-from evaluate import paired_interval, report, review, scores, valid_ratings
+from evaluate import average_ranking, paired_interval, report, resolved_parameters, review, scores, valid_ratings
 from grade import response_ratings
 
 
@@ -28,6 +28,7 @@ class RankingTests(unittest.TestCase):
     def test_perfect_ranking_and_missed_known_target(self):
         good = scores(self.pool, self.pool, self.grades)
         self.assertEqual(good["ndcg10"], 1)
+        self.assertEqual(good["ndcg50"], 1)
         self.assertEqual(good["mrr10"], 1)
         missed = scores([hit("c"), hit("b")], self.pool, self.grades)
         self.assertLess(missed["ndcg10"], good["ndcg10"])
@@ -52,6 +53,34 @@ class RankingTests(unittest.TestCase):
         self.assertEqual(result["precision10"], 1)
         self.assertIsNone(result["pooled_recall50"])
         self.assertEqual(result["unjudged50"], 2)
+        self.assertIsNone(result["ndcg50"])
+
+    def test_deeper_results_receive_their_actual_rank_discount(self):
+        import math
+        ranking = [hit(str(n)) for n in range(12)]
+        ratings = {str(n): (3 if n == 11 else 0) for n in range(12)}
+        result = scores(ranking, ranking, ratings)
+        self.assertEqual(result["ndcg10"], 0)
+        self.assertAlmostEqual(result["ndcg50"], 1 / math.log2(13))
+        self.assertEqual(result["pooled_recall50"], 1)
+        self.assertEqual(scores(list(reversed(ranking)), ranking, ratings)["ndcg50"], 1)
+
+    def test_average_ranking_uses_common_queries_instead_of_incomparable_means(self):
+        by_config = {
+            "candidate": {"a": {"grouped": {"ndcg10": 0.8}}, "b": {"grouped": {"ndcg10": 0.0}}},
+            "baseline": {"a": {"grouped": {"ndcg10": 0.7}}, "b": {"grouped": {"ndcg10": None}}}}
+        result = average_ranking(by_config, ["a", "b"])
+        self.assertEqual(result["query_ids"], ["a"])
+        self.assertEqual(result["winners"], ["candidate"])
+        self.assertEqual(result["leaderboard"][0], {"config_id": "candidate", "mean_ndcg10": 0.8})
+
+    def test_average_ranking_preserves_ties_and_cannot_choose_without_judgments(self):
+        by_config = {name: {"q": {"grouped": {"ndcg10": 0.5}}} for name in ("b", "a")}
+        self.assertEqual(average_ranking(by_config, ["q"])["winners"], ["a", "b"])
+        by_config["a"]["q"]["grouped"]["ndcg10"] = None
+        self.assertEqual(average_ranking(by_config, ["q"])["leaderboard"], [])
+        self.assertEqual(average_ranking(by_config, ["q"])["winners"], [])
+        self.assertEqual(average_ranking({}, ["q"])["query_ids"], [])
 
     def test_no_positive_judgments_have_undefined_ndcg(self):
         result = scores(self.pool, self.pool, {"a": 0, "b": 0, "c": 0})
@@ -114,6 +143,23 @@ class RequestTests(unittest.TestCase):
         result = build_body(exported, {"mode": "semantic"}, None, {"boost": 5})
         self.assertIn("query", result)
         self.assertNotIn("knn", result)
+
+    def test_winning_parameters_resolve_against_recorded_defaults(self):
+        contract = {"defaults": {"k": 10, "num_candidates": 100, "boost": 5},
+                    "engine": {"searchFields": ["text_full", "llm_summary"], "vectorFields": ["llm_summary_vector"], "nestedVectorFields": ["text"]}}
+        config = {"id": "candidate", "mode": "hybrid", "k": 50, "num_candidates": 250, "similarity": 0.65}
+        result = resolved_parameters(config, contract)
+        self.assertEqual(result["k"], 50)
+        self.assertEqual(result["num_candidates"], 250)
+        self.assertEqual(result["boost"], 5)
+        self.assertEqual(result["similarity"], 0.65)
+        self.assertTrue(result["enableSemanticSearch"])
+        self.assertEqual(result["lexical_fields"], {"text_full": 1, "llm_summary": 1})
+        self.assertEqual(result["vector_fields"], {"llm_summary_vector": 1, "text.vector": 1})
+        lexical = resolved_parameters({"id": "lexical", "mode": "lexical"}, contract)
+        self.assertNotIn("k", lexical)
+        self.assertNotIn("vector_fields", lexical)
+        self.assertFalse(lexical["enableSemanticSearch"])
 
     def test_missing_semantic_branches_fail_instead_of_silent_fallback(self):
         exported = self.exported()
@@ -231,6 +277,9 @@ class JudgmentTests(unittest.TestCase):
                 report(SimpleNamespace(run=directory, ratings=[path], allow_model_ratings=False, baseline="current-hybrid"))
             result = load(directory / "report.json")
             self.assertEqual(result["tune_winner"], "candidate")
+            self.assertEqual(result["observed_average_ranking"]["query_ids"], ["t", "v"])
+            self.assertEqual(result["observed_average_ranking"]["winners"], ["candidate", "current-hybrid"])
+            self.assertEqual(result["tune_winner_parameters"]["id"], "candidate")
             self.assertLess(result["comparisons"]["candidate"]["validation_paired_ndcg10"]["mean"], 0)
             manifest = load(directory / "manifest.json")
             manifest["depth"] = 10
@@ -238,6 +287,7 @@ class JudgmentTests(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 report(SimpleNamespace(run=directory, ratings=[path], allow_model_ratings=False, baseline="current-hybrid"))
             self.assertIsNone(load(directory / "report.json")["summary"]["candidate"]["all"]["grouped"]["pooled_recall50"])
+            self.assertIsNone(load(directory / "report.json")["summary"]["candidate"]["all"]["grouped"]["ndcg50"])
 
     def test_offline_review_escapes_source_and_preserves_complete_text(self):
         with tempfile.TemporaryDirectory() as folder:
