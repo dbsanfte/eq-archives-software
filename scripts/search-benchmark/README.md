@@ -129,6 +129,10 @@ than truncated. Per-pair source/query/prompt hashes make grading resumable. The
 default character budget is 20 million across all attempts; exceeding it stops
 with existing judgments retained. Usage and a recorded pricing estimate are
 saved separately, including cached input and reasoning/output tokens.
+The default first screen grades the union of top-10 raw/grouped results from all
+configurations. It supports NDCG/precision/MRR@10 while leaving deeper results
+explicitly unjudged. Rerun `grade --depth 50` to extend the same source-bound
+judgments for pooled recall@50; already graded pairs are reused.
 See [the model documentation](https://developers.openai.com/api/docs/models/gpt-6-luna)
 and [structured outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
 
@@ -152,8 +156,9 @@ python3 scripts/search-benchmark/benchmark.py report \
 `report.json` and `report.md` contain raw/grouped NDCG@10, precision@10, MRR@10,
 **pooled** recall@50, judgment coverage, per-query regressions, category results,
 latency and paired bootstrap intervals on validation queries. Recall's denominator
-is the judged pool, not every relevant document in the archive. Unjudged top-50
-results suppress relevance metrics; they are not silently graded irrelevant.
+is the judged pool, not every relevant document in the archive. Unjudged top-10
+results suppress top-10 metrics; unjudged top-50 results suppress recall@50.
+Unknown judgments are not silently graded irrelevant.
 Queries with no positives in the pool have undefined NDCG/recall and are counted
 through precision/coverage. Grading zero returned results does not prove the
 corpus lacks an answer. Pool additional configurations and known targets when

@@ -44,6 +44,15 @@ class RankingTests(unittest.TestCase):
     def test_short_pages_are_not_given_perfect_precision(self):
         self.assertEqual(scores([hit("a")], self.pool, self.grades)["precision10"], 0.1)
 
+    def test_unjudged_deeper_results_do_not_hide_a_complete_top_ten(self):
+        ranking = [hit(str(n)) for n in range(12)]
+        ratings = {str(n): 3 for n in range(10)}
+        result = scores(ranking, ranking, ratings)
+        self.assertEqual(result["ndcg10"], 1)
+        self.assertEqual(result["precision10"], 1)
+        self.assertIsNone(result["pooled_recall50"])
+        self.assertEqual(result["unjudged50"], 2)
+
     def test_no_positive_judgments_have_undefined_ndcg(self):
         result = scores(self.pool, self.pool, {"a": 0, "b": 0, "c": 0})
         self.assertIsNone(result["ndcg10"])

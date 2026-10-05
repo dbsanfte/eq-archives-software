@@ -27,15 +27,16 @@ def scores(ranking, pool, ratings, collapse=False):
     relevant = {identity for identity, grade in known.items() if grade >= 2}
     top = ranked[:10]
     unjudged = sum(hit["_id"] not in ratings for hit in ranked[:50])
-    complete = unjudged == 0
+    complete10 = all(hit["_id"] in ratings for hit in top)
+    complete50 = unjudged == 0
     top_grades = [ratings.get(hit["_id"], 0) for hit in top]
     ideal = dcg(sorted(known.values(), reverse=True)[:10])
     first = next((rank for rank, grade in enumerate(top_grades, 1) if grade >= 2), None)
     found = {key(hit) for hit in ranked[:50] if ratings.get(hit["_id"], 0) >= 2}
-    return {"ndcg10": dcg(top_grades) / ideal if complete and ideal else None,
-            "precision10": sum(grade >= 2 for grade in top_grades) / 10 if complete else None,
-            "mrr10": (1 / first if first else 0) if complete and relevant else None,
-            "pooled_recall50": len(found & relevant) / len(relevant) if complete and relevant else None,
+    return {"ndcg10": dcg(top_grades) / ideal if complete10 and ideal else None,
+            "precision10": sum(grade >= 2 for grade in top_grades) / 10 if complete10 else None,
+            "mrr10": (1 / first if first else 0) if complete10 and relevant else None,
+            "pooled_recall50": len(found & relevant) / len(relevant) if complete50 and relevant else None,
             "judged_fraction50": 1 - unjudged / min(50, len(ranked)) if ranked else 1,
             "unjudged50": unjudged, "known_relevant": len(relevant), "returned": len(ranked)}
 
@@ -132,6 +133,7 @@ def report(args):
               "tune_winner": winner, "common_scorable_tune_queries": len(comparable),
               "recommendation_status": "provisional: model judgments need human calibration and completed-corpus validation" if origin_counts["model"] else ("human judgments; verify corpus coverage and regressions before changing defaults" if origin_counts["human"] else "unjudged: collect source-based judgments before selecting defaults"),
               "limitations": ["Recall is relative to the pooled judgments, not exhaustive corpus recall.",
+                              "Top-10 metrics require complete top-10 judgments; recall@50 requires complete top-50 judgments. Partial deeper pools remain explicit.",
                               "No-relevant-in-pool queries have undefined NDCG and are reported through precision and coverage.",
                               "Latency measures sequential search requests under current cluster load; it excludes browser painting, facets and cold embedding time.",
                               "Native lexical constraints remain active even for the semantic-only experiment."]}

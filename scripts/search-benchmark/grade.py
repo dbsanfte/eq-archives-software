@@ -65,11 +65,15 @@ def grade(args):
     if usage["signature"] != signature:
         raise BenchmarkError("Grading prompt changed; use a separate rating file/run")
     skipped = []
+    rankings = jsonlines(directory / "runs.jsonl")
+    selected = {}
+    for ranking in rankings:
+        selected.setdefault(ranking["query_id"], set()).update(hit["_id"] for mode in ("raw", "grouped") for hit in ranking[mode][:args.depth])
     key = Path(args.api_key_file).read_text().strip()
     client = HTTP("https://api.openai.com/v1", {"Authorization": "Bearer " + key})
     with path.open("a") as stream:
         for query in manifest["queries"]:
-            documents = list(pool.get(query["id"], []))
+            documents = [hit for hit in pool.get(query["id"], []) if hit["_id"] in selected.get(query["id"], set()) or hit["_id"] in query.get("known_relevant_ids", [])]
             random.Random(digest([query["id"], signature])).shuffle(documents)
             pending = []
             for hit in documents:

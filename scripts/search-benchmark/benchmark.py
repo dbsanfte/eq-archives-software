@@ -469,6 +469,7 @@ def parser():
     judge.add_argument("--run", required=True)
     judge.add_argument("--api-key-file", required=True)
     judge.add_argument("--batch-size", type=int, default=8, choices=range(1, 17))
+    judge.add_argument("--depth", type=int, default=10, choices=[10, 20, 50], help="Pool raw/grouped results to this rank across configurations; default is an initial top-10 screen")
     judge.add_argument("--max-input-characters", type=int, default=20_000_000)
     judge.add_argument("--max-source-characters", type=int, default=200_000)
     judge.add_argument("--pause", type=float, default=0.3)
