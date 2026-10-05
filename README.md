@@ -60,7 +60,7 @@ browser configuration or JavaScript bundle.
 | [`elastic-indexer-stack/indexer/src/indexer/resources/`](elastic-indexer-stack/indexer/src/indexer/resources/) | Enrichment prompts and response schemas |
 | [`elastic-indexer-stack/k8s-manifests/`](elastic-indexer-stack/k8s-manifests/) | Production frontend and Nomic embedding manifests, plus backend reference configuration |
 | [`elastic-indexer-stack/docker-compose.yml`](elastic-indexer-stack/docker-compose.yml) | Reference Compose configuration for the services |
-| [`scripts/`](scripts/) | Frontend deployment, runtime secret reconciliation, and smoke checks |
+| [`scripts/`](scripts/) | Deployment, runtime secrets, smoke checks and search relevance evaluation |
 | [`.github/workflows/elastic-indexer-stack-cicd.yml`](.github/workflows/elastic-indexer-stack-cicd.yml) | Frontend pull-request checks and deployment from `master` |
 
 ## Connect through MCP
@@ -205,7 +205,9 @@ character, including whitespace and line endings. Each request has at most 480
 tokens including `search_document:` and special tokens, with up to roughly 48
 tokens of overlap. This fits the deployed 512-token server without embedding
 sentences just to choose boundaries. Other embedding models retain the existing
-chunker. Retrieval quality still needs evaluation against an archive query set.
+chunker. The [search relevance benchmark](scripts/search-benchmark/README.md)
+compares lexical, semantic and hybrid settings against a reserved archive query
+set, with source-based judgments, raw/grouped metrics and recorded versions.
 
 The [broad text reindex Job](elastic-indexer-stack/indexer/k8s/README.md#broad-text-reindex)
 repairs existing extracted text and rebuilds Nomic chunks in place. It preserves

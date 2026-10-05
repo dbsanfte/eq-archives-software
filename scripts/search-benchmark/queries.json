@@ -1,0 +1,546 @@
+[
+  {
+    "id": "q001",
+    "text": "ancient cyclops",
+    "intent": "Discussions of the Ancient Cyclops, including its spawn and the Journeyman's Boots quest.",
+    "category": "names",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q002",
+    "text": "Journeyman Boots",
+    "intent": "Quest, acquisition, or use of Journeyman's Boots; incidental signatures are insufficient.",
+    "category": "names",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q003",
+    "text": "Lambent armor",
+    "intent": "Bard Lambent armour quests, ingredients, stats, or usefulness.",
+    "category": "names",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q004",
+    "text": "Cazic Thule",
+    "intent": "Discussions of the deity, dungeon, or encounter; a server name alone is insufficient.",
+    "category": "names",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q005",
+    "text": "Fungi Covered Scale Tunic",
+    "intent": "Stats, acquisition, or uses of the Fungi Covered Scale Tunic.",
+    "category": "names",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q006",
+    "text": "Flowing Black Silk Sash",
+    "intent": "Haste, acquisition, or uses of the Flowing Black Silk Sash.",
+    "category": "names",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q007",
+    "text": "how do bards twist several songs at once",
+    "intent": "Instructions or experience about combining bard songs by repeatedly switching them.",
+    "category": "questions",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q008",
+    "text": "how did warriors keep monsters attacking them instead of healers",
+    "intent": "Warrior aggro generation, taunt, weapons, or group tactics.",
+    "category": "questions",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q009",
+    "text": "why does charm break early",
+    "intent": "Mechanics, reliability, or tactics for charm breaking before its nominal duration.",
+    "category": "questions",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q010",
+    "text": "where can a low level character find a group",
+    "intent": "Concrete grouping areas or approaches for low level characters.",
+    "category": "questions",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q011",
+    "text": "how can I recover my corpse after dying in a dungeon",
+    "intent": "Corpse retrieval techniques or difficulties in dungeon deaths.",
+    "category": "questions",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q012",
+    "text": "can a bard cast songs while running",
+    "intent": "Bard song casting or effects during movement, including kiting.",
+    "category": "questions",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q013",
+    "text": "bard solo kiting",
+    "intent": "Practical bard solo kiting discussion; bard presence in an unrelated group is insufficient.",
+    "category": "research",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q014",
+    "text": "necromancer mana regeneration",
+    "intent": "Necromancer mana regeneration spells, efficiency, or tradeoffs.",
+    "category": "research",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q015",
+    "text": "cleric complete heal efficiency",
+    "intent": "Complete Heal mechanics, mana efficiency, or effective use.",
+    "category": "research",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q016",
+    "text": "enchanter crowd control",
+    "intent": "Mesmerize, charm, lull, or other enchanter crowd control tactics.",
+    "category": "research",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q017",
+    "text": "wizard spell resist rates",
+    "intent": "Wizard spell resists, debuffs, or practical impact on damage.",
+    "category": "research",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q018",
+    "text": "tinkering skill progression",
+    "intent": "Recipes, skill raising, components, or costs for tinkering.",
+    "category": "research",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q019",
+    "text": "pottery trivial levels",
+    "intent": "Recipe trivial levels or pottery progression advice.",
+    "category": "research",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q020",
+    "text": "monk weight limit",
+    "intent": "Monk weight effects, limits, penalties, or gear tradeoffs.",
+    "category": "research",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q021",
+    "text": "selo movement speed",
+    "intent": "Selo's bard movement song mechanics, instruments, or speed comparisons.",
+    "category": "research",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q022",
+    "text": "mana song stacking",
+    "intent": "Whether bard mana songs stack with other mana regeneration effects.",
+    "category": "research",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q023",
+    "text": "bard melee damage",
+    "intent": "Bard melee damage, weapons, skills, or relative effectiveness.",
+    "category": "research",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q024",
+    "text": "pet experience penalty",
+    "intent": "Whether and how pets affect experience gains.",
+    "category": "research",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q025",
+    "text": "what changed when Kunark was released",
+    "intent": "Contemporary or retrospective accounts of changes due to Kunark; a casual mention is insufficient.",
+    "category": "history",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q026",
+    "text": "bard song nerf patch",
+    "intent": "A game update that weakened or changed bard songs.",
+    "category": "history",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q027",
+    "text": "hybrid class experience penalty",
+    "intent": "Class experience penalties, removal, balance, or grouping effects.",
+    "category": "history",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q028",
+    "text": "planes raid strategy",
+    "intent": "Tactics for raids in the planes, including encounters or coordination.",
+    "category": "history",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q029",
+    "text": "JBoots",
+    "intent": "Quest, acquisition, or use of Journeyman's Boots, commonly called JBoots.",
+    "category": "acronyms",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q030",
+    "text": "FBSS haste",
+    "intent": "Haste or acquisition of Flowing Black Silk Sash.",
+    "category": "acronyms",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q031",
+    "text": "AE kiting",
+    "intent": "Area effect kiting mechanics or tactics; unrelated area effect spells are insufficient.",
+    "category": "acronyms",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q032",
+    "text": "SoW versus Selo",
+    "intent": "Comparison of Spirit of Wolf and Selo's movement effects.",
+    "category": "acronyms",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q033",
+    "text": "fear",
+    "intent": "EverQuest fear spells, fear kiting, or fear mechanics; ordinary emotional fear is irrelevant.",
+    "category": "ambiguous",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q034",
+    "text": "resist",
+    "intent": "EverQuest spell resistance and resist gear or tactics.",
+    "category": "ambiguous",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q035",
+    "text": "twisting",
+    "intent": "Bard song twisting in EverQuest.",
+    "category": "ambiguous",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q036",
+    "text": "camp",
+    "intent": "EverQuest spawn camps, camp etiquette, or camping mechanics.",
+    "category": "ambiguous",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q037",
+    "text": "bard charm resists",
+    "intent": "Bard charm resistance or reliability.",
+    "category": "typos",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q038",
+    "text": "jounreyman boots",
+    "intent": "Quest, acquisition, or use of Journeyman's Boots despite the misspelling.",
+    "category": "typos",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q039",
+    "text": "necro man regen",
+    "intent": "Necromancer mana regeneration, including abbreviated discussion.",
+    "category": "typos",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q040",
+    "text": "selos accellerando",
+    "intent": "Selo's Accelerando bard song, mechanics, or instrument effects.",
+    "category": "typos",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q041",
+    "text": "\"Lambent\" AND \"armor\"",
+    "intent": "Bard Lambent armour discussion containing both constrained terms.",
+    "category": "constraints",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q042",
+    "text": "\"ancient cyclops\"",
+    "intent": "Discussions containing the exact phrase ancient cyclops.",
+    "category": "constraints",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q043",
+    "text": "charm AND bard NOT enchanter",
+    "intent": "Bard charm discussion respecting the lexical exclusion of enchanter.",
+    "category": "constraints",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q044",
+    "text": "\"complete heal\" OR \"complete healing\"",
+    "intent": "Discussion of the cleric Complete Heal spell using either quoted phrase.",
+    "category": "constraints",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q045",
+    "text": "charm breaks",
+    "intent": "Charm reliability within the bard mailing list.",
+    "category": "filters",
+    "split": "validation",
+    "filters": [
+      {
+        "field": "mailing_list_name",
+        "values": [
+          "eqbards"
+        ],
+        "type": "all"
+      }
+    ],
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q046",
+    "text": "wizard resist",
+    "intent": "Wizard spell resists within the wizard mailing list.",
+    "category": "filters",
+    "split": "tune",
+    "filters": [
+      {
+        "field": "mailing_list_name",
+        "values": [
+          "eq_wizards"
+        ],
+        "type": "all"
+      }
+    ],
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q047",
+    "text": "tinkering recipes",
+    "intent": "Tinkering recipes within the tinkering mailing list.",
+    "category": "filters",
+    "split": "tune",
+    "filters": [
+      {
+        "field": "mailing_list_name",
+        "values": [
+          "EQ_Tinkering"
+        ],
+        "type": "all"
+      }
+    ],
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q048",
+    "text": "mana regeneration",
+    "intent": "Mana regeneration discussion in Yahoo Groups sources.",
+    "category": "filters",
+    "split": "validation",
+    "filters": [
+      {
+        "field": "domain_name",
+        "values": [
+          "groups.yahoo.com"
+        ],
+        "type": "all"
+      }
+    ],
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q049",
+    "text": "bard kiting",
+    "intent": "Bard kiting within sources captured during 1999 through 2002 inclusive.",
+    "category": "filters",
+    "split": "tune",
+    "filters": [
+      {
+        "field": "capture_date",
+        "values": [
+          {
+            "from": "1999-01-01T00:00:00Z",
+            "to": "2002-12-31T23:59:59.999Z",
+            "name": "01/01/1999 – 31/12/2002",
+            "isDateField": true
+          }
+        ],
+        "type": "range"
+      }
+    ],
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q050",
+    "text": "bard charm",
+    "intent": "Bard charm in estimated publication dates during 2000 through 2001 inclusive.",
+    "category": "filters",
+    "split": "tune",
+    "filters": [
+      {
+        "field": "llm_guessed_date",
+        "values": [
+          {
+            "from": "2000-01-01T00:00:00Z",
+            "to": "2001-12-31T23:59:59.999Z",
+            "name": "01/01/2000 – 31/12/2001",
+            "isDateField": true
+          }
+        ],
+        "type": "range"
+      }
+    ],
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q051",
+    "text": "how did EverQuest players use ChatGPT in 1999",
+    "intent": "Historical evidence of ChatGPT use by EverQuest players in 1999. Generic bard advice or chat software does not answer this; do not use external knowledge.",
+    "category": "negative",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q052",
+    "text": "EverQuest quantum teleportation crafting recipe",
+    "intent": "A source actually explaining the specified quantum teleportation crafting recipe. Generic teleport spells or crafting are insufficient.",
+    "category": "negative",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q053",
+    "text": "zirconium marshmallow dragon tax legislation",
+    "intent": "A source directly addressing this combination, not isolated word overlap.",
+    "category": "negative",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q054",
+    "text": "can bards play songs on the Nintendo Switch in 2000",
+    "intent": "Evidence about EverQuest bard songs on Nintendo Switch in 2000. Ordinary bard songs or Nintendo discussion is insufficient.",
+    "category": "negative",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q055",
+    "text": "Verant launch server outages 1999",
+    "intent": "Contemporary discussion or retrospective evidence about Verant's EverQuest launch server outages in 1999.",
+    "category": "later-corpus",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q056",
+    "text": "Fires of Heaven guild recruitment",
+    "intent": "Fires of Heaven guild recruitment requirements, process, or announcements.",
+    "category": "later-corpus",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q057",
+    "text": "alt.games.everquest launch impressions",
+    "intent": "Player accounts of initial EverQuest impressions around its launch.",
+    "category": "later-corpus",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q058",
+    "text": "EverQuest guild raid disputes",
+    "intent": "Player or guild disputes over raid encounters, rights, or behaviour.",
+    "category": "later-corpus",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q059",
+    "text": "how can a bard use instruments and melee weapons together",
+    "intent": "Bard instrument and weapon swapping, song benefits, or practical tradeoffs.",
+    "category": "questions",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q060",
+    "text": "what does charisma do for enchanter charm",
+    "intent": "Evidence or contemporary discussion of charisma's role in enchanter charm.",
+    "category": "questions",
+    "split": "validation",
+    "known_relevant_ids": []
+  }
+]
