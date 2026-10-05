@@ -56,3 +56,10 @@ test('keeps the complete source when formatting or highlighting would be excessi
   expect(container.querySelectorAll('mark')).toHaveLength(1000);
   expect(container.querySelector('pre').textContent).toBe(text);
 });
+
+test('linked screenshots remain a single deliberate source link', () => {
+  const { container } = render(<Reader text={'[![Battle screenshot](battle.jpg)](full-battle.jpg)'} />);
+  expect(screen.getAllByRole('link')).toHaveLength(1);
+  expect(screen.getByRole('link', { name: '[Image: Battle screenshot]' })).toHaveAttribute('href', 'https://web.archive.org/web/20000101000000/http://example.org/a/full-battle.jpg');
+  expect(container.querySelector('a a, img')).toBeNull();
+});

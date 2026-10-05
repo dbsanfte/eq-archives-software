@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Button } from '@mui/material';
 import { highlightMarkdown, highlightParts, MAX_MARKS, sourceLink } from './reader-utils';
 
 export const MAX_FORMATTED_LENGTH = 500000;
+const SourceLinkContext = createContext(false);
 
 export default function ReaderText({ text, base, find, onFind }) {
   const [source, setSource] = useState(false);
@@ -29,9 +30,14 @@ export default function ReaderText({ text, base, find, onFind }) {
   const components = useMemo(() => {
     const link = ({ href, children }) => {
       const safe = sourceLink(href, base);
-      return safe ? <a href={safe} target="_blank" rel="noopener noreferrer">{children}</a> : <span>{children}</span>;
+      return safe ? <a href={safe} target="_blank" rel="noopener noreferrer"><SourceLinkContext.Provider value>{children}</SourceLinkContext.Provider></a> : <span>{children}</span>;
     };
-    return { a: link, img: ({ src, alt }) => link({ href: src, children: `[Image: ${alt || 'view original'}]` }) };
+    function ImageLink({ src, alt }) {
+      const inLink = useContext(SourceLinkContext);
+      const label = `[Image: ${alt || 'view original'}]`;
+      return inLink ? <span>{label}</span> : link({ href: src, children: label });
+    }
+    return { a: link, img: ImageLink };
   }, [base]);
   return <section className="reader-text-section" aria-label="Document text">
     <div className="reader-find">

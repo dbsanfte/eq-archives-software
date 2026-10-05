@@ -160,7 +160,8 @@ frontend workflow does not run backend tests or deploy the indexer.
   cd elastic-indexer-stack/indexer
   python3.13 -m venv .venv
   .venv/bin/pip install -r src/indexer/requirements-dev.txt
-  PYTHONPATH=src .venv/bin/python -m pytest src/indexer/test
+  PYTHONPATH=src .venv/bin/python -m indexer.chunking --download-tokenizer /tmp/nomic-tokenizer.json
+  NOMIC_TOKENIZER_PATH=/tmp/nomic-tokenizer.json PYTHONPATH=src .venv/bin/python -m pytest src/indexer/test
 )
 ```
 
@@ -168,6 +169,16 @@ The backend dependency set includes substantial document and ML tooling. Keep
 test work isolated from live ingestion. Both worker modes require configured
 Elasticsearch, RabbitMQ, model endpoints and a shared archive checkout; see the
 root README for environment variables and secret mounts.
+
+Broad text repairs use the separate, resumable
+[`reindex-text-job.yaml`](elastic-indexer-stack/indexer/k8s/reindex-text-job.yaml)
+workflow in the [indexer Jobs guide](elastic-indexer-stack/indexer/k8s/README.md).
+Preserve existing enrichment/OCR/provenance through partial, concurrent-safe
+updates and retain version checkpoints. Use a dedicated source checkout, an
+exact-ID probe and the pinned tokenizer before starting a broad run. Missing
+sources must be counted without claiming extraction repaired. Nomic chunking
+uses at most 480 tokens including document prefix/special tokens and roughly 48
+tokens of overlap; retain complete source coverage and 768-dimensional vectors.
 
 ### Public MCP service
 

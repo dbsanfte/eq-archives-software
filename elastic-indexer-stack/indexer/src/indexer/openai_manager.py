@@ -7,9 +7,11 @@ import numpy as np
 from openai import OpenAI
 import requests
 import importlib.resources
+import time
 from langchain_openai.embeddings import OpenAIEmbeddings
 from langchain_core.documents import Document
 from langchain_experimental.text_splitter import SemanticChunker
+from .chunking import CHUNKING_VERSION, DOCUMENT_PREFIX, chunk_source
 
 class OpenAIManager:
     AWAITING_LLM_ENRICHMENT = "[ Still awaiting LLM Enrichment... ]"
@@ -403,11 +405,20 @@ class OpenAIManager:
                 raise ValueError("Empty embedding")
             return np.array(embedding, dtype=np.float32)
         except Exception as e:
-            self._logger.error(f"Error fetching embedding: {e}")
-            self._logger.exception(e)
+            self._logger.error("Error fetching embedding (%s)", type(e).__name__)
             raise
         
     def get_chunks_and_embeddings(self, document: Document) -> list[dict]:
+        if "nomic-embed" in self._embedding_model_name:
+            self.chunking_version = CHUNKING_VERSION
+            chunks = []
+            for chunk in chunk_source(document.page_content):
+                vector = self.embed_text(DOCUMENT_PREFIX + chunk.text)
+                if len(vector) != 768 or not np.isfinite(vector).all():
+                    raise ValueError("Nomic must return 768 finite embedding dimensions")
+                chunks.append({"text_chunk": chunk.text, "vector": vector})
+                time.sleep(float(os.environ.get("EMBEDDING_REQUEST_PAUSE", "0")))
+            return chunks
         # Chunk text intelligently
         chunks: list[Document] = []
         embedder: OpenAIEmbeddings = self.get_openai_embedding_client()
@@ -426,4 +437,3 @@ class OpenAIManager:
             )
         # Return a list of the chunk texts and their embeddings
         return chunk_vectors
-    

@@ -36,3 +36,64 @@ IDs remain, so the next run continues with missing IDs. The Job uses the
 existing `elastic-password-secret` for writes and
 `search-eqarchives-secrets` for the Nomic API key; no credential is included
 in the image or manifest.
+
+## Broad text reindex
+
+`reindex-text-job.yaml` repairs existing `file_type=text` records and rebuilds
+their document embeddings with the pinned Nomic tokenizer. It is outside the
+frontend Kustomization. No index is deleted, no LLM enrichment runs, and existing
+summaries, tags, estimated dates, OCR, provenance and unknown fields are retained.
+Only `text_full`, `text`, their extraction/chunking version fields and
+`last_indexed` are updated. The two version fields have additive keyword mappings.
+The exact ES ID and stored archive ID must agree, and source paths/symlinks must
+stay inside the checkout. Optimistic concurrency leaves concurrent writes intact.
+
+Each completed record is checkpointed by its version fields. Live `search_after`
+paging uses the unique archive ID without holding old ES segments for the whole
+multi-day run. A retry scans remaining versions; failures are counted, upstream
+payloads are not logged, and the Job exits nonzero if records failed. This is a
+live-index scan, not a snapshot. Keep other ingestion jobs separate during it.
+
+The dedicated checkout at `/mnt/samsung/eq-archives-html-reindex` avoids changing
+the ingestion checkout's sparse configuration. Prepare it once on eqvm as UID
+1000; use a committed archive revision and keep its SHA with the run record:
+
+```bash
+sudo -n mkdir -p /mnt/samsung/eq-archives-html-reindex
+sudo -n chown dbsanfte:dbsanfte /mnt/samsung/eq-archives-html-reindex
+git clone --filter=blob:none --depth=1 --no-checkout \
+  https://github.com/dbsanfte/eq-archives.git /mnt/samsung/eq-archives-html-reindex
+git -C /mnt/samsung/eq-archives-html-reindex sparse-checkout set --cone websites/www.fohguild.org
+git -C /mnt/samsung/eq-archives-html-reindex checkout
+git -C /mnt/samsung/eq-archives-html-reindex rev-parse HEAD
+```
+
+The broad Job's init container expands this checkout to websites, newsgroups and
+mailing lists at that same revision. Allow space and time for archive downloads;
+it never modifies the original archive repository or ingester checkout. Its main
+container reads sources only. Missing files are counted and their existing text
+is rechunked without marking extraction repaired. A source absent from this
+archive branch needs the appropriate checkout before its extraction can be fixed.
+
+After the protected PR passes and merges, build/import an image with a unique
+commit tag. Replace both `deploy-reindex-image` placeholders in the manifest with
+that tag before applying; keep the rendered manifest out of Git. Run a probe with
+`--id '<exact ES ID>'` and without the source-preparation init container first,
+using the same image, mount and secret references. Verify the document and its
+metadata through the public reader before launching the broad Job.
+
+```bash
+docker build --tag eqarchives-indexer:reindex-<commit-sha> elastic-indexer-stack/indexer
+docker save eqarchives-indexer:reindex-<commit-sha> | sudo -n k3s ctr -n k8s.io images import -
+# Set both image tags in a temporary copy of reindex-text-job.yaml.
+sudo -n kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml apply -f /tmp/reindex-text-job.yaml
+sudo -n kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml -n eqarchives-es \
+  logs -f job/reindex-text-html-20261005 -c indexer
+```
+
+The workload is serial, throttled by `EMBEDDING_REQUEST_PAUSE=0.2`, and uses the
+existing 768-dimensional Nomic model and credentials. Logs report processed,
+updated, unchanged, unavailable-source and failed counts. Delete/recreate only
+this Job to resume a failed attempt; retain the dedicated source cache. Recheck
+public search/reader/MCP health while it runs. A triggered Job is not a completed
+reindex; report its actual phase and progress separately.

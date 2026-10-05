@@ -27,6 +27,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the project files
 COPY ./src /app/src
+RUN python -m indexer.chunking --download-tokenizer /opt/eqarchives/nomic-tokenizer.json
 
 FROM builder AS test-stage
 
@@ -71,6 +72,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the precompiled code
 COPY --from=compile-stage /app/src /app/src
+COPY --from=builder /opt/eqarchives/nomic-tokenizer.json /opt/eqarchives/nomic-tokenizer.json
 COPY --from=test-stage /tmp/test-results.txt /tmp/test-results.txt
 
 WORKDIR /app/src
