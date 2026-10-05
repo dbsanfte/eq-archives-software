@@ -50,9 +50,9 @@ docker build --target dependencies --tag eqarchives-benchmark-node elastic-index
 python3 -m unittest discover -s scripts/search-benchmark -v
 ```
 
-The bridge runs in a network-disabled container. Its two frontend integration
+The bridge runs in a network-disabled container. Its three frontend integration
 tests run with the regular Jest/coverage gate and exercise native request
-construction and conservative capture identity.
+construction, conservative capture identity and the date picker range contract.
 
 On eqvm, forward the existing services in separate terminals:
 
@@ -153,12 +153,13 @@ python3 scripts/search-benchmark/benchmark.py report \
   --ratings /private/search-pilot/model-ratings.jsonl /private/search-pilot/human-ratings.jsonl
 ```
 
-`report.json` and `report.md` contain raw/grouped NDCG@10, precision@10, MRR@10,
+`report.json` and `report.md` contain raw/grouped NDCG@10 and NDCG@50, precision@10, MRR@10,
 **pooled** recall@50, judgment coverage, per-query regressions, category results,
 latency and paired bootstrap intervals on validation queries. Recall's denominator
 is the judged pool, not every relevant document in the archive. Unjudged top-10
 results suppress top-10 metrics; unjudged top-50 results suppress recall@50.
-Unknown judgments are not silently graded irrelevant.
+NDCG@50 also requires all returned top-50 results to be judged and a collection
+depth of at least 50. Unknown judgments are not silently graded irrelevant.
 Queries with no positives in the pool have undefined NDCG/recall and are counted
 through precision/coverage. Grading zero returned results does not prove the
 corpus lacks an answer. Pool additional configurations and known targets when
@@ -167,6 +168,12 @@ making stronger claims about recall.
 The tune winner uses only queries scorable across **all** configurations. The
 reserved validation set does not select it. Compare its validation difference
 with `current-hybrid`, inspect regressions by query/source, and consider latency.
+The separate **observed average ranking** orders configurations by mean grouped
+NDCG@10 over all common scorable queries, including validation. It names every
+tied winner and saves the resolved lexical/vector fields, kNN parameters and
+similarity/RRF settings using the retrieval manifest's recorded defaults. This
+describes the best observed average on this query suite; it is not an independent
+validation result and does not replace the tuning/validation split.
 Do not deploy a global default from a model-judged, incomplete-corpus pilot.
 Changing production defaults is a separate protected PR with frontend regression
 and browser checks.
