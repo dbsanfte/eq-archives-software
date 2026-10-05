@@ -88,6 +88,7 @@ runs; its key includes the model and complete `search_query:` input. The default
 request pause is 0.2 seconds and inference is serial for the shared Nomic slot.
 There is no LLM work during collection. Each retrieval run is capped at 800
 query/configuration cases; partial shards, timeouts and escaped filters fail it.
+Smoke runs collected with `--depth` below 50 do not report recall@50.
 Do not score failed runs. A rerun needs a new PIT and output directory.
 
 The manifest records the software SHA and source hashes, actual frontend

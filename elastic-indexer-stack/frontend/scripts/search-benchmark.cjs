@@ -71,7 +71,8 @@ async function handle(input) {
   // Avoid exporting large result/facet plumbing: ranking, filters and sort stay.
   delete captured.aggs;
   delete captured.highlight;
-  captured._source = ['id', 'title', 'url', 'parent_id', 'domain_name', 'mailing_list_name', 'capture_date', 'llm_guessed_date'];
+  captured._source = ['id', 'title', 'url', 'parent_id', 'domain_name', 'mailing_list_name', 'capture_date', 'llm_guessed_date',
+    'file_type', 'mime_type', 'llm_tags', 'llm_content_flavour'];
   return { body: captured, semantic_allowed: !usesQuerySyntax(query.text) && Boolean(query.text.trim()) };
 }
 

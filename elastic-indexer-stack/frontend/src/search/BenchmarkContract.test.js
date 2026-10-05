@@ -29,6 +29,7 @@ test('exports the real lexical builder, constrained policy and semantic prefilte
   expect(plain.body.query.bool.should.map(q => q.multi_match.type))
     .toEqual(['best_fields', 'cross_fields', 'phrase', 'phrase_prefix']);
   expect(plain.body.query.bool.minimum_should_match).toBe(1);
+  expect(plain.body._source).toEqual(expect.arrayContaining(['file_type', 'mime_type', 'llm_tags', 'llm_content_flavour']));
   expect(constrained.semantic_allowed).toBe(false);
   expect(constrained.body.knn).toBeUndefined();
   expect(constrained.body.query.bool.should[0].query_string.default_operator).toBe('AND');

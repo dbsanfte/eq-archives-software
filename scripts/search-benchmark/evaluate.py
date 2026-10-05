@@ -91,6 +91,9 @@ def report(args):
                "raw": scores(run["raw"], pool.get(qid, []), ratings[qid]),
                "grouped": scores(run["grouped"], pool.get(qid, []), ratings[qid], collapse=True),
                "es_ms": run["es_ms"], "request_ms": run["request_ms"], "window_reached": run["window_reached"]}
+        if manifest.get("depth", 50) < 50:
+            for mode in ("raw", "grouped"):
+                row[mode]["pooled_recall50"] = None
         records.append(row)
     for config in manifest["configs"]:
         selected = [row for row in records if row["config_id"] == config["id"]]

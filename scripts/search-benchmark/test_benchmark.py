@@ -223,6 +223,12 @@ class JudgmentTests(unittest.TestCase):
             result = load(directory / "report.json")
             self.assertEqual(result["tune_winner"], "candidate")
             self.assertLess(result["comparisons"]["candidate"]["validation_paired_ndcg10"]["mean"], 0)
+            manifest = load(directory / "manifest.json")
+            manifest["depth"] = 10
+            save(directory / "manifest.json", manifest)
+            with redirect_stdout(io.StringIO()):
+                report(SimpleNamespace(run=directory, ratings=[path], allow_model_ratings=False, baseline="current-hybrid"))
+            self.assertIsNone(load(directory / "report.json")["summary"]["candidate"]["all"]["grouped"]["pooled_recall50"])
 
     def test_offline_review_escapes_source_and_preserves_complete_text(self):
         with tempfile.TemporaryDirectory() as folder:

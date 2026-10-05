@@ -22,7 +22,8 @@ import urllib.request
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 VERSION = "search-benchmark-v1"
-METADATA = ["id", "title", "url", "parent_id", "domain_name", "mailing_list_name", "capture_date", "llm_guessed_date"]
+METADATA = ["id", "title", "url", "parent_id", "domain_name", "mailing_list_name", "capture_date", "llm_guessed_date",
+            "file_type", "mime_type", "llm_tags", "llm_content_flavour"]
 FILTER_FIELDS = {"domain_name", "mailing_list_name", "file_type", "mime_type", "llm_tags", "llm_content_flavour", "capture_date", "llm_guessed_date"}
 
 
