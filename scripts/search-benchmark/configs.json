@@ -1,0 +1,97 @@
+[
+  {
+    "id": "current-lexical",
+    "mode": "lexical"
+  },
+  {
+    "id": "title-lexical",
+    "mode": "lexical",
+    "lexical_fields": {
+      "text_full": 1,
+      "title": 3,
+      "llm_summary": 0.5
+    }
+  },
+  {
+    "id": "source-semantic",
+    "mode": "semantic",
+    "vector_fields": {
+      "text.vector": 1
+    },
+    "k": 50,
+    "num_candidates": 250,
+    "boost": 1
+  },
+  {
+    "id": "current-hybrid",
+    "mode": "hybrid"
+  },
+  {
+    "id": "source-hybrid-k50",
+    "mode": "hybrid",
+    "vector_fields": {
+      "text.vector": 1
+    },
+    "k": 50,
+    "num_candidates": 250,
+    "boost": 5
+  },
+  {
+    "id": "hybrid-k50",
+    "mode": "hybrid",
+    "k": 50,
+    "num_candidates": 250
+  },
+  {
+    "id": "hybrid-candidates500",
+    "mode": "hybrid",
+    "k": 50,
+    "num_candidates": 500
+  },
+  {
+    "id": "hybrid-boost1",
+    "mode": "hybrid",
+    "k": 50,
+    "num_candidates": 250,
+    "boost": 1
+  },
+  {
+    "id": "hybrid-boost10",
+    "mode": "hybrid",
+    "k": 50,
+    "num_candidates": 250,
+    "boost": 10
+  },
+  {
+    "id": "title-source-hybrid",
+    "mode": "hybrid",
+    "lexical_fields": {
+      "text_full": 1,
+      "title": 3,
+      "llm_summary": 0.5
+    },
+    "vector_fields": {
+      "text.vector": 1
+    },
+    "k": 50,
+    "num_candidates": 250,
+    "boost": 5
+  },
+  {
+    "id": "hybrid-threshold065",
+    "mode": "hybrid",
+    "k": 50,
+    "num_candidates": 250,
+    "similarity": 0.65
+  },
+  {
+    "id": "rrf-source",
+    "mode": "rrf",
+    "k": 100,
+    "num_candidates": 500,
+    "vector_fields": {
+      "text.vector": 1
+    },
+    "rrf_constant": 60
+  }
+]

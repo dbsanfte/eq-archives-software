@@ -27,6 +27,7 @@ digests, dependency versions, or credentials into new files.
 | Managed Kubernetes resources | [Root Kustomization](elastic-indexer-stack/k8s-manifests/kustomization.yaml), [frontend manifests](elastic-indexer-stack/k8s-manifests/01-frontend.yaml), [embedding manifests](elastic-indexer-stack/k8s-manifests/embeddings/deployment.yaml) |
 | Model/image pins, bootstrap and GPU allocation | [runtime.env](elastic-indexer-stack/k8s-manifests/embeddings/runtime.env), [embedding Kustomization](elastic-indexer-stack/k8s-manifests/embeddings/kustomization.yaml), [device plugin](elastic-indexer-stack/k8s-manifests/embeddings/device-plugin.yaml) |
 | Indexer dependencies, tests and mappings | [Indexer Dockerfile](elastic-indexer-stack/indexer/Dockerfile), [test requirements](elastic-indexer-stack/indexer/src/indexer/requirements-dev.txt), [tests](elastic-indexer-stack/indexer/src/indexer/test), [Elasticsearch manager](elastic-indexer-stack/indexer/src/indexer/es_manager.py) |
+| Search relevance evaluation and tuning | [Benchmark guide](scripts/search-benchmark/README.md), [query set](scripts/search-benchmark/queries.json), [experiments](scripts/search-benchmark/configs.json) |
 
 ## Branching and delivery
 
@@ -179,6 +180,19 @@ exact-ID probe and the pinned tokenizer before starting a broad run. Missing
 sources must be counted without claiming extraction repaired. Nomic chunking
 uses at most 480 tokens including document prefix/special tokens and roughly 48
 tokens of overlap; retain complete source coverage and 768-dimensional vectors.
+
+### Search relevance evaluation
+
+The operator benchmark in `scripts/search-benchmark` uses the frontend's actual
+request builder and grouping identity. Run `python3 -m unittest discover -s
+scripts/search-benchmark -v` for changes; frontend contract tests also run in
+the normal Jest gate. Keep credentials and generated sources/vectors/results
+outside Git. Use bounded, short-lived snapshots and serial inference while
+ingestion is active. Model judgments require explicit opt-in for scoring and
+must not be described as human validation. Preserve the tune/validation split,
+report corpus and pooling limits, and validate against the completed corpus
+before changing production defaults. Collection cannot write archive documents
+or mappings; paid Luna grading is a separate explicit command.
 
 ### Public MCP service
 
