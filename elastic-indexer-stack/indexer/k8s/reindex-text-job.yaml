@@ -21,6 +21,12 @@ spec:
           args:
             - |
               set -eu
+              eqarchives_source_sha="$(git -C /data/eq-archives rev-parse HEAD)"
+              if [ "$(git -C /data/eq-archives config --get eqarchives.source-prefetch-revision || true)" != "$eqarchives_source_sha" ]; then
+                echo "Fetching pinned archive $eqarchives_source_sha in bulk"
+                git -C /data/eq-archives -c pack.threads=2 fetch --refetch --depth=1 --no-tags --no-auto-maintenance --filter=blob:limit=4m origin "$eqarchives_source_sha"
+                git -C /data/eq-archives config eqarchives.source-prefetch-revision "$eqarchives_source_sha"
+              fi
               git -C /data/eq-archives sparse-checkout set --cone websites newsgroups mailing-lists
               echo "Archive sources prepared"
           volumeMounts:
@@ -32,7 +38,7 @@ spec:
               memory: 512Mi
             limits:
               cpu: "2"
-              memory: 4Gi
+              memory: 8Gi
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:

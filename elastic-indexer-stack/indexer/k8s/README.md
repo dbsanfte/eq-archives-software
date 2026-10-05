@@ -69,7 +69,12 @@ git -C /mnt/samsung/eq-archives-html-reindex rev-parse HEAD
 ```
 
 The broad Job's init container expands this checkout to websites, newsgroups and
-mailing lists at that same revision. Allow space and time for archive downloads;
+mailing lists at that same revision. It uses the image's Git to bulk-prefetch
+blobs under 4 MiB with `fetch --refetch` before checkout; remaining larger files
+are fetched as needed without truncation. A per-revision cache marker avoids
+repeating the bulk transfer on retry. The init container permits 8 GiB for the
+large Git index and fetch, while the serial indexing process is limited to 2 GiB.
+Allow space and time for archive downloads;
 it never modifies the original archive repository or ingester checkout. Its main
 container reads sources only. Missing files are counted and their existing text
 is rechunked without marking extraction repaired. A source absent from this
