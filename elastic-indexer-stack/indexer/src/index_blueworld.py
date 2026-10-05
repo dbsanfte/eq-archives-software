@@ -15,6 +15,7 @@ from pathlib import Path
 from indexer.es_manager import ElasticsearchManager
 from indexer.indexer import Indexer
 from indexer.openai_manager import OpenAIManager
+from indexer.chunking import CHUNKING_VERSION, chunk_source
 
 
 RELATIVE_DIR = Path("newsgroups/blueworld-pre2000")
@@ -64,8 +65,9 @@ class BoundedArchiveEmbedder(OpenAIManager):
                 time.sleep(self._request_pause)
 
     def get_chunks_and_embeddings(self, document) -> list[dict]:
-        return [embedding for chunk in split_text(document.page_content)
-                for embedding in self._embed_chunk(chunk)]
+        self.chunking_version = CHUNKING_VERSION
+        return [embedding for chunk in chunk_source(document.page_content)
+                for embedding in self._embed_chunk(chunk.text)]
 
 
 def verified_paths(repo: Path) -> list[Path]:

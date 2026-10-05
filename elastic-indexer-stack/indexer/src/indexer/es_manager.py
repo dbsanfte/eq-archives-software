@@ -54,6 +54,14 @@ ES_FIELDS = {
         "mapping": {"type": "text"},
         "default": None
     },
+    "text_extraction_version": {
+        "mapping": {"type": "keyword"},
+        "default": None
+    },
+    "text_chunking_version": {
+        "mapping": {"type": "keyword"},
+        "default": None
+    },
     "llm_model_name": {
         "mapping": {"type": "keyword"},
         "default": None

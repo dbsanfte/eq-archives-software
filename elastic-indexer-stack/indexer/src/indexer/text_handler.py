@@ -12,6 +12,7 @@ import chardet
 from .archive_handler import ArchiveHandler
 from .openai_manager import OpenAIManager
 from .es_manager import ElasticsearchManager
+from .html_extraction import TEXT_EXTRACTION_VERSION, website_markdown
 
 class TextHandler:
     def __init__(self, archive_handler: ArchiveHandler, openai_manager: OpenAIManager, logger: logging.Logger=None,
@@ -81,6 +82,8 @@ class TextHandler:
                     mime_type = mime_type,
                     text = chunks_and_embeddings,
                     text_full = document.page_content,
+                    text_extraction_version = TEXT_EXTRACTION_VERSION,
+                    text_chunking_version = getattr(self._openai_manager, "chunking_version", None),
                     llm_summary = llm_summary,
                     llm_summary_vector = llm_summary_vector,
                     llm_guessed_date = llm_guessed_date,
@@ -197,7 +200,7 @@ class TextHandler:
         
         url = self._archive_handler._convert_to_archive_url(relative_path=relative_path)
         content = f"<b>Page URL:</b> {url}<br/><hr/>{file_content}"
-        md_content = md(content)
+        md_content = website_markdown(content)
         return md_content
 
     def _resolve_title_from_file(self, full_path: str, relative_path: str) -> str:

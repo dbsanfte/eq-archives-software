@@ -1,0 +1,109 @@
+# Broad, resumable text repair; kept outside the frontend Kustomization.
+# Set an immutable local image tag before applying. See README.md.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: reindex-text-html-20261005
+  namespace: eqarchives-es
+spec:
+  backoffLimit: 6
+  parallelism: 1
+  completions: 1
+  template:
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      initContainers:
+        - name: prepare-sources
+          image: eqarchives-indexer:deploy-reindex-image
+          imagePullPolicy: Never
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -eu
+              eqarchives_source_sha="$(git -C /data/eq-archives rev-parse HEAD)"
+              if [ "$(git -C /data/eq-archives config --get eqarchives.source-prefetch-revision || true)" != "$eqarchives_source_sha" ]; then
+                echo "Fetching pinned archive $eqarchives_source_sha in bulk"
+                git -C /data/eq-archives -c pack.threads=2 fetch --refetch --depth=1 --no-tags --no-auto-maintenance --filter=blob:limit=4m origin "$eqarchives_source_sha"
+                git -C /data/eq-archives config eqarchives.source-prefetch-revision "$eqarchives_source_sha"
+              fi
+              git -C /data/eq-archives sparse-checkout set --cone websites newsgroups mailing-lists
+              echo "Archive sources prepared"
+          volumeMounts:
+            - name: archive
+              mountPath: /data/eq-archives
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 8Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+            runAsUser: 1000
+      containers:
+        - name: indexer
+          image: eqarchives-indexer:deploy-reindex-image
+          imagePullPolicy: Never
+          command: ["python", "-u", "reindex_text.pyc"]
+          env:
+            - name: LOCAL_REPO_PATH
+              value: /data/eq-archives
+            - name: ELASTICSEARCH_HOST
+              value: http://elasticsearch.eqarchives-es.svc.cluster.local
+            - name: ELASTICSEARCH_PORT
+              value: "9200"
+            - name: ELASTICSEARCH_INDEX
+              value: eq-archive
+            - name: ELASTICSEARCH_USERNAME
+              value: elastic
+            - name: OPENAI_ENDPOINT
+              value: http://nomic-embeddings.eqarchives-es.svc.cluster.local:8080/v1
+            - name: OPENAI_EMBEDDING_MODEL_NAME
+              value: text-embedding-nomic-embed-text-v1.5@q8_0
+            - name: SKIP_LLM_ENRICHMENT
+              value: "true"
+            - name: EMBEDDING_REQUEST_PAUSE
+              value: "0.2"
+          volumeMounts:
+            - name: archive
+              mountPath: /data/eq-archives
+              readOnly: true
+            - name: credentials
+              mountPath: /run/secrets
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            runAsNonRoot: true
+            runAsUser: 1000
+      volumes:
+        - name: archive
+          hostPath:
+            path: /mnt/samsung/eq-archives-html-reindex
+            type: Directory
+        - name: credentials
+          projected:
+            sources:
+              - secret:
+                  name: elastic-password-secret
+                  items:
+                    - key: ELASTIC_PASSWORD
+                      path: es_password
+              - secret:
+                  name: search-eqarchives-secrets
+                  items:
+                    - key: openai_api_key
+                      path: openai_api_key

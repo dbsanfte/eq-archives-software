@@ -130,8 +130,11 @@ cd elastic-indexer-stack/indexer  # from the repository root
 python3.13 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r src/indexer/requirements-dev.txt
-PYTHONPATH=src python -m pytest src/indexer/test
+PYTHONPATH=src python -m indexer.chunking --download-tokenizer /tmp/nomic-tokenizer.json
+NOMIC_TOKENIZER_PATH=/tmp/nomic-tokenizer.json PYTHONPATH=src python -m pytest src/indexer/test
 ```
+
+The Docker build downloads the pinned tokenizer automatically.
 
 The dependency set includes document conversion, OCR, and machine-learning
 libraries, so installation is substantially larger than the frontend setup.
@@ -153,6 +156,8 @@ Configure the processes using environment variables:
 | `OPENAI_EMBEDDING_MODEL_NAME` | Embedding model; use the same model for indexing and frontend queries |
 | `OPENAI_TEXT_MODEL_NAME`, `OPENAI_IMAGE_MODEL_NAME` | Models used for text and image enrichment |
 | `SKIP_LLM_ENRICHMENT` | Set to `true` to skip summaries, tags, and other enrichment; text indexing still generates embeddings |
+| `NOMIC_TOKENIZER_PATH` | Optional path to the checksum-pinned Nomic tokenizer; the image contains it at `/opt/eqarchives/nomic-tokenizer.json` |
+| `EMBEDDING_REQUEST_PAUSE` | Optional seconds between Nomic document requests; the broad reindex uses `0.2` for the shared single-slot server |
 | `SKIP_TEXT_FILES`, `SKIP_IMAGE_FILES`, `SKIP_OTHER_FILES` | Set individual flags to `true` to omit file types |
 | `REINDEXING_ENABLED`, `REINDEXING_INTERVAL` | Enable periodic reindexing and set the interval in seconds |
 | `LOG_LEVEL` | Logging level; defaults to `INFO` |
@@ -192,6 +197,22 @@ For the one-off BlueWorld newsgroup recovery, the
 the recovered source manifest and indexes only those articles from the existing
 eqvm archive checkout. It uses the deployed Nomic service and skips LLM
 enrichment; it does not require RabbitMQ or the file-finder loop.
+
+Website extraction preserves paragraphs and image URLs, flattens presentation
+tables, and retains data tables. Nomic document chunks use its pinned WordPiece
+tokenizer, prefer paragraph/line/sentence boundaries, and preserve every source
+character, including whitespace and line endings. Each request has at most 480
+tokens including `search_document:` and special tokens, with up to roughly 48
+tokens of overlap. This fits the deployed 512-token server without embedding
+sentences just to choose boundaries. Other embedding models retain the existing
+chunker. Retrieval quality still needs evaluation against an archive query set.
+
+The [broad text reindex Job](elastic-indexer-stack/indexer/k8s/README.md#broad-text-reindex)
+repairs existing extracted text and rebuilds Nomic chunks in place. It preserves
+summaries, tags, dates, OCR and source metadata with atomic partial updates,
+skips completed extraction/chunking versions on restart, and uses a separate
+archive checkout. Missing source files retain their indexed text and are
+reported separately; rechunking that text cannot recover missing paragraphs.
 
 ## Deployment
 

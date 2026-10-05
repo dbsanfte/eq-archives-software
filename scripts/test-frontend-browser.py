@@ -628,7 +628,7 @@ class FrontendBrowserTests(unittest.TestCase):
                     page.on('pageerror', lambda error: errors.append(str(error)))
                     first_id = 'websites/example.org/20000101000000/guide?a=1&b=2'
                     second_id = 'websites/example.org/20010101000000/guide?a=1&b=2'
-                    text = '# Preserved guide\n\nAncient cyclops. Ancient cyclops.\n\n[Related page](../spells)\n\n![Historical image](picture.png)\n\nOld advice\n'
+                    text = '# Preserved guide\n\nAncient cyclops. Ancient cyclops.\n\n[Related page](../spells)\n\n![Historical image](picture.png)\n\n[![Battle screenshot](battle.jpg)](full-battle.jpg)\n\n| Weapon | Damage |\n| --- | --- |\n| Sword | 42 |\n\nOld advice\n'
                     later = text.replace('Old advice', 'New advice')
                     records = {
                         first_id: {"title": "Cyclops research guide", "url": "https://web.archive.org/web/20000101000000/http://example.org/guide?a=1&b=2", "capture_date": "2000-01-01T00:00:00Z", "llm_guessed_date": "1999-01-01", "domain_name": "example.org", "text_full": text, "llm_image_text_full": "Old OCR"},
@@ -670,6 +670,9 @@ class FrontendBrowserTests(unittest.TestCase):
                     page.get_by_role('link', name='Jump to text', exact=True).click()
                     expect(page.get_by_role('searchbox', name='Find in document')).to_be_visible()
                     expect(page.locator('.reader-body img')).to_have_count(0)
+                    expect(page.locator('.reader-body a a')).to_have_count(0)
+                    expect(page.locator('.reader-body table')).to_have_count(1)
+                    expect(page.get_by_role('link', name='[Image: Battle screenshot]', exact=True)).to_have_attribute('href', 'https://web.archive.org/web/20000101000000/http://example.org/full-battle.jpg')
                     expect(page.get_by_role('link', name='Related page')).to_have_attribute('href', 'https://web.archive.org/web/20000101000000/http://example.org/spells')
                     page.get_by_role('button', name='Next match', exact=True).click()
                     expect(page.get_by_text('2 of 2 matches', exact=True)).to_be_visible()
