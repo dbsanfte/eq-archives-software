@@ -4,6 +4,7 @@ import subprocess
 from common import digest
 from coverage_check import refresh
 from review import apply_decisions
+from review import record
 from server import create_app
 from state import connect
 from conftest import add_candidate, manifest_for
@@ -89,3 +90,23 @@ def test_published_batch_blocks_alias_before_archive_checkout_is_updated(tmp_pat
         current=store.db.execute('SELECT state,coverage FROM candidates WHERE id=?',(alias['id'],)).fetchone()
         assert current['state']=='already_archived'
         assert json.loads(current['coverage'])['site_check']['published_candidate']==published['id']
+
+
+def test_corrected_legacy_board_scope_requires_reapproval_and_retains_prior_decision(tmp_path,monkeypatch):
+    root=tmp_path/'state'
+    row=add_candidate(root,url='http://server3.ezboard.com/beverquestmonks.html')
+    with connect(root) as store:
+        store.db.execute("UPDATE candidates SET scope='http://server3.ezboard.com/' WHERE id=?",(row['id'],))
+        store.db.commit()
+        row=record(store,store.candidates()[0])
+        apply_decisions(store,[{'id':row['id'],'manifest_sha256':row['manifest_sha256'],'decision':'approve'}])
+    repo=archive(tmp_path,['server3.ezboard.com/20000101000000/botherguild/index.html'])
+    monkeypatch.setenv('ARCHIVE_REPO',str(repo))
+    refresh(root)
+    with connect(root) as store:
+        current=store.candidates()[0]
+        assert current['state']=='approval_pending' and current['decision'] is None
+        assert current['scope']=='http://server3.ezboard.com/beverquestmonks/'
+        correction=json.loads(current['coverage'])['scope_corrections'][0]
+        assert correction['previous_decision']['decision']=='approve'
+        assert correction['previous_scope']=='http://server3.ezboard.com/'

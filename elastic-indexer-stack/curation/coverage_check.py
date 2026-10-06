@@ -40,6 +40,9 @@ def refresh(root, candidate_id=None, force=False):
             decision = row['decision']
             if mode != 'custom':
                 scope = capture_scope(row['url'], mode)
+                if scope != row['scope']:
+                    coverage.setdefault('scope_corrections', []).append({'previous_scope': row['scope'], 'scope': scope,
+                                                                        'previous_decision': json.loads(decision) if decision else None})
                 if scope != row['scope'] and state == 'approved_waiting_batch':
                     state, decision = 'approval_pending', None
             if site_check['status'] == 'already_archived':
