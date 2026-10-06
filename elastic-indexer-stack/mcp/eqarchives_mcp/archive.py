@@ -194,9 +194,10 @@ class Archive:
             if not constrained:
                 vector = await self.embedding(query)
                 if vector is not None:
+                    # Match the frontend's Luna pilot winner, hybrid-boost10.
                     body["knn"] = [{
-                        "field": field, "query_vector": vector, "k": 10,
-                        "num_candidates": 50, "similarity": 0.65,
+                        "field": field, "query_vector": vector, "k": 50,
+                        "num_candidates": 250, "boost": 10,
                     } for field in ("text.vector", "llm_summary_vector", "llm_image_text_vector")]
             hits = await self.query(body)
             return SearchResults(results=[result_from_hit(hit) for hit in hits])

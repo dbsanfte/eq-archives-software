@@ -28,6 +28,10 @@ operators use lexical search with AND as the default join so excluded terms cann
 broaden the search and semantic matches do not bypass constraints. Use `|` for
 explicit alternatives.
 Natural-language searches can find related material, not only exact words.
+Their vector branches use `k=50`, `num_candidates=250` and `boost=10`, with no
+similarity cutoff, matching the frontend's `hybrid-boost10` defaults. That
+configuration had the highest average grouped NDCG@10 in the Luna pilot (60
+queries, 62,409 regenerated documents); completed-corpus validation is pending.
 The original `search(query)` and `fetch(id)` input/output contracts remain unchanged.
 Use `search_archive` to investigate beyond the first ten results.
 

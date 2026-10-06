@@ -175,6 +175,14 @@ rebuild and every value is visible to site visitors.
 | `vectorFields`, `nestedVectorFields` | Vector fields for semantic search |
 | `embeddingModel` | Model used to embed search queries; must match the indexed vectors |
 
+Semantic search starts enabled with `k=50`, `num_candidates=250` and `boost=10`,
+defined in [`AdvancedSettings.js`](src/views/search/AdvancedSettings.js). These
+match the [`hybrid-boost10` experiment](../../scripts/search-benchmark/configs.json),
+which had the highest average grouped NDCG@10 in the Luna pilot (60 queries,
+62,409 regenerated documents). The pilot used model judgments on a partial corpus;
+repeat the evaluation when the broad reindex finishes. Visitors can still change
+the parameters or disable semantic search in **Advanced...**.
+
 For Nomic Embed v1.5, the embedding client adds `search_query:` to the request
 text while keeping its cache keyed by the original search. The production
 deployment provides a local Q8_0 model under the existing

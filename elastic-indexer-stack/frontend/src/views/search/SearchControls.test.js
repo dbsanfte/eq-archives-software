@@ -40,6 +40,9 @@ test('disables semantic controls while the embedding service is unavailable, the
 test('commits vector parameters on blur and follows external changes', () => {
   const onChange = jest.fn();
   const mounted = render(<AdvancedSettings values={DEFAULT_KNN_PARAMS} onChange={onChange} />);
+  expect(screen.getByLabelText('k')).toHaveValue('50');
+  expect(screen.getByLabelText('num_candidates')).toHaveValue('250');
+  expect(screen.getByLabelText('boost')).toHaveValue('10');
   for (const field of ['k', 'num_candidates', 'boost']) {
     const input = screen.getByLabelText(field);
     fireEvent.change(input, { target: { value: '25' } });
