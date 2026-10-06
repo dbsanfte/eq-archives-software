@@ -1,5 +1,15 @@
 # Frontend, MCP and embedding deployment
 
+The same CI/CD workflow builds, tests and deploys the separate
+[intranet curation/import service](../curation/README.md) through
+[`deploy-curation.sh`](../../scripts/deploy-curation.sh). Its Kustomization manages
+a persistent queue and Jobs controller at `http://192.168.50.100:8090`, without
+authentication or public routing. Actions secrets `ARCHIVE_CRAWLER_OPENAI_API_KEY`
+and `ARCHIVE_PUBLISH_SSH_KEY` are dedicated to grading and archive publication.
+Existing ingestion Jobs are guarded before/after deployment; new imports wait
+until they finish. Reapply the same immutable digest/two secrets to verify
+idempotence. Retain the staging PVC on rollback and never apply placeholder images.
+
 `01-frontend.yaml` captures the production frontend on **eqvm**, which runs
 single-node **k3s** directly (not k3d). It manages the existing four-replica
 `search-eqarchives` Deployment, Service, Traefik routing and middleware, and

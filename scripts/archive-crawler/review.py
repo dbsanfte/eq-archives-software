@@ -19,7 +19,8 @@ def record(store, row):
     result = dict(row)
     for field in ("coverage", "evidence", "captures", "rating", "decision"):
         result[field] = json.loads(result[field]) if result[field] else None
-    result["manifest_sha256"] = digest({key: result[key] for key in ("id", "url", "scope", "captures", "rating")})
+    result["scope_mode"] = (result["coverage"] or {}).get("scope_mode", "directory")
+    result["manifest_sha256"] = digest({key: result[key] for key in ("id", "url", "scope", "scope_mode", "captures", "rating")})
     return result
 
 
@@ -55,16 +56,33 @@ def review(args, store):
 
 def decisions(args, store):
     incoming = json.loads(Path(args.file).read_text())
+    apply_decisions(store, incoming)
+    print(f"Recorded {len(incoming)} decisions; archive publication has not been invoked")
+
+
+def apply_decisions(store, incoming):
+    with store.db:
+        store.db.execute("BEGIN IMMEDIATE")
+        _apply_decisions(store, incoming)
+    store.event(None, "decisions_imported", {"count": len(incoming)})
+
+
+def _apply_decisions(store, incoming):
     if not isinstance(incoming, list) or len(incoming) > 500:
         raise CrawlError("Expected a bounded list of review decisions")
     current = {r["id"]: r for r in queue(store)}
-    validated = []
+    validated, seen = [], set()
     for decision in incoming:
         if not isinstance(decision, dict) or set(decision) != {"id", "manifest_sha256", "decision"} or decision["decision"] not in ("approve", "reject", "defer"):
             raise CrawlError("Invalid review decision")
+        if not isinstance(decision["id"], str) or not isinstance(decision["manifest_sha256"], str) or decision["id"] in seen:
+            raise CrawlError("Invalid or duplicate candidate ID")
+        seen.add(decision["id"])
         row = current.get(decision["id"])
         if not row or row["manifest_sha256"] != decision["manifest_sha256"]:
             raise CrawlError("Review decision refers to changed or unknown staged evidence")
+        if row["state"] in ("capturing", "captured_awaiting_review", "publication_requested", "published", "indexed"):
+            raise CrawlError("Candidate already belongs to a capture batch")
         if decision["decision"] == "approve":
             if not row["rating"] or not row["captures"]:
                 raise CrawlError("Only graded, staged captures can be approved")
@@ -74,9 +92,6 @@ def decisions(args, store):
     for decision in validated:
         store.db.execute("UPDATE candidates SET decision=?,state=? WHERE id=?",
                          (json.dumps({**decision, "reviewed_at": now()}), states[decision["decision"]], decision["id"]))
-    store.db.commit()
-    store.event(None, "decisions_imported", {"count": len(validated)})
-    print(f"Recorded {len(validated)} decisions; archive publication has not been invoked")
 
 
 def batch(args, store):

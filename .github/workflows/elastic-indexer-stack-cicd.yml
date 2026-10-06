@@ -14,26 +14,30 @@ jobs:
   build:
     name: Test and build frontend
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 35
     outputs:
       digest: ${{ steps.publish.outputs.digest }}
       mcp_digest: ${{ steps.publish-mcp.outputs.digest }}
+      curation_digest: ${{ steps.publish-curation.outputs.digest }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
       - name: Validate deployment scripts
         run: |
-          bash -n scripts/deploy-frontend.sh scripts/smoke-frontend.sh scripts/smoke-embeddings.sh scripts/wait-http.sh
+          bash -n scripts/deploy-frontend.sh scripts/deploy-curation.sh scripts/smoke-frontend.sh scripts/smoke-embeddings.sh scripts/smoke-curation.sh scripts/wait-http.sh
           sh -n elastic-indexer-stack/k8s-manifests/embeddings/download-model.sh
           sh -n elastic-indexer-stack/k8s-manifests/embeddings/start-server.sh
           sh -n elastic-indexer-stack/k8s-manifests/embeddings/check-gpu.sh
           python3 -m py_compile scripts/frontend-secrets.py scripts/check-embeddings.py scripts/test-frontend-browser.py scripts/check-mcp.py scripts/mcp-smoke-fixture.py scripts/render-ingress-test.py scripts/test-frontend-rollout.py scripts/test-http-readiness.py scripts/check-static-assets.py
+          python3 -m py_compile scripts/curation-secrets.py scripts/check-curation.py scripts/test-curation-browser.py scripts/indexer-job-guard.py
           python3 scripts/test-http-readiness.py
+          python3 scripts/test-curation-operations.py
           python3 -m unittest discover -s scripts/search-benchmark -v
           ruby -c scripts/archive-crawler/downloader.rb
           python3 -m unittest discover -s scripts/archive-crawler -v
           kubectl kustomize elastic-indexer-stack/k8s-manifests >/dev/null
+          kubectl kustomize elastic-indexer-stack/curation/k8s >/dev/null
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
       - name: Log in to Docker Hub
         if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
@@ -106,6 +110,39 @@ jobs:
           EXPECTED_GIT_SHA: ${{ github.sha }}
           BROWSER_TEST_PYTHON: ${{ runner.temp }}/frontend-browser/bin/python
         run: bash scripts/smoke-frontend.sh "$IMAGE_TAG"
+      - name: Reuse the curation image already published for this commit
+        id: existing-curation
+        if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
+        env:
+          IMAGE_TAG: dbsanfte/frontend:curation-${{ github.sha }}
+        run: |
+          if docker pull "$IMAGE_TAG" > "$RUNNER_TEMP/curation-pull.log" 2>&1; then
+            echo 'reuse=true' >> "$GITHUB_OUTPUT"
+          elif grep -Eq 'manifest unknown|manifest .* not found' "$RUNNER_TEMP/curation-pull.log"; then
+            echo 'No curation image has been published for this commit yet.'
+          else
+            cat "$RUNNER_TEMP/curation-pull.log"
+            exit 1
+          fi
+      - name: Test and build curation and targeted indexer on Python 3.13
+        if: steps.existing-curation.outputs.reuse != 'true'
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          file: elastic-indexer-stack/curation/Dockerfile
+          load: true
+          tags: dbsanfte/frontend:curation-${{ github.sha }}
+          build-args: |
+            GIT_SHA=${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=curation
+          cache-to: type=gha,mode=max,scope=curation
+      - name: Test private curation routing and browser approvals
+        env:
+          BROWSER_TEST_PYTHON: ${{ runner.temp }}/frontend-browser/bin/python
+        run: bash scripts/smoke-curation.sh dbsanfte/frontend:curation-${{ github.sha }}
       - name: Test the offline candidate review screen
         run: '"${{ runner.temp }}/frontend-browser/bin/python" scripts/archive-crawler/verify_review_browser.py'
       - name: Test the Nomic service through the frontend proxy
@@ -136,9 +173,19 @@ jobs:
           if [[ "$REUSE_IMAGE" != 'true' ]]; then docker push "$IMAGE_TAG"; fi
           image=$(docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE_TAG")
           echo "digest=${image#*@}" >> "$GITHUB_OUTPUT"
+      - name: Publish the tested curation and targeted indexer image
+        id: publish-curation
+        if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
+        env:
+          IMAGE_TAG: dbsanfte/frontend:curation-${{ github.sha }}
+          REUSE_IMAGE: ${{ steps.existing-curation.outputs.reuse }}
+        run: |
+          if [[ "$REUSE_IMAGE" != 'true' ]]; then docker push "$IMAGE_TAG"; fi
+          image=$(docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE_TAG")
+          echo "digest=${image#*@}" >> "$GITHUB_OUTPUT"
 
   deploy:
-    name: Deploy frontend to eqvm
+    name: Deploy archive services to eqvm
     needs: build
     if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
     runs-on: [self-hosted, Linux, X64, eqvm]
@@ -166,12 +213,23 @@ jobs:
         env:
           IMAGE: dbsanfte/frontend@${{ needs.build.outputs.digest }}
           MCP_IMAGE: dbsanfte/frontend@${{ needs.build.outputs.mcp_digest }}
+          CURATION_IMAGE: dbsanfte/frontend@${{ needs.build.outputs.curation_digest }}
+          ARCHIVE_CRAWLER_OPENAI_API_KEY: ${{ secrets.ARCHIVE_CRAWLER_OPENAI_API_KEY }}
+          ARCHIVE_PUBLISH_SSH_KEY: ${{ secrets.ARCHIVE_PUBLISH_SSH_KEY }}
           FRONTEND_ES_USERNAME: ${{ secrets.FRONTEND_ES_USERNAME }}
           FRONTEND_ES_PASSWORD: ${{ secrets.FRONTEND_ES_PASSWORD }}
           FRONTEND_OPENAI_API_KEY: ${{ secrets.FRONTEND_OPENAI_API_KEY }}
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
+          job_snapshot=$(mktemp)
+          trap 'rm -f "$job_snapshot"' EXIT
+          sudo -n kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml -n eqarchives-es get jobs -o json |
+            python3 scripts/indexer-job-guard.py > "$job_snapshot"
           bash scripts/deploy-frontend.sh "$IMAGE" "$MCP_IMAGE"
+          bash scripts/deploy-curation.sh "$CURATION_IMAGE"
+          sudo -n kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml -n eqarchives-es get jobs -o json |
+            python3 scripts/indexer-job-guard.py --before "$job_snapshot"
           echo "Deployed \`$IMAGE\` to https://search.eqarchives.org" >> "$GITHUB_STEP_SUMMARY"
           echo "Deployed MCP \`$MCP_IMAGE\` to https://search.eqarchives.org/mcp" >> "$GITHUB_STEP_SUMMARY"
+          echo "Deployed intranet review \`$CURATION_IMAGE\` to http://192.168.50.100:8090" >> "$GITHUB_STEP_SUMMARY"
