@@ -1,0 +1,2 @@
+# Preserve the exact upstream bytes (including upstream whitespace).
+wayback-machine-downloader/** -whitespace

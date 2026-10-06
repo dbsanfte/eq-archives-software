@@ -31,6 +31,8 @@ jobs:
           python3 -m py_compile scripts/frontend-secrets.py scripts/check-embeddings.py scripts/test-frontend-browser.py scripts/check-mcp.py scripts/mcp-smoke-fixture.py scripts/render-ingress-test.py scripts/test-frontend-rollout.py scripts/test-http-readiness.py scripts/check-static-assets.py
           python3 scripts/test-http-readiness.py
           python3 -m unittest discover -s scripts/search-benchmark -v
+          ruby -c scripts/archive-crawler/downloader.rb
+          python3 -m unittest discover -s scripts/archive-crawler -v
           kubectl kustomize elastic-indexer-stack/k8s-manifests >/dev/null
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
       - name: Log in to Docker Hub
@@ -104,6 +106,8 @@ jobs:
           EXPECTED_GIT_SHA: ${{ github.sha }}
           BROWSER_TEST_PYTHON: ${{ runner.temp }}/frontend-browser/bin/python
         run: bash scripts/smoke-frontend.sh "$IMAGE_TAG"
+      - name: Test the offline candidate review screen
+        run: '"${{ runner.temp }}/frontend-browser/bin/python" scripts/archive-crawler/verify_review_browser.py'
       - name: Test the Nomic service through the frontend proxy
         env:
           IMAGE_TAG: dbsanfte/frontend:${{ github.sha }}

@@ -209,6 +209,13 @@ chunker. The [search relevance benchmark](scripts/search-benchmark/README.md)
 compares lexical, semantic and hybrid settings against a reserved archive query
 set, with source-based judgments, raw/grouped metrics and recorded versions.
 
+The [candidate crawler](scripts/archive-crawler/README.md) discovers outward
+links from selected local archive captures, checks cached website coverage,
+stages bounded Wayback samples, and optionally grades them with Luna. Its offline
+approval queue binds review decisions to exact source hashes. State stays outside
+both repositories; discovery does not clone, fetch, or walk archive content.
+Approved samples export as one manifest for subsequent publication and indexing.
+
 The [broad text reindex Job](elastic-indexer-stack/indexer/k8s/README.md#broad-text-reindex)
 repairs existing extracted text and rebuilds Nomic chunks in place. It preserves
 summaries, tags, dates, OCR and source metadata with atomic partial updates,

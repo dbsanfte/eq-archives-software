@@ -1,0 +1,6 @@
+*.sqlite3*
+captures/
+approval-queue.json
+approved-batch.json
+review-decisions.json
+__pycache__/

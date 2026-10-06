@@ -1,0 +1,11 @@
+{
+  "repository": "https://github.com/hartator/wayback-machine-downloader",
+  "revision": "653b94ba128cd209d0d4b345e4bff6e714e833fc",
+  "files": {
+    "MIT-LICENSE.txt": "1819d92f27aa541378c8421df329c54f404168b5bcd6d981f237a33e15f63d5b",
+    "lib/wayback_machine_downloader.rb": "5d386ae35a11db7c66b9cc21d559fda7f644884cba9ccf22d630e3cdade9f04d",
+    "lib/wayback_machine_downloader/archive_api.rb": "da36bb95f12344ec5910a41b90303b0563baaf311de750d786e1d529b16ba17e",
+    "lib/wayback_machine_downloader/tidy_bytes.rb": "fdbb77a740e4d4daebad637381b8065f9e49f9c3bc52053690eeb696fc2a9a5d",
+    "lib/wayback_machine_downloader/to_regex.rb": "ce64419c88e1b3eb4257b48f12354a506b2766a496576c38e0a1b955be0f9dd2"
+  }
+}

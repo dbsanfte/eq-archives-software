@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EQ Archives — Candidate review</title>
+<style>
+:root { color-scheme: dark; font-family: system-ui,sans-serif; background: #151918; color: #e6e3d8; }
+body { margin: 0 auto; padding: 24px; max-width: 1100px; overflow-wrap: anywhere; }
+h1 { color: #c9b779; margin-bottom: 8px; }
+p { line-height: 1.5; }
+button,select { font: inherit; border: 1px solid #877b52; border-radius: 5px; background: #222b26;
+  color: inherit; padding: 9px 14px; cursor: pointer; max-width: 100%; box-sizing: border-box; }
+a { color: #d7c581; overflow-wrap: anywhere; }
+.toolbar { display: flex; gap: 12px; flex-wrap: wrap; margin: 20px 0; }
+.card { border: 1px solid #485449; border-radius: 8px; padding: 18px; margin: 18px 0; }
+.badges { color: #b5c8b5; font-size: .9rem; }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 65vh; overflow: auto; line-height: 1.5;
+  background: #111; padding: 14px; }
+.reason { line-height: 1.5; }
+.warning { color: #f0ba85; }
+.evidence { padding-left: 18px; border-left: 3px solid #877b52; }
+details { margin: 12px 0; }
+summary { cursor: pointer; }
+label { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 15px; }
+.capture { margin-top: 15px; }
+@media (max-width: 500px) {
+  body { padding: 12px; } .card { padding: 12px; } h1 { font-size: 1.6rem; }
+  button,select { min-height: 44px; }
+}
+</style>
+</head>
+<body>
+<h1>EQ Archives candidate review</h1>
+<p>Historical captures discovered from trusted archive sites. First priority: 1999–2001; second: 2002–2007.
+Relevance grades are Luna judgments about the supplied samples. Each item represents a bounded sample of a site.</p>
+<p id="summary"></p>
+<div class="toolbar">
+  <select id="filter" aria-label="Filter candidates">
+    <option value="relevant">Useful EQ candidates</option>
+    <option value="all">All candidates</option>
+    <option value="unjudged">Unjudged candidates</option>
+  </select>
+  <button id="export">Download review decisions</button>
+</div>
+<p>Selections stay in this browser until exported. Importing the decision file records approval;
+publication happens later as a separate batch.</p>
+<main id="cards"></main>
+<script>
+/* QUEUE_DATA */
+const storageKey = 'eqarchives-review:' + queue.metadata.archive_sha;
+let choices = {};
+try { choices = JSON.parse(localStorage.getItem(storageKey) || '{}'); } catch {}
+const el = (tag,text,cls) => {
+  const node = document.createElement(tag);
+  if (text !== undefined) node.textContent = text;
+  if (cls) node.className = cls;
+  return node;
+};
+const link = (url,text) => {
+  const a = el('a', text || url);
+  a.href = url;
+  a.target = '_blank';
+  a.rel = 'noopener noreferrer';
+  return a;
+};
+const judged = queue.candidates.filter(c => c.rating).length;
+const cost = (queue.metadata.grading?.estimated_usd || 0).toFixed(4);
+const revision = (queue.metadata.archive_sha || 'not selected').slice(0,12);
+document.getElementById('summary').textContent =
+  `${queue.candidates.length} discovered candidates · ${judged} graded · estimated API usage $${cost} · archive ${revision}`;
+
+function render() {
+  const main = document.getElementById('cards');
+  main.replaceChildren();
+  const filter = document.getElementById('filter').value;
+  for (const c of queue.candidates) {
+    if (filter === 'relevant' && (!c.rating || c.rating.grade < 2)) continue;
+    if (filter === 'unjudged' && c.rating) continue;
+    const card = el('article', undefined, 'card');
+    card.dataset.id = c.id;
+    card.append(link(c.url, c.captures?.[0]?.title || c.url), el('p', c.url));
+    const level = Math.min(...c.captures.map(x => x.tier));
+    const grade = c.rating ? `Grade ${c.rating.grade} / 3 · ${c.rating.category} · ${c.rating.confidence} confidence` : 'Unjudged';
+    card.append(el('div', `${Number.isFinite(level) ? 'Tier ' + level : 'No staged capture'} · ${grade} · ${c.state}`, 'badges'));
+    card.append(el('p', 'Proposed scope: ' + c.scope), el('p', 'Existing coverage: ' + c.coverage.status));
+    if (c.rating) {
+      card.append(el('p', c.rating.reason, 'reason'));
+      for (const evidence of c.rating.evidence) card.append(el('p', evidence.excerpt, 'evidence'));
+    }
+    if (c.error) card.append(el('p', c.error, 'warning'));
+    const origins = el('details');
+    origins.append(el('summary', 'Discovery evidence'));
+    for (const evidence of c.evidence) {
+      const p = el('p', `${evidence.source_timestamp} · ${evidence.anchor}\n${evidence.context}`);
+      p.append(el('br'), link('https://web.archive.org/web/' + evidence.source_timestamp + '/' + evidence.source_url, 'Referring capture'));
+      origins.append(p);
+    }
+    card.append(origins);
+    for (const source of c.sources) {
+      const detail = el('details', undefined, 'capture');
+      const capture = c.captures[source.slot];
+      detail.append(el('summary', 'Read captured source — ' + source.timestamp));
+      detail.append(el('p', 'Capture date basis: ' + (capture.timestamp_basis || 'legacy metadata')));
+      detail.append(link('https://web.archive.org/web/' + source.timestamp + '/' + source.url, 'Open Wayback capture'));
+      detail.append(el('pre', source.complete_extracted_text));
+      card.append(detail);
+    }
+    if (c.source_error) card.append(el('p', c.source_error, 'warning'));
+    const label = el('label', 'Review decision');
+    const select = el('select');
+    select.setAttribute('aria-label', 'Decision for ' + c.url);
+    const approvable = c.rating && c.captures.length && !c.source_error;
+    for (const [value,text] of [['','Undecided'],['approve','Approve staged captures'],['defer','Defer'],['reject','Reject']]) {
+      const option = el('option', text);
+      option.value = value;
+      option.disabled = value === 'approve' && !approvable;
+      select.append(option);
+    }
+    const old = choices[c.id] || c.decision;
+    if (old?.manifest_sha256 === c.manifest_sha256 && (old.decision !== 'approve' || approvable)) {
+      select.value = old.decision;
+      choices[c.id] = {id: c.id, manifest_sha256: c.manifest_sha256, decision: old.decision};
+    }
+    select.onchange = () => {
+      choices[c.id] = {id: c.id, manifest_sha256: c.manifest_sha256, decision: select.value};
+      try { localStorage.setItem(storageKey, JSON.stringify(choices)); } catch {}
+    };
+    label.append(select);
+    card.append(label);
+    main.append(card);
+  }
+}
+document.getElementById('filter').onchange = render;
+document.getElementById('export').onclick = () => {
+  const current = new Map(queue.candidates.map(c => [c.id,c]));
+  const rows = Object.values(choices).filter(r => {
+    const c = current.get(r.id);
+    return r.decision && c?.manifest_sha256 === r.manifest_sha256 &&
+      (r.decision !== 'approve' || (c.rating && c.captures.length && !c.source_error));
+  });
+  const url = URL.createObjectURL(new Blob([JSON.stringify(rows,null,2) + '\n'], {type: 'application/json'}));
+  const a = el('a');
+  a.href = url;
+  a.download = 'review-decisions.json';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+render();
+</script>
+</body>
+</html>

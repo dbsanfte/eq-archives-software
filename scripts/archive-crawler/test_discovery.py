@@ -1,0 +1,154 @@
+"""Discovery regressions use small disposable archives, never the live checkout."""
+
+import json
+import os
+from pathlib import Path
+import subprocess
+import tempfile
+import shlex
+import unittest
+from unittest.mock import patch
+
+from common import CrawlError, Page, Store, original_url, site_scope, tier
+from crawler import parser
+from discovery import Archive, discover
+
+
+class DiscoveryTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.repo = self.root / "archive"
+        self.repo.mkdir()
+        self.git("init", "-q")
+        self.store = Store(self.root / "state")
+        self.addCleanup(self.store.close)
+
+    def git(self, *arguments):
+        return subprocess.check_output(["git", "-C", str(self.repo), *arguments], stderr=subprocess.DEVNULL).decode().strip()
+
+    def file(self, host, timestamp, path, text):
+        destination = self.repo / "websites" / host / timestamp / path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(text)
+
+    def commit(self):
+        self.git("add", "websites")
+        self.git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture")
+
+    def args(self, maximum=50):
+        seeds = self.root / "seeds.json"
+        seeds.write_text(json.dumps([{"host": "seed.example", "category": "guild"}]))
+        return parser().parse_args(["--work-dir", str(self.store.root), "discover", "--archive-repo", str(self.repo),
+                                   "--seeds", str(seeds), "--max-candidates", str(maximum)])
+
+    def test_url_identity_and_capture_unwrapping(self):
+        url = "https://EQ.example/Guide%2FOne?b=2&a=1#section"
+        self.assertEqual(original_url(url), "https://eq.example/Guide%2FOne?b=2&a=1")
+        self.assertEqual(original_url("https://web.archive.org/web/20011231235959id_/" + url), original_url(url))
+        self.assertEqual(original_url("../Classes.htm", "http://eq.example/info/index.html"), "http://eq.example/Classes.htm")
+        for bad in ("javascript:alert(1)", "http://127.0.0.1/", "http://localhost/", "http://user:password@eq.example/", "http://eq.example/a b"):
+            self.assertIsNone(original_url(bad))
+        self.assertNotEqual(original_url("http://eq.example/A?a=1&b=2"), original_url("https://eq.example/a?b=2&a=1"))
+
+    def test_inclusive_tiers_and_shared_host_scope(self):
+        for date in ("19990101000000", "20011231235959"):
+            self.assertEqual(tier(date), 1)
+        for date in ("20020101000000", "20071231235959"):
+            self.assertEqual(tier(date), 2)
+        for date in ("19981231235959", "20080101000000", "20010230000000", "2001"):
+            self.assertIsNone(tier(date))
+        self.assertEqual(site_scope("http://www.geocities.com/SouthBeach/Breakers/2938/page.html"), "http://www.geocities.com/SouthBeach/Breakers/2938/")
+        self.assertEqual(site_scope("http://www.geocities.com/guild/page.html"), "http://www.geocities.com/guild/")
+        self.assertNotEqual(site_scope("http://www.angelfire.com/games/guild1/"), site_scope("http://www.angelfire.com/games/guild2/"))
+
+    def test_page_links_and_text_ignore_scripts(self):
+        page = Page("http://seed.example/links.html")
+        page.feed('<title>EQ guilds</title><script>ignore me</script><a href="https://eq.example/">Guild<img alt="roster"></a>')
+        self.assertEqual(page.links[0]["anchor"].strip(), "Guild roster")
+        self.assertNotIn("ignore me", page.text)
+
+    def test_historical_boolean_attributes_do_not_abort_source_parsing(self):
+        page = Page("http://seed.example/links.html")
+        page.feed('<a href="http://guild.example/"><img alt>EQ guild</a><a href>Empty</a><iframe src>')
+        self.assertEqual(page.links[0]["url"], "http://guild.example/")
+        self.assertIn("EQ guild", " ".join(page.text))
+
+    def test_cached_discovery_is_bounded_and_does_not_write_archive(self):
+        self.file("seed.example", "20000101000000", "links.html", '<p>EverQuest guild links</p>' +
+                  ''.join(f'<a href="http://guild{i}.example/">EQ guild {i}</a>' for i in range(8)))
+        self.commit()
+        head = self.git("rev-parse", "HEAD")
+        args = self.args(3)
+        discover(args, self.store)
+        self.assertEqual(len(self.store.candidates()), 3)
+        self.assertEqual(self.store.get("discovery_result")["seed_reads"], 1)
+        with patch.object(Archive, "blob", side_effect=AssertionError("cached sources must not be reread")):
+            discover(args, self.store)
+        self.assertEqual(len(self.store.candidates()), 3)
+        self.assertEqual(self.git("rev-parse", "HEAD"), head)
+        self.assertEqual(self.git("status", "--porcelain"), "")
+
+    def test_coverage_distinguishes_missing_tier_and_legacy_identity(self):
+        self.file("known.example", "20000101000000", "Guide.html", "first")
+        self.file("known.example", "20030101000000", "later.html", "second")
+        self.commit()
+        archive = Archive(self.repo, self.store)
+        self.assertEqual(archive.coverage("http://known.example/Guide.html")["status"], "present_tier1")
+        self.assertEqual(archive.coverage("http://known.example/guide.html")["status"], "absent_page")
+        self.assertEqual(archive.coverage("http://known.example/later.html")["status"], "missing_tier1")
+        self.assertEqual(archive.coverage("https://known.example/Guide.html")["status"], "uncertain_legacy_url")
+        self.assertEqual(archive.coverage("http://unknown.example/")["status"], "absent_host")
+
+    def test_partial_inventory_does_not_claim_page_absent(self):
+        for number in range(4):
+            self.file("known.example", "20000101000000", f"{number}.html", str(number))
+        self.commit()
+        archive = Archive(self.repo, self.store, max_entries=2, max_inventory=2)
+        self.assertEqual(archive.coverage("http://known.example/3.html")["status"], "inventory_partial")
+        self.assertEqual(self.store.db.execute("SELECT SUM(entries) FROM tree_state").fetchone()[0], 2)
+
+    def test_state_cannot_live_in_software_or_archive(self):
+        with self.assertRaises(CrawlError):
+            Store(Path(__file__).parent / "test-state")
+        self.file("known.example", "20000101000000", "index.html", "EQ")
+        self.commit()
+        nested = Store(self.repo / "state")
+        self.addCleanup(nested.close)
+        with self.assertRaises(CrawlError):
+            Archive(self.repo, nested)
+
+    def test_missing_partial_clone_blob_never_invokes_remote_or_writes_objects(self):
+        self.file("known.example", "20000101000000", "index.html", "EQ guild history")
+        self.commit()
+        blob = self.git("rev-parse", "HEAD:websites/known.example/20000101000000/index.html")
+        (self.repo / ".git" / "objects" / blob[:2] / blob[2:]).unlink()
+        self.git("config", "remote.origin.url", "ssh://fixture.invalid/archive")
+        self.git("config", "remote.origin.promisor", "true")
+        self.git("config", "remote.origin.partialclonefilter", "blob:none")
+        marker = self.root / "fetch-attempt"
+        ssh = self.root / "fake-ssh.py"
+        ssh.write_text("from pathlib import Path\nPath(" + repr(str(marker)) + ").write_text('attempted')\nraise SystemExit(1)\n")
+        with patch.dict(os.environ, {"GIT_SSH_COMMAND": "python3 " + shlex.quote(str(ssh)), "GIT_NO_LAZY_FETCH": "0"}):
+            archive = Archive(self.repo, self.store)
+            with self.assertRaises(CrawlError):
+                archive.blob(blob, 1024)
+        self.assertFalse(marker.exists(), "Discovery must never try a promisor fetch")
+
+    def test_missing_seed_can_use_next_available_capture_within_probe_cap(self):
+        self.file("seed.example", "19990101000000", "links.html", "missing first")
+        self.file("seed.example", "20000101000000", "links.html", '<a href="http://guild.example/">EQ guild</a>')
+        self.commit()
+        blob = self.git("rev-parse", "HEAD:websites/seed.example/19990101000000/links.html")
+        (self.repo / ".git" / "objects" / blob[:2] / blob[2:]).unlink()
+        args = self.args()
+        args.max_per_seed = 1
+        args.max_seed_probes = 2
+        discover(args, self.store)
+        self.assertEqual(len(self.store.candidates()), 1)
+        self.assertEqual(self.store.get("discovery_result")["seed_probes"], 2)
+
+
+if __name__ == "__main__":
+    unittest.main()
