@@ -109,10 +109,13 @@ def test_import_job_only_mounts_staging_readonly_and_separate_indexing_secrets()
     batch={'id':'a'*32,'manifest_sha256':'b'*64}
     spec=import_job(batch,IMAGE)['spec']['template']['spec']
     assert not spec['automountServiceAccountToken']
-    assert all(mount['readOnly'] for mount in spec['containers'][0]['volumeMounts'])
+    mounts=spec['containers'][0]['volumeMounts']
+    assert mounts[0]['readOnly'] and mounts[1]['readOnly']
+    assert mounts[2]['subPath']=='enrichment' and mounts[2]['mountPath']=='/enrichment'
     assert not any('hostPath' in volume for volume in spec['volumes'])
     secret_names=[source['secret']['name'] for source in spec['volumes'][1]['projected']['sources']]
-    assert secret_names == ['eqarchives-capture-indexer-secrets','search-eqarchives-secrets']
+    assert secret_names == ['eqarchives-capture-indexer-secrets','search-eqarchives-secrets','eqarchives-curation-secrets']
+    assert spec['volumes'][1]['projected']['sources'][2]['secret']['items']==[{'key':'luna_api_key','path':'luna_api_key'}]
     with pytest.raises(CrawlError): import_job(batch,'latest')
 
 

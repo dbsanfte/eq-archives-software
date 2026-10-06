@@ -9,6 +9,7 @@ from urllib.parse import unquote_plus, urlsplit
 from acquisition import Downloader
 from common import CrawlError, Page, Store, TIERS, decode, digest, now, original_url, save, tier, within_scope
 from discovery import SKIP
+from indexer.capture_enrichment import DEFAULT_POLICY
 
 LIMITS = {"sites": 5, "pages_per_site": 20, "files": 100, "bytes": 64 * 1024 * 1024,
           "requests": 500, "seconds": 1800, "page_bytes": 1024 * 1024}
@@ -91,7 +92,7 @@ def capture_sites(root, batch_id, sites, downloader_factory=Downloader):
         draft = json.loads(draft_path.read_text())
     else:
         draft = {"schema": 1, "batch_id": batch_id, "created_at": now(), "limits": LIMITS,
-                 "sites": sites, "captures": [], "visited": [], "notes": []}
+                 "sites": sites, "captures": [], "visited": [], "notes": [], "indexing": dict(DEFAULT_POLICY)}
         for site in sites:
             for capture in site["captures"]:
                 verified_source(root, capture)

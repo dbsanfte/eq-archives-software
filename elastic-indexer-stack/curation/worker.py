@@ -168,6 +168,7 @@ class Worker:
                 if waiting:
                     state, detail = "published_waiting_index", {"waiting_for": waiting}
                 else:
+                    (self.root / "enrichment").mkdir(exist_ok=True, mode=0o700)
                     self.kube.create(import_job(batch, os.environ.get("IMPORT_IMAGE", "")))
                     state, detail = "indexing", {"name": name, "state": "submitted"}
                     # No further submissions until the next list sees this Job.

@@ -101,6 +101,7 @@ function batch(row) {
     const slots = new Set(captures.map((_,index)=>index));
     let publish;
     card.append(element('p', `${captures.length} HTML files · ${(captures.reduce((total,c)=>total+c.bytes,0)/1048576).toFixed(2)} MiB`, 'meta'));
+    card.append(element('p', `AI enrichment on import: Luna summaries, categories, tags and supported date estimates · $${row.manifest.indexing?.max_enrichment_usd ?? 2} maximum for this batch.`, 'meta'));
     const details = element('details'); details.append(element('summary','Review archive file set'));
     captures.forEach((capture,slot) => {
       const file = element('div',undefined,'file');

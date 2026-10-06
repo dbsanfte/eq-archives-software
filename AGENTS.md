@@ -228,8 +228,15 @@ checkouts during curation delivery. Its controller has only Jobs get/list/create
 permissions and waits for other unfinished, unsuspended Jobs, including pending/
 retrying Jobs with active=0. The publisher uses its own bare treeless repository
 and dedicated archive deploy key, without an archive worktree or force push. Keep
-private state on its PVC. Import Jobs mount it read-only and receive only their
-dedicated create-only ES account and the existing Nomic key.
+private state on its PVC. Import Jobs mount approved sources read-only and a
+separate enrichment subdirectory writable. They receive their dedicated
+create-only ES account, existing Nomic key and only the paid Luna key item,
+never the publication key. AI enrichment is enabled by default using the
+existing text prompts/schema enums, with source-bound caching, conservative
+reservations and a separate $2 cap per approved batch. Preserve full source,
+model provenance and supported date evidence; capture dates are not publication
+estimates. Enrichment failures leave the new document pending. Skip existing
+IDs without paying for enrichment or overwriting their metadata.
 
 ### Public MCP service
 

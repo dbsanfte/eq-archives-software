@@ -220,7 +220,8 @@ LAN clients in `192.168.0.0/16`, without authentication or public ingress.
 Deep-link directory scopes and whole-site/account alternatives are explicit.
 Approved sites receive bounded captures in the existing `websites/` layout;
 a second approval selects files for one publication commit and targeted
-create-only indexing. Import Jobs wait for existing ingestion Jobs to finish.
+create-only indexing with Luna enrichment by default and a separate $2 batch
+cap. Import Jobs wait for existing ingestion Jobs to finish.
 Paid discovery is manual, up to 50 new candidates and $2 per explicit run;
 deployment makes no paid calls.
 

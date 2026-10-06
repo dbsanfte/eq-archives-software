@@ -20,8 +20,13 @@ def test_manifest_indexing_creates_missing_ids_preserves_source_and_skips_existi
     root,row=candidate
     batch=published(row)
     class FakeServices:
-        def __init__(self): self.docs={}; self.inputs=[]
+        def __init__(self): self.docs={}; self.inputs=[]; self.enrichments=[]
         def exists(self,identifier): return identifier in self.docs
+        def enrich(self,capture,source):
+            self.enrichments.append(source)
+            return {'llm_summary':'An EverQuest guild history and guide.', 'llm_content_flavour':'Guild Achievements',
+                    'llm_tags':['raid'],'llm_guessed_date':None,'llm_extracted_dates':[],
+                    'llm_model_name':'gpt-6-luna','llm_enrichment_signature':'c'*64}
         def embedding(self,text): self.inputs.append(text); return [0.01]*768
         def create(self,identifier,document): self.docs[identifier]=document; return True
     services=FakeServices()
@@ -35,10 +40,14 @@ def test_manifest_indexing_creates_missing_ids_preserves_source_and_skips_existi
     assert doc['capture_date'] == '2000-01-01T00:00:00+00:00'
     assert doc['archive_source_sha256'] == row['captures'][0]['sha256']
     assert doc['archive_commit'] == 'b'*40
+    assert doc['llm_model_name']=='gpt-6-luna' and doc['llm_tags']==['raid']
+    assert len(doc['llm_summary_vector'])==768
+    assert all('Page URL:' not in text for text in services.enrichments)
     assert all(len(load_tokenizer().encode(DOCUMENT_PREFIX+text).ids)<=480 for text in services.inputs)
     original=json.dumps(doc,sort_keys=True)
     assert index_batch(root,batch,services)['existing'] == 1
     assert json.dumps(services.docs[identifier],sort_keys=True) == original
+    assert len(services.enrichments)==1
 
 
 def test_entire_manifest_is_verified_before_any_index_or_embedding_request(candidate):
@@ -48,6 +57,17 @@ def test_entire_manifest_is_verified_before_any_index_or_embedding_request(candi
     class Forbidden:
         def exists(self,*args): raise AssertionError('No writes/embeddings before whole manifest validation')
     with pytest.raises(CrawlError): index_batch(root,batch,Forbidden())
+
+
+def test_enrichment_failure_leaves_new_document_pending_and_never_writes_fallback(candidate):
+    root,row=candidate
+    class Pending:
+        def exists(self,*args):return False
+        def enrich(self,*args):raise CrawlError('Enrichment dollar budget reached')
+        def embedding(self,*args):raise AssertionError('No embedding before required enrichment')
+        def create(self,*args):raise AssertionError('No unenriched document should be created')
+    with pytest.raises(CrawlError,match='Enrichment dollar budget'):
+        index_batch(root,published(row),Pending())
 
 
 def test_read_batch_rejects_missing_publication_stale_hash_and_path_escape(candidate):

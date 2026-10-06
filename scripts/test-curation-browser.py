@@ -60,6 +60,7 @@ async def check(base):
             await page.goto(base)
             button=page.get_by_role('button',name='Approve publication & queue indexing')
             await button.wait_for()
+            await page.locator('#batches p').filter(has_text='AI enrichment on import').wait_for()
             await page.locator('#batches summary').filter(has_text='Review archive file set').click()
             files=page.get_by_label('Include this capture')
             for checkbox in await files.all():

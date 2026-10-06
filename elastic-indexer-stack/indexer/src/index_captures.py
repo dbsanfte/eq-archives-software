@@ -1,7 +1,7 @@
 """Create-only, manifest-directed indexing of approved and published captures.
 
-No Git checkout, finder, RabbitMQ, mapping updates, paid LLM or enrichment edits.
-Reuse the archive's Markdown extractor and checksum-pinned Nomic chunker.
+No Git checkout, finder, RabbitMQ, mapping updates or existing-document edits.
+Reuse the archive's extractor, Nomic chunker and default source-bound enrichment.
 """
 
 import argparse
@@ -21,6 +21,7 @@ from common import CrawlError, decode, digest, now
 from captures import check_manifest, verified_source
 from indexer.chunking import CHUNKING_VERSION, DOCUMENT_PREFIX, chunk_source
 from indexer.html_extraction import WEBSITE_EXTRACTION_VERSION, website_markdown
+from indexer.capture_enrichment import Enricher, policy
 
 
 def read_batch(root, relative, expected):
@@ -51,7 +52,8 @@ def text_document(root, capture):
 
 
 class Services:
-    def __init__(self, directory=Path("/run/secrets")):
+    def __init__(self, directory=Path("/run/secrets"), enricher=None):
+        self.enricher = enricher
         self.es_url = os.environ.get("ELASTICSEARCH_URL", "http://elasticsearch.eqarchives-es.svc.cluster.local:9200").rstrip("/")
         self.index = os.environ.get("ELASTICSEARCH_INDEX", "eq-archive")
         self.model = os.environ.get("EMBEDDING_MODEL", "text-embedding-nomic-embed-text-v1.5@q8_0")
@@ -65,6 +67,13 @@ class Services:
     def close(self):
         self.client.close()
         self.embedder.close()
+        if self.enricher:
+            self.enricher.close()
+
+    def enrich(self, capture, source):
+        if not self.enricher:
+            raise CrawlError("Default enrichment is not configured; document remains pending")
+        return self.enricher.enrich(capture, source)
 
     def exists(self, record_id):
         response = self.client.head(f"{self.es_url}/{quote(self.index, safe='')}/_doc/{quote(record_id, safe='')}")
@@ -107,6 +116,7 @@ class Services:
 def index_batch(root, batch, services, chunker=chunk_source):
     manifest = batch["manifest"]
     check_manifest(root, manifest)
+    policy(manifest)
     created = skipped = 0
     for capture in manifest["captures"]:
         record_id = capture["archive_path"]
@@ -114,16 +124,29 @@ def index_batch(root, batch, services, chunker=chunk_source):
             skipped += 1
             continue
         replay, content = text_document(root, capture)
+        # Model date extraction sees the original body, not our synthetic
+        # provenance header or the capture timestamp embedded in its URL.
+        source, _ = decode(verified_source(root, capture), capture.get("content_type") or "")
+        metadata = services.enrich(capture, website_markdown(source))
         chunks = [{"text_chunk": chunk.text, "vector": services.embedding(chunk.text)} for chunk in chunker(content)]
         if not chunks:
             raise CrawlError("Capture has no source chunks")
+        summary_vectors = [services.embedding(chunk.text) for chunk in chunker(metadata["llm_summary"])]
+        if not summary_vectors:
+            raise CrawlError("Summary has no usable embedding chunks; enriched result retained for retry")
+        summary_vector = [sum(vector[index] for vector in summary_vectors) / len(summary_vectors) for index in range(768)]
+        magnitude = math.sqrt(sum(value * value for value in summary_vector))
+        if not magnitude:
+            raise CrawlError("Summary embedding is empty; enriched result retained for retry")
+        summary_vector = [value / magnitude for value in summary_vector]
         timestamp = datetime.strptime(capture["timestamp"], "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc).isoformat()
         document = {"id": record_id, "title": capture.get("title") or urlsplit(capture["url"]).path or "Archived page",
                     "domain_name": urlsplit(capture["url"]).netloc, "capture_date": timestamp, "last_indexed": now(),
                     "url": replay, "mime_type": "text/html", "file_type": "text", "thumbnail": "thumbnails/website.webp",
                     "text_full": content, "text": chunks, "text_extraction_version": WEBSITE_EXTRACTION_VERSION,
                     "text_chunking_version": CHUNKING_VERSION, "archive_source_sha256": capture["sha256"],
-                    "archive_source_manifest": batch["manifest_sha256"], "archive_commit": batch["publication"]["commit"]}
+                    "archive_source_manifest": batch["manifest_sha256"], "archive_commit": batch["publication"]["commit"],
+                    **metadata, "llm_summary_vector": summary_vector}
         if services.create(record_id, document):
             created += 1
         else:
@@ -136,11 +159,16 @@ def main():
     parser.add_argument("--root", required=True, type=Path)
     parser.add_argument("--batch", required=True)
     parser.add_argument("--manifest-sha256", required=True)
+    parser.add_argument("--enrichment-root", type=Path, default=Path("/enrichment"))
     args = parser.parse_args()
     services = None
+    enricher = None
     try:
         batch = read_batch(args.root, args.batch, args.manifest_sha256)
-        services = Services()
+        settings = policy(batch["manifest"])
+        enricher = Enricher(args.enrichment_root / batch["manifest"]["batch_id"], "/run/secrets/luna_api_key",
+                            maximum=settings["max_enrichment_usd"])
+        services = Services(enricher=enricher)
         print(json.dumps(index_batch(args.root, batch, services)), flush=True)
     except (CrawlError, OSError, httpx.HTTPError):
         print("Capture indexing failed; no existing documents were overwritten. Retry the verified manifest.", flush=True)
@@ -148,6 +176,8 @@ def main():
     finally:
         if services:
             services.close()
+        elif enricher:
+            enricher.close()
     return 0
 
 

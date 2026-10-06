@@ -28,7 +28,8 @@ Legacy finder/worker/broad reindex Jobs retain their separate lifecycles.
 4. Review the resulting archive file set and complete sources, uncheck unwanted
    captures and **Approve publication & queue indexing**. This second approval
    binds to the actual source hashes and selected subset, which can differ from
-   the initial samples Luna assessed.
+   the initial samples Luna assessed. Import includes AI enrichment by default,
+   with a separate $2 limit shown before publication approval.
 5. Publication makes one fast-forward archive commit, including
    `crawl-manifests/<batch-id>.json`. Import waits for every other unfinished,
    unsuspended Job in `eqarchives-es`, including pending/retrying Jobs with
@@ -93,12 +94,13 @@ marker and source blob IDs. A recovered commit denotes a verified snapshot
 containing the batch and may be newer than its original publication commit.
 
 `ARCHIVE_CRAWLER_OPENAI_API_KEY` is the separate paid Actions key. Both are
-projected into `eqarchives-curation-secrets`; neither reaches the browser,
-image or import Job. Import uses the existing Nomic key and a separate ES
+projected into `eqarchives-curation-secrets`; neither reaches the browser or
+image. Import receives only the paid `luna_api_key` item, never the publication
+key. It uses the existing Nomic key and a separate ES
 user/role `eqarchives-capture-import`, restricted to `read` and `create_doc` on
 `eq-archive`, from `eqarchives-capture-indexer-secrets`. The trusted deployment
 runner reads the existing elastic password through stdin to provision this
-account and three additive provenance keyword mappings. It does not change
+account and four additive provenance keyword mappings. It does not change
 existing accounts or Jobs. Secret apply uses a private pipe/server-side apply,
 with no secret-bearing files or last-applied annotations.
 
@@ -108,8 +110,24 @@ complete source serially with `search_document:`, at most 480 tokens including
 prefix/special tokens and roughly 48 tokens overlap, and requires finite,
 nonzero 768-dimensional vectors. IDs are exact `websites/...` paths. Existing
 IDs/concurrent create conflicts are skipped, preserving enrichment, OCR and
-provenance. There is no index/mapping creation, RabbitMQ, broad scan or paid
-enrichment. Kubernetes retries twice; terminal failures remain visible for
+provenance. By default, each new document also receives source-bound Luna
+summary, content flavour, tags and supported date estimates using the existing
+archive text prompts/schema enums. It stores the actual model and enrichment
+signature, and embeds its short summary with Nomic. The complete original body
+is retained separately; model estimates never replace capture dates. Date
+extraction receives no synthetic capture header and requires verbatim source
+evidence. Sources exceeding the 900 KB serialized enrichment bound remain
+pending rather than being truncated.
+
+Each approved publication batch has a separate cumulative $2 enrichment cap.
+Reservations use conservative long-context rates and precede calls; ambiguous
+failures retain reservations. Verified results are cached by source/prompt/model
+signature in a writable `enrichment/` subdirectory on the PVC. The approved
+sources/manifests remain read-only in import Jobs. Completed results are reused
+on retry, while existing document IDs incur no model calls. Failed enrichment
+or an exhausted budget leaves that document pending instead of silently creating
+an unenriched entry. There is no index/mapping creation, RabbitMQ or broad scan.
+Kubernetes retries twice; terminal failures remain visible for
 operator investigation, without deleting/replacing an existing Job.
 
 ## Storage, deployment and checks

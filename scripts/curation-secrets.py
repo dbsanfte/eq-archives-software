@@ -37,7 +37,7 @@ def main():
     put("/_security/user/" + username, {"password": password, "roles": ["eqarchives-capture-import"]})
     # Only additive provenance mappings; no existing field or index changes.
     put("/eq-archive/_mapping", {"properties": {name: {"type": "keyword"} for name in
-                                               ("archive_source_sha256", "archive_source_manifest", "archive_commit")}})
+                                               ("archive_source_sha256", "archive_source_manifest", "archive_commit", "llm_enrichment_signature")}})
     def secret(name, fields):
         return {"apiVersion": "v1", "kind": "Secret", "metadata": {"name": name, "namespace": "eqarchives-es"},
                 "type": "Opaque", "data": {name: base64.b64encode(value.encode()).decode() for name, value in fields.items()}}
