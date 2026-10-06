@@ -1,6 +1,8 @@
 import json
 import subprocess
 
+import pytest
+
 from common import digest
 from coverage_check import refresh
 from review import apply_decisions
@@ -110,3 +112,34 @@ def test_corrected_legacy_board_scope_requires_reapproval_and_retains_prior_deci
         correction=json.loads(current['coverage'])['scope_corrections'][0]
         assert correction['previous_decision']['decision']=='approve'
         assert correction['previous_scope']=='http://server3.ezboard.com/'
+
+
+@pytest.mark.parametrize('previously_unverified', [False, True])
+def test_partial_recheck_cannot_restore_approval_invalidated_by_scope_correction(tmp_path,monkeypatch,previously_unverified):
+    from site_inventory import SiteInventory
+    root=tmp_path/'state'
+    row=add_candidate(root,url='http://pub6.ezboard.com/bthemagicianstower.html')
+    with connect(root) as store:
+        store.db.execute("UPDATE candidates SET scope='http://pub6.ezboard.com/' WHERE id=?",(row['id'],))
+        store.db.commit()
+        row=record(store,store.candidates()[0])
+        apply_decisions(store,[{'id':row['id'],'manifest_sha256':row['manifest_sha256'],'decision':'approve'}])
+        if previously_unverified:
+            coverage=json.loads(store.candidates()[0]['coverage'])
+            coverage['previous_state']='approved_waiting_batch'
+            store.db.execute("UPDATE candidates SET state='coverage_unverified',coverage=? WHERE id=?",(json.dumps(coverage),row['id']))
+            store.db.commit()
+    repo=archive(tmp_path,['pub6.ezboard.com/20000101000000/botherguild/index.html'])
+    monkeypatch.setenv('ARCHIVE_REPO',str(repo))
+    check=SiteInventory.check
+    monkeypatch.setattr(SiteInventory,'check',lambda self,*args,**kwargs:{'status':'inventory_partial','complete':False})
+    refresh(root)
+    with connect(root) as store:
+        assert store.candidates()[0]['state']=='coverage_unverified'
+        assert store.candidates()[0]['decision'] is None
+    monkeypatch.setattr(SiteInventory,'check',check)
+    refresh(root,force=True)
+    with connect(root) as store:
+        current=store.candidates()[0]
+        assert current['state']=='approval_pending' and current['decision'] is None
+        assert json.loads(current['coverage'])['scope_corrections'][0]['previous_decision']['decision']=='approve'
