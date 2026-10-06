@@ -1,0 +1,12 @@
+.git
+**/.venv
+**/node_modules
+**/coverage
+**/.coverage
+**/coverage.json
+**/build
+**/__pycache__
+**/.pytest_cache
+**/.env
+**/test-results
+**/playwright-report

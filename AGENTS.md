@@ -24,6 +24,7 @@ digests, dependency versions, or credentials into new files.
 | Required checks and production delivery | [Frontend CI/CD](.github/workflows/elastic-indexer-stack-cicd.yml) |
 | Frontend build and coverage configuration | [Dockerfile](elastic-indexer-stack/frontend/Dockerfile), [package.json](elastic-indexer-stack/frontend/package.json), [Jest configuration](elastic-indexer-stack/frontend/jest.config.js) |
 | Production reconciliation and runtime secrets | [deploy-frontend.sh](scripts/deploy-frontend.sh), [frontend-secrets.py](scripts/frontend-secrets.py) |
+| Intranet curation and targeted imports | [Curation guide](elastic-indexer-stack/curation/README.md), [deployment](scripts/deploy-curation.sh), [secret provisioning](scripts/curation-secrets.py) |
 | Managed Kubernetes resources | [Root Kustomization](elastic-indexer-stack/k8s-manifests/kustomization.yaml), [frontend manifests](elastic-indexer-stack/k8s-manifests/01-frontend.yaml), [embedding manifests](elastic-indexer-stack/k8s-manifests/embeddings/deployment.yaml) |
 | Model/image pins, bootstrap and GPU allocation | [runtime.env](elastic-indexer-stack/k8s-manifests/embeddings/runtime.env), [embedding Kustomization](elastic-indexer-stack/k8s-manifests/embeddings/kustomization.yaml), [device plugin](elastic-indexer-stack/k8s-manifests/embeddings/device-plugin.yaml) |
 | Indexer dependencies, tests and mappings | [Indexer Dockerfile](elastic-indexer-stack/indexer/Dockerfile), [test requirements](elastic-indexer-stack/indexer/src/indexer/requirements-dev.txt), [tests](elastic-indexer-stack/indexer/src/indexer/test), [Elasticsearch manager](elastic-indexer-stack/indexer/src/indexer/es_manager.py) |
@@ -154,8 +155,9 @@ This does not itself exempt a normal PR from the required CI check.
 ### Indexing backend
 
 Use Python **3.13**, Git and system `libmagic`, as specified in the indexer
-Dockerfile. Backend changes need their own pytest verification; the required
-frontend workflow does not run backend tests or deploy the indexer.
+Dockerfile. Legacy backend changes need their own pytest verification; the required
+workflow does not deploy legacy workers or reindex Jobs. It does build/test the
+separate curation image and manifest import entry point with Python 3.13 pytest.
 
 ```bash
 (
@@ -209,8 +211,25 @@ Paid Luna grading is explicit and separately budgeted; model judgments are not
 human approval. Preserve complete evidence, exact URL/date identity, source
 hash checks and stale-decision rejection. The pilot stages bounded page samples,
 exports explicit approved batches, and cannot publish archive Git changes or
-write production index documents. Full-site capture and batch publication remain
-separate operator work after review.
+write production index documents. The production service in
+`elastic-indexer-stack/curation` adds persistent LAN review, explicit page/directory/
+site-account scopes, bounded acquisition, selected-file publication approval and
+create-only imports. Use its guide, Dockerfile pytest and `scripts/smoke-curation.sh`
+browser/TCP checks for changes. Preserve the exact Linux
+`websites/<host>/<timestamp>/<decoded path>` convention and refuse unsafe names or
+identity/content collisions. Bind only the LAN IP, allow actual peers in
+`192.168.0.0/16`, ignore forwarded headers and require literal Host/same-origin
+JSON actions. There is no public route or authentication. Do not run paid discovery
+on deployment or schedule it without a request. Each explicit run is bounded to
+50 candidates/$2 with durable reservations and explicit resume.
+
+Do not alter, suspend, delete or restart existing indexing Jobs or their source
+checkouts during curation delivery. Its controller has only Jobs get/list/create
+permissions and waits for other unfinished, unsuspended Jobs, including pending/
+retrying Jobs with active=0. The publisher uses its own bare treeless repository
+and dedicated archive deploy key, without an archive worktree or force push. Keep
+private state on its PVC. Import Jobs mount it read-only and receive only their
+dedicated create-only ES account and the existing Nomic key.
 
 ### Public MCP service
 
@@ -351,12 +370,15 @@ There is no release-please workflow or release/tag prerequisite.
 The required build job runs on GitHub-hosted `ubuntu-24.04`. It validates scripts
 and Kustomize, builds the frontend with Jest/coverage, runs container and browser
 checks, builds/tests MCP with coverage, and exercises both containers with the real
-Nomic service on CPU. PRs get no production secrets
+Nomic service on CPU. It also builds/tests the Python 3.13 curation/import image,
+runs its real browser and TCP peer/spoofing checks, and validates its separate
+Kustomization. PRs get no production secrets
 or self-hosted execution. Keep this required check present on every normal PR;
 path-based workflow skipping can leave required checks pending.
 
 Only `master` publishes `dbsanfte/frontend:<full-git-sha>` and the MCP artifact
-`dbsanfte/frontend:mcp-<full-git-sha>` to Docker Hub and deploys their independent
+`dbsanfte/frontend:mcp-<full-git-sha>` plus the curation/import artifact
+`dbsanfte/frontend:curation-<full-git-sha>` to Docker Hub and deploys their independent
 immutable image digests. A rerun reuses an already published image
 for that SHA and repeats smoke checks. Base images, third-party actions and the
 embedding runtime/model are pinned; update those pins deliberately.
@@ -372,6 +394,9 @@ The deploy script validates rendered resources, reconciles secrets, brings up
 and verifies Nomic/GPU service, then rolls the frontend and MCP service. It checks
 HTTPS, search, document count, embeddings and a vector-only search through the
 production proxy, followed by public MCP discovery/search/fetch checks.
+It then deploys curation, verifies its LAN queue/build and rejection of non-LAN
+forwarded-header spoofs, and guards unfinished Job UIDs/spec hashes across the
+entire deployment.
 Repeated deployment of the same image/configuration/secrets must leave Deployment
 generations, revisions and pod UIDs unchanged. Do not add timestamp annotations
 or routine `rollout restart` calls. Configuration hashes and credential checksums
@@ -394,6 +419,7 @@ available for builds and isolated checks. Production resources are in namespace
 | Elasticsearch | Existing service `elasticsearch.eqarchives-es.svc.cluster.local:9200`, index `eq-archive`; managed separately from frontend CI |
 | Embeddings | Deployment/Service `nomic-embeddings`, one replica, internal endpoint `http://nomic-embeddings.eqarchives-es.svc.cluster.local:8080`, zero-unavailable rolling updates |
 | MCP connector | Deployment/Service `eqarchives-mcp`, one replica, port 8080, exact public `/mcp` HTTPS ingress, zero-unavailable rolling updates; uses the existing read-only ES/model credentials |
+| Curation | Deployment `eqarchives-curation`, one replica/Recreate, LAN-only `192.168.50.100:8090`, no Service/Ingress/auth; separate 25 GiB staging PVC and controlled import Jobs |
 | Model cache | PVC `nomic-embedding-models`, 1 GiB on existing `local-path` storage; reproducible model cache, not archive storage |
 | GPU access | DaemonSet `eqarchives-vulkan-device-plugin`, AMD Radeon Vulkan device `/dev/dri/renderD128`, supplemental render GID 109 |
 
@@ -407,6 +433,8 @@ privileged mode. The pinned runtime rejects oversized inputs with HTTP 500 but
 remains usable afterward; capacity changes need explicit testing.
 
 The root Kustomization manages frontend, MCP and embedding resources only.
+The separate `elastic-indexer-stack/curation/k8s` Kustomization manages curation
+without applying backend references or changing existing ingestion Jobs.
 [00-elasticsearch.yaml](elastic-indexer-stack/k8s-manifests/00-elasticsearch.yaml)
 and [docker-compose.yml](elastic-indexer-stack/docker-compose.yml) are backend
 references with environment-specific settings/placeholders, not a deployment
@@ -428,6 +456,8 @@ data is only base64-encoded, not safe to publish. Use placeholders in examples.
 | `FRONTEND_ES_USERNAME` | Dedicated read-only Elasticsearch account |
 | `FRONTEND_ES_PASSWORD` | Password for that account |
 | `FRONTEND_OPENAI_API_KEY` | Shared NGINX/Nomic embedding API key |
+| `ARCHIVE_CRAWLER_OPENAI_API_KEY` | Dedicated paid Luna key, only in curation |
+| `ARCHIVE_PUBLISH_SSH_KEY` | Dedicated write deploy key scoped to dbsanfte/eq-archives |
 
 The deployment pipes these into `search-eqarchives-secrets` and
 `dockerhub-pull-secret` using server-side apply, avoiding secret-bearing files and

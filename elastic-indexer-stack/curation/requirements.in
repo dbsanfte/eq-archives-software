@@ -1,0 +1,7 @@
+# Reuse the deployed MCP HTTP stack and existing indexer extraction/tokenization.
+starlette==1.6.0
+uvicorn==0.53.0
+httpx==0.28.1
+beautifulsoup4==4.15.0
+markdownify==1.1.0
+tokenizers==0.21.0

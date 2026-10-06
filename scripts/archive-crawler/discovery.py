@@ -19,8 +19,8 @@ class Archive:
         self.max_inventory = max_inventory
         if self.repo == store.root or self.repo in store.root.parents:
             raise CrawlError("Staging must be outside the archive checkout")
-        self.sha = subprocess.check_output(["git", "-C", str(self.repo), "rev-parse", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
-        common = subprocess.check_output(["git", "-C", str(self.repo), "rev-parse", "--git-common-dir"], stderr=subprocess.DEVNULL).decode().strip()
+        self.sha = subprocess.check_output(["git", "-c", f"safe.directory={self.repo}", "-C", str(self.repo), "rev-parse", "HEAD"], stderr=subprocess.DEVNULL).decode().strip()
+        common = subprocess.check_output(["git", "-c", f"safe.directory={self.repo}", "-C", str(self.repo), "rev-parse", "--git-common-dir"], stderr=subprocess.DEVNULL).decode().strip()
         self.objects = (self.repo / common / "objects").resolve()
         self.reader = store.root / "git-reader"
         self.env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_NO_LAZY_FETCH": "1",
@@ -221,6 +221,7 @@ def discover(args, store):
         store.db.execute("DELETE FROM candidates WHERE state='discovered' AND captures='[]' AND rating IS NULL")
     existing = store.candidates()
     scopes = {row["scope"] for row in existing}
+    scopes.update(store.get("excluded_scopes", []))
     added = len(existing)
     for priority, url, evidence in ranked:
         if added >= args.max_candidates:

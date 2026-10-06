@@ -83,6 +83,8 @@ def site_scope(url):
               "homes.arealcity.com", "go.to")
     name = host.removeprefix("www.")
     count = 0
+    if pieces and pieces[0].startswith("~"):
+        count = 1
     if name in shared or host.endswith(".ezboard.com"):
         count = 1
         if name == "angelfire.com":
@@ -95,8 +97,45 @@ def site_scope(url):
     account = pieces[:count]
     if account and re.search(r"\.(?:html?|shtml|php|asp)$", account[-1], re.I):
         account.pop()  # A page filename cannot be an account directory.
+    if name == "sitepowerup.com" or (name in shared and not account):
+        return url  # Unidentified shared-host accounts require exact-page scope.
     path = "/" + "/".join(account) + "/" if account else "/"
     return urlunsplit((parsed.scheme, parsed.netloc, path.replace("//", "/"), "", ""))
+
+
+def within_scope(url, scope):
+    url = original_url(url)
+    if not url:
+        return False
+    page, boundary = urlsplit(url), urlsplit(scope)
+    if (page.scheme, page.netloc) != (boundary.scheme, boundary.netloc):
+        return False
+    # A shared-host root does not identify an account. Even a trailing slash
+    # must remain exact rather than granting traversal of every hosted site.
+    host = boundary.hostname.lower().removeprefix("www.")
+    if host == "sitepowerup.com" or boundary.path == "/" and (host in (
+            "geocities.com", "angelfire.com", "members.aol.com", "home.att.net",
+            "home.earthlink.net", "members.tripod.com", "members.tripod.co.uk", "ezboard.com",
+            "homes.arealcity.com", "go.to") or host.endswith(".ezboard.com")):
+        return url == scope
+    if boundary.query or not boundary.path.endswith("/"):
+        return url == scope
+    return page.path == boundary.path.rstrip("/") or page.path.startswith(boundary.path)
+
+
+def capture_scope(url, mode="directory"):
+    owner = site_scope(url)
+    if mode == "site":
+        return owner
+    if mode == "page":
+        return url
+    if mode != "directory":
+        raise CrawlError("Choose page, directory or site capture scope")
+    parsed = urlsplit(url)
+    path = (parsed.path.rstrip("/") + "/" if parsed.path.endswith("/") or "." not in parsed.path.rsplit("/", 1)[-1]
+            else parsed.path.rsplit("/", 1)[0] + "/")
+    directory = urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
+    return directory if within_scope(directory, owner) else owner
 
 
 class Page(HTMLParser):

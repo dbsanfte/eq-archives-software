@@ -1,5 +1,11 @@
 # BlueWorld newsgroup recovery indexing
 
+Approved website batches use the separate
+[curation/import flow](../../curation/README.md), deployed by standard CI/CD.
+Its create-only import Jobs verify staged manifests and wait for all existing
+unfinished ingestion Jobs. They do not replace or modify the one-off or broad
+reindex Jobs described here.
+
 `blueworld-index-job.yaml` is a one-off Job for the 11,914 recovered
 `alt.games.everquest` articles. It is deliberately outside the frontend
 Kustomization. It reads the existing archive checkout on eqvm at

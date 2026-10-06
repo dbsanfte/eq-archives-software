@@ -1,11 +1,15 @@
 # Website candidate crawler
 
+The [production intranet service](../../elastic-indexer-stack/curation/README.md)
+adds persistent review, explicit scopes, bounded site capture, a second batch
+publication approval and targeted indexing through standard CI/CD.
+
 This operator tool spiders outward from selected local website captures, checks
 archive coverage, stages historical Wayback samples, grades complete extracted
 sources with Luna, and produces an offline approval queue. Commands need Python
 3.10+ and Ruby 3.0+, with no Python packages or Ruby gems.
 
-The first version ends at a manifest of explicitly approved page samples. It
+The standalone CLI pilot ends at a manifest of explicitly approved page samples. It
 does not download an entire site, publish archive Git changes, or write index
 documents. Subsequent operator work can expand approved site scopes, publish one
 archive commit/push and index just the changed files. Surviving live sites can

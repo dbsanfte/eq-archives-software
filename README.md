@@ -214,7 +214,15 @@ links from selected local archive captures, checks cached website coverage,
 stages bounded Wayback samples, and optionally grades them with Luna. Its offline
 approval queue binds review decisions to exact source hashes. State stays outside
 both repositories; discovery does not clone, fetch, or walk archive content.
-Approved samples export as one manifest for subsequent publication and indexing.
+The production [intranet curation service](elastic-indexer-stack/curation/README.md)
+serves the persistent queue at **http://192.168.50.100:8090/**, restricted to actual
+LAN clients in `192.168.0.0/16`, without authentication or public ingress.
+Deep-link directory scopes and whole-site/account alternatives are explicit.
+Approved sites receive bounded captures in the existing `websites/` layout;
+a second approval selects files for one publication commit and targeted
+create-only indexing. Import Jobs wait for existing ingestion Jobs to finish.
+Paid discovery is manual, up to 50 new candidates and $2 per explicit run;
+deployment makes no paid calls.
 
 The [broad text reindex Job](elastic-indexer-stack/indexer/k8s/README.md#broad-text-reindex)
 repairs existing extracted text and rebuilds Nomic chunks in place. It preserves
@@ -225,7 +233,7 @@ reported separately; rechunking that text cannot recover missing paragraphs.
 
 ## Deployment
 
-The frontend, read-only MCP connector and local **llama.cpp / Nomic Embed v1.5 Q8_0** service deploy
+The frontend, read-only MCP connector, intranet curation service and local **llama.cpp / Nomic Embed v1.5 Q8_0** service deploy
 automatically from `master` to the production **k3s** cluster. Nomic uses eqvm's
 Radeon iGPU through Vulkan and returns normalized 768-dimensional vectors.
 The model is pinned to a Hugging Face revision and SHA-256, downloaded into a
@@ -233,7 +241,7 @@ persistent cache, and served only inside the cluster. NGINX forwards the public
 `/openai/v1/embeddings` route with its runtime API key. The frontend adds Nomic's
 `search_query:` prefix; this instance accepts up to 512 tokens per input.
 
-Pull requests run tests, enforce coverage, build the frontend and MCP containers,
+Pull requests run tests, enforce frontend/MCP coverage, build frontend, MCP and curation/import containers,
 and exercise the real Nomic server on CPU through both services on a GitHub-hosted
 runner. Only `master` publishes images and deploys through the VM's self-hosted runner.
 

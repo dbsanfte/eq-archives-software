@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EQ Archives — Site review</title><link rel="stylesheet" href="/assets/review.css"><script defer src="/assets/review.js"></script></head>
+<body><main><header><p class="eyebrow">EQ ARCHIVES · INTRANET</p><h1>Site review</h1><p>Discover, review and preserve EverQuest websites.</p></header>
+<section class="toolbar" aria-label="Queue actions"><label>Show <select id="filter"><option value="recommended">Recommended</option><option value="pending">All awaiting review</option><option value="all">All candidates</option></select></label>
+<button id="refresh">Refresh</button><button id="discover">Discover &amp; grade · 50 sites · $2 cap</button></section>
+<p id="status" role="status" aria-live="polite">Loading queue…</p><p id="error" role="alert" hidden></p>
+<section class="intro"><h2>Candidate approval</h2><p>Luna grades the supplied captures only. Review the source and capture scope before approving. Shared hosts stay within their account.</p>
+<p>Capture batches use one connection, a 3-second delay and 128 KiB/s. Limits: 5 sites, 20 new URLs per site, 100 HTML files and 64 MiB. Prefer 1999–2001; use 2002–2007 when an exact URL has no first-tier capture.</p>
+<button id="capture" disabled>Capture selected approved sites</button><span id="selection"></span></section>
+<section id="candidates" aria-label="Candidates"></section><nav class="pagination" aria-label="Queue pages"><button id="previous" disabled>Previous</button><span id="page"></span><button id="next" disabled>Next</button></nav>
+<section><h2>Capture batches</h2><p>Review the downloaded file set before publishing. Publication makes one archive commit per batch; indexing waits for existing Kubernetes Jobs to finish.</p><div id="batches"></div></section>
+<section><h2>Operations</h2><div id="operations"></div></section>
+<footer><p>No scheduled paid runs. Files and judgments remain in staging until approved. Captures are bounded subsets, not complete site mirrors.</p><p id="version"></p></footer></main></body></html>
