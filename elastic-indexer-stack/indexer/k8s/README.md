@@ -54,6 +54,15 @@ multi-day run. A retry scans remaining versions; failures are counted, upstream
 payloads are not logged, and the Job exits nonzero if records failed. This is a
 live-index scan, not a snapshot. Keep other ingestion jobs separate during it.
 
+Website text includes the reconstructed `Page URL` and, when different, its
+`Alternate Page URL` in the stored Markdown header. The alternate drops a final
+`/index.html`, which the downloader can add locally for extensionless pages; it
+is a candidate source link, not a claim that every `index.html` was synthetic.
+The website extraction checkpoint advances for this header repair. Completed
+newsgroups and mailing lists retain their previous extraction checkpoint and
+are skipped on resume when their chunking version is current. Previously
+completed websites receive the header update; all other completed text is kept.
+
 The dedicated checkout at `/mnt/samsung/eq-archives-html-reindex` avoids changing
 the ingestion checkout's sparse configuration. Prepare it once on eqvm as UID
 1000; use a committed archive revision and keep its SHA with the run record:

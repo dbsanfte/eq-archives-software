@@ -5,6 +5,13 @@ from markdownify import MarkdownConverter
 
 
 TEXT_EXTRACTION_VERSION = "html-2026-10-05"
+WEBSITE_EXTRACTION_VERSION = "html-2026-10-06-source-links"
+
+
+def extraction_version(record_id):
+    # Only website headers changed. Completed newsgroups and mailing lists keep
+    # their existing extraction checkpoints when the broad job resumes.
+    return WEBSITE_EXTRACTION_VERSION if record_id.startswith("websites/") else TEXT_EXTRACTION_VERSION
 
 
 def is_layout_table(table):
