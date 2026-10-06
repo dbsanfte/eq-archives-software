@@ -143,3 +143,25 @@ def test_partial_recheck_cannot_restore_approval_invalidated_by_scope_correction
         current=store.candidates()[0]
         assert current['state']=='approval_pending' and current['decision'] is None
         assert json.loads(current['coverage'])['scope_corrections'][0]['previous_decision']['decision']=='approve'
+
+
+def test_repeated_partial_rechecks_preserve_unchanged_approval(tmp_path,monkeypatch):
+    from site_inventory import SiteInventory
+    root=tmp_path/'state'
+    row=add_candidate(root,url='http://guild.example/eq/news.html')
+    with connect(root) as store:
+        apply_decisions(store,[{'id':row['id'],'manifest_sha256':row['manifest_sha256'],'decision':'approve'}])
+        decision=store.candidates()[0]['decision']
+    repo=archive(tmp_path,['other.example/20000101000000/index.html'])
+    monkeypatch.setenv('ARCHIVE_REPO',str(repo))
+    check=SiteInventory.check
+    for _ in range(2):
+        monkeypatch.setattr(SiteInventory,'check',lambda self,*args,**kwargs:{'status':'inventory_partial','complete':False})
+        refresh(root)
+        with connect(root) as store:
+            assert store.candidates()[0]['state']=='coverage_unverified'
+        monkeypatch.setattr(SiteInventory,'check',check)
+        refresh(root,force=True)
+        with connect(root) as store:
+            current=store.candidates()[0]
+            assert current['state']=='approved_waiting_batch' and current['decision']==decision

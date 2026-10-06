@@ -53,13 +53,16 @@ def refresh(root, candidate_id=None, force=False):
                 state = 'duplicate_candidate'
                 coverage['duplicate_of'] = owners[site_identity(row['url'])]
             elif site_check['status'] == 'inventory_partial':
+                if state != 'coverage_unverified':
+                    coverage['previous_state'] = state
                 state = 'coverage_unverified'
             elif state == 'coverage_unverified':
                 state = coverage.pop('previous_state', 'approval_pending')
             if state == 'approved_waiting_batch' and not decision:
                 state = 'approval_pending'
             if state != row['state']:
-                coverage.setdefault('previous_state', row['state'])
+                if row['state'] != 'coverage_unverified':
+                    coverage.setdefault('previous_state', row['state'])
                 store.db.execute('INSERT INTO events(candidate,action,detail,created) VALUES (?,?,?,?)',
                                  (row['id'], 'site_coverage_changed', json.dumps({'previous_state': row['state'], 'state': state, 'coverage': site_check}), now()))
             if coverage != json.loads(row['coverage'] or '{}') or state != row['state'] or scope != row['scope']:
