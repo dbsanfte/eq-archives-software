@@ -15,7 +15,7 @@ from langchain_core.documents import Document
 from indexer.archive_handler import ArchiveHandler
 from indexer.chunking import CHUNKING_VERSION
 from indexer.es_manager import ElasticsearchManager, ES_FIELDS
-from indexer.html_extraction import TEXT_EXTRACTION_VERSION
+from indexer.html_extraction import TEXT_EXTRACTION_VERSION, WEBSITE_EXTRACTION_VERSION, extraction_version
 from indexer.openai_manager import OpenAIManager
 from indexer.text_handler import TextHandler
 
@@ -75,8 +75,9 @@ def reindex_record(client, index, hit, repo, handler, embedder, progress):
         if text.strip() and not chunks:
             raise ValueError("nonempty source has no embedding chunks")
         patch.update(text_full=text, text=chunks, text_chunking_version=CHUNKING_VERSION)
-    if available and source.get("text_extraction_version") != TEXT_EXTRACTION_VERSION:
-        patch["text_extraction_version"] = TEXT_EXTRACTION_VERSION
+    version = extraction_version(record_id)
+    if available and source.get("text_extraction_version") != version:
+        patch["text_extraction_version"] = version
     if not patch:
         progress.unchanged += 1
         return
@@ -98,15 +99,26 @@ def reindex(client, index, repo, handler, embedder, record_ids=None, limit=0, ba
     # segments for a multi-day scroll/PIT while this job rewrites the index.
     query = {"bool": {
         "filter": [{"term": {"file_type": "text"}}, {"exists": {"field": "id"}}],
-        "must_not": [{"bool": {"filter": [
-            {"term": {"text_extraction_version": TEXT_EXTRACTION_VERSION}},
-            {"term": {"text_chunking_version": CHUNKING_VERSION}}
-        ]}}]
+        "must_not": [{"bool": {
+            "filter": [{"term": {"text_chunking_version": CHUNKING_VERSION}}],
+            "should": [
+                {"bool": {"filter": [
+                    {"prefix": {"id": "websites/"}},
+                    {"term": {"text_extraction_version": WEBSITE_EXTRACTION_VERSION}}
+                ]}},
+                {"bool": {
+                    "filter": [{"term": {"text_extraction_version": TEXT_EXTRACTION_VERSION}}],
+                    "must_not": [{"prefix": {"id": "websites/"}}]
+                }}
+            ],
+            "minimum_should_match": 1
+        }}]
     }}
     if record_ids:
         query["bool"]["filter"].append({"ids": {"values": record_ids}})
     total = client.count(index=index, query=query)["count"]
-    LOGGER.info("Starting %s candidates (live index); extraction=%s chunking=%s", total, TEXT_EXTRACTION_VERSION, CHUNKING_VERSION)
+    LOGGER.info("Starting %s candidates (live index); website_extraction=%s other_extraction=%s chunking=%s",
+                total, WEBSITE_EXTRACTION_VERSION, TEXT_EXTRACTION_VERSION, CHUNKING_VERSION)
     while not limit or progress.processed < limit:
         request = dict(index=index, query=query, source=FIELDS, size=min(batch_size, limit - progress.processed) if limit else batch_size,
                        sort=[{"id": "asc"}], seq_no_primary_term=True)

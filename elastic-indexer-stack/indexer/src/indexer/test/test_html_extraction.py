@@ -1,20 +1,33 @@
 """Source fidelity regressions for old, table-based archive pages."""
 
-from types import SimpleNamespace
-
 import pytest
 
+from indexer.archive_handler import ArchiveHandler
 from indexer.text_handler import TextHandler
 
 
-def extract(tmp_path, html):
+def extract(tmp_path, html, relative_path="websites/example.org/20030812201431/archive.php?page=39"):
     path = tmp_path / "page.html"
     path.write_text(html, encoding="utf-8")
-    archive = SimpleNamespace(
-        _convert_to_archive_url=lambda **_: "https://web.archive.org/web/20030812201431/http://example.org/archive.php?page=39"
-    )
-    handler = TextHandler(archive, None, llm_enrichment_enabled=False)
-    return handler._preprocess_website_file(str(path), "websites/example.org/20030812201431/archive.php?page=39")
+    handler = TextHandler(ArchiveHandler(), None, llm_enrichment_enabled=False)
+    return handler._preprocess_website_file(str(path), relative_path)
+
+
+def test_page_header_includes_alternate_wayback_link_for_local_index_file(tmp_path):
+    relative_path = "websites/pub114.ezboard.com/20020601194540/flegacyofsteel43089general/index.html"
+    text = extract(tmp_path, '<p>VEX THAL CLEARED!! ATEN HA RA DEAD!! AHR DAY!!</p>', relative_path)
+    archive_url = "https://web.archive.org/web/20020601194540/http://pub114.ezboard.com/flegacyofsteel43089general"
+    assert f"**Page URL:** {archive_url}/index.html" in text
+    assert f"**Alternate Page URL:** {archive_url}" in text
+    assert text.index("**Page URL:**") < text.index("**Alternate Page URL:**") < text.index("VEX THAL CLEARED!!")
+
+
+@pytest.mark.parametrize("path", ["archive.php?page=39&stop=20", "news.html", "index.html?page=2"])
+def test_page_header_omits_identical_alternate_and_preserves_query_string(tmp_path, path):
+    text = extract(tmp_path, '<p>Complete article.</p>', f"websites/example.org/20030812201431/{path}")
+    assert f"**Page URL:** https://web.archive.org/web/20030812201431/http://example.org/{path}" in text
+    assert "Alternate Page URL:" not in text
+    assert "Complete article." in text
 
 
 def test_mixed_line_breaks_preserve_every_paragraph(tmp_path):

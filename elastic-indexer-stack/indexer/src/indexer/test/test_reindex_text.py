@@ -6,11 +6,13 @@ import pytest
 
 import reindex_text as job
 from indexer.chunking import CHUNKING_VERSION
-from indexer.html_extraction import TEXT_EXTRACTION_VERSION
+from indexer.archive_handler import ArchiveHandler
+from indexer.html_extraction import TEXT_EXTRACTION_VERSION, WEBSITE_EXTRACTION_VERSION
+from indexer.text_handler import TextHandler
 
 
-def setup_record(tmp_path, text="complete source", present=True):
-    record_id = "websites/example.org/20000101000000/archive.php?page=39"
+def setup_record(tmp_path, text="complete source", present=True,
+                 record_id="websites/example.org/20000101000000/archive.php?page=39"):
     path = tmp_path / record_id
     if present:
         path.parent.mkdir(parents=True)
@@ -42,7 +44,7 @@ def test_partial_atomic_update_preserves_enrichment_ocr_and_provenance(tmp_path)
     for field in ("llm_summary", "llm_tags", "llm_image_text_full", "capture_date"):
         assert updated[field] == original[field]
         assert field not in args["doc"]
-    assert updated["text_extraction_version"] == TEXT_EXTRACTION_VERSION
+    assert updated["text_extraction_version"] == WEBSITE_EXTRACTION_VERSION
     assert updated["text_chunking_version"] == CHUNKING_VERSION
     assert progress.updated == 1
 
@@ -68,12 +70,40 @@ def test_missing_source_rechunks_preserved_text_without_claiming_extraction_repa
 
 def test_finished_versions_skip_embeddings_and_updates(tmp_path):
     hit, client, handler, embedder = setup_record(tmp_path, "opening paragraph")
+    hit["_source"].update(text_chunking_version=CHUNKING_VERSION, text_extraction_version=WEBSITE_EXTRACTION_VERSION)
+    progress = job.Progress()
+    job.reindex_record(client, "eq-archive", hit, tmp_path, handler, embedder, progress)
+    assert progress.unchanged == 1
+    client.update.assert_not_called()
+    embedder.get_chunks_and_embeddings.assert_not_called()
+
+
+@pytest.mark.parametrize("record_id", ["newsgroups/group-message.txt", "mailing-lists/group/message.json"])
+def test_resume_keeps_completed_non_website_checkpoints_without_reembedding(tmp_path, record_id):
+    hit, client, handler, embedder = setup_record(tmp_path, "opening paragraph", record_id=record_id)
     hit["_source"].update(text_chunking_version=CHUNKING_VERSION, text_extraction_version=TEXT_EXTRACTION_VERSION)
     progress = job.Progress()
     job.reindex_record(client, "eq-archive", hit, tmp_path, handler, embedder, progress)
     assert progress.unchanged == 1
     client.update.assert_not_called()
     embedder.get_chunks_and_embeddings.assert_not_called()
+
+
+def test_legacy_website_checkpoint_is_upgraded_with_alternate_in_stored_text(tmp_path):
+    record_id = "websites/pub114.ezboard.com/20020601194540/flegacyofsteel43089general/index.html"
+    hit, client, _, embedder = setup_record(tmp_path, record_id=record_id)
+    (tmp_path / record_id).write_text('<p>VEX THAL CLEARED!! ATEN HA RA DEAD!! AHR DAY!!</p>')
+    hit["_source"].update(text_chunking_version=CHUNKING_VERSION, text_extraction_version=TEXT_EXTRACTION_VERSION)
+    handler = TextHandler(ArchiveHandler(), None, llm_enrichment_enabled=False)
+    progress = job.Progress()
+    job.reindex_record(client, "eq-archive", hit, tmp_path, handler, embedder, progress)
+    patch = client.update.call_args.kwargs["doc"]
+    assert "**Alternate Page URL:** https://web.archive.org/web/20020601194540/http://pub114.ezboard.com/flegacyofsteel43089general" in patch["text_full"]
+    assert "VEX THAL CLEARED!! ATEN HA RA DEAD!! AHR DAY!!" in patch["text_full"]
+    assert patch["text_extraction_version"] == WEBSITE_EXTRACTION_VERSION
+    assert "llm_summary" not in patch and "capture_date" not in patch
+    assert progress.updated == 1
+    embedder.get_chunks_and_embeddings.assert_called_once()
 
 
 def test_missing_full_text_never_erases_legacy_chunks(tmp_path):
