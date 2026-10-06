@@ -16,6 +16,7 @@ from captures import capture_sites
 from jobs import Kubernetes, blockers, import_job
 from publisher import publish
 from state import connect, unpack, worker_lease
+from coverage_check import refresh, require_new
 
 
 def campaign(root, operation):
@@ -81,6 +82,7 @@ class Worker:
         self.root, self.kube = Path(root), kube
         self.stop = threading.Event()
         self.lease = worker_lease(self.root)
+        refresh(self.root)
         with connect(self.root) as store:
             # A terminated paid/download request has uncertain outcome. Require
             # an explicit resume; retained dollar and HTTP reservations still apply.
@@ -116,6 +118,9 @@ class Worker:
                 expected = operation["payload"]["manifest_sha256"]
                 if batch["state"] != "publication_requested" or batch["manifest_sha256"] != expected:
                     raise CrawlError("Publication approval is no longer current")
+                with connect(self.root) as store:
+                    for site in batch['manifest']['sites']:
+                        require_new(store, site['url'])
                 result = publish(self.root, batch["manifest"], expected)
                 destination = self.root / "batches" / batch_id / "approved.json"
                 destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -128,6 +133,9 @@ class Worker:
                         store.db.execute("UPDATE candidates SET state='published' WHERE id=?", (site["id"],))
                     store.db.commit()
             else:
+                with connect(self.root) as store:
+                    for site in operation['payload']['sites']:
+                        require_new(store, site['url'])
                 manifest = capture_sites(self.root, operation["payload"]["batch_id"], operation["payload"]["sites"])
                 batch_id = operation["payload"]["batch_id"]
                 with connect(self.root) as store:

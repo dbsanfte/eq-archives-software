@@ -12,6 +12,7 @@ from unittest.mock import patch
 from common import CrawlError, Page, Store, original_url, site_scope, tier
 from crawler import parser
 from discovery import Archive, discover
+from site_inventory import SiteInventory
 
 
 class DiscoveryTests(unittest.TestCase):
@@ -108,6 +109,60 @@ class DiscoveryTests(unittest.TestCase):
         archive = Archive(self.repo, self.store, max_entries=2, max_inventory=2)
         self.assertEqual(archive.coverage("http://known.example/3.html")["status"], "inventory_partial")
         self.assertEqual(self.store.db.execute("SELECT SUM(entries) FROM tree_state").fetchone()[0], 2)
+
+    def test_known_site_is_excluded_even_when_root_page_inventory_is_exhausted(self):
+        self.file('seed.example','20000101000000','links.html','<a href="http://www.mythiran.com/">EQ research</a><a href="http://new.example/">EQ guild</a>')
+        self.file('mythiran.com','19990918084825','research/spells.html','EverQuest research')
+        self.commit()
+        args=self.args()
+        args.max_tree_entries=1
+        args.max_inventory_entries=1
+        discover(args,self.store)
+        self.assertEqual([row['url'] for row in self.store.candidates()],['http://new.example/'])
+
+    def test_shared_host_inventory_checks_accounts_without_merging_other_users(self):
+        self.file('geocities.com','20000101000000','alice/eq/index.html','EQ guild')
+        self.file('server3.ezboard.com','20000101000000','bthesafehouse/index.html','EQ rogue forum')
+        self.commit()
+        archive=Archive(self.repo,self.store,max_inventory=0)
+        inventory=SiteInventory(archive)
+        with patch.object(Archive,'files',side_effect=AssertionError('No recursive page inventory')):
+            known=inventory.check('https://www.geocities.com:443/alice/eq/news.html')
+            self.assertEqual(known['status'],'already_archived')
+            self.assertIn('/alice',known['archive_path'])
+            self.assertEqual(inventory.check('http://geocities.com/bob/eq/')['status'],'new_site')
+            self.assertEqual(inventory.check('http://server3.ezboard.com/bthesafehouse.html')['status'],'already_archived')
+            self.assertEqual(inventory.check('http://server3.ezboard.com/botherguild.html')['status'],'new_site')
+        self.assertFalse(self.store.db.execute('SELECT * FROM files').fetchone())
+
+    def test_missing_shared_metadata_or_budget_is_unverified_and_never_fetches(self):
+        self.file('geocities.com','20000101000000','alice/index.html','EQ guild')
+        self.commit()
+        archive=Archive(self.repo,self.store)
+        self.assertEqual(SiteInventory(archive,max_trees=0).check('http://geocities.com/alice/')['status'],'inventory_partial')
+        timestamp=self.git('rev-parse','HEAD:websites/geocities.com/20000101000000')
+        (self.repo/'.git/objects'/timestamp[:2]/timestamp[2:]).unlink()
+        self.assertEqual(SiteInventory(archive).check('http://geocities.com/alice/',force=True)['status'],'inventory_partial')
+
+    def test_staged_site_aliases_do_not_use_multiple_candidate_slots(self):
+        self.file('seed.example','20000101000000','links.html','<a href="http://new.example/">EQ guild</a><a href="https://www.new.example:443/eq/">EQ guild</a>')
+        self.commit()
+        discover(self.args(),self.store)
+        self.assertEqual(len(self.store.candidates()),1)
+
+    def test_shared_metadata_recheck_resumes_under_original_per_check_bounds(self):
+        for year in range(1999,2005):
+            self.file('geocities.com',f'{year}0101000000',f'other-{year}/index.html','EQ')
+        self.commit()
+        archive=Archive(self.repo,self.store)
+        result=SiteInventory(archive,max_trees=3).check('http://geocities.com/new-account/')
+        self.assertEqual(result['status'],'inventory_partial')
+        for _ in range(6):
+            inventory=SiteInventory(archive,max_trees=3)
+            result=inventory.check('http://geocities.com/new-account/',force=True)
+            self.assertLessEqual(inventory.probes,3)
+            if result['status']=='new_site':break
+        self.assertEqual(result['status'],'new_site')
 
     def test_state_cannot_live_in_software_or_archive(self):
         with self.assertRaises(CrawlError):

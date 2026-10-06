@@ -74,6 +74,42 @@ def test_tampered_source_and_ungraded_candidate_cannot_be_approved(candidate):
     assert call(app,"POST","/api/decisions",[decision]).status_code == 409
 
 
+def test_custom_folder_survives_reload_invalidates_approval_and_can_exclude_sample(candidate):
+    root,row=candidate
+    app=create_app(root,start_worker=False)
+    decision={'id':row['id'],'manifest_sha256':row['manifest_sha256'],'decision':'approve'}
+    assert call(app,'POST','/api/decisions',[decision]).status_code==200
+    changed=call(app,'POST','/api/scope',{'id':row['id'],'manifest_sha256':row['manifest_sha256'],'mode':'custom','path':'/research'})
+    assert changed.status_code==200
+    current=call(create_app(root,start_worker=False),'GET','/api/queue').json()['candidates'][0]
+    assert current['scope']=='http://guild.example/research/' and current['scope_mode']=='custom'
+    assert current['state']=='approval_pending' and current['decision'] is None
+    assert call(app,'POST','/api/decisions',[decision]).status_code==409
+    decision['manifest_sha256']=current['manifest_sha256']
+    assert call(app,'POST','/api/decisions',[decision]).status_code==200
+    assert call(app,'POST','/api/capture',{'ids':[row['id']]}).status_code==202
+    with connect(root) as store:
+        operation=json.loads(store.db.execute('SELECT payload FROM operations').fetchone()[0])
+        assert operation['sites'][0]['scope']==current['scope']
+        assert operation['sites'][0]['captures']==[]
+
+
+@pytest.mark.parametrize('path',['../other','//other.example/','/eq/../outside/','/eq/%2e%2e/','/eq/%2fother/','/eq/%00/','/eq/%ff/','/eq/?x=1','/eq/#section','/eq/\\outside/'])
+def test_custom_scope_rejects_unsafe_or_non_folder_paths(candidate,path):
+    root,row=candidate
+    app=create_app(root,start_worker=False)
+    assert call(app,'POST','/api/scope',{'id':row['id'],'manifest_sha256':row['manifest_sha256'],'mode':'custom','path':path}).status_code==409
+
+
+def test_custom_scope_cannot_escape_shared_host_account(tmp_path):
+    root=tmp_path/'state'
+    row=add_candidate(root,url='http://geocities.com/alice/eq/news.html')
+    app=create_app(root,start_worker=False)
+    for path in ('/','/bob/eq/'):
+        assert call(app,'POST','/api/scope',{'id':row['id'],'manifest_sha256':row['manifest_sha256'],'mode':'custom','path':path}).status_code==409
+    assert call(app,'POST','/api/scope',{'id':row['id'],'manifest_sha256':row['manifest_sha256'],'mode':'custom','path':'/alice/guides/'}).status_code==200
+
+
 def test_final_publication_requires_unchanged_batch_and_second_explicit_approval(candidate):
     root,row = candidate
     manifest = manifest_for(row)

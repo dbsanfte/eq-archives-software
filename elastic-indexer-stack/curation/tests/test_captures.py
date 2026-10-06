@@ -70,6 +70,29 @@ def test_page_only_root_captures_dont_widen_into_host(candidate):
     assert len(manifest['captures']) == 1
 
 
+def test_custom_folder_uses_reviewed_links_without_publishing_outside_source(tmp_path):
+    from conftest import add_candidate
+    root=tmp_path/'state'
+    row=add_candidate(root,body=b'<p>EverQuest guild history.</p><a href="/research/guide.html">Research</a><a href="/news.html">Outside</a>')
+    site=manifest_for(row)['sites'][0]
+    site.update(scope='http://guild.example/research/',scope_mode='custom',captures=[],reviewed_captures=row['captures'])
+    requests=[]
+    class Downloader:
+        def __init__(self,*args): pass
+        def call(self,job):
+            requests.append(job['url'])
+            if job['op']=='list':
+                return {'captures': [] if job['url'].endswith('/') else [{'url':job['url'],'timestamp':'20000101000000','digest':'cdx','length':'100'}]}
+            raw=b'<p>EverQuest research guide.</p>'
+            Path(job['destination']).write_bytes(raw)
+            return {'url':job['url'],'timestamp':job['timestamp'],'sha256':digest(raw),'bytes':len(raw)}
+        def close(self): pass
+    manifest=capture_sites(root,'a'*32,[site],Downloader)
+    assert [capture['url'] for capture in manifest['captures']]==['http://guild.example/research/guide.html']
+    assert all('/research/' in url for url in requests)
+    check_manifest(root,manifest)
+
+
 @pytest.mark.parametrize('url', ['http://geocities.com/', 'http://angelfire.com/', 'http://www.sitepowerup.com/mb/'])
 def test_unidentified_shared_hosts_cannot_expand_into_unrelated_accounts(url):
     scope=capture_scope(url,'site')

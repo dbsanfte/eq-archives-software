@@ -8,12 +8,15 @@ import json
 from pathlib import Path
 import re
 import sqlite3
-from urllib.parse import urljoin, urlsplit, urlunsplit
+from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
 
 TIERS = {1: ("19990101000000", "20011231235959"),
          2: ("20020101000000", "20071231235959")}
 CATEGORIES = ["guild", "news", "aggregator", "personal_blog", "forum", "class",
               "independent_information", "other", "unrelated"]
+SHARED_HOSTS = ("geocities.com", "angelfire.com", "members.aol.com", "home.att.net",
+                "home.earthlink.net", "members.tripod.com", "members.tripod.co.uk", "ezboard.com",
+                "homes.arealcity.com", "go.to", "tyler.net")
 
 
 class CrawlError(Exception):
@@ -78,9 +81,7 @@ def site_scope(url):
     pieces = [p for p in parsed.path.strip("/").split("/") if p]
     host = parsed.hostname.lower()
     # These shared hosts contain unrelated sites. Bound approvals to an account.
-    shared = ("geocities.com", "angelfire.com", "members.aol.com", "home.att.net",
-              "home.earthlink.net", "members.tripod.com", "members.tripod.co.uk", "ezboard.com",
-              "homes.arealcity.com", "go.to")
+    shared = SHARED_HOSTS
     name = host.removeprefix("www.")
     count = 0
     if pieces and pieces[0].startswith("~"):
@@ -95,6 +96,11 @@ def site_scope(url):
             address = next((i for i, piece in enumerate(pieces[:3]) if piece.isdigit()), None)
             count = address + 1 if address is not None else 1
     account = pieces[:count]
+    if host.endswith(".ezboard.com") and account:
+        if re.fullmatch(r"b[^/]+", account[0], re.I):
+            account[0] = re.sub(r"\.html?$", "", account[0], flags=re.I)
+        else:
+            return url  # Forum/thread filenames do not reliably identify a board.
     if account and re.search(r"\.(?:html?|shtml|php|asp)$", account[-1], re.I):
         account.pop()  # A page filename cannot be an account directory.
     if name == "sitepowerup.com" or (name in shared and not account):
@@ -113,18 +119,40 @@ def within_scope(url, scope):
     # A shared-host root does not identify an account. Even a trailing slash
     # must remain exact rather than granting traversal of every hosted site.
     host = boundary.hostname.lower().removeprefix("www.")
-    if host == "sitepowerup.com" or boundary.path == "/" and (host in (
-            "geocities.com", "angelfire.com", "members.aol.com", "home.att.net",
-            "home.earthlink.net", "members.tripod.com", "members.tripod.co.uk", "ezboard.com",
-            "homes.arealcity.com", "go.to") or host.endswith(".ezboard.com")):
+    if host == "sitepowerup.com" or boundary.path == "/" and (host in SHARED_HOSTS or host.endswith(".ezboard.com")):
         return url == scope
     if boundary.query or not boundary.path.endswith("/"):
         return url == scope
+    if boundary.hostname.endswith(".ezboard.com") and page.path in (boundary.path.rstrip("/") + ".html", boundary.path.rstrip("/") + ".htm"):
+        return True
     return page.path == boundary.path.rstrip("/") or page.path.startswith(boundary.path)
 
 
-def capture_scope(url, mode="directory"):
+def site_identity(url):
+    """Discovery identity only; source URL and document identity stay exact."""
+    parsed = urlsplit(site_scope(original_url(url)))
+    return (parsed.netloc.removeprefix("www."), parsed.path, parsed.query)
+
+
+def capture_scope(url, mode="directory", path=None):
     owner = site_scope(url)
+    if mode == "custom":
+        if (not isinstance(path, str) or not 1 <= len(path) <= 2048 or not path.startswith("/")
+                or path.startswith("//") or any(character in path for character in "?#*\\")
+                or any(character.isspace() or ord(character) < 32 for character in path)):
+            raise CrawlError("Enter an absolute website folder path, such as /eq/research/")
+        try:
+            decoded = unquote(path, errors="strict")
+        except UnicodeDecodeError:
+            raise CrawlError("Custom scope must use valid UTF-8 URL encoding") from None
+        if (any(piece in (".", "..") for piece in decoded.split("/")) or "\\" in decoded
+                or any(ord(character) < 32 for character in decoded) or re.search(r"%2f|%5c|%25", path, re.I)):
+            raise CrawlError("Custom scope contains an unsafe or ambiguous folder path")
+        parsed = urlsplit(url)
+        folder = original_url(urlunsplit((parsed.scheme, parsed.netloc, path.rstrip("/") + "/", "", "")))
+        if not folder or not within_scope(folder, owner):
+            raise CrawlError("Custom folder must remain within this website or shared-host account")
+        return folder
     if mode == "site":
         return owner
     if mode == "page":
