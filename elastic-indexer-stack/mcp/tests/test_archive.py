@@ -62,6 +62,9 @@ def test_hybrid_search_preserves_query_limits_fields_and_citations():
         "text.vector", "llm_summary_vector", "llm_image_text_vector",
     }
     assert all(item["query_vector"] == VECTOR for item in body["knn"])
+    for item in body["knn"]:
+        assert (item["k"], item["num_candidates"], item.get("boost")) == (50, 250, 10)
+        assert "similarity" not in item
     assert "text_full" not in body["_source"]
 
 

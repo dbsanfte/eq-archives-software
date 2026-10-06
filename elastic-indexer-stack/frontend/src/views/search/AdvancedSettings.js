@@ -2,12 +2,12 @@ import React, { useState, useEffect } from "react";
 import PropTypes from "prop-types";
 import { Box, Typography, TextField } from "@mui/material";
 
-// Define default parameters here
+// Best observed average in the Luna pilot: hybrid-boost10.
 export const DEFAULT_KNN_PARAMS = {
   enableSemanticSearch: true,
-  k: 10,
-  num_candidates: 100,
-  boost: 5,
+  k: 50,
+  num_candidates: 250,
+  boost: 10,
 };
 
 export default function AdvancedSettings({ onChange, values }) {

@@ -35,7 +35,7 @@ test('exports the real lexical builder, constrained policy and semantic prefilte
   expect(constrained.body.query.bool.should[0].query_string.default_operator).toBe('AND');
   expect(hybrid.body.knn).toHaveLength(3);
   for (const branch of hybrid.body.knn) {
-    expect(branch).toMatchObject({ k: 10, num_candidates: 100, boost: 5, query_vector: vector });
+    expect(branch).toMatchObject({ k: 50, num_candidates: 250, boost: 10, query_vector: vector });
     expect(branch.filter).toContainEqual(hybrid.body.post_filter);
   }
   expect(weighted.body.query.bool.should[0].multi_match.fields).toEqual(['title^3', 'text_full^1']);

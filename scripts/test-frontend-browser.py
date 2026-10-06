@@ -472,10 +472,16 @@ class FrontendBrowserTests(unittest.TestCase):
                     self.assertEqual(len(embeddings), 1)
                     self.assertEqual(embeddings[0]['input'], ['search_query: ancient cyclops'])
                     self.assertIn('knn', requests[-1])
+                    self.assertEqual(len(requests[-1]['knn']), 3)
+                    for branch in requests[-1]['knn']:
+                        self.assertEqual((branch['k'], branch['num_candidates'], branch['boost']), (50, 250, 10))
                     search('"ancient cyclops"')
                     self.assertEqual(len(embeddings), 1)
                     self.assertNotIn('knn', requests[-1])
                     page.get_by_role('button', name='Advanced...', exact=True).click()
+                    expect(page.get_by_role('checkbox', name='Enable semantic search')).to_be_checked()
+                    for field, value in (('k', '50'), ('num_candidates', '250'), ('boost', '10')):
+                        expect(page.get_by_label(field, exact=True)).to_have_value(value)
                     page.get_by_role('checkbox', name='Enable semantic search').uncheck()
                     search('cleric soloing')
                     self.assertEqual(len(embeddings), 1)
