@@ -97,6 +97,14 @@ implicit promisor fetching even on older Git. No clone, pull, checkout, status,
 working-tree walk, archive commit or push is part of the tool. The inventory cap
 persists with the work directory, including older cached tree versions.
 
+Website/account novelty is checked separately from that capped page inventory.
+Existing ordinary hosts are excluded before sampling/grading, including `www`
+and default-port aliases. Shared hosts use targeted account-tree probes. Missing
+or budget-limited metadata never establishes absence and is excluded from new
+discovery runs. The production review queue blocks these unverified entries and
+provides a bounded resumable recheck. These checks read Git trees only, without
+fetching missing objects, reading page blobs or walking the checkout.
+
 Legacy filenames lose protocol and some escaping information. Coverage is a
 dated legacy-path check: missing host/page, tier-2-only page, tier-1 match,
 partial inventory or uncertain legacy identity. HTTPS/encoded URLs remain

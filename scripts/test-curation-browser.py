@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import json
 
 from playwright.async_api import async_playwright
 
@@ -53,6 +54,27 @@ async def check(base):
                 # Reset this fixture review decision for the next viewport.
                 await card.get_by_role('button',name='Defer',exact=True).click()
                 await page.locator('#status').filter(has_text='0 approved for capture').wait_for()
+                card=page.locator('#candidates article').filter(has=page.get_by_role('link',name='http://guild.example/eq/news.html',exact=True))
+                async def active_operation(route):
+                    response=await route.fetch()
+                    body=await response.json()
+                    body['operations']=[{'kind':'capture','state':'running','payload':{}}]
+                    await route.fulfill(status=200,content_type='application/json',body=json.dumps(body))
+                await page.route('**/api/queue?**',active_operation)
+                await page.locator('#refresh').click()
+                await page.locator('#operations h3').filter(has_text='capture · running').wait_for()
+                await card.get_by_label('Capture scope',exact=True).select_option('custom')
+                await card.get_by_label('Custom capture folder path').fill('/research')
+                await page.wait_for_timeout(5200)
+                assert await card.get_by_label('Custom capture folder path').input_value()=='/research'
+                assert not await card.get_by_role('button',name='Approve capture',exact=True).is_enabled()
+                await card.get_by_role('button',name='Save custom scope',exact=True).click()
+                await card.locator('.scope').filter(has_text='http://guild.example/research/').wait_for()
+                await page.reload()
+                card=page.locator('#candidates article').filter(has=page.get_by_role('link',name='http://guild.example/eq/news.html',exact=True))
+                assert await card.get_by_label('Capture scope',exact=True).input_value()=='custom'
+                assert await card.get_by_label('Custom capture folder path').input_value()=='/research/'
+                assert await page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                 assert not external,external
                 await context.close()
             context=await browser.new_context(viewport={'width':390,'height':900})

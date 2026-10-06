@@ -19,6 +19,10 @@ Legacy finder/worker/broad reindex Jobs retain their separate lifecycles.
 2. Choose scope and **Approve capture**. Deep links default to their containing
    directory and descendants; extensionless paths use that directory itself.
    **Linked page only** and **Whole site / shared account** are alternatives.
+   **Custom folder and below** accepts an absolute URL folder path such as
+   `/eq/research/`, with the host supplied by the candidate. Save the path before
+   approving. It may select a different folder from the sampled page; reviewed
+   links seed the traversal, and only in-scope pages enter the downloaded batch.
    Shared hosts retain their account boundaries. A scope change clears an
    earlier approval and changes its manifest hash.
    Unidentified shared-host accounts remain exact-page scopes, including roots.
@@ -80,6 +84,22 @@ staging sources with grades 2–3 for outward links, and excludes known site/acc
 scopes. It probes selected local blobs through a remote-free reader without
 implicit fetches. It never clones, pulls, enumerates a disk checkout or commits
 either archive checkout.
+
+Website/account duplicate checks use the Git host list and targeted tree
+metadata independently of the capped page inventory. Known ordinary hosts are
+excluded even when their linked page is absent or unenumerated. Shared hosts
+are checked by account, preserving unrelated accounts. Discovery treats `www`,
+protocol and default-port variants as site aliases; source URLs, capture identity
+and published paths remain exact. No page blobs or checkout walks are needed.
+
+The queue rechecks old candidates, retains their sources/judgments/decision
+history and moves confirmed duplicates to **already archived**. They remain
+visible under **All candidates** but cannot be approved, captured or published.
+Unverified account coverage also blocks approval. **Recheck archive coverage**
+continues from the saved metadata position with fresh bounded probes. Checks use
+at most 4,096 new trees per candidate, 16,384 cached trees and 32 MiB/15 seconds per
+audit; unavailable partial-clone metadata is never fetched automatically. Approval,
+capture execution and publication all enforce these checks.
 
 ## Publication, indexing and secrets
 

@@ -7,7 +7,7 @@ import re
 import subprocess
 from urllib.parse import urlsplit
 
-from common import CrawlError, Page, decode, digest, original_url, site_scope, tier
+from common import CrawlError, Page, decode, digest, original_url, site_identity, site_scope, tier
 
 SKIP = re.compile(r"\.(?:gif|jpe?g|png|webp|css|js|ico|zip|exe|mp[34]|wav|pdf)(?:$|\?)", re.I)
 SIGNALS = re.compile(r"everquest|\beq\b|norrath|guild|class|cleric|druid|shaman|monk|wizard|enchanter|necromancer|bard|paladin|ranger|rogue|warrior|shadow.?knight|news|forum|raid|tradeskill|spell|quest|blog", re.I)
@@ -45,7 +45,8 @@ class Archive:
                     if kind == b"tree":
                         store.db.execute("INSERT INTO hosts VALUES (?,?)", (name.decode("utf-8"), oid.decode()))
             store.set("archive_sha", self.sha)
-        store.set("archive_repository", str(self.repo))
+        if store.get("archive_repository") != str(self.repo):
+            store.set("archive_repository", str(self.repo))
 
     def git(self, *args):
         result = subprocess.run(["git", "--git-dir", str(self.reader), *args],
@@ -220,19 +221,27 @@ def discover(args, store):
     if not store.get("acquisition_started"):
         store.db.execute("DELETE FROM candidates WHERE state='discovered' AND captures='[]' AND rating IS NULL")
     existing = store.candidates()
-    scopes = {row["scope"] for row in existing}
-    scopes.update(store.get("excluded_scopes", []))
+    scopes = {site_identity(row["url"]) for row in existing}
+    scopes.update(site_identity(url) for url in store.get("excluded_scopes", []))
     added = len(existing)
     for priority, url, evidence in ranked:
         if added >= args.max_candidates:
             break
         scope = site_scope(url)
-        if scope in scopes:
+        identity = site_identity(url)
+        if identity in scopes:
+            continue
+        from site_inventory import SiteInventory
+        if not hasattr(archive, "site_inventory"):
+            archive.site_inventory = SiteInventory(archive)
+        site_coverage = archive.site_inventory.check(url)
+        if site_coverage["status"] != "new_site":
             continue
         coverage = archive.coverage(url)
         if coverage["status"] == "present_tier1":
             continue
-        scopes.add(scope)
+        coverage["site_check"] = site_coverage
+        scopes.add(identity)
         identifier = digest(url)[:24]
         store.db.execute("INSERT OR IGNORE INTO candidates(id,url,scope,priority,coverage,evidence) VALUES (?,?,?,?,?,?)",
                          (identifier, url, scope, priority, json.dumps(coverage), json.dumps(evidence)))

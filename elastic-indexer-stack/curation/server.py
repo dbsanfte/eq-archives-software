@@ -16,6 +16,7 @@ from review import apply_decisions, checked_sources, queue, record
 from captures import LIMITS, check_manifest, document
 from state import connect, enqueue, identifier, unpack, valid_id
 from worker import Worker
+from coverage_check import refresh, require_new
 
 NETWORK = ipaddress.ip_network("192.168.0.0/16")
 STATIC = Path(__file__).parent
@@ -103,6 +104,7 @@ def create_app(root=None, origin=None, start_worker=True):
         return FileResponse(STATIC / filename, media_type="text/javascript" if filename.endswith("js") else "text/css")
 
     def listing(request):
+        refresh(root)
         try:
             offset = int(request.query_params.get("offset", "0"))
             if offset < 0:
@@ -157,15 +159,19 @@ def create_app(root=None, origin=None, start_worker=True):
 
     async def decide(request):
         incoming = await body(request)
+        refresh(root)
         with connect(root) as store:
             apply_decisions(store, incoming)
         return JSONResponse({"recorded": len(incoming)})
 
     async def scope_change(request):
         payload = await body(request)
-        if (not isinstance(payload, dict) or set(payload) != {"id", "manifest_sha256", "mode"}
+        if (not isinstance(payload, dict) or set(payload) not in ({"id", "manifest_sha256", "mode"}, {"id", "manifest_sha256", "mode", "path"})
                 or not all(isinstance(payload[key], str) for key in payload)):
             raise CrawlError("Scope changes require a candidate ID, manifest hash and scope mode")
+        if (payload['mode'] == 'custom') != ('path' in payload):
+            raise CrawlError('Custom scope requires an explicit folder path')
+        refresh(root)
         with connect(root) as store:
             store.db.execute("BEGIN IMMEDIATE")
             row = store.db.execute("SELECT * FROM candidates WHERE id=?", (payload["id"],)).fetchone()
@@ -174,13 +180,25 @@ def create_app(root=None, origin=None, start_worker=True):
             current = record(store, row)
             if current["manifest_sha256"] != payload["manifest_sha256"]:
                 raise CrawlError("Candidate changed since review")
-            scope = capture_scope(current["url"], payload["mode"])
+            scope = capture_scope(current["url"], payload["mode"], payload.get('path'))
             coverage = current["coverage"] or {}
             coverage["scope_mode"] = payload["mode"]
             store.db.execute("UPDATE candidates SET scope=?,coverage=?,decision=NULL,state='approval_pending' WHERE id=?", (scope, json.dumps(coverage), payload["id"]))
             store.db.commit()
             store.event(payload["id"], "scope_changed", {"scope": scope, "mode": payload["mode"]})
         return JSONResponse({"scope": scope})
+
+    async def coverage_check(request):
+        payload = await body(request)
+        if (not isinstance(payload, dict) or set(payload) != {'id', 'manifest_sha256'}
+                or not all(isinstance(value, str) for value in payload.values())):
+            raise CrawlError('Coverage recheck requires the reviewed candidate and manifest hash')
+        with connect(root) as store:
+            row = store.db.execute('SELECT * FROM candidates WHERE id=?', (payload['id'],)).fetchone()
+            if not row or record(store,row)['manifest_sha256'] != payload['manifest_sha256']:
+                raise CrawlError('Candidate changed since review')
+        refresh(root, candidate_id=payload['id'], force=True)
+        return JSONResponse({'checked': payload['id']})
 
     async def discovery(request):
         payload = await body(request)
@@ -200,6 +218,7 @@ def create_app(root=None, origin=None, start_worker=True):
         if (not isinstance(ids, list) or not 1 <= len(ids) <= LIMITS["sites"]
                 or not all(isinstance(value, str) for value in ids) or len(set(ids)) != len(ids)):
             raise CrawlError("Select 1–5 approved candidates for a capture batch")
+        refresh(root)
         with connect(root) as store:
             store.db.execute("BEGIN IMMEDIATE")
             sites = []
@@ -214,9 +233,10 @@ def create_app(root=None, origin=None, start_worker=True):
                 snapshots = [item for item in site["captures"] if
                              (original_url(item["url"]) == original_url(site["url"]) if site["scope_mode"] == "page"
                               else within_scope(item["url"], site["scope"]))]
-                if not snapshots:
+                if not snapshots and site['scope_mode'] != 'custom':
                     raise CrawlError("Approved scope excludes its reviewed source")
-                sites.append({**{key: site[key] for key in ("id", "url", "scope", "scope_mode", "manifest_sha256", "decision")}, "captures": snapshots})
+                sites.append({**{key: site[key] for key in ("id", "url", "scope", "scope_mode", "manifest_sha256", "decision")},
+                              "captures": snapshots, "reviewed_captures": site['captures']})
             batch_id = identifier()
             operation = enqueue(store, "capture", {"batch_id": batch_id, "sites": sites}, commit=False)
             store.db.execute("INSERT INTO batches VALUES (?,'capturing',NULL,NULL,NULL,NULL,NULL,?,?)", (batch_id, now(), now()))
@@ -230,6 +250,10 @@ def create_app(root=None, origin=None, start_worker=True):
         if not isinstance(payload, dict) or set(payload) not in ({"id", "manifest_sha256"}, {"id", "manifest_sha256", "slots"}):
             raise CrawlError("Publication requires the reviewed batch ID and manifest hash")
         with connect(root) as store:
+            current = store.db.execute('SELECT manifest FROM batches WHERE id=?', (valid_id(payload['id']),)).fetchone()
+            if current and current['manifest']:
+                for site in json.loads(current['manifest'])['sites']:
+                    require_new(store, site['url'])
             store.db.execute("BEGIN IMMEDIATE")
             row = store.db.execute("SELECT * FROM batches WHERE id=?", (valid_id(payload["id"]),)).fetchone()
             if not row:
@@ -273,7 +297,7 @@ def create_app(root=None, origin=None, start_worker=True):
 
     app = Starlette(routes=[Route("/", screen), Route("/assets/{name}", asset), Route("/healthz", health),
                             Route("/api/queue", listing), Route("/api/source", source),
-                            Route("/api/decisions", decide, methods=["POST"]), Route("/api/scope", scope_change, methods=["POST"]), Route("/api/discover", discovery, methods=["POST"]),
+                            Route("/api/decisions", decide, methods=["POST"]), Route("/api/scope", scope_change, methods=["POST"]), Route('/api/coverage', coverage_check, methods=['POST']), Route("/api/discover", discovery, methods=["POST"]),
                             Route("/api/capture", capture, methods=["POST"]), Route("/api/publish", publication, methods=["POST"]),
                             Route("/api/resume", resume, methods=["POST"])], lifespan=lifespan,
                     exception_handlers={CrawlError: problem})

@@ -122,6 +122,9 @@ def capture_sites(root, batch_id, sites, downloader_factory=Downloader):
     try:
         for site in sites:
             frontier = deque([site["scope"], site["url"]])
+            for capture in site.get('reviewed_captures', []):
+                page, _ = document(root, capture)
+                frontier.extend(link['url'] for link in page.links)
             for capture in draft["captures"]:
                 if capture["candidate_id"] == site["id"]:
                     page, _ = document(root, capture)

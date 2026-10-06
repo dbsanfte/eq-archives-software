@@ -223,6 +223,13 @@ JSON actions. There is no public route or authentication. Do not run paid discov
 on deployment or schedule it without a request. Each explicit run is bounded to
 50 candidates/$2 with durable reservations and explicit resume.
 
+Exclude already archived website/account scopes independently of capped page
+inventories. Keep shared-host accounts distinct, preserve source URL identity,
+and block approval/publication when coverage is unverified. Rechecks use bounded
+local Git metadata and resume without automatic fetches or archive walks. Custom
+capture folders are absolute URL paths within the site's account; saving a new
+scope invalidates the previous approval and must persist across reloads.
+
 Do not alter, suspend, delete or restart existing indexing Jobs or their source
 checkouts during curation delivery. Its controller has only Jobs get/list/create
 permissions and waits for other unfinished, unsuspended Jobs, including pending/

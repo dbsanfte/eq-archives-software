@@ -68,6 +68,10 @@ function candidate(row) {
   card.append(element('div', `${rating?.category?.replaceAll('_',' ') || 'Unclassified'} · ${rating?.confidence || 'No'} confidence · ${row.state.replaceAll('_',' ')}`, 'meta'));
   card.append(element('p', rating?.reason || row.error || 'Awaiting source acquisition.'));
   const coverage = row.coverage;
+  if (coverage?.site_check) {
+    const check = coverage.site_check;
+    card.append(element('p', `Website/account check: ${check.status.replaceAll('_',' ')}${check.archive_path ? ' · '+check.archive_path : ''}${check.complete === false ? ' · approval blocked until verified' : ''}`, 'meta'));
+  }
   if (coverage?.status) card.append(element('p', `Archive coverage: ${coverage.status.replaceAll('_',' ')}${coverage.complete === false ? ' · incomplete inventory' : ''}${coverage.archive_sha ? ' · checked at '+coverage.archive_sha.slice(0,12) : ''}`, 'meta'));
   if (rating) for (const evidence of rating.evidence) card.append(element('blockquote', evidence.excerpt, 'quote'));
   card.append(element('p', `Capture scope: ${row.scope}${row.scope_mode === 'page' ? ' (exact page only)' : ''}`, 'scope'));
@@ -75,18 +79,42 @@ function candidate(row) {
   const editable = ['approval_pending','approved_waiting_batch','deferred','rejected'].includes(row.state);
   const controls = element('div', undefined, 'actions');
   const scope = element('select'); scope.setAttribute('aria-label', 'Capture scope'); scope.disabled = !editable;
-  [['directory','Linked directory and below'],['page','Linked page only'],['site','Whole site / shared account']].forEach(([value,label]) => {
+  [['directory','Linked directory and below'],['page','Linked page only'],['site','Whole site / shared account'],['custom','Custom folder and below']].forEach(([value,label]) => {
     const option = element('option',label); option.value = value; scope.append(option);
   }); scope.value = row.scope_mode;
-  scope.addEventListener('change', () => perform(() => request('/api/scope',{id:row.id, manifest_sha256:row.manifest_sha256, mode:scope.value})));
   controls.append(scope);
+  const custom = element('div', undefined, 'custom-scope');
+  const pathLabel = element('label', 'Custom capture folder path'), path = element('input');
+  path.type = 'text'; path.placeholder = '/eq/research/'; path.setAttribute('aria-label','Custom capture folder path');
+  path.value = new URL(row.scope).pathname; path.disabled = !editable;
+  pathLabel.append(path); custom.append(pathLabel);
+  custom.append(button('Save custom scope', () => request('/api/scope',{id:row.id,manifest_sha256:row.manifest_sha256,mode:'custom',path:path.value}), !editable),
+                element('p','Uses this folder and its descendants. Save this scope before approving capture.','meta'));
+  custom.hidden = row.scope_mode !== 'custom'; controls.append(custom);
+  let approveButton;
+  function draftScope() {
+    custom.dataset.scopeDraft='1';
+    if (approveButton) approveButton.disabled = true;
+    selected.delete(row.id);
+    const check = card.querySelector('input[type=checkbox]'); if (check) { check.checked=false; check.disabled=true; }
+    selection();
+  }
+  path.addEventListener('input',draftScope);
+  scope.addEventListener('change', () => {
+    custom.hidden = scope.value !== 'custom';
+    if (scope.value === 'custom') draftScope();
+    else perform(() => request('/api/scope',{id:row.id, manifest_sha256:row.manifest_sha256, mode:scope.value}));
+  });
   for (const [decision, label] of [['approve','Approve capture'],['reject','Reject'],['defer','Defer']]) {
-    controls.append(button(label, () => request('/api/decisions',[{id:row.id,manifest_sha256:row.manifest_sha256,decision}]), !editable || decision === 'approve' && !rating));
+    const action = button(label, () => request('/api/decisions',[{id:row.id,manifest_sha256:row.manifest_sha256,decision}]), !editable || decision === 'approve' && !rating);
+    if (decision === 'approve') approveButton=action;
+    controls.append(action);
   }
   if (row.state === 'approved_waiting_batch') {
     const label = element('label', 'Select for batch'), check = element('input'); check.type='checkbox'; check.checked=selected.has(row.id);
     check.addEventListener('change', () => { if (check.checked) selected.add(row.id); else selected.delete(row.id); selection(); }); label.prepend(check); controls.append(label);
   }
+  if (row.state === 'coverage_unverified') controls.append(button('Recheck archive coverage', () => request('/api/coverage',{id:row.id,manifest_sha256:row.manifest_sha256})));
   card.append(controls); return card;
 }
 function batch(row) {
@@ -147,5 +175,5 @@ $('refresh').addEventListener('click',()=>perform(async()=>{}));
 $('discover').addEventListener('click',()=>perform(()=>request('/api/discover',{max_candidates:50,max_usd:2})));
 $('capture').addEventListener('click',()=>perform(async()=>{await request('/api/capture',{ids:[...selected]});selected.clear();}));
 perform(async()=>{});
-setInterval(()=>{if (!busy && data && !document.querySelector('details[open]') &&
+setInterval(()=>{if (!busy && data && !document.querySelector('details[open]') && !document.querySelector('[data-scope-draft]') &&
   (data.operations.some(op=>['queued','running'].includes(op.state)) || data.batches.some(batch=>['published_waiting_index','indexing'].includes(batch.state)))) perform(async()=>{});},5000);
