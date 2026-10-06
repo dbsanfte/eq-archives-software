@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 import pytest
 
@@ -9,6 +10,41 @@ from worker import Worker
 from conftest import manifest_for
 
 IMAGE='dbsanfte/frontend@sha256:'+'1'*64
+
+
+def test_controller_credentials_mounts_start_without_nested_readonly_volumes(tmp_path,monkeypatch):
+    import ssl
+    import yaml
+    from jobs import Kubernetes
+    resources=yaml.safe_load_all((Path(__file__).resolve().parents[1]/'k8s/curation.yaml').read_text())
+    deployment=next(resource for resource in resources if resource['kind']=='Deployment')
+    spec=deployment['spec']['template']['spec']
+    assert spec.get('automountServiceAccountToken') is False
+    container=spec['containers'][0]
+    directory=next(value['value'] for value in container['env'] if value['name']=='KUBERNETES_CREDENTIALS_DIR')
+    mounts=container['volumeMounts']
+    def canonical(path):
+        return Path('/run'+path[len('/var/run'):] if path.startswith('/var/run/') else path)
+    for mount in mounts:
+        if mount.get('readOnly'):
+            for other in mounts:
+                assert canonical(mount['mountPath']) not in canonical(other['mountPath']).parents
+    token_mount=next(mount for mount in mounts if mount['mountPath']==directory)
+    assert token_mount['readOnly']
+    volume=next(volume for volume in spec['volumes'] if volume['name']==token_mount['name'])
+    projection=volume['projected']['sources']
+    assert projection[0]['serviceAccountToken']['path']=='token'
+    assert projection[1]['configMap']['items']==[{'key':'ca.crt','path':'ca.crt'}]
+    assert projection[2]['downwardAPI']['items'][0]['fieldRef']['fieldPath']=='metadata.namespace'
+    (tmp_path/'namespace').write_text('eqarchives-es\n')
+    monkeypatch.setenv('KUBERNETES_CREDENTIALS_DIR',str(tmp_path))
+    monkeypatch.setenv('KUBERNETES_SERVICE_HOST','fixture')
+    monkeypatch.setenv('KUBERNETES_SERVICE_PORT','443')
+    observed=[]
+    monkeypatch.setattr(ssl,'create_default_context',lambda **kwargs:observed.append(kwargs) or object())
+    client=Kubernetes()
+    assert client.directory==tmp_path and client.namespace=='eqarchives-es'
+    assert observed==[{'cafile':str(tmp_path/'ca.crt')}]
 
 
 def test_kubernetes_paging_checks_later_jobs_and_rereads_rotated_tokens(tmp_path,monkeypatch):

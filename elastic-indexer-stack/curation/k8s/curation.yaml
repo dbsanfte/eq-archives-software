@@ -61,6 +61,9 @@ spec:
         app: eqarchives-curation
     spec:
       serviceAccountName: eqarchives-curation
+      # /var/run aliases /run. An automatic service-account mount beneath
+      # /run/secrets cannot be created after that read-only Secret is mounted.
+      automountServiceAccountToken: false
       nodeSelector:
         kubernetes.io/hostname: eqvm
       # Bind ONLY status.hostIP:8090, require that IP and every client peer to
@@ -117,6 +120,8 @@ spec:
               value: eqarchives-curation:deploy-via-ci
             - name: ARCHIVE_REPO
               value: /archive
+            - name: KUBERNETES_CREDENTIALS_DIR
+              value: /run/kubernetes
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -154,6 +159,9 @@ spec:
             - name: credentials
               mountPath: /run/secrets
               readOnly: true
+            - name: kubernetes
+              mountPath: /run/kubernetes
+              readOnly: true
             - name: temporary
               mountPath: /tmp
       imagePullSecrets:
@@ -174,6 +182,24 @@ spec:
           secret:
             secretName: eqarchives-curation-secrets
             defaultMode: 288
+        - name: kubernetes
+          projected:
+            defaultMode: 288
+            sources:
+              - serviceAccountToken:
+                  path: token
+                  expirationSeconds: 3607
+              - configMap:
+                  name: kube-root-ca.crt
+                  items:
+                    - key: ca.crt
+                      path: ca.crt
+              - downwardAPI:
+                  items:
+                    - path: namespace
+                      fieldRef:
+                        apiVersion: v1
+                        fieldPath: metadata.namespace
         - name: temporary
           emptyDir:
             sizeLimit: 16Mi
