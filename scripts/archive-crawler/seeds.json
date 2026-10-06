@@ -1,0 +1,13 @@
+[
+  {"host": "www.fohguild.org", "category": "guild"},
+  {"host": "eq.castersrealm.com", "category": "news"},
+  {"host": "www.eqatlas.com", "category": "independent_information"},
+  {"host": "www.graffe.com", "category": "class"},
+  {"host": "www.thesafehouse.org", "category": "class"},
+  {"host": "everquest.allakhazam.com", "category": "aggregator"},
+  {"host": "www.eqclerics.com", "category": "class"},
+  {"host": "www.eqtraders.com", "category": "independent_information"},
+  {"host": "www.monkly-business.com", "category": "class"},
+  {"host": "www.eqshaman.com", "category": "class"},
+  {"host": "eqdruids.com", "category": "class"}
+]

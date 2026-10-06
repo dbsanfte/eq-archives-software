@@ -28,6 +28,7 @@ digests, dependency versions, or credentials into new files.
 | Model/image pins, bootstrap and GPU allocation | [runtime.env](elastic-indexer-stack/k8s-manifests/embeddings/runtime.env), [embedding Kustomization](elastic-indexer-stack/k8s-manifests/embeddings/kustomization.yaml), [device plugin](elastic-indexer-stack/k8s-manifests/embeddings/device-plugin.yaml) |
 | Indexer dependencies, tests and mappings | [Indexer Dockerfile](elastic-indexer-stack/indexer/Dockerfile), [test requirements](elastic-indexer-stack/indexer/src/indexer/requirements-dev.txt), [tests](elastic-indexer-stack/indexer/src/indexer/test), [Elasticsearch manager](elastic-indexer-stack/indexer/src/indexer/es_manager.py) |
 | Search relevance evaluation and tuning | [Benchmark guide](scripts/search-benchmark/README.md), [query set](scripts/search-benchmark/queries.json), [experiments](scripts/search-benchmark/configs.json) |
+| Website candidate discovery, Wayback staging and approval | [Crawler guide](scripts/archive-crawler/README.md), [seed sites](scripts/archive-crawler/seeds.json), [pinned downloader](scripts/archive-crawler/vendor/wayback-machine-downloader/UPSTREAM.json) |
 
 ## Branching and delivery
 
@@ -193,6 +194,23 @@ must not be described as human validation. Preserve the tune/validation split,
 report corpus and pooling limits, and validate against the completed corpus
 before changing production defaults. Collection cannot write archive documents
 or mappings; paid Luna grading is a separate explicit command.
+
+### Archive candidate crawler
+
+The operator tool in `scripts/archive-crawler` uses Python 3.10+ and Ruby 3.0+.
+Run `python3 -m unittest discover -s scripts/archive-crawler -v` and its
+`verify_review_browser.py` using the browser-test environment for changes. CI
+runs both. Keep state, captured sources, judgments, decisions and keys outside
+both repositories. Discovery uses a remote-free Git reader and bounded cached
+tree inventories; do not enable implicit promisor fetches on older Git or walk
+the archive checkout. Wayback requests are serial through a persistent client,
+with cumulative request/byte/time budgets, throttling and bounded 422/429 backoff.
+Paid Luna grading is explicit and separately budgeted; model judgments are not
+human approval. Preserve complete evidence, exact URL/date identity, source
+hash checks and stale-decision rejection. The pilot stages bounded page samples,
+exports explicit approved batches, and cannot publish archive Git changes or
+write production index documents. Full-site capture and batch publication remain
+separate operator work after review.
 
 ### Public MCP service
 
