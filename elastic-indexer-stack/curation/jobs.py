@@ -13,7 +13,7 @@ from common import CrawlError
 
 class Kubernetes:
     def __init__(self):
-        directory = Path("/var/run/secrets/kubernetes.io/serviceaccount")
+        directory = Path(os.environ.get("KUBERNETES_CREDENTIALS_DIR", "/var/run/secrets/kubernetes.io/serviceaccount"))
         self.directory = directory
         self.namespace = directory.joinpath("namespace").read_text().strip()
         self.base = f"https://{os.environ['KUBERNETES_SERVICE_HOST']}:{os.environ['KUBERNETES_SERVICE_PORT']}"

@@ -104,6 +104,13 @@ account and four additive provenance keyword mappings. It does not change
 existing accounts or Jobs. Secret apply uses a private pipe/server-side apply,
 with no secret-bearing files or last-applied annotations.
 
+The controller disables automatic service-account mounting and explicitly
+projects its rotating token, CA and namespace into `/run/kubernetes`. This stays
+beside the read-only `/run/secrets` credential volume: `/var/run` aliases `/run`,
+so mounting a token beneath `/var/run/secrets` would prevent container startup.
+Import Jobs have no Kubernetes service-account token. CI checks the configured
+token location and starts the built container with both read-only volumes.
+
 Import verifies the entire manifest/file set before any ES requests. It reuses
 the website Markdown extractor and checksum-pinned WordPiece tokenizer, embeds
 complete source serially with `search_document:`, at most 480 tokens including
