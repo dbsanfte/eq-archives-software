@@ -145,7 +145,8 @@ function candidate(row) {
     card.classList.add('site-summary');
     const title = element('h3'); title.append(link(row.scope)); card.append(title);
     const states = {captured_awaiting_review:'Awaiting indexing decision',approved_waiting_publication:'Approved for indexing',indexing_declined:'Indexing declined',published:'Published — indexing queued',indexed:'Indexed'};
-    card.append(element('p', `${states[row.state]}${capture.pages !== undefined ? ` · ${capture.pages} pages · ${capture.files} captures` : ''}`, 'meta'));
+    const reviewStates={awaiting_review:'Awaiting indexing decision',publication_requested:'Approved for indexing',published_waiting_index:'Waiting to index',indexing:'Indexing in progress',index_failed:'Indexing failed',indexed:'Indexed',indexing_declined:'Indexing declined'};
+    card.append(element('p', `${reviewStates[row.review_state] || states[row.state]}${capture.pages !== undefined ? ` · ${capture.pages} pages · ${capture.files} captures` : ''}`, 'meta'));
     card.append(button('Review site',()=>{selectedSite={id:reviewId,candidate:row.id};$('filter').value='captured';offset=0;},!reviewId));
     return card;
   }
@@ -215,7 +216,7 @@ function siteStatus(row) {
   const publication=row.state==='publication_requested' ? row.operation : null;
   const publicationLabels={interrupted:'Publication paused',queued:'Approved — publication queued',running:'Publishing approved site'};
   status.append(element('p',publicationLabels[publication?.state] || labels[row.state] || row.state.replaceAll('_',' '),'capture-phase'));
-  const next = {awaiting_review:'Browse the pages below, then approve or decline indexing for this entire captured site.',indexing_declined:'This site will not be published or indexed. Reconsider to return it to review.',publication_requested:'All captured pages from this site are approved. AI enrichment and indexing queue automatically after publication.',published_waiting_index:'AI enrichment and indexing will start when the worker is available and other indexing Jobs finish.',indexing:'The import Job includes Luna enrichment and indexing. Its completion is checked automatically.',indexed:'This site is published and indexed.',index_failed:'Inspect the failed import Job before retrying. The published files are retained.'};
+  const next = {awaiting_review:'Browse the pages below, then approve or decline indexing for this entire captured site.',indexing_declined:'This site will not be published or indexed. Reconsider to return it to review.',publication_requested:'All captured pages from this site are approved. AI enrichment and indexing queue automatically after publication.',published_waiting_index:'AI enrichment and indexing will start when the worker is available and other indexing Jobs finish.',indexing:'The import Job includes Luna enrichment and indexing. Its completion is checked automatically.',indexed:'This site is published and indexed.',index_failed:'Published files are retained. Retry indexing to continue with saved AI results and the same $2 site budget. Existing entries are skipped.'};
   status.append(element('p',publication?.state==='interrupted' ? 'Your approval is saved. Retry publication to continue; no recapture or new approval is needed.' : next[row.state] || 'Awaiting the next workflow step.'));
   if (publication?.error) status.append(element('p',publication.error,'failure'));
   if (row.error) status.append(element('p',row.error));
@@ -292,6 +293,10 @@ function siteDecisions(row) {
   } else if (row.state==='indexing_declined') controls.append(button('Reconsider indexing',()=>decision('reconsider')));
   else if (row.state==='publication_requested' && row.operation?.state==='interrupted') {
     const retry=button('Retry publication',()=>request('/api/resume',{id:row.operation.id}),Boolean(activeOperation()));retry.className='primary';
+    controls.append(retry);
+  }
+  else if (row.state==='index_failed' && row.job?.name) {
+    const retry=button('Retry indexing',()=>request('/api/index-retry',{id:row.id,manifest_sha256:row.manifest_sha256,job_name:row.job.name}));retry.className='primary';
     controls.append(retry);
   }
   container.append(controls);container.hidden=!controls.childElementCount;return container;

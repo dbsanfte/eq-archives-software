@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from common import CrawlError, digest
-from jobs import blockers, import_job
+from jobs import blockers, import_job, import_name
 from state import connect, worker_lease
 from worker import Worker
 from conftest import manifest_for
@@ -154,6 +154,112 @@ def test_import_job_only_mounts_staging_readonly_and_separate_indexing_secrets()
     assert secret_names == ['eqarchives-capture-indexer-secrets','search-eqarchives-secrets','eqarchives-curation-secrets']
     assert spec['volumes'][1]['projected']['sources'][2]['secret']['items']==[{'key':'luna_api_key','path':'luna_api_key'}]
     with pytest.raises(CrawlError): import_job(batch,'latest')
+
+
+def failed_import(root,row):
+    manifest=manifest_for(row)
+    batch={'id':manifest['batch_id'],'state':'index_failed','manifest':manifest,
+           'manifest_sha256':digest(manifest),'publication':{'commit':'b'*40}}
+    batch['job']={'name':import_name(batch),'state':'index_failed'}
+    path=root/'batches'/batch['id']/'approved.json'
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(batch))
+    with connect(root) as store:
+        store.db.execute("INSERT INTO batches VALUES (?,'index_failed',?,?,?,?,NULL,'now','now')",
+                         (batch['id'],json.dumps(manifest),batch['manifest_sha256'],json.dumps(batch['publication']),json.dumps(batch['job'])))
+        store.db.execute("UPDATE candidates SET state='published',coverage=?",
+                         (json.dumps({'capture':{'batch_id':batch['id'],'review_id':batch['id']}}),))
+        store.db.commit()
+    return batch
+
+
+def test_explicit_index_retry_preserves_failed_jobs_publication_and_approved_site(candidate,monkeypatch):
+    import copy
+    from server import create_app
+    from test_server import call
+    root,row=candidate
+    batch=failed_import(root,row)
+    app=create_app(root,start_worker=False)
+    payload={'id':batch['id'],'manifest_sha256':batch['manifest_sha256'],'job_name':batch['job']['name']}
+    assert call(app,'GET','/api/queue?filter=captured').json()['candidates'][0]['review_state']=='index_failed'
+    source=root/batch['manifest']['captures'][0]['path']
+    stamp=source.stat().st_mtime_ns
+    assert call(app,'POST','/api/index-retry',payload).json()=={'state':'published_waiting_index','attempt':2}
+    assert call(app,'GET','/api/queue?filter=captured').json()['candidates'][0]['review_state']=='published_waiting_index'
+    assert call(app,'POST','/api/index-retry',payload).status_code==409
+    assert call(create_app(root,start_worker=False),'GET','/api/site?id='+batch['id']).json()['job']['attempt']==2
+    original=import_job(batch,IMAGE)
+    original['metadata']['uid']='preserved-failed-job'
+    original['status']={'conditions':[{'type':'Failed','status':'True'}]}
+    snapshot=copy.deepcopy(original)
+    ingestion={'metadata':{'name':'legacy-ingestion','uid':'preserved-ingestion'},'spec':{},'status':{'active':0}}
+    class FakeKube:
+        def __init__(self):self.items=[original,ingestion];self.created=[]
+        def jobs(self):return self.items.copy()
+        def create(self,job):self.created.append(job);self.items.append(job)
+    kube=FakeKube()
+    monkeypatch.setenv('IMPORT_IMAGE',IMAGE)
+    worker=Worker(root,kube=kube)
+    try:
+        worker.indexing()
+        assert not kube.created
+        ingestion['status']['conditions']=[{'type':'Complete','status':'True'}]
+        worker.indexing();worker.indexing()
+        assert len(kube.created)==1
+        retried=kube.created[0]
+        assert retried['metadata']['name']==batch['job']['name']+'-r2'
+        assert retried['metadata']['annotations']['eqarchives.org/manifest-sha256']==batch['manifest_sha256']
+        assert retried['spec']['template']['spec']['containers'][0]['command']==original['spec']['template']['spec']['containers'][0]['command']
+        assert original==snapshot
+        retried['status']={'conditions':[{'type':'Complete','status':'True'}]}
+        worker.indexing()
+        with connect(root) as store:
+            saved=store.db.execute('SELECT state,manifest,publication,job FROM batches').fetchone()
+            assert saved[0]=='indexed' and json.loads(saved[1])==batch['manifest'] and json.loads(saved[2])==batch['publication']
+            assert json.loads(saved[3])['attempt']==2
+            assert store.db.execute('SELECT COUNT(*) FROM operations').fetchone()[0]==0
+            assert store.db.execute('SELECT state FROM candidates').fetchone()[0]=='indexed'
+        assert source.stat().st_mtime_ns==stamp
+    finally:worker.lease.close()
+
+
+@pytest.mark.parametrize('problem',['hash','job','source','approval','publication','state'])
+def test_index_retry_rejects_stale_or_unverified_approvals(candidate,problem):
+    from server import create_app
+    from test_server import call
+    root,row=candidate
+    batch=failed_import(root,row)
+    payload={'id':batch['id'],'manifest_sha256':batch['manifest_sha256'],'job_name':batch['job']['name']}
+    if problem=='hash':payload['manifest_sha256']='stale'
+    elif problem=='job':payload['job_name']='old-job'
+    elif problem=='source':(root/batch['manifest']['captures'][0]['path']).write_bytes(b'tampered')
+    elif problem=='approval':(root/'batches'/batch['id']/'approved.json').unlink()
+    else:
+        with connect(root) as store:
+            if problem=='publication':store.db.execute('UPDATE batches SET publication=?',(json.dumps({'commit':'c'*40}),))
+            else:store.db.execute("UPDATE batches SET state='indexing'")
+            store.db.commit()
+    assert call(create_app(root,start_worker=False),'POST','/api/index-retry',payload).status_code==409
+    with connect(root) as store:
+        assert store.db.execute('SELECT COUNT(*) FROM operations').fetchone()[0]==0
+        assert json.loads(store.db.execute('SELECT job FROM batches').fetchone()[0])==batch['job']
+
+
+def test_simultaneous_index_retries_queue_only_one_attempt(candidate):
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    from server import create_app
+    from test_server import call
+    root,row=candidate
+    batch=failed_import(root,row)
+    app=create_app(root,start_worker=False)
+    payload={'id':batch['id'],'manifest_sha256':batch['manifest_sha256'],'job_name':batch['job']['name']}
+    ready=threading.Barrier(2)
+    def retry(_):
+        ready.wait(timeout=10)
+        return call(app,'POST','/api/index-retry',payload).status_code
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        assert sorted(executor.map(retry,range(2)))==[202,409]
 
 
 def test_exclusive_worker_lease_and_explicit_restart_resume(candidate):

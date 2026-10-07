@@ -20,6 +20,7 @@ from coverage_check import refresh, require_new
 from capture_flow import Action, UNDO_SECONDS, transition
 from capture_queue import claim
 from site_reviews import get as get_site_review, migrate
+from jobs import import_attempt, import_name
 
 NETWORK = ipaddress.ip_network("192.168.0.0/16")
 STATIC = Path(__file__).parent
@@ -134,7 +135,15 @@ def create_app(root=None, origin=None, start_worker=True):
                 rows.sort(key=lambda row: ((row['coverage'] or {}).get('capture') or {}).get('completed_at', ''), reverse=True)
             operations = [unpack(row) for row in store.db.execute("SELECT * FROM operations ORDER BY CASE state WHEN 'running' THEN 0 WHEN 'queued' THEN 1 WHEN 'interrupted' THEN 2 ELSE 3 END,created DESC LIMIT 20")]
             batches = [unpack(row) for row in store.db.execute("SELECT * FROM batches WHERE state!='capture_group' ORDER BY created DESC LIMIT 100")]
-            return JSONResponse({"candidates": rows[offset:offset + 50], "total": len(rows), "offset": offset,
+            page_rows = rows[offset:offset + 50]
+            for row in page_rows:
+                capture = (row.get('coverage') or {}).get('capture') or {}
+                review_id = capture.get('review_id') or capture.get('batch_id')
+                if review_id:
+                    status = store.db.execute('SELECT state FROM batches WHERE id=?',(review_id,)).fetchone()
+                    if status:
+                        row['review_state'] = status[0]
+            return JSONResponse({"candidates": page_rows, "total": len(rows), "offset": offset,
                                  "all_count": len(all_rows), "approved": sum(row["state"] == "approved_waiting_batch" for row in all_rows),
                                  "recommended": sum(row['state'] in ('approval_pending','deferred') and (row['rating'] or {}).get('grade',-1)>=2 for row in all_rows),
                                  "operations": operations, "batches": batches, "limits": LIMITS, "undo_seconds": UNDO_SECONDS,
@@ -225,6 +234,33 @@ def create_app(root=None, origin=None, start_worker=True):
         with connect(root) as store:
             apply_decisions(store, incoming, capture_delay=UNDO_SECONDS)
         return JSONResponse({"recorded": len(incoming)})
+
+    async def index_retry(request):
+        payload = await body(request)
+        if (not isinstance(payload,dict) or set(payload) != {'id','manifest_sha256','job_name'}
+                or not all(isinstance(value,str) for value in payload.values())):
+            raise CrawlError('Indexing retry requires the site review ID, manifest hash and failed Job name')
+        with connect(root) as store:
+            store.db.execute('BEGIN IMMEDIATE')
+            reviewed = get_site_review(store,payload['id'])
+            if (reviewed['state'] != 'index_failed' or reviewed['manifest_sha256'] != payload['manifest_sha256']
+                    or (reviewed['job'] or {}).get('name') != payload['job_name']
+                    or import_name(reviewed) != payload['job_name']):
+                raise CrawlError('This indexing failure changed or is already queued for retry')
+            # Revalidate the original published approval and every source. Never
+            # republish, mutate a terminal Job or change the approved budget.
+            from index_captures import read_batch
+            published = read_batch(root,f"batches/{reviewed['id']}/approved.json",reviewed['manifest_sha256'])
+            if published['publication']['commit'] != (reviewed['publication'] or {}).get('commit'):
+                raise CrawlError('Published approval changed before indexing retry')
+            job = {'attempt':import_attempt(reviewed)+1,'previous_name':payload['job_name'],'state':'retry_queued'}
+            import_name({**reviewed,'job':job})  # Validate the next immutable Job identity.
+            store.db.execute("UPDATE batches SET state='published_waiting_index',job=?,error=NULL,updated=? WHERE id=?",
+                             (json.dumps(job),now(),reviewed['id']))
+            store.db.execute('INSERT INTO events(candidate,action,detail,created) VALUES (?,?,?,?)',
+                             (reviewed['manifest']['sites'][0]['id'],'site_indexing_retried',json.dumps(payload),now()))
+            store.db.commit()
+        return JSONResponse({'state':'published_waiting_index','attempt':job['attempt']},status_code=202)
 
     async def undo(request):
         payload = await body(request)
@@ -357,6 +393,7 @@ def create_app(root=None, origin=None, start_worker=True):
     app = Starlette(routes=[Route("/", screen), Route("/assets/{name}", asset), Route("/healthz", health),
                             Route("/api/queue", listing), Route("/api/source", source),
                             Route('/api/site',site_review), Route('/api/site-decision',site_decision,methods=['POST']),
+                            Route('/api/index-retry',index_retry,methods=['POST']),
                             Route("/api/decisions", decide, methods=["POST"]),
                             Route("/api/undo", undo, methods=["POST"]), Route("/api/scope", scope_change, methods=["POST"]), Route('/api/coverage', coverage_check, methods=['POST']), Route("/api/discover", discovery, methods=["POST"]),
                             Route("/api/capture", capture, methods=["POST"]), Route("/api/publish", publication, methods=["POST"]),

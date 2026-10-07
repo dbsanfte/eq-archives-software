@@ -27,9 +27,11 @@ from indexer.capture_enrichment import Enricher, policy
 def read_batch(root, relative, expected):
     root = Path(root).resolve()
     path = (root / relative).resolve()
-    if root not in path.parents or path.stat().st_size > 2 * 1024 * 1024:
+    if root not in path.parents:
         raise CrawlError("Invalid or oversized approved manifest path")
     try:
+        if path.stat().st_size > 2 * 1024 * 1024:
+            raise CrawlError("Invalid or oversized approved manifest path")
         batch = json.loads(path.read_text())
         manifest = batch["manifest"]
         commit = batch["publication"]["commit"]
