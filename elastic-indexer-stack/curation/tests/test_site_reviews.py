@@ -100,6 +100,26 @@ def test_whole_site_approval_rechecks_all_child_source_hashes(tmp_path):
     assert decision(app,review,'decline').status_code==200
 
 
+def test_site_review_exposes_its_own_paused_publication_and_resume_keeps_approval(tmp_path):
+    root=tmp_path/'state'
+    rows,parent=mixed_sites(root)
+    app=create_app(root,start_worker=False)
+    reviewed=review_for(app,rows[0])
+    assert decision(app,reviewed,'approve').status_code==202
+    with connect(root) as store:
+        store.db.execute("UPDATE operations SET state='interrupted',error='SSH runtime account is missing'")
+        store.db.commit()
+    paused=review_for(app,rows[0])
+    assert paused['operation']['state']=='interrupted'
+    assert paused['operation']['error']=='SSH runtime account is missing'
+    assert paused['operation']['payload']['batch_id']==paused['id']
+    assert review_for(app,rows[1])['operation'] is None
+    assert call(app,'POST','/api/resume',{'id':paused['operation']['id']}).status_code==202
+    resumed=review_for(app,rows[0])
+    assert resumed['operation']['state']=='queued' and resumed['operation']['error'] is None
+    assert resumed['state']=='publication_requested' and resumed['manifest_sha256']==reviewed['manifest_sha256']
+
+
 def test_empty_site_can_be_declined_but_not_approved(tmp_path):
     root=tmp_path/'state'
     rows,parent=mixed_sites(root)

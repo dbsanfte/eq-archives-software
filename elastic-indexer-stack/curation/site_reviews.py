@@ -66,4 +66,6 @@ def get(store, review_id, candidate=None):
     result['source_slots'] = slots
     result['manifest'] = {**manifest,'sites':sites,'captures':[manifest['captures'][slot] for slot in slots]}
     result['page_identities'] = [original_url(manifest['captures'][slot]['url']) for slot in slots]
+    operation = store.db.execute("SELECT * FROM operations WHERE kind='publish' AND json_extract(payload,'$.batch_id')=? ORDER BY created DESC LIMIT 1", (review_id,)).fetchone()
+    result['operation'] = unpack(operation) if operation else None
     return result

@@ -16,6 +16,21 @@ from captures import check_manifest, verified_source
 REMOTE = "git@github.com:dbsanfte/eq-archives.git"
 
 
+def git_failure(arguments, stderr):
+    """Describe a known failure without exposing upstream output or arguments."""
+    operation = next((value for value in arguments if value in
+                      {'init','remote','config','fetch','rev-parse','cat-file','hash-object','commit-tree','push','ls-remote'}), 'operation')
+    diagnostic = stderr.lower()
+    hints = [(b'no user exists for uid', 'The publication container needs a Unix account for its runtime UID.'),
+             (b'permission denied (publickey)', 'GitHub rejected the publication SSH credential.'),
+             (b'host key verification failed', 'The GitHub SSH host identity could not be verified.'),
+             (b'could not resolve hostname', 'The publication service could not resolve GitHub.'),
+             (b'no space left on device', 'Publication staging has no free disk space.'),
+             (b'connection timed out', 'The connection to GitHub timed out.')]
+    hint = next((message for pattern,message in hints if pattern in diagnostic), 'Upstream details were omitted to protect credentials.')
+    return f'Archive Git {operation} failed. {hint} The approved sources remain in staging.'
+
+
 class Publisher:
     def __init__(self, root, remote=REMOTE, key_file="/run/secrets/archive_publish_key"):
         self.root = Path(root)
@@ -69,7 +84,7 @@ class Publisher:
         if result.returncode:
             if optional:
                 return None
-            raise CrawlError("Archive Git operation failed; upstream details omitted, no force push attempted")
+            raise CrawlError(git_failure(arguments,result.stderr))
         if b"filtering not recognized" in result.stderr or b"does not support filter" in result.stderr:
             raise CrawlError("Remote does not support bounded partial fetches")
         return result.stdout

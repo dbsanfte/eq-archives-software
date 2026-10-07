@@ -136,6 +136,7 @@ def create_app(root=None, origin=None, start_worker=True):
             batches = [unpack(row) for row in store.db.execute("SELECT * FROM batches WHERE state!='capture_group' ORDER BY created DESC LIMIT 100")]
             return JSONResponse({"candidates": rows[offset:offset + 50], "total": len(rows), "offset": offset,
                                  "all_count": len(all_rows), "approved": sum(row["state"] == "approved_waiting_batch" for row in all_rows),
+                                 "recommended": sum(row['state'] in ('approval_pending','deferred') and (row['rating'] or {}).get('grade',-1)>=2 for row in all_rows),
                                  "operations": operations, "batches": batches, "limits": LIMITS, "undo_seconds": UNDO_SECONDS,
                                  "capturing": sum(row['state']=='capturing' for row in all_rows),
                                  "captured": sum(row['state'] in CAPTURED_STATES for row in all_rows),
