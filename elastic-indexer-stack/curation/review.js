@@ -76,8 +76,9 @@ async function request(path,value,signal) {
   let result;try { result=await response.json(); } catch (_) { throw new Error('The service is unavailable. Refresh to retry.'); }
   if (!response.ok) throw new Error(result.error || 'The action could not be completed.');return result;
 }
-function message(text,undo) {
+function message(text,undo,tone='') {
   $('notice').replaceChildren(node('span',text));$('notice').hidden=false;
+  $('notice').dataset.tone=tone;
   if (undo) $('notice').append(control('Undo approval',()=>act('Undoing approval',()=>request('/api/undo',undo),'Returned to Candidates.')));
 }
 async function act(label,action,confirmation) {
@@ -85,13 +86,13 @@ async function act(label,action,confirmation) {
   const actedId=route.candidate;busy=true;++generation;controller?.abort();$('error').hidden=true;
   for (const item of document.querySelectorAll('[data-mutation]')) item.disabled=true;
   $('status').textContent=label;renderDock(true);
-  try { await action();
+  try { const outcome=await action();
     // Only confirmed actions move the site. Read its durable state before following it.
     if (route.candidate && route.candidate===actedId) {
       const result=await request(`/api/candidate?id=${encodeURIComponent(route.candidate)}`);
       if (route.candidate===actedId) { detail=result;route={...route,view:result.candidate.stage,panel:'site',page:0,slot:0};writeRoute(true); }
     }
-    message(confirmation || 'Saved.');workspaceSignature='';dockSignature='';
+    message((typeof confirmation==='function' ? confirmation(outcome) : confirmation) || 'Saved.',null,outcome?.coverage?.complete===false ? 'attention' : '');workspaceSignature='';dockSignature='';
     await refresh(true);
     if (detail?.candidate.id===actedId && detail.candidate.stage==='queued') {
       message('Approved. This site is now in the capture queue. Undo is available below until it starts.');
@@ -200,7 +201,7 @@ function renderWorkspace() {
   if (!detail || !route.candidate) { workspaceSignature='';return; }
   const row=detail.candidate,review=detail.review;
   if (route.panel!=='site') { const {groups}=pageGroups(row,review);if (groups.length) { route.page=Math.min(route.page,groups.length-1);if (!groups[route.page].slots.includes(route.slot)) route.slot=groups[route.page].slots[0];writeRoute(true); } }
-  const signature=JSON.stringify([row.id,row.stage,row.state,row.manifest_sha256,review?.manifest_sha256,route.panel,route.page,route.slot]);
+  const signature=JSON.stringify([row.id,row.stage,row.state,row.manifest_sha256,review?.manifest_sha256,route.panel,route.page,route.slot,route.panel==='site' ? row.coverage?.site_check : null]);
   if (signature!==workspaceSignature) {
     const root=$('site-workspace');root.replaceChildren();
     const navigation=node('div',undefined,'workspace-nav');
@@ -237,6 +238,26 @@ function renderWorkspace() {
 function appendEvidenceLink(root,row) {
   if (row.captures?.length) root.append(control(`Read source evidence · ${row.captures.length} ${row.captures.length===1 ? 'capture' : 'captures'}`,()=>go({panel:'pages',page:0,slot:0}),'wide'));
 }
+function coverageMessage(result) {
+  const check=result.coverage || {};
+  if (check.status==='already_archived') return 'Coverage verified: this site/account is already archived. Moved to History.';
+  if (check.status==='new_site' && check.complete) return 'Coverage verified: this site/account is not yet archived.';
+  return `Coverage is still unverified. ${check.message || 'The check is incomplete; approval remains blocked.'}`;
+}
+function coveragePanel(row) {
+  const coverage=row.coverage || {},check=coverage.site_check || coverage;
+  if (!check.status) return null;
+  const descriptions={new_site:'No archived copy of this site/account was found.',already_archived:'This site/account is already represented in the archive.',inventory_partial:'Coverage is not yet verified. Capture approval remains blocked.'};
+  const box=panel('Archive coverage',descriptions[check.status] || check.status.replaceAll('_',' '),check.complete===false ? 'attention' : '');
+  if (check.message) box.append(node('p',check.message));
+  if (check.progress) box.append(node('p',`${check.progress.checked.toLocaleString()} of ${check.progress.total.toLocaleString()} archive snapshots checked on ${check.progress.host}.`,'meta'));
+  if (check.archive_path) {
+    box.append(node('p',check.archive_path,'meta'));
+    if (/^[a-f0-9]{40}$/.test(check.archive_sha)) box.append(external(`https://github.com/dbsanfte/eq-archives/tree/${check.archive_sha}/${check.archive_path.split('/').map(encodeURIComponent).join('/')}`,'View existing archived capture'));
+  }
+  if (row.state==='coverage_unverified') box.append(mutation(check.retryable ? 'Continue coverage check' : 'Recheck archive coverage',()=>request('/api/coverage',{id:row.id,manifest_sha256:row.manifest_sha256}),coverageMessage));
+  return box;
+}
 function renderCandidate(root,row) {
   const columns=node('div',undefined,'site-columns'),left=node('div'),right=node('div');
   const evidence=panel('Why capture this site?',row.rating?.reason || row.error || 'This site needs verified source evidence before approval.');
@@ -244,14 +265,7 @@ function renderCandidate(root,row) {
   for (const excerpt of row.rating?.evidence || []) evidence.append(node('blockquote',excerpt.excerpt,'evidence'));
   if (row.rating) evidence.append(node('p',`${row.rating.confidence} confidence · AI assessment, awaiting your decision`,'meta'));
   appendEvidenceLink(evidence,row);left.append(evidence);
-  const coverage=row.coverage || {},check=coverage.site_check;
-  if (check || coverage.status) {
-    const box=panel('Archive coverage',check ? check.status.replaceAll('_',' ') : coverage.status.replaceAll('_',' '));
-    if (check?.complete===false || coverage.complete===false) box.append(node('p','Coverage is not verified. Capture approval is blocked until the check completes.'));
-    if (check?.archive_path) box.append(node('p',check.archive_path,'meta'));
-    if (row.state==='coverage_unverified') box.append(mutation('Recheck archive coverage',()=>request('/api/coverage',{id:row.id,manifest_sha256:row.manifest_sha256}),'Archive coverage checked.'));
-    left.append(box);
-  }
+  const coverage=coveragePanel(row);if (coverage) left.append(coverage);
   if (row.evidence?.length) {
     const origin=panel('How it was found');const details=node('details');details.append(node('summary',`${row.evidence.length} discovery references`));
     for (const entry of row.evidence) details.append(node('p',typeof entry==='string' ? entry : entry.source_url || entry.source || entry.path || JSON.stringify(entry),'meta'));
@@ -302,6 +316,7 @@ function renderHistory(root,row,review) {
   const box=panel(indexed ? 'Indexed · complete' : statusLabel(row),indexed ? 'This site is published and indexed. It has retired from the active workflow; its sources and completion record remain here.' : 'This site is outside the active workflow. Its decision and source evidence are retained.');
   if (review?.publication?.commit) box.append(external(`https://github.com/dbsanfte/eq-archives/commit/${review.publication.commit}`,'View published files in the archive'));
   root.append(box);
+  if (row.state==='already_archived') {const coverage=coveragePanel(row);if (coverage) root.append(coverage);}
   if (review) root.append(captureSummary(row,review));else appendEvidenceLink(root,row);
 }
 function renderLive() {

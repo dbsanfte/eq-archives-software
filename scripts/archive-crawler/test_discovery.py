@@ -2,6 +2,7 @@
 
 import json
 import os
+from datetime import datetime, timedelta
 from pathlib import Path
 import subprocess
 import tempfile
@@ -139,10 +140,45 @@ class DiscoveryTests(unittest.TestCase):
         self.file('geocities.com','20000101000000','alice/index.html','EQ guild')
         self.commit()
         archive=Archive(self.repo,self.store)
-        self.assertEqual(SiteInventory(archive,max_trees=0).check('http://geocities.com/alice/')['status'],'inventory_partial')
+        bounded=SiteInventory(archive,max_bytes=1)
+        result=bounded.check('http://geocities.com/alice/')
+        self.assertEqual(result['reason'],'tree_too_large')
+        self.assertFalse(result['retryable'])
+        self.assertEqual(bounded.bytes,0)
+        result=SiteInventory(archive,max_trees=0).check('http://geocities.com/alice/',force=True)
+        self.assertEqual(result['reason'],'tree_limit')
+        self.assertTrue(result['retryable'])
         timestamp=self.git('rev-parse','HEAD:websites/geocities.com/20000101000000')
         (self.repo/'.git/objects'/timestamp[:2]/timestamp[2:]).unlink()
-        self.assertEqual(SiteInventory(archive).check('http://geocities.com/alice/',force=True)['status'],'inventory_partial')
+        missing=SiteInventory(archive).check('http://geocities.com/alice/',force=True)
+        self.assertEqual(missing['status'],'inventory_partial')
+        self.assertEqual(missing['reason'],'metadata_unavailable')
+        self.assertFalse(missing['retryable'])
+
+    def test_large_shared_host_tree_uses_the_existing_total_byte_budget(self):
+        # Model a large host with Git objects, without creating thousands of files.
+        self.file('pub6.ezboard.com','19990101000000','bthemagicianstower.html','EQ forum')
+        self.commit()
+        capture_tree=self.git('rev-parse','HEAD:websites/pub6.ezboard.com/19990101000000')
+        def tree(entries):
+            return subprocess.check_output(['git','-C',str(self.repo),'mktree'],input=entries.encode()).decode().strip()
+        dates=[(datetime(1999,1,1)+timedelta(seconds=index)).strftime('%Y%m%d%H%M%S') for index in range(52000)]
+        host=tree(''.join(f'040000 tree {capture_tree}\t{stamp}\n' for stamp in dates))
+        self.assertGreater(int(self.git('cat-file','-s',host)),2*1024*1024)
+        websites=tree(f'040000 tree {host}\tpub6.ezboard.com\n')
+        root=tree(f'040000 tree {websites}\twebsites\n')
+        commit=self.git('-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit-tree',root,'-m','large metadata fixture')
+        self.git('update-ref','HEAD',commit)
+        archive=Archive(self.repo,self.store)
+        inventory=SiteInventory(archive,max_trees=3)
+        with patch.object(Archive,'files',side_effect=AssertionError('No page inventory or checkout walk')):
+            result=inventory.check('http://pub6.ezboard.com/bthemagicianstower.html',timestamps=[dates[-1]])
+        self.assertEqual(result['status'],'already_archived')
+        self.assertTrue(result['complete'])
+        self.assertIn(dates[-1],result['archive_path'])
+        self.assertLessEqual(inventory.probes,3)
+        self.assertLessEqual(inventory.bytes,32*1024*1024)
+        self.assertFalse(self.store.db.execute('SELECT * FROM files').fetchone())
 
     def test_staged_site_aliases_do_not_use_multiple_candidate_slots(self):
         self.file('seed.example','20000101000000','links.html','<a href="http://new.example/">EQ guild</a><a href="https://www.new.example:443/eq/">EQ guild</a>')
@@ -157,12 +193,18 @@ class DiscoveryTests(unittest.TestCase):
         archive=Archive(self.repo,self.store)
         result=SiteInventory(archive,max_trees=3).check('http://geocities.com/new-account/')
         self.assertEqual(result['status'],'inventory_partial')
+        self.assertEqual(result['progress']['checked'],2)
+        self.assertEqual(result['progress']['total'],6)
+        previous=result['progress']['checked']
         for _ in range(6):
             inventory=SiteInventory(archive,max_trees=3)
             result=inventory.check('http://geocities.com/new-account/',force=True)
             self.assertLessEqual(inventory.probes,3)
+            self.assertGreater(result['progress']['checked'],previous)
+            previous=result['progress']['checked']
             if result['status']=='new_site':break
         self.assertEqual(result['status'],'new_site')
+        self.assertEqual(result['progress']['checked'],6)
 
     def test_state_cannot_live_in_software_or_archive(self):
         with self.assertRaises(CrawlError):

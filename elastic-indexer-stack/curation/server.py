@@ -350,8 +350,14 @@ def create_app(root=None, origin=None, start_worker=True):
             row = store.db.execute('SELECT * FROM candidates WHERE id=?', (payload['id'],)).fetchone()
             if not row or record(store,row)['manifest_sha256'] != payload['manifest_sha256']:
                 raise CrawlError('Candidate changed since review')
+        if not os.environ.get('ARCHIVE_REPO'):
+            raise CrawlError('Archive metadata is not configured; coverage cannot be verified')
         refresh(root, candidate_id=payload['id'], force=True)
-        return JSONResponse({'checked': payload['id']})
+        with connect(root) as store:
+            row = store.db.execute('SELECT * FROM candidates WHERE id=?', (payload['id'],)).fetchone()
+            current = record(store, row)
+        return JSONResponse({'checked': payload['id'], 'state': current['state'],
+                             'coverage': (current['coverage'] or {}).get('site_check')})
 
     async def discovery(request):
         payload = await body(request)

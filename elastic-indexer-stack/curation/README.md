@@ -169,12 +169,21 @@ and published paths remain exact. No page blobs or checkout walks are needed.
 
 The queue rechecks old candidates, retains their sources/judgments/decision
 history and moves confirmed duplicates to **already archived**. They remain
-visible under **All candidates** but cannot be approved, captured or published.
+visible under **History** but cannot be approved, captured or published.
 Unverified account coverage also blocks approval. **Recheck archive coverage**
 continues from the saved metadata position with fresh bounded probes. Checks use
 at most 4,096 new trees per candidate, 16,384 cached trees and 32 MiB/15 seconds per
 audit; unavailable partial-clone metadata is never fetched automatically. Approval,
 capture execution and publication all enforce these checks.
+Large shared-host timestamp trees use that same cumulative byte budget; there is
+no smaller per-tree limit that can permanently stall a recheck. Partial results
+report why the check stopped and how many snapshots were checked on the current
+host. **Continue coverage check** resumes a bounded scan; missing local metadata
+or a tree larger than the total budget is shown as requiring operator attention.
+The API returns the resulting state and coverage evidence, and the UI explicitly
+keeps approval blocked for incomplete checks. A completed site/account check takes
+precedence over the original capped page inventory. Confirmed duplicates move to
+History with a link to the existing archive path.
 
 ## Publication, indexing and secrets
 

@@ -386,6 +386,72 @@ async def unavailable_candidate(browser,base):
     await context.close()
 
 
+async def coverage_feedback(browser,base,width):
+    for outcome in ('new_site','already_archived'):
+        context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
+        page=await context.new_page()
+        snapshot=await (await context.request.get(base+'/api/queue?filter=candidates')).json()
+        row=copy.deepcopy(snapshot['candidates'][0])
+        row.update(state='coverage_unverified',stage='candidates',scope_mode='page',
+                   url='http://pub6.ezboard.com/bthemagicianstower.html',scope='http://pub6.ezboard.com/bthemagicianstower.html')
+        row['coverage']={'status':'inventory_partial','complete':False,'site_check':{'status':'inventory_partial','complete':False}}
+        attempts=0
+        async def fixture(route):
+            nonlocal attempts
+            parsed=urlsplit(route.request.url)
+            if route.request.method=='POST':
+                assert parsed.path=='/api/coverage'
+                assert route.request.post_data_json=={'id':row['id'],'manifest_sha256':row['manifest_sha256']}
+                attempts+=1
+                if attempts==1:
+                    check={'status':'inventory_partial','complete':False,'reason':'tree_limit','retryable':True,
+                           'message':'The metadata read limit was reached. Continue from the saved position.',
+                           'progress':{'host':'pub6.ezboard.com','checked':4095,'total':63764}}
+                elif attempts==2:
+                    check={**row['coverage']['site_check'],'reason':'metadata_unavailable','retryable':False,
+                           'message':'Archive metadata is unavailable locally. An operator must restore it before approval; no automatic fetch was attempted.'}
+                else:
+                    check={'status':outcome,'complete':True,'archive_sha':'1'*40}
+                    row.update(state='already_archived' if outcome=='already_archived' else 'approval_pending',
+                               stage='history' if outcome=='already_archived' else 'candidates')
+                    if outcome=='already_archived':check['archive_path']='websites/pub6.ezboard.com/20000101000000/bthemagicianstower.html'
+                row['coverage']['site_check']=check
+                await route.fulfill(status=200,json={'checked':row['id'],'state':row['state'],'coverage':check});return
+            if parsed.path=='/api/candidate':body={'candidate':row,'review':None}
+            elif parsed.path=='/api/queue':
+                view=parse_qs(parsed.query)['filter'][0]
+                body={**snapshot,'candidates':[row] if view==row['stage'] else [],'total':int(view==row['stage']),
+                      'operations':[],'stage_counts':{name:int(name==row['stage']) for name in ('candidates','queued','capturing','review','indexing','saved','history')}}
+            else:raise AssertionError(parsed.path)
+            await route.fulfill(status=200,json=body)
+        await page.route('**/api/**',fixture)
+        await page.goto(base+'/?view=candidates&candidate='+row['id'])
+        approve=page.get_by_role('button',name='Approve site for capture',exact=True)
+        await page.get_by_role('button',name='Recheck archive coverage',exact=True).click()
+        await page.locator('#notice').filter(has_text='Coverage is still unverified.').wait_for()
+        assert await page.locator('#notice').get_attribute('data-tone')=='attention'
+        assert await approve.is_disabled()
+        await page.get_by_text('4,095 of 63,764 archive snapshots checked on pub6.ezboard.com.',exact=True).wait_for()
+        await page.get_by_role('button',name='Continue coverage check',exact=True).click()
+        await page.locator('#notice').filter(has_text='An operator must restore it').wait_for()
+        assert await approve.is_disabled()
+        await page.get_by_role('button',name='Recheck archive coverage',exact=True).click()
+        await page.locator('#notice').filter(has_text='Coverage verified:').wait_for()
+        assert await page.locator('#notice').get_attribute('data-tone')==''
+        assert not await page.get_by_text('Coverage is not yet verified. Capture approval remains blocked.',exact=True).count()
+        if outcome=='new_site':
+            assert await approve.is_enabled()
+            await page.get_by_text('No archived copy of this site/account was found.',exact=True).wait_for()
+        else:
+            assert 'view=history' in page.url and not await approve.count()
+            await page.get_by_text('This site/account is already represented in the archive.',exact=True).wait_for()
+            assert await page.get_by_role('link',name='View existing archived capture').get_attribute('href')=='https://github.com/dbsanfte/eq-archives/tree/'+'1'*40+'/websites/pub6.ezboard.com/20000101000000/bthemagicianstower.html'
+        assert attempts==3
+        await safe_layout(page,width)
+        if width==390:await page.screenshot(path=f'/tmp/curation-coverage-{outcome}-{width}.png',full_page=True)
+        await context.close()
+
+
 async def capture_flow(browser,base):
     context=await browser.new_context(viewport={'width':390,'height':844},is_mobile=True,has_touch=True)
     page=await context.new_page()
@@ -448,6 +514,7 @@ async def check(base):
             for width in (320,390,430,768,1280):
                 await basic_flow(browser,base,width)
                 await long_reader(browser,base,width)
+                await coverage_feedback(browser,base,width)
                 print(f'Mobile workflow and complete-source navigation verified at {width}px',flush=True)
             await search_and_queue(browser,base)
             await unavailable_candidate(browser,base)

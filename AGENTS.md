@@ -226,7 +226,12 @@ on deployment or schedule it without a request. Each explicit run is bounded to
 Exclude already archived website/account scopes independently of capped page
 inventories. Keep shared-host accounts distinct, preserve source URL identity,
 and block approval/publication when coverage is unverified. Rechecks use bounded
-local Git metadata and resume without automatic fetches or archive walks. Custom
+local Git metadata and resume without automatic fetches or archive walks.
+Coverage rechecks must expose incomplete results, their pause reason and saved
+snapshot progress; a successful HTTP request is not verified coverage. Use the
+latest site/account result ahead of older capped page inventory flags. Large host
+trees remain within the cumulative metadata byte/time limits, without a smaller
+per-tree ceiling that prevents resumable checks from starting. Custom
 capture folders are absolute URL paths within the site's account; saving a new
 scope invalidates the previous approval and must persist across reloads.
 

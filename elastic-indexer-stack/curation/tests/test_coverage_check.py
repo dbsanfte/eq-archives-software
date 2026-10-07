@@ -165,3 +165,46 @@ def test_repeated_partial_rechecks_preserve_unchanged_approval(tmp_path,monkeypa
         with connect(root) as store:
             current=store.candidates()[0]
             assert current['state']=='approved_waiting_batch' and current['decision']==decision
+
+
+def test_recheck_api_reports_partial_progress_and_verified_outcome(tmp_path,monkeypatch):
+    from site_inventory import SiteInventory
+    root=tmp_path/'state'
+    row=add_candidate(root,url='http://geocities.com/new-account/eq.html')
+    with connect(root) as store:
+        store.db.execute('UPDATE candidates SET coverage=? WHERE id=?',
+                         (json.dumps({'status':'inventory_partial','complete':False}),row['id']))
+        store.db.commit()
+    repo=archive(tmp_path,[f'geocities.com/2000010{index}000000/other-{index}/index.html' for index in range(1,7)])
+    monkeypatch.setenv('ARCHIVE_REPO',str(repo))
+    monkeypatch.setattr('coverage_check.SiteInventory',lambda archive:SiteInventory(archive,max_trees=2))
+    app=create_app(root,start_worker=False)
+    payload={'id':row['id'],'manifest_sha256':row['manifest_sha256']}
+    assert call(app,'POST','/api/coverage',{**payload,'manifest_sha256':'stale'}).status_code==409
+    result=call(app,'POST','/api/coverage',payload).json()
+    assert result['checked']==row['id'] and result['state']=='coverage_unverified'
+    check=result['coverage']
+    assert check['status']=='inventory_partial' and check['complete'] is False
+    assert check['reason']=='tree_limit' and check['retryable'] is True
+    assert 0<check['progress']['checked']<check['progress']['total']==6
+    previous=check['progress']['checked']
+    for _ in range(6):
+        result=call(app,'POST','/api/coverage',payload).json()
+        assert result['coverage']['progress']['checked']>previous
+        previous=result['coverage']['progress']['checked']
+        if result['coverage']['complete']:break
+    assert result['coverage']['status']=='new_site' and result['state']=='approval_pending'
+    with connect(root) as store:
+        current=record(store,store.candidates()[0])
+        assert current['coverage']['complete'] is False  # Original page inventory is separate evidence.
+        assert current['coverage']['site_check']['complete'] is True
+        assert current['manifest_sha256']==row['manifest_sha256'] and current['decision'] is None
+        assert store.db.execute('SELECT COUNT(*) FROM operations').fetchone()[0]==0
+
+
+def test_recheck_api_cannot_claim_success_without_archive_metadata(candidate,monkeypatch):
+    root,row=candidate
+    monkeypatch.delenv('ARCHIVE_REPO',raising=False)
+    app=create_app(root,start_worker=False)
+    response=call(app,'POST','/api/coverage',{'id':row['id'],'manifest_sha256':row['manifest_sha256']})
+    assert response.status_code==409 and 'not configured' in response.json()['error']
