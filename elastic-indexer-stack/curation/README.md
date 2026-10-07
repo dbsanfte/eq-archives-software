@@ -59,11 +59,18 @@ Legacy finder/worker/broad reindex Jobs retain their separate lifecycles.
 
 The four navigation buttons open Suggestions, Awaiting capture, Capturing and
 Review & indexing. Captured sites appear in a compact list beside the selected
-site's pages. The view and selected site are retained in the URL across reloads.
+site's pages. **Captured sites**, **Captured pages**, and **Document preview**
+have separate labeled panels, contrasting surfaces, and independent scroll
+controls. The lists show scroll hints, persistent gutters, and up/down buttons;
+the reader also has Previous/Next page controls and a page position. On phones
+these panels stack vertically. **Site decision** applies to the entire capture,
+regardless of which page is open. Capture notes and indexing Job details expand
+separately. The view and selected site are retained in the URL across reloads.
 Tools & help holds additional inventory views, discovery and capture limits;
 activity history is collapsed. Publication failures appear on the affected site
 with **Retry publication**, preserving its existing approval and captured files.
-Status updates and decisions retain the page currently being read.
+Status updates and decisions retain the page currently being read. Automatic
+and manual refreshes preserve list/document scroll positions and open scope drafts.
 
 The screen shows the next action, current capture URL, files staged,
 source bytes, URL checks and site position. Capture progress is durable in SQLite
@@ -242,7 +249,9 @@ pytest, including an over-50-item queue and Undo/worker claim races. The runtime
 defines a Unix account for UID/GID 10001: OpenSSH requires the passwd entry even
 when the private key and destination are supplied explicitly. The container
 smoke check exercises SSH configuration offline as that non-root user. CI also uses
-real Chromium at 320/390/1280 px, delayed source responses, live progress during
+real Chromium at 320/390/768/1280/1440 px, long site/page lists with independent
+keyboard/button scrolling, document position across status polling, delayed
+source responses, live progress during
 open source/scope edits, moves between workflow views,
 Undo during a delayed refresh, draining pagination, durable site decisions,
 child-page/version browsing, bookmarked navigation, publication retry and
