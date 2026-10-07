@@ -4,6 +4,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1
     PYTHONPATH=/app/scripts/archive-crawler:/app/curation:/app \
     NOMIC_TOKENIZER_PATH=/opt/eqarchives/nomic-tokenizer.json
 RUN apt-get update && apt-get install -y --no-install-recommends git ruby openssh-client libmagic1 ca-certificates && rm -rf /var/lib/apt/lists/*
+# OpenSSH requires getpwuid() to resolve the configured non-root runtime UID.
+RUN groupadd --gid 10001 curation && useradd --uid 10001 --gid 10001 --home-dir /tmp --no-create-home --no-log-init --shell /usr/sbin/nologin curation
 WORKDIR /app
 COPY elastic-indexer-stack/curation/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir --require-hashes -r /app/requirements.txt

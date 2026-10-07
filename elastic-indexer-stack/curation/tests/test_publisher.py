@@ -4,12 +4,39 @@ import subprocess
 import pytest
 
 from common import CrawlError, digest
-from publisher import Publisher
+from publisher import Publisher, git_failure
 from conftest import manifest_for
 
 
 def git(path,*args):
     return subprocess.check_output(['git','-C',str(path),*args],stderr=subprocess.DEVNULL).decode().strip()
+
+
+@pytest.mark.parametrize('stderr,hint',[
+    (b'No user exists for uid 10001', 'Unix account'),
+    (b'Permission denied (publickey)', 'SSH credential'),
+    (b'Host key verification failed', 'SSH host identity'),
+    (b'Could not resolve hostname github.com', 'resolve GitHub'),
+    (b'No space left on device', 'disk space'),
+    (b'Connection timed out', 'timed out'),
+    (b'unknown upstream error', 'omitted'),
+])
+def test_publication_git_errors_identify_stage_without_leaking_upstream_output(stderr,hint):
+    error=git_failure(('-c','fetch.negotiationAlgorithm=noop','fetch','origin','private-object'),stderr+b'\nprivate-fixture-secret')
+    assert 'Archive Git fetch failed' in error and hint in error
+    assert 'private-fixture-secret' not in error and 'private-object' not in error
+
+
+def test_git_command_uses_safe_stage_error_on_failure(tmp_path,monkeypatch):
+    publisher=object.__new__(Publisher)
+    publisher.repo=tmp_path/'publisher.git'
+    publisher.reader=tmp_path/'reader.git'
+    publisher.env={}
+    monkeypatch.setattr(subprocess,'run',lambda *args,**kwargs:subprocess.CompletedProcess(args[0],128,b'',b'No user exists for uid 10001\nprivate-fixture-secret'))
+    with pytest.raises(CrawlError,match='Archive Git fetch failed.*Unix account') as caught:
+        publisher.git('fetch','origin','master')
+    assert 'private-fixture-secret' not in str(caught.value)
+    assert publisher.git('fetch','origin','master',optional=True) is None
 
 
 def test_one_batch_commit_keeps_unrelated_files_and_recovers_repeat_publication(candidate,tmp_path):

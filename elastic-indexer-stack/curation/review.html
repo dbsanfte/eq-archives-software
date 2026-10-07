@@ -1,19 +1,46 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>EQ Archives — Site review</title><link rel="stylesheet" href="/assets/review.css"><script defer src="/assets/review.js"></script></head>
-<body><main><header><p class="eyebrow">EQ ARCHIVES · INTRANET</p><h1>Site review</h1><p>Discover, review and preserve EverQuest websites.</p></header>
-<section class="toolbar" aria-label="Queue actions"><label>Show <select id="filter"><option value="recommended">Suggestions</option><option value="approved">Awaiting capture</option><option value="capturing">Capturing</option><option value="captured">Recent captures</option><option value="pending">All awaiting review</option><option value="all">All candidates</option></select></label>
-<button id="refresh">Refresh</button><button id="discover">Discover &amp; grade · 50 sites · $2 cap</button></section>
-<p id="status" role="status" aria-live="polite">Loading queue…</p><p id="error" role="alert" hidden></p>
-<section id="capture-workflow" class="intro"><h2>What happens next</h2>
-<ol class="flow"><li><strong>1. Approve</strong><span>Moves the site into Awaiting capture, with time to undo.</span></li><li><strong>2. Capture automatically</strong><span>The worker downloads queued sites into staging.</span></li><li><strong>3. Review the site</strong><span>Browse its captured pages and approve or decline indexing.</span></li><li><strong>4. Enrich &amp; index</strong><span>Publishes the approved site, then waits for existing indexing Jobs.</span></li></ol>
-<p id="next-step" role="status" aria-live="polite">Approve a site to queue its capture. Undo is available until capture starts.</p>
-<div class="actions"><button id="view-awaiting" disabled>View awaiting capture</button><button id="view-captured" disabled>View recent captures</button></div>
-<p>Luna grades the supplied captures only. Review the source and capture scope before approving. Shared hosts stay within their account.</p>
-<details><summary>Capture limits &amp; dates</summary><p>Capture batches use one connection, a 3-second delay and 128 KiB/s. Limits: 5 sites, 20 new URLs per site, 100 HTML files and 64 MiB. Prefer 1999–2001; use 2002–2007 when an exact URL has no first-tier capture.</p></details></section>
-<section id="capture-activity" aria-label="Capture activity" hidden><h2>Capture activity</h2><div id="activity" role="status" aria-live="polite"></div></section>
-<section id="site-review" hidden><h2>Review captured site</h2><p>Review one site and its captured pages, then approve or decline indexing for the entire captured scope.</p><div id="reviewed-site"></div></section>
-<section id="candidates" aria-label="Candidates"></section><nav class="pagination" aria-label="Queue pages"><button id="previous" disabled>Previous</button><span id="page"></span><button id="next" disabled>Next</button></nav>
-
-<details><summary>Operation history</summary><div id="operations"></div></details>
-<footer><p>No scheduled paid runs. Files and judgments remain in staging until approved. Captures are bounded subsets, not complete site mirrors.</p><p id="version"></p></footer></main></body></html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>EQ Archives — Site review</title>
+  <link rel="stylesheet" href="/assets/review.css"><script defer src="/assets/review.js"></script>
+</head>
+<body><main>
+  <header>
+    <div><p class="eyebrow">EQ ARCHIVES · INTRANET</p><h1>Website curation</h1></div>
+    <div class="toolbar">
+      <button id="refresh">Refresh</button>
+      <details id="tools"><summary>Tools &amp; help</summary><div class="tools-menu">
+        <label>More views <select id="filter">
+          <option value="recommended">Suggestions</option><option value="approved">Awaiting capture</option>
+          <option value="capturing">Capturing</option><option value="captured">Review &amp; indexing</option>
+          <option value="pending">All awaiting review</option><option value="all">All candidates</option>
+        </select></label>
+        <button id="discover">Discover &amp; grade · 50 sites · $2 cap</button>
+        <p>Approve a suggestion to queue capture. You can undo before capture starts. After downloading, review the site's pages and approve indexing separately.</p>
+        <p>Luna grades are suggestions. Shared hosts stay within their account. Captures are bounded subsets, not complete site mirrors.</p>
+        <details><summary>Capture limits &amp; dates</summary><p>One connection, a 3-second delay and 128 KiB/s. Acquisition limits: 5 sites per batch, 20 new URLs per site, 100 HTML files and 64 MiB. The approval queue has no count limit. Prefer 1999–2001; use 2002–2007 when an exact URL has no first-tier capture.</p></details>
+      </div></details>
+    </div>
+  </header>
+  <nav class="views" aria-label="Curation views">
+    <button data-view="recommended">Suggestions <span data-count="recommended" aria-hidden="true"></span></button>
+    <button id="view-awaiting" data-view="approved">Awaiting capture <span data-count="approved" aria-hidden="true"></span></button>
+    <button data-view="capturing">Capturing <span data-count="capturing" aria-hidden="true"></span></button>
+    <button id="view-captured" data-view="captured">Review &amp; indexing <span data-count="captured" aria-hidden="true"></span></button>
+  </nav>
+  <p id="status" class="sr-only" role="status" aria-live="polite">Loading queue…</p>
+  <p id="error" role="alert" hidden></p>
+  <p id="next-step" class="notice" role="status" aria-live="polite">Loading queue…</p>
+  <section id="capture-activity" aria-label="Capture activity" hidden><div id="activity" role="status" aria-live="polite"></div></section>
+  <div class="view-heading"><h2 id="view-title">Suggestions</h2><span id="view-total" class="meta"></span></div>
+  <div id="workspace">
+    <section id="candidate-list" aria-label="Sites">
+      <div id="candidates"></div>
+      <nav class="pagination" aria-label="Queue pages"><button id="previous" disabled>Previous</button><span id="page"></span><button id="next" disabled>Next</button></nav>
+    </section>
+    <section id="site-review" aria-label="Selected site" hidden><div id="reviewed-site"></div></section>
+  </div>
+  <details class="history"><summary>Activity history</summary><div id="operations"></div></details>
+  <footer><p>No scheduled paid runs. Sources stay in staging until you approve publication and indexing.</p><p id="version"></p></footer>
+</main></body></html>

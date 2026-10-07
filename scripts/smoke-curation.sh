@@ -29,6 +29,17 @@ docker run -d --name "$curation_container" --network "$curation_network" --ip 19
   -e LAN_BIND_IP=192.168.240.2 -e KUBERNETES_CREDENTIALS_DIR=/run/kubernetes \
   "$image" python /app/curation/browser_fixture.py >/dev/null
 bash "$repo_dir/scripts/wait-http.sh" http://192.168.240.2:8090/healthz
+# Exercise the production UID's real SSH client without network or credentials.
+docker exec -i "$curation_container" python - <<'PY'
+import os
+import pwd
+import subprocess
+assert os.getuid()==10001
+assert pwd.getpwuid(os.getuid()).pw_name=='curation'
+result=subprocess.run(['ssh','-G','git@github.com'],capture_output=True)
+assert result.returncode==0,'The non-root publication SSH client cannot start'
+print('Non-root publication account and offline SSH configuration verified')
+PY
 "$BROWSER_TEST_PYTHON" "$repo_dir/scripts/test-curation-browser.py" http://192.168.240.2:8090
 # Real TCP peer checks against the built service, including spoofed headers.
 docker exec -i "$curation_container" python - <<'PY'

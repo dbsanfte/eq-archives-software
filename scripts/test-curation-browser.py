@@ -8,6 +8,16 @@ import re
 from playwright.async_api import async_playwright
 
 
+async def view(page, name):
+    """Use visible navigation; the extra inventory views live in Tools & help."""
+    if name in ('recommended','approved','capturing','captured'):
+        await page.locator(f'.views [data-view="{name}"]').click()
+    else:
+        if not await page.locator('#tools').evaluate('(node)=>node.open'):
+            await page.locator('#tools > summary').click()
+        await page.locator('#filter').select_option(name)
+
+
 async def check(base):
     async with async_playwright() as playwright:
         browser=await playwright.chromium.launch()
@@ -20,9 +30,12 @@ async def check(base):
                 await page.goto(base)
                 await page.locator('#status').filter(has_text='5 candidates').wait_for()
                 assert await page.locator('#candidates article').count()==2
+                assert await page.locator('.views button').count()==4
+                assert not await page.locator('#tools').evaluate('(node)=>node.open')
+                assert await page.locator('.views [aria-current=page]').get_attribute('data-view')=='recommended'
                 assert await page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                 assert await page.evaluate('window.pwned') is None
-                await page.locator('#filter').select_option('all')
+                await view(page,'all')
                 await page.locator('#status').filter(has_text='5 in this view').wait_for()
                 assert await page.locator('#candidates article').count()==5
                 card=page.locator('#candidates article').filter(has=page.get_by_role('link',name='http://guild.example/eq/news.html',exact=True))
@@ -45,15 +58,15 @@ async def check(base):
                 await card.get_by_role('button',name='Approve for capture',exact=True).click()
                 await page.locator('#status').filter(has_text='1 awaiting capture').wait_for()
                 await page.locator('#next-step').filter(has_text='automatic capture').wait_for()
-                await page.locator('#filter').select_option('recommended')
+                await view(page,'recommended')
                 await page.locator('#status').filter(has_text='1 in this view').wait_for()
                 assert await page.locator('#candidates article').count()==1
                 assert not await page.locator('#candidates').get_by_role('link',name='http://guild.example/eq/news.html',exact=True).count()
-                await page.get_by_role('button',name='View awaiting capture',exact=True).click()
+                await page.get_by_role('button',name='Awaiting capture',exact=True).click()
                 await page.locator('#candidates').get_by_role('button',name='Undo approval',exact=True).wait_for()
                 await page.reload()
                 await page.locator('#status').filter(has_text='1 awaiting capture').wait_for()
-                await page.get_by_role('button',name='View awaiting capture',exact=True).click()
+                await page.get_by_role('button',name='Awaiting capture',exact=True).click()
                 entered,release=asyncio.Event(),asyncio.Event()
                 async def held_refresh(route):
                     response=await route.fetch()
@@ -71,14 +84,14 @@ async def check(base):
                 release.clear()
                 await page.locator('#refresh').click()
                 await asyncio.wait_for(entered.wait(),timeout=3)
-                await page.locator('#filter').select_option('recommended')
+                await view(page,'recommended')
                 release.set()
                 await page.locator('#status').filter(has_text='2 in this view').wait_for(timeout=8000)
                 assert await page.locator('#candidates article').count()==2
                 await page.unroute('**/api/queue?**',held_refresh)
-                await page.locator('#filter').select_option('recommended')
+                await view(page,'recommended')
                 await page.locator('#status').filter(has_text='2 in this view').wait_for()
-                await page.locator('#filter').select_option('all')
+                await view(page,'all')
                 card=page.locator('#candidates article').filter(has=page.get_by_role('link',name='http://guild.example/eq/news.html',exact=True))
                 capture_files=2
                 virtual_state=None
@@ -125,14 +138,14 @@ async def check(base):
                 snapshot=await context.request.get(base+'/api/queue?filter=all')
                 virtual_row=next(row for row in (await snapshot.json())['candidates'] if row['url']=='http://guild.example/eq/news.html')
                 virtual_state='capturing'
-                await page.locator('#filter').select_option('capturing')
+                await view(page,'capturing')
                 await page.locator('#status').filter(has_text='1 capturing').wait_for()
                 assert not await page.get_by_role('button',name='Undo approval',exact=True).count()
                 virtual_state='captured_awaiting_review'
                 await page.locator('#refresh').click()
                 await page.locator('#next-step').filter(has_text='2 captured sites').wait_for()
                 await page.locator('#capture-activity').wait_for(state='hidden')
-                await page.get_by_role('button',name='View recent captures',exact=True).click()
+                await page.get_by_role('button',name='Review & indexing',exact=True).click()
                 await page.locator('#status').filter(has_text='2 in this view').wait_for()
                 assert await page.locator('#filter').input_value()=='captured'
                 assert await page.locator('#candidates article').count()==2
@@ -153,9 +166,10 @@ async def check(base):
                 virtual_state=None
                 capture_files=5
                 await page.locator('#refresh').click()
-                await page.locator('#activity h3').filter(has_text='Capturing sites').wait_for()
+                await page.locator('#next-step').filter(has_text='5 HTML files staged').wait_for()
                 capture_files=6
-                await page.locator('#activity .capture-counts').filter(has_text='6 HTML files staged').wait_for(timeout=8000)
+                await page.locator('#next-step').filter(has_text='6 HTML files staged').wait_for(timeout=8000)
+                assert await page.locator('#capture-activity').is_hidden()
                 assert 'Last child paragraph.' in await pane.locator('pre').inner_text()
                 await pane.get_by_role('button',name='captured-guild EQ archive',exact=True).click()
                 await pane.get_by_label('Capture version').select_option('1')
@@ -181,16 +195,24 @@ async def check(base):
                 await page.unroute('**/api/site?**',held_site)
                 assert 'captured-guild site content.' not in await pane.locator('pre').inner_text()
                 await guild.get_by_role('button',name='Review site',exact=True).click()
+                await pane.get_by_role('button',name='Guild child guide',exact=True).click()
+                await pane.locator('pre').filter(has_text='Last child paragraph.').wait_for()
                 await pane.get_by_role('button',name='Decline indexing',exact=True).click()
                 await pane.locator('.site-status').filter(has_text='Indexing declined').wait_for()
+                assert 'Last child paragraph.' in await pane.locator('pre').inner_text()
                 assert 'Awaiting indexing decision' in await other.inner_text()
+                bookmark=page.url
                 await page.reload()
-                await page.get_by_role('button',name='View recent captures',exact=True).click()
+                await pane.locator('.site-status').filter(has_text='Indexing declined').wait_for()
+                assert page.url==bookmark
+                assert await page.locator('#filter').input_value()=='captured'
                 await guild.get_by_role('button',name='Review site',exact=True).click()
                 await pane.locator('.site-status').filter(has_text='Indexing declined').wait_for()
                 await pane.get_by_role('button',name='Reconsider indexing',exact=True).click()
                 await pane.get_by_role('button',name='Approve site & queue indexing',exact=True).wait_for()
-                await pane.screenshot(path=f'/tmp/eqarchives-site-review-browser-{width}.png')
+                await pane.get_by_role('button',name='Guild child guide',exact=True).click()
+                await pane.locator('pre').filter(has_text='Last child paragraph.').wait_for()
+                await page.screenshot(path=f'/tmp/eqarchives-curation-simple-{width}.png',full_page=True)
                 assert await page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                 assert not external,external
                 await context.close()
@@ -221,7 +243,7 @@ async def check(base):
             context=await browser.new_context(viewport={'width':390,'height':900})
             page=await context.new_page()
             await page.goto(base)
-            await page.get_by_role('button',name='View recent captures',exact=True).click()
+            await page.get_by_role('button',name='Review & indexing',exact=True).click()
             pane=page.locator('#reviewed-site')
             other=page.locator('#candidates article').filter(has=page.get_by_role('link',name='http://captured-class.example/eq/',exact=True))
             guild=page.locator('#candidates article').filter(has=page.get_by_role('link',name='http://captured-guild.example/eq/',exact=True))
@@ -241,10 +263,42 @@ async def check(base):
             approved=await context.request.get(base+'/api/site?id='+payload['id'])
             assert len((await approved.json())['manifest']['captures'])==3
             await page.reload()
-            await page.get_by_role('button',name='View recent captures',exact=True).click()
+            await page.get_by_role('button',name='Review & indexing',exact=True).click()
             await guild.get_by_role('button',name='Review site',exact=True).click()
             await pane.locator('.site-status').filter(has_text='Approved — publication queued').wait_for()
             assert not await pane.get_by_role('button',name='Approve site & queue indexing').count()
+            # A paused publication belongs to the site, rather than leaving its
+            # main panel saying "queued" while a separate history says "paused".
+            snapshot=await context.request.get(base+'/api/queue?filter=captured')
+            publish_op=next(op for op in (await snapshot.json())['operations'] if op['kind']=='publish')
+            paused=True
+            async def publication_status(route):
+                response=await route.fetch()
+                body=await response.json()
+                op={**publish_op,'state':'interrupted' if paused else 'queued','error':'Publication SSH runtime account is missing' if paused else None}
+                if '/api/site?' in route.request.url: body['operation']=op
+                else: body['operations']=[op]
+                await route.fulfill(response=response,json=body)
+            async def retry_publication(route):
+                nonlocal paused
+                assert route.request.post_data_json=={'id':publish_op['id']}
+                paused=False
+                await route.fulfill(status=202,json={'resumed':publish_op['id']})
+            await page.route('**/api/queue?**',publication_status)
+            await page.route('**/api/site?**',publication_status)
+            await page.route('**/api/resume',retry_publication)
+            await pane.get_by_role('button',name='Guild child guide',exact=True).click()
+            await pane.locator('pre').filter(has_text='Last child paragraph.').wait_for()
+            await page.locator('#refresh').click()
+            await pane.locator('.site-status').filter(has_text='Publication paused').wait_for()
+            await pane.locator('.site-status').filter(has_text='SSH runtime account').wait_for()
+            assert await pane.get_by_role('button',name='Retry publication',exact=True).is_enabled()
+            assert await page.locator('#capture-activity').is_hidden()
+            assert 'Last child paragraph.' in await pane.locator('pre').inner_text()
+            await pane.get_by_role('button',name='Retry publication',exact=True).click()
+            await pane.locator('.site-status').filter(has_text='Approved — publication queued').wait_for()
+            assert not await pane.get_by_role('button',name='Retry publication',exact=True).count()
+            assert 'Last child paragraph.' in await pane.locator('pre').inner_text()
             await context.close()
         finally:
             await browser.close()
@@ -255,4 +309,4 @@ if __name__=='__main__':
     parser.add_argument('url')
     args=parser.parse_args()
     asyncio.run(check(args.url.rstrip('/')))
-    print('Curation browser checks passed at 320, 390 and 1280 px; queue views, progress, Undo/refresh races, draining pagination, scope and independent whole-site indexing decisions verified')
+    print('Curation browser checks passed at 320, 390 and 1280 px; direct navigation, bookmarked site reviews, progress, Undo races, scope, whole-site decisions and publication retry verified')

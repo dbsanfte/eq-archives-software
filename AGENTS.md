@@ -233,7 +233,7 @@ scope invalidates the previous approval and must persist across reloads.
 Production approval automatically moves a suggestion to Awaiting capture. The
 queue has no count cap; the worker claims oldest eligible items in serial batches
 of at most five after a 60-second Undo grace period. Preserve typed transitions,
-atomic Undo/claim locking, durable progress and separate Capturing/Recent captures
+atomic Undo/claim locking, durable progress and separate Capturing/Review & indexing
 views. A paused capture requires explicit resume and holds the queue. Source
 reading and scope drafts must not prevent progress polling or lose edits. Download
 completion creates an independent review for each site. Review and approve all
@@ -241,6 +241,10 @@ captured pages within one site's chosen scope at a time, with dated Wayback link
 and complete sources. Preserve independent approve/decline/reconsider decisions,
 manifest-bound approvals and metadata-only migration of unapproved mixed capture
 groups; never copy sources or replay already approved publication/import work.
+Keep publication status and explicit retry on the affected site. Preserve the
+selected view/site across reloads and the open source page during status updates.
+The non-root curation UID must have a Unix account so OpenSSH can start; exercise
+the real SSH configuration offline in the built-image smoke check.
 
 Do not alter, suspend, delete or restart existing indexing Jobs or their source
 checkouts during curation delivery. Its controller has only Jobs get/list/create

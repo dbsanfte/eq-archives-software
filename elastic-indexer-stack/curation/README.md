@@ -40,7 +40,7 @@ Legacy finder/worker/broad reindex Jobs retain their separate lifecycles.
    The worker
    spiders HTML links within the scope, including its entry directory, through
    the pinned public Wayback Machine Downloader and serial persistent client.
-4. Completed items move into **Recent captures**, newest first. Choose **Review
+4. Completed items move into **Review & indexing**, newest first. Choose **Review
    site** to browse one site's captured pages and dated Wayback links, including
    complete extracted source and multiple versions of the same page.
    **Approve site & queue indexing** approves every captured page within that
@@ -57,7 +57,15 @@ Legacy finder/worker/broad reindex Jobs retain their separate lifecycles.
    unsuspended Job in `eqarchives-es`, including pending/retrying Jobs with
    `active=0`. The controller cannot patch, suspend or delete Jobs.
 
-The screen shows the workflow and next action, current capture URL, files staged,
+The four navigation buttons open Suggestions, Awaiting capture, Capturing and
+Review & indexing. Captured sites appear in a compact list beside the selected
+site's pages. The view and selected site are retained in the URL across reloads.
+Tools & help holds additional inventory views, discovery and capture limits;
+activity history is collapsed. Publication failures appear on the affected site
+with **Retry publication**, preserving its existing approval and captured files.
+Status updates and decisions retain the page currently being read.
+
+The screen shows the next action, current capture URL, files staged,
 source bytes, URL checks and site position. Capture progress is durable in SQLite
 and refreshes every five seconds, including while sources or scope drafts are open.
 Actions wait for an in-flight refresh rather than being dropped, and a draining
@@ -223,11 +231,15 @@ kubectl kustomize elastic-indexer-stack/curation/k8s >/dev/null
 ```
 
 The image build runs Python 3.13 API/state/scope/source/campaign/publication/import
-pytest, including an over-50-item queue and Undo/worker claim races. CI also uses
+pytest, including an over-50-item queue and Undo/worker claim races. The runtime
+defines a Unix account for UID/GID 10001: OpenSSH requires the passwd entry even
+when the private key and destination are supplied explicitly. The container
+smoke check exercises SSH configuration offline as that non-root user. CI also uses
 real Chromium at 320/390/1280 px, delayed source responses, live progress during
 open source/scope edits, moves between workflow views,
 Undo during a delayed refresh, draining pagination, durable site decisions,
-child-page/version browsing and independent approve/decline/reconsider actions
+child-page/version browsing, bookmarked navigation, publication retry and
+independent approve/decline/reconsider actions
 in isolated fixtures with no
 paid calls or real archive writes. Real TCP tests reject non-LAN peers and
 forwarded-header spoofs. Deployment checks the live queue/build and hashes
