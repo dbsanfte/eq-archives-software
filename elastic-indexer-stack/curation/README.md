@@ -16,7 +16,13 @@ Legacy finder/worker/broad reindex Jobs retain their separate lifecycles.
 
 1. Review Luna's grade, reason, verbatim evidence and complete extracted source.
    Archived scripts, HTML and images never execute in this screen.
-2. Choose scope and **Approve capture**. Deep links default to their containing
+2. Choose scope and **Approve for capture**. This queues the site automatically,
+   removes it from **Suggestions**, and moves it into **Awaiting capture**.
+   The queue has no item-count cap; its 50-row pages are pagination, not a limit.
+   New approvals have a 60-second grace period. **Undo approval** returns the
+   site to Suggestions and retains its sources and grade. Undo remains available
+   until the worker atomically claims the site, even after the grace period.
+   Deep links default to their containing
    directory and descendants; extensionless paths use that directory itself.
    **Linked page only** and **Whole site / shared account** are alternatives.
    **Custom folder and below** accepts an absolute URL folder path such as
@@ -26,18 +32,39 @@ Legacy finder/worker/broad reindex Jobs retain their separate lifecycles.
    Shared hosts retain their account boundaries. A scope change clears an
    earlier approval and changes its manifest hash.
    Unidentified shared-host accounts remain exact-page scopes, including roots.
-3. Select up to five approved sites and capture them together. The worker
+3. The worker automatically processes the oldest eligible approvals in serial
+   batches of up to five sites. This is a per-batch resource bound, not a queue
+   size limit. Existing approvals receive a one-time grace period on migration;
+   restarting does not reset it. A paused capture holds the queue until explicitly
+   resumed, retaining its budgets. Items move into **Capturing** when claimed.
+   The worker
    spiders HTML links within the scope, including its entry directory, through
    the pinned public Wayback Machine Downloader and serial persistent client.
-4. Review the resulting archive file set and complete sources, uncheck unwanted
+4. Completed items move into **Recent captures**, newest first. Review the
+   resulting archive file set and complete sources, uncheck unwanted
    captures and **Approve publication & queue indexing**. This second approval
    binds to the actual source hashes and selected subset, which can differ from
    the initial samples Luna assessed. Import includes AI enrichment by default,
    with a separate $2 limit shown before publication approval.
+   Publication can be queued during another capture; the serial worker publishes
+   it before claiming another capture batch, so a large capture queue cannot
+   prevent publication of already reviewed files.
 5. Publication makes one fast-forward archive commit, including
    `crawl-manifests/<batch-id>.json`. Import waits for every other unfinished,
    unsuspended Job in `eqarchives-es`, including pending/retrying Jobs with
    `active=0`. The controller cannot patch, suspend or delete Jobs.
+
+The screen shows the workflow and next action, current capture URL, files staged,
+source bytes, URL checks and site position. Capture progress is durable in SQLite
+and refreshes every five seconds, including while sources or scope drafts are open.
+Actions wait for an in-flight refresh rather than being dropped, and a draining
+queue automatically returns an empty last page to the nearest valid page.
+It shows counts rather than a percentage because the link frontier is discovered
+during traversal. Batch stages show file review, publication, waits for named
+existing Jobs, enrichment/indexing and completion. Typed candidate transitions
+are centralized in `scripts/archive-crawler/capture_flow.py`; queue claiming and
+Undo use the same SQLite write lock, so only one can succeed. Publication still
+requires its own explicit approval; approving a suggestion does not publish files.
 
 [Capture limits](captures.py): five sites, 20 additional URL attempts per site,
 100 files, 1 MiB per response, 64 MiB source/transport budget, 500 HTTP requests
@@ -181,8 +208,11 @@ kubectl kustomize elastic-indexer-stack/curation/k8s >/dev/null
 ```
 
 The image build runs Python 3.13 API/state/scope/source/campaign/publication/import
-pytest. CI also uses real Chromium at 320/390/1280 px, delayed source responses,
-durable decisions and final publication approval in isolated fixtures with no
+pytest, including an over-50-item queue and Undo/worker claim races. CI also uses
+real Chromium at 320/390/1280 px, delayed source responses, live progress during
+open source/scope edits, moves between workflow views,
+Undo during a delayed refresh, draining pagination, durable decisions and final
+publication approval in isolated fixtures with no
 paid calls or real archive writes. Real TCP tests reject non-LAN peers and
 forwarded-header spoofs. Deployment checks the live queue/build and hashes
 existing unfinished Job specs before/after; it never saves their credential-

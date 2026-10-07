@@ -11,12 +11,14 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, PlainTextResponse
 from starlette.routing import Route
 
-from common import CrawlError, capture_scope, digest, now, original_url, within_scope
+from common import CrawlError, capture_scope, digest, now
 from review import apply_decisions, checked_sources, queue, record
 from captures import LIMITS, check_manifest, document
-from state import connect, enqueue, identifier, unpack, valid_id
+from state import connect, enqueue, unpack, valid_id
 from worker import Worker
 from coverage_check import refresh, require_new
+from capture_flow import Action, UNDO_SECONDS, transition
+from capture_queue import claim
 
 NETWORK = ipaddress.ip_network("192.168.0.0/16")
 STATIC = Path(__file__).parent
@@ -114,17 +116,27 @@ def create_app(root=None, origin=None, start_worker=True):
         with connect(root) as store:
             all_rows = queue(store)
             selected = request.query_params.get("filter", "recommended")
-            if selected not in ("recommended", "pending", "all"):
+            if selected not in ("recommended", "pending", "approved", "capturing", "captured", "all"):
                 raise CrawlError("Invalid queue filter")
             rows = [row for row in all_rows if selected == "all" or
-                    selected == "recommended" and row["state"] in ("approval_pending", "approved_waiting_batch", "deferred")
+                    selected == "recommended" and row["state"] in ("approval_pending", "deferred")
                     and (row["rating"] or {}).get("grade", -1) >= 2 or
-                    selected == "pending" and row["state"] in ("approval_pending", "approved_waiting_batch", "deferred")]
-            operations = [unpack(row) for row in store.db.execute("SELECT * FROM operations ORDER BY created DESC LIMIT 20")]
+                    selected == "pending" and row["state"] in ("approval_pending", "deferred") or
+                    selected == "approved" and row["state"] == 'approved_waiting_batch' or
+                    selected == "capturing" and row['state'] == 'capturing' or
+                    selected == "captured" and row['state'] in ('captured_awaiting_review','published','indexed')]
+            if selected == 'approved':
+                rows.sort(key=lambda row: (row['decision'] or {}).get('reviewed_at', ''))
+            elif selected == 'captured':
+                rows.sort(key=lambda row: ((row['coverage'] or {}).get('capture') or {}).get('completed_at', ''), reverse=True)
+            operations = [unpack(row) for row in store.db.execute("SELECT * FROM operations ORDER BY CASE state WHEN 'running' THEN 0 WHEN 'queued' THEN 1 WHEN 'interrupted' THEN 2 ELSE 3 END,created DESC LIMIT 20")]
             batches = [unpack(row) for row in store.db.execute("SELECT * FROM batches ORDER BY created DESC LIMIT 100")]
             return JSONResponse({"candidates": rows[offset:offset + 50], "total": len(rows), "offset": offset,
                                  "all_count": len(all_rows), "approved": sum(row["state"] == "approved_waiting_batch" for row in all_rows),
-                                 "operations": operations, "batches": batches, "limits": LIMITS,
+                                 "operations": operations, "batches": batches, "limits": LIMITS, "undo_seconds": UNDO_SECONDS,
+                                 "capturing": sum(row['state']=='capturing' for row in all_rows),
+                                 "captured": sum(row['state'] in ('captured_awaiting_review','published','indexed') for row in all_rows),
+                                 "capture_queue_error": store.get('capture_queue_error'),
                                  "version": os.environ.get("GIT_SHA", "development"), "last_campaign": store.get("last_campaign"),
                                  "pilot_grading": store.get("grading_result")})
 
@@ -161,8 +173,25 @@ def create_app(root=None, origin=None, start_worker=True):
         incoming = await body(request)
         refresh(root)
         with connect(root) as store:
-            apply_decisions(store, incoming)
+            apply_decisions(store, incoming, capture_delay=UNDO_SECONDS)
         return JSONResponse({"recorded": len(incoming)})
+
+    async def undo(request):
+        payload = await body(request)
+        if (not isinstance(payload, dict) or set(payload) != {'id','manifest_sha256'}
+                or not all(isinstance(value, str) for value in payload.values())):
+            raise CrawlError('Undo requires the candidate ID and reviewed manifest hash')
+        with connect(root) as store:
+            store.db.execute('BEGIN IMMEDIATE')
+            row = store.db.execute('SELECT * FROM candidates WHERE id=?', (payload['id'],)).fetchone()
+            if not row or record(store,row)['manifest_sha256'] != payload['manifest_sha256']:
+                raise CrawlError('Candidate changed since review')
+            state = transition(row['state'], Action.UNDO)
+            store.db.execute('UPDATE candidates SET state=?,decision=NULL WHERE id=?', (state,row['id']))
+            store.db.execute('INSERT INTO events(candidate,action,detail,created) VALUES (?,?,?,?)',
+                             (row['id'], 'approval_undone', json.dumps({'previous_decision': json.loads(row['decision'])}), now()))
+            store.db.commit()
+        return JSONResponse({'state':state})
 
     async def scope_change(request):
         payload = await body(request)
@@ -207,8 +236,6 @@ def create_app(root=None, origin=None, start_worker=True):
                 or type(payload["max_usd"]) not in (int, float) or not 0 < payload["max_usd"] <= 2):
             raise CrawlError("Discovery requires explicit bounds: 1–50 candidates and up to $2")
         with connect(root) as store:
-            if store.db.execute("SELECT COUNT(*) FROM candidates").fetchone()[0] >= 5000:
-                raise CrawlError("Queue capacity reached; archive this queue before further discovery")
             operation = enqueue(store, "discover", payload)
         return JSONResponse({"operation": operation}, status_code=202)
 
@@ -221,27 +248,7 @@ def create_app(root=None, origin=None, start_worker=True):
         refresh(root)
         with connect(root) as store:
             store.db.execute("BEGIN IMMEDIATE")
-            sites = []
-            for candidate in ids:
-                row = store.db.execute("SELECT * FROM candidates WHERE id=?", (candidate,)).fetchone()
-                if not row or row["state"] != "approved_waiting_batch":
-                    raise CrawlError("Capture requires a current site approval")
-                site = record(store, row)
-                if site["decision"]["manifest_sha256"] != site["manifest_sha256"]:
-                    raise CrawlError("Site approval is stale")
-                checked_sources(store, site)
-                snapshots = [item for item in site["captures"] if
-                             (original_url(item["url"]) == original_url(site["url"]) if site["scope_mode"] == "page"
-                              else within_scope(item["url"], site["scope"]))]
-                if not snapshots and site['scope_mode'] != 'custom':
-                    raise CrawlError("Approved scope excludes its reviewed source")
-                sites.append({**{key: site[key] for key in ("id", "url", "scope", "scope_mode", "manifest_sha256", "decision")},
-                              "captures": snapshots, "reviewed_captures": site['captures']})
-            batch_id = identifier()
-            operation = enqueue(store, "capture", {"batch_id": batch_id, "sites": sites}, commit=False)
-            store.db.execute("INSERT INTO batches VALUES (?,'capturing',NULL,NULL,NULL,NULL,NULL,?,?)", (batch_id, now(), now()))
-            for candidate in ids:
-                store.db.execute("UPDATE candidates SET state='capturing' WHERE id=?", (candidate,))
+            operation, batch_id = claim(store, ids)
             store.db.commit()
         return JSONResponse({"operation": operation, "batch": batch_id}, status_code=202)
 
@@ -297,7 +304,8 @@ def create_app(root=None, origin=None, start_worker=True):
 
     app = Starlette(routes=[Route("/", screen), Route("/assets/{name}", asset), Route("/healthz", health),
                             Route("/api/queue", listing), Route("/api/source", source),
-                            Route("/api/decisions", decide, methods=["POST"]), Route("/api/scope", scope_change, methods=["POST"]), Route('/api/coverage', coverage_check, methods=['POST']), Route("/api/discover", discovery, methods=["POST"]),
+                            Route("/api/decisions", decide, methods=["POST"]),
+                            Route("/api/undo", undo, methods=["POST"]), Route("/api/scope", scope_change, methods=["POST"]), Route('/api/coverage', coverage_check, methods=['POST']), Route("/api/discover", discovery, methods=["POST"]),
                             Route("/api/capture", capture, methods=["POST"]), Route("/api/publish", publication, methods=["POST"]),
                             Route("/api/resume", resume, methods=["POST"])], lifespan=lifespan,
                     exception_handlers={CrawlError: problem})

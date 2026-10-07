@@ -1,8 +1,11 @@
 """Offline source review and explicit decisions bound to immutable manifests."""
 
 import json
+from datetime import datetime, timedelta
+
 from pathlib import Path
 
+from capture_flow import Action, transition
 from common import CrawlError, digest, now, save
 from grading import SIGNATURE, sources
 
@@ -60,14 +63,14 @@ def decisions(args, store):
     print(f"Recorded {len(incoming)} decisions; archive publication has not been invoked")
 
 
-def apply_decisions(store, incoming):
+def apply_decisions(store, incoming, capture_delay=0):
     with store.db:
         store.db.execute("BEGIN IMMEDIATE")
-        _apply_decisions(store, incoming)
+        _apply_decisions(store, incoming, capture_delay)
     store.event(None, "decisions_imported", {"count": len(incoming)})
 
 
-def _apply_decisions(store, incoming):
+def _apply_decisions(store, incoming, capture_delay=0):
     if not isinstance(incoming, list) or len(incoming) > 500:
         raise CrawlError("Expected a bounded list of review decisions")
     current = {r["id"]: r for r in queue(store)}
@@ -89,11 +92,14 @@ def _apply_decisions(store, incoming):
             if not row["rating"] or not row["captures"]:
                 raise CrawlError("Only graded, staged captures can be approved")
             checked_sources(store, row)  # Recheck artifacts and the judgment before approval.
-        validated.append(decision)
-    states = {"approve": "approved_waiting_batch", "reject": "rejected", "defer": "deferred"}
-    for decision in validated:
+        validated.append((decision, transition(row['state'], Action(decision['decision']))))
+    for decision, state in validated:
+        reviewed_at = now()
+        grant = {**decision, 'reviewed_at': reviewed_at}
+        if decision['decision'] == 'approve' and capture_delay:
+            grant['capture_after'] = (datetime.fromisoformat(reviewed_at) + timedelta(seconds=capture_delay)).isoformat()
         store.db.execute("UPDATE candidates SET decision=?,state=? WHERE id=?",
-                         (json.dumps({**decision, "reviewed_at": now()}), states[decision["decision"]], decision["id"]))
+                         (json.dumps(grant), state, decision['id']))
 
 
 def batch(args, store):

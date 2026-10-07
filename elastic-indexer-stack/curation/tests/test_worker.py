@@ -71,7 +71,9 @@ def test_capture_then_publication_operation_is_durable_without_any_index_write(c
         store.db.execute("INSERT INTO batches VALUES (?,'capturing',NULL,NULL,NULL,NULL,NULL,'now','now')",(manifest['batch_id'],))
         store.db.commit()
         enqueue(store,'capture',{'batch_id':manifest['batch_id'],'sites':manifest['sites']})
-    monkeypatch.setattr('worker.capture_sites',lambda *args:manifest)
+        store.db.execute("UPDATE candidates SET state='capturing'")
+        store.db.commit()
+    monkeypatch.setattr('worker.capture_sites',lambda *args,**kwargs:manifest)
     worker=Worker(root)
     try:
         worker.operation()
@@ -96,7 +98,7 @@ def test_unknown_download_failure_stays_interrupted_and_sanitizes_upstream_detai
     root,row=candidate
     with connect(root) as store:
         enqueue(store,'capture',{'batch_id':'a'*32,'sites':[]})
-    def fail(*args):raise RuntimeError('secret-like upstream response must not appear in queue')
+    def fail(*args,**kwargs):raise RuntimeError('secret-like upstream response must not appear in queue')
     monkeypatch.setattr('worker.capture_sites',fail)
     worker=Worker(root)
     try:
@@ -106,4 +108,29 @@ def test_unknown_download_failure_stays_interrupted_and_sanitizes_upstream_detai
             assert op[0]=='interrupted'
             assert 'RuntimeError' in op[1]
             assert 'secret-like' not in op[1]
+    finally:worker.lease.close()
+
+
+def test_capture_progress_is_visible_during_work_and_survives_interruption(candidate,monkeypatch):
+    from server import create_app
+    from test_server import call
+    root,row=candidate
+    app=create_app(root,start_worker=False)
+    batch_id='a'*32
+    snapshot={'phase':'downloading','files':2,'bytes':1234,'urls_checked':3,
+              'sites_done':0,'sites_total':1,'current_url':row['url'],'site_url':row['url']}
+    with connect(root) as store:
+        enqueue(store,'capture',{'batch_id':batch_id,'sites':manifest_for(row)['sites']})
+    def capture(root,batch,sites,progress):
+        progress(snapshot)
+        current=call(app,'GET','/api/queue').json()['operations'][0]
+        assert current['state']=='running' and current['result']['progress']==snapshot
+        raise CrawlError('Wayback HTTP 422; bounded retries exhausted')
+    monkeypatch.setattr('worker.capture_sites',capture)
+    worker=Worker(root)
+    try:
+        worker.operation()
+        current=call(create_app(root,start_worker=False),'GET','/api/queue').json()['operations'][0]
+        assert current['state']=='interrupted' and current['result']['progress']==snapshot
+        assert current['result']['batch_id']==batch_id
     finally:worker.lease.close()

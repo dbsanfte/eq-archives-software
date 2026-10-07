@@ -84,7 +84,7 @@ def check_manifest(root, manifest):
         raise CrawlError("Batch exceeds the source byte limit")
 
 
-def capture_sites(root, batch_id, sites, downloader_factory=Downloader):
+def capture_sites(root, batch_id, sites, downloader_factory=Downloader, progress=None):
     directory = Path(root) / "batches" / batch_id
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     draft_path = directory / "draft.json"
@@ -109,6 +109,14 @@ def capture_sites(root, batch_id, sites, downloader_factory=Downloader):
     downloader = None
     seen = {(c["candidate_id"], original_url(c["url"])) for c in draft["captures"]}
     visited = {tuple(entry) for entry in draft["visited"]}
+    site_index, site_url = 0, None
+    def report(phase, current_url=None):
+        if progress:
+            progress({"phase": phase, "files": len(draft["captures"]),
+                      "bytes": sum(c["bytes"] for c in draft["captures"]), "urls_checked": len(visited),
+                      "sites_done": site_index if phase == 'ready_for_review' else max(0, site_index - 1),
+                      "sites_total": len(sites), "site_url": site_url, "current_url": current_url})
+    report('preparing')
     args = SimpleNamespace(delay=3, bytes_per_second=131072, max_requests=LIMITS["requests"],
                            max_page_bytes=LIMITS["page_bytes"], max_bytes=LIMITS["bytes"], max_seconds=LIMITS["seconds"])
     def acquire(job):
@@ -120,7 +128,8 @@ def capture_sites(root, batch_id, sites, downloader_factory=Downloader):
                 return None
             raise
     try:
-        for site in sites:
+        for site_index, site in enumerate(sites, 1):
+            site_url = site['url']
             frontier = deque([site["scope"], site["url"]])
             for capture in site.get('reviewed_captures', []):
                 page, _ = document(root, capture)
@@ -147,6 +156,7 @@ def capture_sites(root, batch_id, sites, downloader_factory=Downloader):
                     raise CrawlError("Batch source byte budget reached")
                 downloader = downloader or downloader_factory(transport_store, args)
                 for level, (start, end) in TIERS.items():
+                    report('checking_wayback', url)
                     listing = acquire({"op": "list", "url": url, "from": start, "to": end})
                     if listing is None:
                         break
@@ -157,6 +167,7 @@ def capture_sites(root, batch_id, sites, downloader_factory=Downloader):
                     folder = directory / "captures" / site["id"]
                     folder.mkdir(parents=True, exist_ok=True, mode=0o700)
                     destination = folder / (digest(url) + "-" + record["timestamp"] + ".html")
+                    report('downloading', record['url'])
                     capture = acquire({"op": "capture", "url": record["url"], "timestamp": record["timestamp"],
                                        "from": start, "to": end, "destination": str(destination)})
                     if capture is None:
@@ -182,6 +193,7 @@ def capture_sites(root, batch_id, sites, downloader_factory=Downloader):
                 visited.add((site["id"], url))
                 draft["visited"] = sorted(visited)
                 save(draft_path, draft)
+                report('checking_wayback')
     except CrawlError as error:
         if "budget" not in str(error).lower():
             raise
@@ -194,4 +206,5 @@ def capture_sites(root, batch_id, sites, downloader_factory=Downloader):
         transport_store.close()
     # Every newly acquired file needs a second, explicit batch publication approval.
     check_manifest(root, draft)
+    report('ready_for_review')
     return draft

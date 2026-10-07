@@ -63,6 +63,19 @@ def test_queue_source_scope_approval_and_capture_survive_reload(candidate):
     assert call(app,"POST","/api/capture",{"ids":[row["id"]]}).status_code == 409
 
 
+def test_approved_filter_shows_only_sites_ready_to_start_capture(candidate):
+    root,row=candidate
+    app=create_app(root,start_worker=False)
+    assert call(app,'GET','/api/queue?filter=approved').json()['total']==0
+    decision={'id':row['id'],'manifest_sha256':row['manifest_sha256'],'decision':'approve'}
+    assert call(app,'POST','/api/decisions',[decision]).status_code==200
+    current=call(app,'GET','/api/queue?filter=approved').json()
+    assert current['total']==1 and current['candidates'][0]['id']==row['id']
+    assert current['operations']==[] and current['batches']==[]
+    assert call(app,'POST','/api/capture',{'ids':[row['id']]}).status_code==202
+    assert call(app,'GET','/api/queue?filter=approved').json()['total']==0
+
+
 def test_tampered_source_and_ungraded_candidate_cannot_be_approved(candidate):
     root,row = candidate
     app = create_app(root,start_worker=False)
