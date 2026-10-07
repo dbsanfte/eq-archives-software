@@ -21,6 +21,7 @@ from capture_flow import Action, UNDO_SECONDS, transition
 from capture_queue import claim
 from site_reviews import get as get_site_review, migrate
 from jobs import import_attempt, import_name
+from portal import Stage, decorate, counts, search_matches
 
 NETWORK = ipaddress.ip_network("192.168.0.0/16")
 STATIC = Path(__file__).parent
@@ -118,32 +119,30 @@ def create_app(root=None, origin=None, start_worker=True):
         except ValueError:
             raise CrawlError("Invalid queue offset") from None
         with connect(root) as store:
-            all_rows = queue(store)
+            all_rows = decorate(store, queue(store))
             selected = request.query_params.get("filter", "recommended")
-            if selected not in ("recommended", "pending", "approved", "capturing", "captured", "all"):
+            if selected not in ("recommended", "pending", "approved", "captured", "all", *Stage):
                 raise CrawlError("Invalid queue filter")
-            rows = [row for row in all_rows if selected == "all" or
+            search = request.query_params.get('search', '').strip()
+            if len(search) > 200:
+                raise CrawlError('Site search exceeds 200 characters')
+            rows = [row for row in all_rows if selected == row['stage'] or selected == "all" or
                     selected == "recommended" and row["state"] in ("approval_pending", "deferred")
                     and (row["rating"] or {}).get("grade", -1) >= 2 or
                     selected == "pending" and row["state"] in ("approval_pending", "deferred") or
                     selected == "approved" and row["state"] == 'approved_waiting_batch' or
-                    selected == "capturing" and row['state'] == 'capturing' or
                     selected == "captured" and row['state'] in CAPTURED_STATES]
-            if selected == 'approved':
+            if selected in ('approved', 'queued'):
                 rows.sort(key=lambda row: (row['decision'] or {}).get('reviewed_at', ''))
-            elif selected == 'captured':
+            elif selected in ('captured', 'review', 'indexing', 'history'):
                 rows.sort(key=lambda row: ((row['coverage'] or {}).get('capture') or {}).get('completed_at', ''), reverse=True)
+            if search:
+                rows = [row for row in rows if search_matches(row, search)]
             operations = [unpack(row) for row in store.db.execute("SELECT * FROM operations ORDER BY CASE state WHEN 'running' THEN 0 WHEN 'queued' THEN 1 WHEN 'interrupted' THEN 2 ELSE 3 END,created DESC LIMIT 20")]
             batches = [unpack(row) for row in store.db.execute("SELECT * FROM batches WHERE state!='capture_group' ORDER BY created DESC LIMIT 100")]
             page_rows = rows[offset:offset + 50]
-            for row in page_rows:
-                capture = (row.get('coverage') or {}).get('capture') or {}
-                review_id = capture.get('review_id') or capture.get('batch_id')
-                if review_id:
-                    status = store.db.execute('SELECT state FROM batches WHERE id=?',(review_id,)).fetchone()
-                    if status:
-                        row['review_state'] = status[0]
             return JSONResponse({"candidates": page_rows, "total": len(rows), "offset": offset,
+                                 "stage_counts": counts(all_rows),
                                  "all_count": len(all_rows), "approved": sum(row["state"] == "approved_waiting_batch" for row in all_rows),
                                  "recommended": sum(row['state'] in ('approval_pending','deferred') and (row['rating'] or {}).get('grade',-1)>=2 for row in all_rows),
                                  "operations": operations, "batches": batches, "limits": LIMITS, "undo_seconds": UNDO_SECONDS,
@@ -153,6 +152,45 @@ def create_app(root=None, origin=None, start_worker=True):
                                  "capture_queue_error": store.get('capture_queue_error'),
                                  "version": os.environ.get("GIT_SHA", "development"), "last_campaign": store.get("last_campaign"),
                                  "pilot_grading": store.get("grading_result")})
+
+    def candidate_detail(request):
+        with connect(root) as store:
+            row = store.db.execute('SELECT * FROM candidates WHERE id=?', (request.query_params.get('id'),)).fetchone()
+            if not row:
+                raise CrawlError('Unknown candidate')
+            candidate = decorate(store, [record(store, row)])[0]
+            capture = (candidate.get('coverage') or {}).get('capture') or {}
+            review_id = capture.get('review_id') or capture.get('batch_id')
+            review = get_site_review(store, review_id, candidate['id']) if review_id and candidate['stage'] != Stage.CAPTURING else None
+            operation = store.db.execute("""SELECT * FROM operations WHERE kind='capture' AND EXISTS
+                (SELECT 1 FROM json_each(operations.payload,'$.sites') WHERE json_extract(value,'$.id')=?)
+                ORDER BY created DESC,rowid DESC LIMIT 1""", (candidate['id'],)).fetchone()
+            queued = store.db.execute("SELECT id FROM candidates WHERE state='approved_waiting_batch' ORDER BY json_extract(decision,'$.reviewed_at'),rowid").fetchall()
+            ids = [item['id'] for item in queued]
+            blocker = store.db.execute("SELECT id,kind,state FROM operations WHERE state IN ('running','queued') OR (kind='capture' AND state='interrupted') ORDER BY CASE state WHEN 'interrupted' THEN 0 ELSE 1 END,created LIMIT 1").fetchone()
+            return JSONResponse({'candidate': candidate, 'review': review,
+                'capture_operation': unpack(operation) if operation else None,
+                'queue_position': ids.index(candidate['id']) + 1 if candidate['id'] in ids else None,
+                'queue_blocker': dict(blocker) if blocker else None,
+                'capture_queue_error': store.get('capture_queue_error')})
+
+    async def restore_candidate(request):
+        payload = await body(request)
+        if (not isinstance(payload, dict) or set(payload) != {'id','manifest_sha256'}
+                or not all(isinstance(value, str) for value in payload.values())):
+            raise CrawlError('Restore requires the candidate ID and reviewed manifest hash')
+        refresh(root)
+        with connect(root) as store:
+            store.db.execute('BEGIN IMMEDIATE')
+            row = store.db.execute('SELECT * FROM candidates WHERE id=?',(payload['id'],)).fetchone()
+            if not row or record(store,row)['manifest_sha256'] != payload['manifest_sha256']:
+                raise CrawlError('Candidate changed since review')
+            state = transition(row['state'], Action.RESTORE)
+            store.db.execute('UPDATE candidates SET state=?,decision=NULL WHERE id=?',(state,row['id']))
+            store.db.execute('INSERT INTO events(candidate,action,detail,created) VALUES (?,?,?,?)',
+                             (row['id'],'candidate_restored',json.dumps({'previous_state':row['state']}),now()))
+            store.db.commit()
+        return JSONResponse({'state':state})
 
     def source(request):
         try:
@@ -392,6 +430,7 @@ def create_app(root=None, origin=None, start_worker=True):
 
     app = Starlette(routes=[Route("/", screen), Route("/assets/{name}", asset), Route("/healthz", health),
                             Route("/api/queue", listing), Route("/api/source", source),
+                            Route('/api/candidate',candidate_detail), Route('/api/restore',restore_candidate,methods=['POST']),
                             Route('/api/site',site_review), Route('/api/site-decision',site_decision,methods=['POST']),
                             Route('/api/index-retry',index_retry,methods=['POST']),
                             Route("/api/decisions", decide, methods=["POST"]),

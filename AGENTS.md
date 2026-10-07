@@ -230,11 +230,17 @@ local Git metadata and resume without automatic fetches or archive walks. Custom
 capture folders are absolute URL paths within the site's account; saving a new
 scope invalidates the previous approval and must persist across reloads.
 
-Production approval automatically moves a suggestion to Awaiting capture. The
+The mobile portal has five exclusive active stages: Candidates, Capture queue,
+Capturing, Review capture and Indexing. Production approval moves a candidate to
+Capture queue. Indexed sites retire automatically to secondary History; declined,
+dismissed and duplicate sites also stay there. Deferred sites live in Saved for
+later. Restore can return only deferred/dismissed candidates to Candidates, without
+approving or starting work. Stage counts and filtering use all review status metadata,
+independently of capped batch inventories. Preserve existing operator API filters. The
 queue has no count cap; the worker claims oldest eligible items in serial batches
 of at most five after a 60-second Undo grace period. Preserve typed transitions,
-atomic Undo/claim locking, durable progress and separate Capturing/Review & indexing
-views. A paused capture requires explicit resume and holds the queue. Source
+atomic Undo/claim locking and durable progress in the appropriate stage. A paused
+capture requires explicit resume and holds the queue. Source
 reading and scope drafts must not prevent progress polling or lose edits. Download
 completion creates an independent review for each site. Review and approve all
 captured pages within one site's chosen scope at a time, with dated Wayback links
@@ -243,10 +249,14 @@ manifest-bound approvals and metadata-only migration of unapproved mixed capture
 groups; never copy sources or replay already approved publication/import work.
 Keep publication status and explicit retry on the affected site. Preserve the
 selected view/site across reloads and the open source page during status updates.
-Keep the site picker, captured-page browser and document reader visually distinct,
-with named panels, visible scroll affordances and independent keyboard/button
-scrolling. Preserve list and reading positions during status refreshes; exercise
-long lists and sources at phone, tablet and desktop widths in Chromium.
+Design for phones first: bottom stage navigation, compact site lists, focused site
+workspaces and a reachable action bar. Confirmed approvals follow the site into
+its next stage; failures cannot advance it. Whole-site approval lives outside the
+document reader. Use separate mobile page-list/reader screens with normal scrolling
+and URL-backed page/version navigation. Desktop may show both labeled panels with
+independent keyboard/button scrolling. Preserve Back navigation, page filters,
+scope drafts and reading positions during polling and refresh. Exercise long lists,
+source races, stage transitions, retries, retirement and touch layouts in Chromium.
 Terminal indexing retries must bind the failed Job and published manifest,
 create a new numbered Job, retain prior Jobs and reuse the original site budget.
 The non-root curation UID must have a Unix account so OpenSSH can start; exercise

@@ -1,477 +1,487 @@
 'use strict';
 const $ = id => document.getElementById(id);
-let offset = 0, data = null, busy = false;
-let actions = Promise.resolve();
-let selectedSite = null;
-let renderedView = null;
-const scrollWidgets = new Map();
-const capturedStates = ['captured_awaiting_review','approved_waiting_publication','indexing_declined','published','indexed'];
-const viewNames = {recommended:'Suggestions',approved:'Awaiting capture',capturing:'Capturing',captured:'Review & indexing',pending:'All awaiting review',all:'All candidates'};
-const viewDescriptions = {
-  recommended:'Choose sites to capture. Review the source, set the scope, then approve the download.',
-  approved:'Approved sites wait here until capture starts. You can undo an approval while it is still queued.',
-  capturing:'Follow the current download. Completed sites move to Review & indexing automatically.',
-  captured:'Choose a captured site, browse its pages, then decide whether to publish and index the whole site.',
-  pending:'Review candidates that still need a capture decision.',
-  all:'Browse all candidates, including deferred, rejected, queued, and captured sites.'
+const stages = ['candidates','queued','capturing','review','indexing'];
+const names = {candidates:'Candidates',queued:'Capture queue',capturing:'Capturing',review:'Review capture',indexing:'Indexing',saved:'Saved for later',history:'History'};
+const descriptions = {
+  candidates:'Find the next piece of EverQuest history. Review a site’s evidence and choose what to capture.',
+  queued:'Approved sites download automatically. Undo is available until the worker starts.',
+  capturing:'Follow downloads here. Completed captures move to Review automatically.',
+  review:'Browse each captured site, then decide whether to publish and index it.',
+  indexing:'Approved sites are published, enriched with AI, and indexed automatically.',
+  saved:'Sites you set aside. Restore one when you’re ready to review it.',
+  history:'Completed and declined sites stay here, away from your active work.'
 };
-const restored = new URLSearchParams(location.search);
-if (Object.hasOwn(viewNames,restored.get('view'))) $('filter').value=restored.get('view');
-if ($('filter').value==='captured' && /^[a-f0-9]{32}$/.test(restored.get('site')) && /^[a-f0-9]{24}$/.test(restored.get('candidate'))) {
-  selectedSite={id:restored.get('site'),candidate:restored.get('candidate')};
+const aliases = {recommended:'candidates',approved:'queued',captured:'review',pending:'candidates',all:'history'};
+const labels = {approval_pending:'Needs a capture decision',coverage_unverified:'Coverage needs checking',deferred:'Saved for later',rejected:'Dismissed',already_archived:'Already archived',duplicate_candidate:'Duplicate candidate',approved_waiting_batch:'Queued for capture',capturing:'Capture in progress',captured_awaiting_review:'Ready to review',approved_waiting_publication:'Publication approved',awaiting_review:'Ready to review',publication_requested:'Publishing',published_waiting_index:'Waiting to index',indexing:'Enriching & indexing',index_failed:'Indexing needs attention',indexed:'Indexed',indexing_declined:'Indexing declined'};
+let route = readRoute(), data = null, detail = null, busy = false, generation = 0, controller = null;
+let listSignature = '', workspaceSignature = '', dockSignature = '', liveSignature = '', sourceGeneration = 0;
+let searchTimer;
+const drafts = new Map(), positions = new Map(), pageQueries = new Map(), sourceCache = new Map();
+history.scrollRestoration = 'manual';
+function node(tag, text, className) {
+  const item=document.createElement(tag);
+  if (text!==undefined) item.textContent=text;
+  if (className) item.className=className;
+  return item;
 }
-function saveView() {
-  const url=new URL(location.href);
-  url.searchParams.set('view',$('filter').value);
-  if ($('filter').value==='captured' && selectedSite) {
-    url.searchParams.set('site',selectedSite.id);url.searchParams.set('candidate',selectedSite.candidate);
-  } else { url.searchParams.delete('site');url.searchParams.delete('candidate'); }
-  history.replaceState(null,'',url);
+function control(text, action, className='') {
+  const item=node('button',text,className);item.type='button';item.addEventListener('click',action);return item;
 }
-function element(tag, text, className) {
-  const node = document.createElement(tag);
-  if (text !== undefined) node.textContent = text;
-  if (className) node.className = className;
-  return node;
+function external(url, text=url) {
+  const item=node('a',text);
+  if (/^https?:\/\//.test(url)) { item.href=url;item.target='_blank';item.rel='noopener noreferrer'; }
+  return item;
 }
-function link(url, text) {
-  const node = element('a', text || url);
-  if (/^https?:\/\//.test(url)) { node.href = url; node.target = '_blank'; node.rel = 'noopener noreferrer'; }
-  return node;
+function badge(text,tone='') { const item=node('span',text,'badge');item.dataset.tone=tone;return item; }
+function tone(row) { return row.review_state==='index_failed' || row.state==='coverage_unverified' ? 'attention' : (row.review_state || row.state)==='indexed' ? 'complete' : ['queued','capturing','indexing'].includes(row.stage) ? 'active' : ''; }
+function siteName(row) { const url=new URL(row.scope);return url.host+(url.pathname==='/' ? '' : url.pathname); }
+function statusLabel(row) { return labels[row.review_state] || labels[row.state] || row.state.replaceAll('_',' '); }
+function captureDate(stamp) { return `${stamp.slice(0,4)}-${stamp.slice(4,6)}-${stamp.slice(6,8)} ${stamp.slice(8,10)}:${stamp.slice(10,12)} UTC`; }
+function readRoute() {
+  const query=new URLSearchParams(location.search),view=aliases[query.get('view')] || query.get('view');
+  return {view:Object.hasOwn(names,view) ? view : 'candidates',candidate:query.get('candidate') || null,
+    panel:['pages','reader'].includes(query.get('screen')) ? query.get('screen') : 'site',
+    page:Math.max(0,Number(query.get('page')) || 0),slot:Math.max(0,Number(query.get('slot')) || 0),
+    offset:Math.max(0,Number(query.get('offset')) || 0),query:(query.get('search') || '').slice(0,200)};
 }
-function button(text, action, disabled = false) {
-  const node = element('button', text);
-  node.disabled = disabled;
-  node.addEventListener('click', () => perform(action));
-  return node;
+function routeKey(value=route) { return JSON.stringify(value); }
+function writeRoute(replace=false, parent=null) {
+  const url=new URL(location.href);url.search='';url.searchParams.set('view',route.view);
+  if (route.candidate) { url.searchParams.set('candidate',route.candidate);
+    if (route.panel!=='site') { url.searchParams.set('screen',route.panel);url.searchParams.set('page',route.page);url.searchParams.set('slot',route.slot); }
+  } else { if (route.offset) url.searchParams.set('offset',route.offset);if (route.query) url.searchParams.set('search',route.query); }
+  history[replace ? 'replaceState' : 'pushState'](replace ? history.state : {parent},'',url);
 }
-function updateScrollControls() {
-  for (const [target, update] of scrollWidgets) {
-    if (!target.isConnected) scrollWidgets.delete(target);
-    else update();
+function remember() {
+  positions.set(routeKey(),{window:scrollY,pages:document.querySelector('.site-pages')?.scrollTop || 0,text:document.querySelector('.document-text')?.scrollTop || 0});
+  if (positions.size>80) positions.delete(positions.keys().next().value);
+}
+function restorePosition() {
+  const saved=positions.get(routeKey());
+  requestAnimationFrame(()=>{window.scrollTo(0,saved?.window || 0);
+    const list=document.querySelector('.site-pages'),text=document.querySelector('.document-text');
+    if (list) list.scrollTop=saved?.pages || 0;if (text) text.scrollTop=saved?.text || 0;
+  });
+}
+function go(change,{replace=false}={}) {
+  remember();const parent={...route};route={...route,...change};writeRoute(replace,parent);$('tools').close();$('error').hidden=true;$('notice').hidden=true;
+  if (!route.candidate && parent.view!==route.view) { $('candidates').replaceChildren(node('p','Loading sites…','description'));listSignature=''; }
+  const cached=detail?.candidate.id===route.candidate;
+  renderShell();if (cached) {renderWorkspace();renderDock();restorePosition();} refresh(!cached);
+}
+function openStage(view) { go({view,candidate:null,panel:'site',page:0,slot:0,offset:0,query:''}); }
+function openSite(id) { go({candidate:id,panel:'site',page:0,slot:0}); }
+async function request(path,value,signal) {
+  const response=await fetch(path,value===undefined ? {signal} : {method:'POST',headers:{'Content-Type':'application/json','X-Curation-Request':'1'},body:JSON.stringify(value),signal});
+  let result;try { result=await response.json(); } catch (_) { throw new Error('The service is unavailable. Refresh to retry.'); }
+  if (!response.ok) throw new Error(result.error || 'The action could not be completed.');return result;
+}
+function message(text,undo) {
+  $('notice').replaceChildren(node('span',text));$('notice').hidden=false;
+  if (undo) $('notice').append(control('Undo approval',()=>act('Undoing approval',()=>request('/api/undo',undo),'Returned to Candidates.')));
+}
+async function act(label,action,confirmation) {
+  if (busy) return;
+  const actedId=route.candidate;busy=true;++generation;controller?.abort();$('error').hidden=true;
+  for (const item of document.querySelectorAll('[data-mutation]')) item.disabled=true;
+  $('status').textContent=label;renderDock(true);
+  try { await action();
+    // Only confirmed actions move the site. Read its durable state before following it.
+    if (route.candidate && route.candidate===actedId) {
+      const result=await request(`/api/candidate?id=${encodeURIComponent(route.candidate)}`);
+      if (route.candidate===actedId) { detail=result;route={...route,view:result.candidate.stage,panel:'site',page:0,slot:0};writeRoute(true); }
+    }
+    message(confirmation || 'Saved.');workspaceSignature='';dockSignature='';
+    await refresh(true);
+    if (detail?.candidate.id===actedId && detail.candidate.stage==='queued') {
+      message('Approved. This site is now in the capture queue. Undo is available below until it starts.');
+    }
+  } catch (error) { $('error').textContent=error.message;$('error').hidden=false; }
+  finally { busy=false;for (const button of document.querySelectorAll('[data-mutation]')) button.disabled=button.dataset.blocked==='true';renderDock(true);$('discover').disabled=hasOperation(); }
+}
+function mutation(text,action,confirmation,primary=false,disabled=false) {
+  const button=control(text,()=>act(text,action,confirmation),primary ? 'primary' : '');
+  button.dataset.mutation='';button.dataset.blocked=String(disabled);button.disabled=busy || disabled;return button;
+}
+async function refresh(navigated=false) {
+  const token=++generation,requested={...route};controller?.abort();controller=new AbortController();
+  const signal=controller.signal;
+  try {
+    const [listing,context]=await Promise.all([
+      request(`/api/queue?filter=${requested.view}&offset=${requested.offset}&search=${encodeURIComponent(requested.query)}`,undefined,signal),
+      requested.candidate ? request(`/api/candidate?id=${encodeURIComponent(requested.candidate)}`,undefined,signal) : Promise.resolve(null)
+    ]);
+    if (token!==generation || routeKey(requested)!==routeKey()) return;
+    if (!requested.candidate && route.offset>0 && route.offset>=listing.total) {
+      route.offset=Math.max(0,Math.floor((listing.total-1)/50)*50);writeRoute(true);return refresh(navigated);
+    }
+    if (context && context.candidate.stage!==route.view) {
+      // During Back/deep-link navigation, the visible DOM still belongs to the
+      // previous route. Preserve the destination's saved reading/list position.
+      if (!navigated) remember();const position=positions.get(routeKey());route.view=context.candidate.stage;
+      if (route.panel!=='site') positions.set(routeKey(),position);
+      writeRoute(true);detail=context;
+      if (route.panel==='site') message(route.view==='history' && context.candidate.review_state==='indexed' ? 'Indexing complete. This site has retired to History.' : `This site moved to ${names[route.view]}.`);
+      return refresh(true);
+    }
+    data=listing;detail=context;renderShell();renderList();renderWorkspace();renderDock();renderTools();
+    $('version').textContent=`Build ${data.version}`;
+    $('status').textContent=`${names[route.view]}: ${data.total} sites. ${detail ? statusLabel(detail.candidate) : ''}`;
+    if (navigated) restorePosition();
+  } catch (error) {
+    if (error.name==='AbortError' || token!==generation) return;
+    $('error').textContent=error.message;$('error').hidden=false;
   }
 }
-function revealIn(container,item) {
-  const bounds=container.getBoundingClientRect(),target=item.getBoundingClientRect();
-  if (target.top<bounds.top) container.scrollTop+=target.top-bounds.top;
-  else if (target.bottom>bounds.bottom) container.scrollTop+=target.bottom-bounds.bottom;
-}
-function scrollControls(target, name) {
-  const controls=element('div',undefined,'scroll-controls'), hint=element('p',undefined,'scroll-hint');
-  target.classList.add('scrollable');target.tabIndex=0;target.setAttribute('aria-label',name);
-  const up=element('button','↑'),down=element('button','↓');
-  up.setAttribute('aria-label',`Scroll ${name.toLowerCase()} up`);
-  down.setAttribute('aria-label',`Scroll ${name.toLowerCase()} down`);
-  up.addEventListener('click',()=>target.scrollBy({top:-target.clientHeight*.8,behavior:'instant'}));
-  down.addEventListener('click',()=>target.scrollBy({top:target.clientHeight*.8,behavior:'instant'}));
-  function update() {
-    const overflow=target.scrollHeight>target.clientHeight+2;
-    up.disabled=!overflow || target.scrollTop<=1;
-    down.disabled=!overflow || target.scrollTop+target.clientHeight>=target.scrollHeight-2;
-    const noun=name==='Document text' ? 'text' : name.toLowerCase().replace('captured ','');
-    hint.textContent=!overflow ? `All ${noun} shown` : down.disabled ? `End of ${noun} · scroll up for more` : `More ${noun} below · scroll to explore`;
+function renderShell() {
+  document.body.dataset.panel=route.panel;
+  $('stage-list').hidden=Boolean(route.candidate);$('site-workspace').hidden=!route.candidate;
+  if (!route.candidate) { $('action-dock').hidden=true;measureDock(); }
+  for (const item of $('stages').querySelectorAll('button')) {
+    if (item.dataset.view===route.view) item.setAttribute('aria-current','step');else item.removeAttribute('aria-current');
   }
-  target.addEventListener('scroll',update,{passive:true});scrollWidgets.set(target,update);
-  controls.append(hint,up,down);requestAnimationFrame(updateScrollControls);return controls;
+  for (const item of document.querySelectorAll('[data-count]')) item.textContent=data?.stage_counts?.[item.dataset.count] ?? '0';
+  $('view-title').textContent=names[route.view];$('view-step').textContent=stages.includes(route.view) ? `Step ${stages.indexOf(route.view)+1} of 5` : 'Your records';
+  $('view-description').textContent=descriptions[route.view];
+  if ($('site-search').value!==route.query) $('site-search').value=route.query;
+  if (route.candidate && detail?.candidate.id!==route.candidate) {
+    $('site-workspace').replaceChildren(node('p','Loading site…','description'));workspaceSignature='';
+    $('action-dock').hidden=true;measureDock();
+  }
 }
-function stateTone(state) {
-  return state==='indexed' ? 'complete' : ['index_failed','interrupted'].includes(state) ? 'attention' :
-    ['publication_requested','published_waiting_index','indexing'].includes(state) ? 'active' : state==='indexing_declined' ? 'muted' : 'review';
+function renderList() {
+  $('view-total').textContent=`${data.total} ${data.total===1 ? 'site' : 'sites'}`;
+  if (route.candidate) return;
+  const signature=JSON.stringify([route.view,route.offset,route.query,data.candidates]);
+  if (signature!==listSignature) {
+    const items=data.candidates.map(row=>{
+      const item=control('',()=>openSite(row.id),'site-tile');item.dataset.candidate=row.id;
+      item.setAttribute('aria-label',`Open ${siteName(row)}`);
+      const top=node('div',undefined,'tile-top');top.append(badge(statusLabel(row),tone(row)));
+      if (row.stage==='candidates' && row.rating) top.append(node('span',`Grade ${row.rating.grade}/3`,'meta'));
+      item.append(top,node('h2',siteName(row)),node('span',row.url,'address'));
+      const capture=row.coverage?.capture;
+      const description=row.stage==='candidates' ? row.rating?.reason || row.error || 'Source review is needed.' :
+        row.stage==='queued' ? 'Approved scope saved. Undo before capture starts.' : row.stage==='capturing' ? 'Download progress is available inside.' :
+        row.stage==='indexing' ? (row.review_state==='index_failed' ? 'Sources are retained. Open this site to retry.' : 'Publication and AI-enriched indexing are automatic.') :
+        row.stage==='saved' ? 'Set aside for a later decision.' : capture ? `${capture.pages} pages · ${capture.files} dated captures` : 'Saved decision and source evidence.';
+      item.append(node('p',description));
+      const bottom=node('div',undefined,'tile-bottom');bottom.append(node('span',row.rating?.category?.replaceAll('_',' ') || 'Website'),node('span','Open site →','open-label'));item.append(bottom);return item;
+    });
+    if (!items.length) {
+      const empty=node('div',undefined,'empty');empty.append(node('h2',route.query ? 'No matching sites' : `Nothing in ${names[route.view].toLowerCase()}`),node('p',route.query ? 'Try another name or address.' : ({candidates:'Discover more sites from More, or review captures already waiting for a decision.',queued:'Approve a candidate and it will wait here until capture starts.',capturing:'Downloads appear here as soon as the worker starts.',review:'Completed downloads arrive here for your indexing decision.',indexing:'Approved captures appear here until indexing is complete.',saved:'Sites you save for later will appear here.',history:'Completed, declined, and dismissed sites will appear here.'})[route.view]));
+      if (route.query) empty.append(control('Clear search',()=>go({query:'',offset:0},{replace:true})));
+      else if (route.view==='candidates' && data.stage_counts.review) empty.append(control('Review captured sites',()=>openStage('review')));
+      items.push(empty);
+    }
+    $('candidates').replaceChildren(...items);listSignature=signature;
+  }
+  $('pagination').hidden=data.total<=50 && route.offset===0;
+  $('page').textContent=data.total ? `${route.offset+1}–${Math.min(route.offset+50,data.total)} of ${data.total}` : '0 sites';
+  $('previous').disabled=route.offset===0;$('next').disabled=route.offset+50>=data.total;
+  const paused=data.operations.find(op=>op.kind==='capture' && op.state==='interrupted');
+  $('stage-activity').hidden=!(['queued','capturing'].includes(route.view) && (paused || data.capture_queue_error));
+  if (!$('stage-activity').hidden) {
+    const box=panel('Queue waiting','A paused capture needs attention. Other approved sites stay queued.','attention');
+    if (data.capture_queue_error) box.append(node('p',data.capture_queue_error));
+    if (paused) box.append(control('Open paused captures',()=>openStage('capturing')));$('stage-activity').replaceChildren(box);
+  }
 }
-async function request(path, value) {
-  const response = await fetch(path, value === undefined ? {} : {
-    method: 'POST', headers: {'Content-Type':'application/json', 'X-Curation-Request':'1'}, body: JSON.stringify(value)
-  });
-  let result;
-  try { result = await response.json(); } catch (_) { throw new Error('The review service is unavailable. Refresh to retry.'); }
-  if (!response.ok) throw new Error(result.error || 'The action could not be completed.');
-  return result;
+function panel(title,text,className='') {
+  const box=node('section',undefined,`panel ${className}`);box.append(node('h2',title));if (text) box.append(node('p',text));return box;
 }
-function perform(action, preserveEdits = false) {
-  actions = actions.then(async () => {
-    busy = true; $('error').hidden = true;
-    try { await action(); await load(preserveEdits); }
-    catch (error) { $('error').textContent = error.message; $('error').hidden = false; }
-    finally { busy = false; }
-  });
-  return actions;
+function scopeDescription(row) { return row.scope_mode==='page' ? 'Exact linked page only' : row.scope_mode==='site' ? 'Whole site / shared account' : row.scope_mode==='custom' ? 'Custom folder and descendants' : 'Linked directory and descendants'; }
+function getDraft(row) {
+  let draft=drafts.get(row.id);
+  if (!draft || draft.hash!==row.manifest_sha256) { draft={hash:row.manifest_sha256,mode:row.scope_mode,path:new URL(row.scope).pathname,dirty:false};drafts.set(row.id,draft); }
+  return draft;
 }
-function activeOperation() { return data.operations.find(op=>op.state==='running') || data.operations.find(op=>op.state==='queued'); }
-function jump(text, target) {
-  const node = element('a', text); node.href = target; return node;
+function renderWorkspace() {
+  if (!detail || !route.candidate) { workspaceSignature='';return; }
+  const row=detail.candidate,review=detail.review;
+  if (route.panel!=='site') { const {groups}=pageGroups(row,review);if (groups.length) { route.page=Math.min(route.page,groups.length-1);if (!groups[route.page].slots.includes(route.slot)) route.slot=groups[route.page].slots[0];writeRoute(true); } }
+  const signature=JSON.stringify([row.id,row.stage,row.state,row.manifest_sha256,review?.manifest_sha256,route.panel,route.page,route.slot]);
+  if (signature!==workspaceSignature) {
+    const root=$('site-workspace');root.replaceChildren();
+    const navigation=node('div',undefined,'workspace-nav');
+    navigation.append(control(route.panel==='reader' ? '← Back to pages' : route.panel==='pages' ? '← Back to site review' : `← ${names[route.view]}`,()=>backFromSite(),'quiet back'));
+    if (route.panel==='site' && stages.includes(row.stage)) {
+      const next=control('Next site →',()=>{const rows=data.candidates.filter(item=>item.id!==route.candidate);if (rows.length) openSite(rows[0].id);},'quiet back');next.id='next-site';navigation.append(next);
+    }
+    root.append(navigation);
+    const header=node('header',undefined,'site-header');
+    header.append(node('p',stages.includes(row.stage) ? `Step ${stages.indexOf(row.stage)+1} of 5 · ${names[row.stage]}` : names[row.stage],'eyebrow'),node('h1',siteName(row)),node('p',`${scopeDescription(row)} · ${row.scope}`,'scope'));
+    root.append(header);
+    if (route.panel!=='site') renderPages(root,row,review);
+    else {
+      const live=node('div');live.id='stage-live';root.append(live);
+      if (row.stage==='candidates') renderCandidate(root,row);
+      else if (row.stage==='review') renderCaptureReview(root,row,review);
+      else if (row.stage==='saved') {
+        root.append(panel('Saved for later','Your source evidence and capture scope are retained. Restore this site to Candidates when you’re ready.'));
+        appendEvidenceLink(root,row);
+      } else if (row.stage==='history') renderHistory(root,row,review);
+      else {
+        const scope=panel('Approved capture scope',row.scope);scope.append(node('p',scopeDescription(row),'meta'));root.append(scope);
+        if (review) root.append(control('Browse captured pages',()=>go({panel:'pages',page:0,slot:0}),'wide'));
+      }
+    }
+    workspaceSignature=signature;liveSignature='';dockSignature='';
+  }
+  if ($('next-site')) $('next-site').disabled=!data.candidates.some(item=>item.id!==route.candidate);
+  renderLive();
 }
-function workflow() {
-  const active = activeOperation(), ready = data.awaiting_site_review ?? data.batches.filter(row => row.state === 'awaiting_review').length;
-  const reviewing=$('filter').value==='captured';
-  const messages = [];
-  const paused = data.operations.find(op=>op.kind==='publish' && op.state==='interrupted');
-  if (paused) messages.push('Publication paused for an approved site. Open Review & indexing to retry; its sources are retained.');
-  if (active?.kind === 'capture') messages.push(active.state === 'queued' ? 'Capture queued; waiting for the worker.' : reviewing ? `Capture running in the background: ${active.result?.progress?.files ?? 0} HTML files staged.` : 'Capture is running. Live progress appears below.');
-  else if (active?.kind === 'publish') messages.push(active.state === 'queued' ? 'Publication queued; it will start after the current operation.' : 'Publishing the approved files. AI enrichment and indexing will queue automatically afterward.');
-  else if (active) messages.push('Discovery is running. The capture queue will continue when it finishes.');
-  if (data.approved) messages.push(`${data.approved} site${data.approved === 1 ? '' : 's'} awaiting automatic capture. New approvals have a ${data.undo_seconds ?? 60}-second grace period. Undo is available in Awaiting capture until the worker starts. There is no queue count limit.`);
-  if (data.capture_queue_error) messages.push(`Capture queue paused: ${data.capture_queue_error}`);
-  if (data.operations.some(op=>op.kind==='capture' && op.state==='interrupted')) messages.push('The capture queue is paused until the interrupted capture is resumed.');
-  if (ready) messages.push(`${ready} captured site${ready === 1 ? '' : 's'} awaiting your indexing decision. Browse each site in Review & indexing.`);
-  if (!messages.length) messages.push('Review a suggestion’s source and scope, then Approve for capture. It moves to Awaiting capture and downloads automatically after the grace period.');
-  const text = messages.join(' ');
-  if ($('next-step').textContent !== text) $('next-step').textContent = text;
-  const visible = data.operations.filter(op => !reviewing && ['capture','publish'].includes(op.kind) &&
-    ['queued','running','interrupted'].includes(op.state));
-  $('capture-activity').hidden = !visible.length;
-  $('activity').replaceChildren(...visible.map(operation));
+function appendEvidenceLink(root,row) {
+  if (row.captures?.length) root.append(control(`Read source evidence · ${row.captures.length} ${row.captures.length===1 ? 'capture' : 'captures'}`,()=>go({panel:'pages',page:0,slot:0}),'wide'));
 }
-function age(value) {
-  const seconds = Math.max(0, Math.floor((Date.now() - Date.parse(value)) / 1000));
-  if (!Number.isFinite(seconds)) return '';
-  return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+function renderCandidate(root,row) {
+  const columns=node('div',undefined,'site-columns'),left=node('div'),right=node('div');
+  const evidence=panel('Why capture this site?',row.rating?.reason || row.error || 'This site needs verified source evidence before approval.');
+  if (row.rating) evidence.prepend(badge(`Luna grade ${row.rating.grade}/3 · ${row.rating.category.replaceAll('_',' ')}`));
+  for (const excerpt of row.rating?.evidence || []) evidence.append(node('blockquote',excerpt.excerpt,'evidence'));
+  if (row.rating) evidence.append(node('p',`${row.rating.confidence} confidence · AI assessment, awaiting your decision`,'meta'));
+  appendEvidenceLink(evidence,row);left.append(evidence);
+  const coverage=row.coverage || {},check=coverage.site_check;
+  if (check || coverage.status) {
+    const box=panel('Archive coverage',check ? check.status.replaceAll('_',' ') : coverage.status.replaceAll('_',' '));
+    if (check?.complete===false || coverage.complete===false) box.append(node('p','Coverage is not verified. Capture approval is blocked until the check completes.'));
+    if (check?.archive_path) box.append(node('p',check.archive_path,'meta'));
+    if (row.state==='coverage_unverified') box.append(mutation('Recheck archive coverage',()=>request('/api/coverage',{id:row.id,manifest_sha256:row.manifest_sha256}),'Archive coverage checked.'));
+    left.append(box);
+  }
+  if (row.evidence?.length) {
+    const origin=panel('How it was found');const details=node('details');details.append(node('summary',`${row.evidence.length} discovery references`));
+    for (const entry of row.evidence) details.append(node('p',typeof entry==='string' ? entry : entry.source_url || entry.source || entry.path || JSON.stringify(entry),'meta'));
+    origin.append(details);left.append(origin);
+  }
+  const settings=panel('Choose capture scope');settings.append(node('p','Approve this scope once. The download starts automatically after the Undo grace period.','meta'));
+  const draft=getDraft(row),fields=node('div',undefined,'fields'),scopeLabel=node('label','Download scope'),select=node('select');select.id='capture-scope';select.setAttribute('aria-label','Download scope');
+  for (const [value,label] of [['directory','Linked directory and below'],['page','Linked page only'],['site','Whole site / shared account'],['custom','Custom folder and below']]) {
+    const option=node('option',label);option.value=value;select.append(option);
+  }
+  select.value=draft.mode;scopeLabel.append(select);fields.append(scopeLabel);
+  const custom=node('div'),pathLabel=node('label','Custom capture folder path'),path=node('input');path.type='text';path.placeholder='/eq/research/';path.value=draft.path;pathLabel.append(path);custom.append(pathLabel,node('p','An absolute URL path inside this site or shared account.','field-help'));custom.hidden=draft.mode!=='custom';fields.append(custom);
+  const saved=node('p',row.scope,'scope-value'),dirty=node('p','Scope edited. Save it before approving capture.','scope-draft');dirty.hidden=!draft.dirty;
+  const save=mutation('Save capture scope',()=>request('/api/scope',{id:row.id,manifest_sha256:row.manifest_sha256,mode:draft.mode,...(draft.mode==='custom' ? {path:draft.path} : {})}),'Capture scope saved.');save.hidden=!draft.dirty;
+  function edit() { draft.mode=select.value;draft.path=path.value;draft.dirty=true;custom.hidden=draft.mode!=='custom';dirty.hidden=false;save.hidden=false;renderDock(true); }
+  select.addEventListener('change',edit);path.addEventListener('input',edit);
+  const editable=row.state==='approval_pending';select.disabled=!editable;path.disabled=!editable;save.dataset.blocked=String(!editable);save.disabled=!editable || busy;
+  settings.append(fields,saved,dirty,save);right.append(settings);
+  const secondary=node('div',undefined,'secondary-actions');
+  const decidable=['approval_pending','discovered','sampled','sample_error','unavailable','identity_unresolved'].includes(row.state);
+  secondary.append(mutation('Save for later',()=>request('/api/decisions',[{id:row.id,manifest_sha256:row.manifest_sha256,decision:'defer'}]),'Moved to Saved for later.',false,!decidable),mutation('Dismiss site',()=>request('/api/decisions',[{id:row.id,manifest_sha256:row.manifest_sha256,decision:'reject'}]),'Moved to History.',false,!decidable));
+  right.append(secondary);columns.append(left,right);root.append(columns);
 }
-function operation(op) {
-  const card = element('article', undefined, 'card'); card.dataset.operation = op.id || '';
-  const labels = {capture:{queued:'Capture queued',running:'Capturing sites',completed:'Capture complete',interrupted:'Capture paused'},
-                  publish:{queued:'Publication queued',running:'Publishing approved files',completed:'Publication complete',interrupted:'Publication paused'}};
-  card.append(element('h3', labels[op.kind]?.[op.state] || `${op.kind} · ${op.state}`));
-  if (op.kind === 'discover') card.append(element('p', `${op.payload.max_candidates} candidates · $${op.payload.max_usd} maximum`, 'meta'));
-  const progress = op.result?.progress;
-  if (op.kind === 'capture') {
-    const phases = {preparing:'Preparing approved sources',checking_wayback:'Checking Wayback for this URL',downloading:'Downloading a capture',ready_for_review:'Downloaded files are ready for review'};
+function captureSummary(row,review) {
+  const captures=review?.manifest.captures || [],count=new Set(review?.page_identities || captures.map(c=>c.url)).size;
+  const box=panel('Your captured site');const stats=node('div',undefined,'stat-grid');
+  for (const [amount,label] of [[count,'pages'],[captures.length,'dated captures']]) {const stat=node('div',undefined,'stat');stat.append(node('strong',String(amount)),node('span',label));stats.append(stat);}
+  box.append(stats);
+  const dates=captures.map(c=>c.timestamp).sort();
+  if (dates.length) box.append(node('p',`Capture dates: ${captureDate(dates[0]).slice(0,10)} to ${captureDate(dates.at(-1)).slice(0,10)}`,'meta'));
+  box.append(node('p','This is a bounded capture of the chosen scope. It may contain only part of the original site.','meta'));
+  if (count) box.append(control(`Browse ${count} captured ${count===1 ? 'page' : 'pages'}`,()=>go({panel:'pages',page:0,slot:0}),'wide primary'));
+  return box;
+}
+function renderCaptureReview(root,row,review) {
+  if (!review) {root.append(panel('Capture details unavailable','Refresh to reload the saved review.'));return;}
+  root.append(captureSummary(row,review));
+  if (review.manifest.notes?.length) {
+    const notes=panel('Capture coverage',`${review.manifest.notes.length} coverage notes. Check these before approving the captured subset.`,'attention');
+    const list=node('details');list.append(node('summary','Read coverage notes'));
+    for (const note of review.manifest.notes) list.append(node('p',`${note.url}: ${note.note}`));notes.append(list);root.append(notes);
+  }
+  const decision=panel('Decide for the whole site',`Approval publishes all ${review.manifest.captures.length} captured files and queues AI-enriched indexing. Maximum enrichment spend: $${review.manifest.indexing?.max_enrichment_usd ?? 2} for this site.`);
+  decision.append(node('p','Declining retains these sources in History. You can reconsider later.','meta'),mutation('Decline indexing',()=>siteDecision('decline'),'Indexing declined. Sources retained in History.'));root.append(decision);
+}
+function renderHistory(root,row,review) {
+  const indexed=(row.review_state || row.state)==='indexed';
+  const box=panel(indexed ? 'Indexed · complete' : statusLabel(row),indexed ? 'This site is published and indexed. It has retired from the active workflow; its sources and completion record remain here.' : 'This site is outside the active workflow. Its decision and source evidence are retained.');
+  if (review?.publication?.commit) box.append(external(`https://github.com/dbsanfte/eq-archives/commit/${review.publication.commit}`,'View published files in the archive'));
+  root.append(box);
+  if (review) root.append(captureSummary(row,review));else appendEvidenceLink(root,row);
+}
+function renderLive() {
+  const host=$('stage-live');if (!host || !detail) return;
+  const {candidate:row,review,capture_operation:op}=detail;
+  const signature=JSON.stringify([row.stage,detail.queue_position,detail.queue_blocker,detail.capture_queue_error,op,review?.state,review?.operation,review?.job,review?.error]);
+  if (signature===liveSignature) return;
+  const expanded=new Set([...host.querySelectorAll('details[open]')].map(n=>n.dataset.key));
+  host.replaceChildren();
+  if (row.stage==='queued') {
+    const box=panel('Ready for automatic capture',`Queue position ${detail.queue_position ?? 'pending'}. New approvals have a ${data.undo_seconds ?? 60}-second Undo grace period.`);
+    const until=node('p',undefined,'grace-period');until.dataset.until=row.decision?.capture_after || '';box.append(until);
+    if (detail.capture_queue_error) box.append(node('p',detail.capture_queue_error));
+    const blocker=detail.queue_blocker;
+    if (blocker) box.append(node('p',blocker.state==='interrupted' ? 'Waiting for a paused capture to be resumed.' : `Waiting for the current ${blocker.kind==='publish' ? 'publication' : blocker.kind==='discover' ? 'discovery' : 'capture'} operation to finish.`,'meta'));
+    box.append(node('p','You can undo until the worker starts. The queue has no item-count limit.','meta'));host.append(box);updateCountdown();
+  } else if (row.stage==='capturing') {
+    const paused=op?.state==='interrupted',progress=op?.result?.progress;
+    const box=panel(paused ? 'Capture paused' : 'Capture in progress',paused ? 'Staged files are retained. Resume within the original capture budget.' : 'This screen updates automatically as URLs are checked and downloaded.',paused ? 'attention' : '');
+    if (op?.error) box.append(node('p',op.error));
     if (progress) {
-      card.append(element('p', phases[progress.phase] || 'Capturing approved scopes', 'capture-phase'));
-      card.append(element('p', `${progress.files} HTML files staged · ${(progress.bytes / 1048576).toFixed(2)} MiB · ${progress.urls_checked} new URLs checked`, 'capture-counts'));
-      if (progress.site_url && op.state === 'running') card.append(element('p', `Site ${Math.min(progress.sites_done + 1, progress.sites_total)} of ${progress.sites_total} · ${progress.site_url}`, 'meta'));
-      if (progress.current_url) card.append(link(progress.current_url));
-    } else if (op.state === 'completed') card.append(element('p', `${op.result?.captures ?? 'Downloaded'} HTML files ready for review.`));
-    else card.append(element('p', 'The worker will report files as it checks and downloads URLs.'));
-    if (['queued','running'].includes(op.state)) {
-      const indicator = element('progress'); indicator.setAttribute('aria-label','Capture in progress'); card.append(indicator);
-      card.append(element('p','Progress refreshes every 5 seconds. The number of pages is discovered during capture, so a completion percentage is unavailable.','meta'));
+      const phases={preparing:'Preparing sources',checking_wayback:'Checking Wayback captures',downloading:'Downloading a capture',ready_for_review:'Preparing site reviews'};
+      box.append(node('p',phases[progress.phase] || 'Working through the approved scope','progress-title'),node('p',`${progress.files} HTML files staged · ${(progress.bytes/1048576).toFixed(2)} MiB · ${progress.urls_checked} URLs checked`));
+      if (progress.site_url) box.append(node('p',`Current site: ${progress.site_url}`,'meta'));
+      if (progress.current_url) box.append(external(progress.current_url));
+      box.append(node('p',`Worker batch progress · ${progress.sites_total} approved ${progress.sites_total===1 ? 'site' : 'sites'}. Each completed site receives its own review.`,'meta'));
+    } else box.append(node('p','Waiting for the worker’s first progress update.'));
+    if (!paused) {const bar=node('progress');bar.setAttribute('aria-label','Capture in progress');box.append(bar);}
+    host.append(box);
+  } else if (row.stage==='indexing' && review) {
+    const state=review.state,publishing=state==='publication_requested',paused=publishing && review.operation?.state==='interrupted',failed=state==='index_failed';
+    const title=paused ? 'Publication paused' : failed ? 'Indexing needs attention' : publishing ? 'Publishing approved files' : state==='published_waiting_index' ? 'Waiting to index' : 'AI enrichment & indexing';
+    const box=panel(title,paused ? 'Your approval is saved. Retry publication to continue with the retained sources.' : failed ? 'Published sources are retained. Retry with saved AI results and the same site budget; existing entries are skipped.' : publishing ? 'The approved site is being added to the archive. Git publication can take several minutes.' : state==='published_waiting_index' ? 'Indexing starts when the worker is available and other indexing Jobs finish.' : 'Luna enrichment and indexing are running. The site will retire from the active portal when the import completes.',paused || failed ? 'attention' : '');
+    if (review.error || review.operation?.error) box.append(node('p',review.error || review.operation.error));
+    const step=publishing ? 0 : state==='published_waiting_index' ? 1 : 2,pipeline=node('ol',undefined,'pipeline');
+    ['Publish approved site','Wait for an available worker','AI enrichment & indexing','Complete and retire'].forEach((text,index)=>{const li=node('li',text);li.dataset.progress=index<step ? 'done' : index===step ? 'current' : 'upcoming';pipeline.append(li);});box.append(pipeline);
+    if (review.job) {
+      const diagnostics=node('details');diagnostics.dataset.key='indexing';diagnostics.append(node('summary','Indexing details'));
+      if (review.job.name) diagnostics.append(node('p',`Job: ${review.job.name}`,'meta'));
+      if (review.job.waiting_for?.length) diagnostics.append(node('p',`Waiting for: ${review.job.waiting_for.join(', ')}`,'meta'));box.append(diagnostics);
     }
-    if (op.state === 'completed') card.append(button('Review captured sites',()=>{$('filter').value='captured';offset=0;}));
+    if (review.publication?.commit) box.append(external(`https://github.com/dbsanfte/eq-archives/commit/${review.publication.commit}`,'View archive commit'));host.append(box);
   }
-  if (op.kind === 'publish' && ['queued','running'].includes(op.state)) card.append(element('p','Publishing the reviewed files in one archive commit. Git publication can take several minutes.'));
-  if (op.error) card.append(element('p',op.error));
-  if (age(op.created)) card.append(element('p', `Elapsed ${age(op.created)}${age(op.updated) ? ' · last update '+age(op.updated)+' ago' : ''}`, 'meta'));
-  if (op.result?.grading) card.append(element('p',`Estimated spend $${op.result.grading.estimated_usd.toFixed(4)} · conservative reservations $${op.result.grading.reserved_usd.toFixed(4)}`,'meta'));
-  if (op.state === 'interrupted') {
-    card.append(element('p','Staged files are retained. Resume explicitly to continue within the original budget.'));
-    card.append(button('Resume within original budget',()=>request('/api/resume',{id:op.id})));
-  }
-  return card;
+  for (const item of host.querySelectorAll('details')) if (expanded.has(item.dataset.key)) item.open=true;
+  liveSignature=signature;
 }
-function sources(container, captures, candidate, batch) {
-  const details = element('details',undefined,'source-review'); details.append(element('summary', `Read source evidence · ${captures.length} captures`));
-  const controls = element('div', undefined, 'source-controls'), select = element('select');
-  select.setAttribute('aria-label', 'Source capture');
-  captures.forEach((capture, slot) => {
-    const option = element('option', `${capture.timestamp} · ${capture.url}`); option.value = slot; select.append(option);
+function siteDecision(decision) { const review=detail.review;return request('/api/site-decision',{id:review.id,manifest_sha256:review.manifest_sha256,decision}); }
+function pageGroups(row,review) {
+  const captures=review?.manifest.captures || row.captures || [],groups=new Map();
+  captures.forEach((capture,index)=>{const identity=review?.page_identities?.[index] || capture.url;if (!groups.has(identity)) groups.set(identity,[]);groups.get(identity).push(index);});
+  return {captures,groups:[...groups].map(([url,slots])=>({url,slots}))};
+}
+function backFromSite() {
+  const destination=route.panel==='reader' ? {...route,panel:'pages'} : route.panel==='pages' ? {...route,panel:'site',page:0,slot:0} : {...route,candidate:null,panel:'site',page:0,slot:0};
+  const parent=history.state?.parent;
+  if (parent && parent.candidate===destination.candidate && parent.panel===destination.panel && parent.view===destination.view) history.back();
+  else go(destination,{replace:true});
+}
+function renderPages(root,row,review) {
+  const {captures,groups}=pageGroups(row,review);
+  if (!groups.length) { root.append(panel('No pages captured','Return to the site for its current status.'));return; }
+  const chosen=Math.min(route.page,groups.length-1),group=groups[chosen],slot=group.slots.includes(route.slot) ? route.slot : group.slots[0];
+  if (chosen!==route.page || slot!==route.slot) {route.page=chosen;route.slot=slot;writeRoute(true);}
+  const layout=node('div',undefined,'reading-layout'),browser=node('section',undefined,'page-browser');browser.setAttribute('aria-label',review ? 'Captured pages' : 'Source evidence');
+  browser.append(node('p',review ? 'Captured pages' : 'Source evidence','panel-label'),node('h2',`${groups.length} ${groups.length===1 ? 'page' : 'pages'}`));
+  const filter=node('input');filter.type='search';filter.placeholder='Find a page';filter.setAttribute('aria-label','Find a captured page');filter.value=pageQueries.get(row.id) || '';browser.append(filter);
+  const list=node('ul',undefined,'site-pages');list.tabIndex=0;list.setAttribute('aria-label','Page list');
+  const matchCount=node('p',undefined,'list-hint');
+  const renderList=()=>{
+    const query=filter.value.trim().toLowerCase();pageQueries.set(row.id,filter.value);
+    list.replaceChildren();
+    groups.forEach((entry,index)=>{
+      const first=captures[entry.slots[0]],title=first.title || new URL(entry.url).pathname;
+      if (query && !(title+' '+entry.url).toLowerCase().includes(query)) return;
+      const item=node('li',undefined,'site-page'),choose=control('',()=>go({panel:'reader',page:index,slot:entry.slots[0]}));
+      choose.setAttribute('aria-label',`Read ${title}`);choose.dataset.page=index;
+      if (index===chosen) choose.setAttribute('aria-current','page');
+      choose.append(node('strong',title),node('span',new URL(entry.url).pathname+new URL(entry.url).search,'path'),node('span',`${entry.slots.length} ${entry.slots.length===1 ? 'capture' : 'captures'} · ${captureDate(first.timestamp).slice(0,10)}`,'versions'));
+      item.append(choose);
+      for (const captureSlot of entry.slots) {const capture=captures[captureSlot];item.append(external(`https://web.archive.org/web/${capture.timestamp}/${capture.url}`,`${captureDate(capture.timestamp).slice(0,10)} · Wayback`));}
+      list.append(item);
+    });
+    matchCount.textContent=`${list.childElementCount} of ${groups.length} pages${query ? ' match' : ' · scroll to browse'}`;
+  };
+  filter.addEventListener('input',renderList);renderList();browser.append(list,matchCount,scrollButtons(list,'pages'));
+  const reader=node('section',undefined,'document-reader');reader.setAttribute('aria-label','Document reader');
+  const header=node('div',undefined,'reader-heading');header.append(node('p',review ? 'Captured document' : 'Source evidence','panel-label'),node('h2',captures[slot].title || new URL(captures[slot].url).pathname));
+  const controls=node('div',undefined,'reader-controls'),label=node('label','Capture date'),version=node('select');version.setAttribute('aria-label','Capture version');
+  for (const captureSlot of group.slots) {const option=node('option',captureDate(captures[captureSlot].timestamp));option.value=captureSlot;version.append(option);}version.value=slot;label.append(version);
+  version.addEventListener('change',()=>go({slot:Number(version.value)},{replace:true}));
+  controls.append(label,external(`https://web.archive.org/web/${captures[slot].timestamp}/${captures[slot].url}`,'Open this capture in Wayback'),node('p',captures[slot].url,'meta'));controls.querySelector('a').className='site-citation';
+  const text=node('pre','Loading verified source…','document-text');text.tabIndex=0;text.setAttribute('aria-label','Document text');
+  reader.append(header,controls,text,scrollButtons(text,'document'));
+  layout.append(browser,reader);root.append(layout);
+  if (route.panel==='reader' || matchMedia('(min-width:1000px)').matches) readSource(row,review,slot,text);
+  else text.textContent='Choose a page to read its complete source.';
+}
+async function readSource(row,review,slot,target) {
+  const token=++sourceGeneration;
+  const key=review ? `batch=${encodeURIComponent(review.id)}&slot=${review.source_slots[slot]}` : `candidate=${encodeURIComponent(row.id)}&slot=${slot}`;
+  const cacheKey=`${key}:${review?.manifest_sha256 || row.manifest_sha256}`;
+  try {
+    let source=sourceCache.get(cacheKey);
+    if (source===undefined) { const result=await request(`/api/source?${key}`);source=result.complete_extracted_text;sourceCache.set(cacheKey,source);if (sourceCache.size>12) sourceCache.delete(sourceCache.keys().next().value); }
+    if (token!==sourceGeneration || !target.isConnected) return;
+    target.textContent=source;
+    const saved=positions.get(routeKey());if (saved) {target.scrollTop=saved.text;window.scrollTo(0,saved.window);}
+  } catch (error) { if (token===sourceGeneration && target.isConnected) target.textContent=error.message; }
+}
+function scrollButtons(target,name) {
+  const box=node('div',undefined,'scroll-controls');box.append(node('span',name==='pages' ? 'Scroll the page list' : 'Scroll the document'));
+  for (const [label,direction] of [['↑',-1],['↓',1]]) {const button=control(label,()=>target.scrollBy({top:direction*target.clientHeight*.8,behavior:'instant'}));button.setAttribute('aria-label',`Scroll ${name} ${direction<0 ? 'up' : 'down'}`);box.append(button);}
+  return box;
+}
+function renderDock(force=false) {
+  if (!detail || !route.candidate || detail.candidate.id!==route.candidate) { $('action-dock').hidden=true;measureDock();return; }
+  const row=detail.candidate,review=detail.review,draft=getDraft(row),op=detail.capture_operation;
+  const signature=JSON.stringify([row.id,row.state,row.stage,row.manifest_sha256,review?.state,review?.operation?.state,review?.job,op?.id,op?.state,hasOperation(),route.panel,route.page,route.slot,draft.dirty,busy]);
+  if (!force && signature===dockSignature) return;
+  const dock=$('action-dock'),inner=node('div',undefined,'dock-inner'),buttons=node('div',undefined,'dock-buttons');let hint='';
+  if (route.panel==='reader') {
+    const {groups}=pageGroups(row,review);
+    const previous=control('← Previous',()=>{const index=route.page-1;go({page:index,slot:groups[index].slots[0]},{replace:true});});previous.setAttribute('aria-label','Previous page');previous.disabled=route.page<=0;
+    const next=control('Next →',()=>{const index=route.page+1;go({page:index,slot:groups[index].slots[0]},{replace:true});});next.setAttribute('aria-label','Next page');next.disabled=route.page>=groups.length-1;
+    hint=`Page ${route.page+1} of ${groups.length}`;
+    const pages=control('Pages',()=>backFromSite());pages.setAttribute('aria-label','Back to page list');buttons.append(previous,pages,next);
+  } else if (route.panel==='pages') buttons.append(control('Back to site decision',()=>backFromSite(),'primary'));
+  else if (row.stage==='candidates') {
+    hint=draft.dirty ? 'Save your scope changes before approving.' : row.state==='coverage_unverified' ? 'Verify archive coverage before approving.' : !row.rating || !row.captures?.length ? 'Source evidence and a Luna grade are needed before capture approval.' : 'Entire chosen scope · 60 seconds to undo before capture';
+    buttons.append(mutation('Approve site for capture',()=>request('/api/decisions',[{id:row.id,manifest_sha256:row.manifest_sha256,decision:'approve'}]),'Approved for capture.',true,draft.dirty || !row.rating || !row.captures?.length || row.state!=='approval_pending'));
+  } else if (row.stage==='queued') {
+    hint='Your approval is saved. Capture starts automatically.';
+    buttons.append(mutation('Undo approval',()=>request('/api/undo',{id:row.id,manifest_sha256:row.manifest_sha256}),'Returned to Candidates.',true));
+  } else if (row.stage==='capturing' && op?.state==='interrupted') {
+    hint='Resume the interrupted worker batch within its original budget.';
+    buttons.append(mutation('Resume capture',()=>request('/api/resume',{id:op.id}),'Capture resumed.',true,hasOperation()));
+  } else if (row.stage==='review' && review) {
+    hint=`Whole captured site · AI enrichment included · $${review.manifest.indexing?.max_enrichment_usd ?? 2} maximum`;
+    buttons.append(mutation('Approve site & index',()=>siteDecision('approve'),'Approved. Publication and indexing are queued.',true,!review.manifest.captures.length));
+  } else if (row.stage==='indexing' && review?.state==='publication_requested' && review.operation?.state==='interrupted') {
+    hint='Approval retained · no recapture needed';buttons.append(mutation('Retry publication',()=>request('/api/resume',{id:review.operation.id}),'Publication queued again.',true,hasOperation()));
+  } else if (row.stage==='indexing' && review?.state==='index_failed' && review.job?.name) {
+    hint='Reuse saved AI results and the original site budget';buttons.append(mutation('Retry indexing',()=>request('/api/index-retry',{id:review.id,manifest_sha256:review.manifest_sha256,job_name:review.job.name}),'Indexing queued again.',true));
+  } else if (row.stage==='saved' || row.stage==='history' && row.state==='rejected') {
+    buttons.append(mutation('Restore to Candidates',()=>request('/api/restore',{id:row.id,manifest_sha256:row.manifest_sha256}),'Restored to Candidates.',true));
+  } else if (row.stage==='history' && review?.state==='indexing_declined') buttons.append(mutation('Reconsider indexing',()=>siteDecision('reconsider'),'Returned to Review capture.',true));
+  else if (row.stage==='history') buttons.append(control('Back to active sites',()=>openStage('candidates'),'primary'));
+  if (hint || busy) inner.append(node('p',busy ? 'Saving your decision…' : hint,'dock-hint'));inner.append(buttons);dock.replaceChildren(inner);dock.hidden=!buttons.childElementCount;dockSignature=signature;measureDock();
+}
+function measureDock() { document.documentElement.style.setProperty('--dock',`${$('action-dock').hidden ? 0 : $('action-dock').getBoundingClientRect().height}px`); }
+function hasOperation() { return data?.operations.some(op=>['queued','running'].includes(op.state)); }
+function updateCountdown() {
+  const item=document.querySelector('.grace-period');if (!item) return;
+  const seconds=Math.ceil((Date.parse(item.dataset.until)-Date.now())/1000);
+  item.textContent=seconds>0 ? `Eligible to start in ${seconds} seconds. Undo is available.` : 'Ready for the worker. You can still undo until capture starts.';
+}
+function renderTools() {
+  $('discover').disabled=busy || hasOperation();
+  const operations=data.operations.map(op=>{
+    const log=node('div',undefined,'operation-log');log.append(node('p',`${op.kind==='publish' ? 'Publication' : op.kind==='capture' ? 'Capture' : 'Discovery'} · ${op.state}`));
+    if (op.error) log.append(node('p',op.error));
+    if (op.kind==='discover') {log.append(node('p',`${op.payload.max_candidates} candidates · $${op.payload.max_usd} maximum`,'meta'));
+      if (op.state==='interrupted') log.append(mutation('Resume discovery',()=>request('/api/resume',{id:op.id}),'Discovery resumed within its original budget.',false,hasOperation()));}
+    return log;
   });
-  const text = element('pre', 'Select a capture to read its complete extracted text.');
-  let generation = 0;
-  async function read() {
-    const current = ++generation, slot = select.value;
-    text.textContent = 'Loading verified source…';
-    try {
-      const source = await request(`/api/source?${batch ? 'batch' : 'candidate'}=${encodeURIComponent(batch || candidate)}&slot=${slot}`);
-      if (current === generation) text.textContent = source.complete_extracted_text;
-    } catch (error) { if (current === generation) text.textContent = error.message; }
-  }
-  const reread = element('button','Read source'); reread.addEventListener('click',read);
-  controls.append(select, reread); details.append(controls, text);
-  details.addEventListener('toggle', () => { if (details.open && generation === 0) read(); });
-  select.addEventListener('change', read); container.append(details);
+  $('operations').replaceChildren(...operations);
+  const active=data.operations.find(op=>op.kind==='discover' && ['queued','running','interrupted'].includes(op.state));
+  $('discovery-status').textContent=active ? `Discovery ${active.state}. Capture resumes when the worker is available.` : '';
 }
-function candidate(row) {
-  const card = element('article', undefined, 'card'); card.dataset.candidate = row.id;
-  card.dataset.state = row.state; card.dataset.manifest = row.manifest_sha256;
-  if (capturedStates.includes(row.state)) {
-    const capture = row.coverage?.capture || {}, reviewId = capture.review_id || capture.batch_id;
-    card.classList.add('site-summary');
-    const title = element('h3'),siteLink=link(row.scope,row.scope.replace(/^https?:\/\//,''));siteLink.setAttribute('aria-label',row.scope);title.append(siteLink);card.append(title);
-    const states = {captured_awaiting_review:'Awaiting indexing decision',approved_waiting_publication:'Approved for indexing',indexing_declined:'Indexing declined',published:'Published — indexing queued',indexed:'Indexed'};
-    const reviewStates={awaiting_review:'Awaiting indexing decision',publication_requested:'Approved for indexing',published_waiting_index:'Waiting to index',indexing:'Indexing in progress',index_failed:'Indexing failed',indexed:'Indexed',indexing_declined:'Indexing declined'};
-    const status=element('p',reviewStates[row.review_state] || states[row.state],'status-badge');status.dataset.tone=stateTone(row.review_state);card.append(status);
-    if (capture.pages!==undefined) card.append(element('p',`${capture.pages} pages · ${capture.files} captures`,'meta'));
-    card.append(button('Review site',()=>{selectedSite={id:reviewId,candidate:row.id};$('filter').value='captured';offset=0;},!reviewId));
-    return card;
-  }
-  card.classList.add('candidate-card');
-  const rating = row.rating;
-  const title = element('h3'); title.append(element('span', rating ? `Grade ${rating.grade}/3` : 'Ungraded', 'badge'), link(row.url)); card.append(title);
-  const states = {approved_waiting_batch:'Awaiting capture',capturing:'Capture in progress',captured_awaiting_review:'Downloaded — awaiting publication approval',published:'Published — indexing queued',indexed:'Indexed'};
-  card.append(element('div', `${rating?.category?.replaceAll('_',' ') || 'Unclassified'} · ${rating?.confidence || 'No'} confidence · ${states[row.state] || row.state.replaceAll('_',' ')}`, 'meta'));
-  card.append(element('p', rating?.reason || row.error || 'Awaiting source acquisition.'));
-  const coverage = row.coverage;
-  if (coverage?.site_check) {
-    const check = coverage.site_check;
-    card.append(element('p', `Website/account check: ${check.status.replaceAll('_',' ')}${check.archive_path ? ' · '+check.archive_path : ''}${check.complete === false ? ' · approval blocked until verified' : ''}`, 'meta'));
-  }
-  if (coverage?.status) card.append(element('p', `Archive coverage: ${coverage.status.replaceAll('_',' ')}${coverage.complete === false ? ' · incomplete inventory' : ''}${coverage.archive_sha ? ' · checked at '+coverage.archive_sha.slice(0,12) : ''}`, 'meta'));
-  if (rating) for (const evidence of rating.evidence) card.append(element('blockquote', evidence.excerpt, 'quote'));
-  card.append(element('p', `Capture scope: ${row.scope}${row.scope_mode === 'page' ? ' (exact page only)' : ''}`, 'scope'));
-  if (row.captures?.length) sources(card, row.captures, row.id);
-  if (row.state === 'approved_waiting_batch') {
-    const remaining = Math.ceil((Date.parse(row.decision?.capture_after) - Date.now()) / 1000);
-    card.append(element('p',remaining > 0 ? `Queued; eligible in ${remaining}s. Undo before capture starts.` : 'Queued; waiting for the worker. You can undo until capture starts.','candidate-next'));
-    card.append(button('Undo approval',()=>request('/api/undo',{id:row.id,manifest_sha256:row.manifest_sha256})));
-    return card;
-  }
-  if (row.state==='capturing') {
-    card.append(jump('View capture progress','#capture-activity'));
-    return card;
-  }
-  const editable = ['approval_pending','deferred','rejected'].includes(row.state);
-  const controls = element('div', undefined, 'actions');
-  const scope = element('select'); scope.setAttribute('aria-label', 'Capture scope'); scope.disabled = !editable;
-  [['directory','Linked directory and below'],['page','Linked page only'],['site','Whole site / shared account'],['custom','Custom folder and below']].forEach(([value,label]) => {
-    const option = element('option',label); option.value = value; scope.append(option);
-  }); scope.value = row.scope_mode;
-  controls.append(element('p','Capture settings','capture-settings-label'));
-  const scopeLabel=element('label','Download scope');scopeLabel.append(scope);controls.append(scopeLabel);
-  const custom = element('div', undefined, 'custom-scope');
-  const pathLabel = element('label', 'Custom capture folder path'), path = element('input');
-  path.type = 'text'; path.placeholder = '/eq/research/'; path.setAttribute('aria-label','Custom capture folder path');
-  path.value = new URL(row.scope).pathname; path.disabled = !editable;
-  pathLabel.append(path); custom.append(pathLabel);
-  custom.append(button('Save custom scope', () => request('/api/scope',{id:row.id,manifest_sha256:row.manifest_sha256,mode:'custom',path:path.value}), !editable),
-                element('p','Uses this folder and its descendants. Save this scope before approving capture.','meta'));
-  custom.hidden = row.scope_mode !== 'custom'; controls.append(custom);
-  let approveButton;
-  function draftScope() {
-    custom.dataset.scopeDraft='1';
-    if (approveButton) approveButton.disabled = true;
-  }
-  path.addEventListener('input',draftScope);
-  scope.addEventListener('change', () => {
-    custom.hidden = scope.value !== 'custom';
-    if (scope.value === 'custom') draftScope();
-    else perform(() => request('/api/scope',{id:row.id, manifest_sha256:row.manifest_sha256, mode:scope.value}));
-  });
-  for (const [decision, label] of [['approve','Approve for capture'],['reject','Reject'],['defer','Defer']]) {
-    const action = button(label, async () => {
-      await request('/api/decisions',[{id:row.id,manifest_sha256:row.manifest_sha256,decision}]);
-    }, !editable || decision === 'approve' && !rating);
-    if (decision === 'approve') { approveButton=action;action.className='primary'; }
-    controls.append(action);
-  }
-  if (row.state === 'coverage_unverified') controls.append(button('Recheck archive coverage', () => request('/api/coverage',{id:row.id,manifest_sha256:row.manifest_sha256})));
-  card.append(controls); return card;
-}
-function siteStatus(row) {
-  const status = element('div', undefined, 'site-status');
-  const labels = {awaiting_review:'Awaiting indexing decision',indexing_declined:'Indexing declined — files retained in staging',publication_requested:'Approved — publication queued or in progress',published_waiting_index:'Published — waiting to index',indexing:'AI enrichment and indexing in progress',indexed:'Indexed — complete',index_failed:'Indexing failed — attention needed'};
-  const publication=row.state==='publication_requested' ? row.operation : null;
-  status.dataset.tone=stateTone(publication?.state || row.state);
-  const publicationLabels={interrupted:'Publication paused',queued:'Approved — publication queued',running:'Publishing approved site'};
-  status.append(element('p',publicationLabels[publication?.state] || labels[row.state] || row.state.replaceAll('_',' '),'capture-phase'));
-  const next = {awaiting_review:'Browse the pages below, then approve or decline indexing for this entire captured site.',indexing_declined:'This site will not be published or indexed. Reconsider to return it to review.',publication_requested:'All captured pages from this site are approved. AI enrichment and indexing queue automatically after publication.',published_waiting_index:'AI enrichment and indexing will start when the worker is available and other indexing Jobs finish.',indexing:'The import Job includes Luna enrichment and indexing. Its completion is checked automatically.',indexed:'This site is published and indexed.',index_failed:'Published files are retained. Retry indexing to continue with saved AI results and the same $2 site budget. Existing entries are skipped.'};
-  status.append(element('p',publication?.state==='interrupted' ? 'Your approval is saved. Retry publication to continue; no recapture or new approval is needed.' : next[row.state] || 'Awaiting the next workflow step.'));
-  if (publication?.error) status.append(element('p',publication.error,'failure'));
-  if (row.error) status.append(element('p',row.error));
-  if (row.job?.waiting_for?.length || row.job?.name) {
-    const details=element('details',undefined,'technical-details');details.append(element('summary','Indexing details'));
-    if (row.job?.waiting_for?.length) details.append(element('p',`Waiting for existing Jobs: ${row.job.waiting_for.join(', ')}`));
-    if (row.job?.name) details.append(element('p',`Indexing Job: ${row.job.name}`,'meta'));
-    status.append(details);
-  }
-  if (row.publication?.commit) status.append(link(`https://github.com/dbsanfte/eq-archives/commit/${row.publication.commit}`,'View archive commit'));
-  return status;
-}
-function captureDate(timestamp) { return `${timestamp.slice(0,4)}-${timestamp.slice(4,6)}-${timestamp.slice(6,8)} ${timestamp.slice(8,10)}:${timestamp.slice(10,12)}:${timestamp.slice(12,14)} UTC`; }
-function sitePages(container, row) {
-  const captures=row.manifest.captures,pages=new Map();
-  captures.forEach((capture,slot)=>{
-    const identity=row.page_identities?.[slot] || capture.url;
-    if (!pages.has(identity)) pages.set(identity,[]);
-    pages.get(identity).push(slot);
-  });
-  const entries=[...pages],layout=element('div',undefined,'site-browser');
-  const navigation=element('section',undefined,'page-navigation'),list=element('ul',undefined,'site-pages');
-  navigation.setAttribute('aria-label','Page browser');
-  const heading=element('div',undefined,'panel-heading'),headingText=element('div');
-  headingText.append(element('p','Browse this capture','panel-label'),element('h4','Captured pages'),element('p','Scroll to browse pages ↓','browse-hint'));
-  heading.append(headingText,element('span',`${pages.size} pages`,'count'));
-  navigation.append(heading,list,scrollControls(list,'Captured pages'));
-  const reader=element('section',undefined,'site-source'),readerHeading=element('div',undefined,'reader-heading'),title=element('h4','Page source');
-  reader.setAttribute('aria-label','Document preview');
-  readerHeading.append(element('p','Document preview','panel-label'),title);
-  const pageControls=element('div',undefined,'page-controls'),previous=element('button','← Previous page'),next=element('button','Next page →'),position=element('span',undefined,'page-position');
-  previous.setAttribute('aria-label','Previous page');next.setAttribute('aria-label','Next page');
-  pageControls.append(previous,position,next);
-  const controls=element('div',undefined,'reader-controls'),versionLabel=element('label','Capture date'),version=element('select');
-  version.setAttribute('aria-label','Capture version');versionLabel.append(version);
-  const citation=element('div',undefined,'site-citation'),text=element('pre','Choose a captured page to read its complete extracted source.');
-  controls.append(versionLabel,citation);
-  reader.append(readerHeading,pageControls,controls,text,scrollControls(text,'Document text'));
-  let generation=0,selected=0;
-  async function read(slot) {
-    const current=++generation,capture=captures[slot];
-    title.textContent=capture.title || new URL(capture.url).pathname;
-    citation.replaceChildren(link(`https://web.archive.org/web/${capture.timestamp}/${capture.url}`,'Open this capture in Wayback'),element('p',capture.url,'meta'));
-    text.textContent='Loading verified source…';text.scrollTop=0;
-    try {
-      const source=await request(`/api/source?batch=${encodeURIComponent(row.id)}&slot=${row.source_slots[slot]}`);
-      if (current===generation) text.textContent=source.complete_extracted_text;
-    } catch (error) { if (current===generation) text.textContent=error.message; }
-    requestAnimationFrame(updateScrollControls);
-  }
-  function choosePage(index,reveal=false) {
-    if (index<0 || index>=entries.length) return;
-    selected=index;
-    const slots=entries[index][1];
-    for (const active of list.querySelectorAll('[aria-current]')) active.removeAttribute('aria-current');
-    const chosen=list.children[index].querySelector('button');chosen.setAttribute('aria-current','page');
-    version.replaceChildren(...slots.map(slot=>{const option=element('option',captureDate(captures[slot].timestamp));option.value=slot;return option;}));
-    position.textContent=`Page ${index+1} of ${entries.length}`;
-    previous.disabled=index===0;next.disabled=index===entries.length-1;
-    if (reveal) revealIn(list,list.children[index]);
-    read(slots[0]);
-  }
-  previous.addEventListener('click',()=>choosePage(selected-1,true));next.addEventListener('click',()=>choosePage(selected+1,true));
-  version.addEventListener('change',()=>read(Number(version.value)));
-  entries.forEach(([identity,slots],index)=>{
-    const item=element('li',undefined,'site-page'),capture=captures[slots[0]],choose=element('button',capture.title || new URL(identity).pathname);
-    choose.addEventListener('click',()=>choosePage(index));
-    item.append(choose,element('p',new URL(identity).pathname+new URL(identity).search,'meta'));
-    for (const slot of slots) item.append(link(`https://web.archive.org/web/${captures[slot].timestamp}/${captures[slot].url}`,`${captureDate(captures[slot].timestamp)} · Wayback`));
-    list.append(item);
-  });
-  layout.append(navigation,reader);container.append(layout);
-  if (captures.length) choosePage(0);
-  else { text.textContent='No pages were captured within this scope. This site cannot be indexed.';previous.disabled=true;next.disabled=true;position.textContent='No pages'; }
-}
-function siteCard(row) {
-  const card = element('article',undefined,'card'); card.dataset.siteSignature = `${row.id}:${row.manifest.sites[0].id}:${row.state}:${row.manifest_sha256}`;
-  card.dataset.siteIdentity=`${row.id}:${row.manifest.sites[0].id}:${row.manifest_sha256}`;
-  const site = row.manifest.sites[0], captures = row.manifest.captures, title = element('h3'),heading=element('div',undefined,'site-heading');
-  title.append(link(site.scope,site.scope.replace(/^https?:\/\//,'')));heading.append(element('p','Selected site','panel-label'),title);
-  const pages = new Set(row.page_identities || captures.map(capture=>capture.url)).size;
-  heading.append(element('p',`${pages} pages · ${captures.length} dated captures · ${(captures.reduce((total,c)=>total+c.bytes,0)/1048576).toFixed(2)} MiB`,'site-metrics'),siteStatus(row));
-  const details=element('details',undefined,'capture-details');details.append(element('summary',`Capture details${row.manifest.notes?.length ? ` · ${row.manifest.notes.length} coverage notes` : ''}`),element('p',`Capture scope: ${site.scope}${site.scope_mode==='page' ? ' (linked page only)' : ' and descendants'}`,'scope'));
-  for (const note of row.manifest.notes || []) details.append(element('p',`${note.url}: ${note.note}`,'meta'));
-  heading.append(details);card.append(heading);
-  sitePages(card,row); card.append(siteDecisions(row)); return card;
-}
-function siteDecisions(row) {
-  const container=element('div',undefined,'site-decisions'),controls=element('div',undefined,'actions');
-  container.append(element('h4','Site decision'));
-  const decision=value=>request('/api/site-decision',{id:row.id,manifest_sha256:row.manifest_sha256,decision:value});
-  if (row.state==='awaiting_review') {
-    container.append(element('p',`Approval publishes every captured page above and queues AI-enriched indexing. Maximum enrichment spend: $${row.manifest.indexing?.max_enrichment_usd ?? 2} for this site.`));
-    const approve=button('Approve site & queue indexing',()=>decision('approve'),!row.manifest.captures.length);approve.className='primary';
-    controls.append(approve,button('Decline indexing',()=>decision('decline')));
-  } else if (row.state==='indexing_declined') controls.append(button('Reconsider indexing',()=>decision('reconsider')));
-  else if (row.state==='publication_requested' && row.operation?.state==='interrupted') {
-    const retry=button('Retry publication',()=>request('/api/resume',{id:row.operation.id}),Boolean(activeOperation()));retry.className='primary';
-    controls.append(retry);
-  }
-  else if (row.state==='index_failed' && row.job?.name) {
-    const retry=button('Retry indexing',()=>request('/api/index-retry',{id:row.id,manifest_sha256:row.manifest_sha256,job_name:row.job.name}));retry.className='primary';
-    controls.append(retry);
-  }
-  container.append(controls);container.hidden=!controls.childElementCount;return container;
-}
-async function loadSite(viewChanged=false) {
-  $('site-review').hidden = $('filter').value !== 'captured';
-  if ($('site-review').hidden) return;
-  if (!selectedSite) {
-    const paused=data.operations.find(op=>op.kind==='publish' && op.state==='interrupted');
-    const row = data.candidates.find(row=>paused && [row.coverage?.capture?.review_id,row.coverage?.capture?.batch_id].includes(paused.payload.batch_id)) ||
-      data.candidates.find(row=>row.state==='captured_awaiting_review') || data.candidates[0];
-    const capture = row?.coverage?.capture;
-    selectedSite = capture ? {id:capture.review_id || capture.batch_id,candidate:row.id} : null;
-  }
-  if (!selectedSite) { $('site-review').hidden=true;$('reviewed-site').replaceChildren();return; }
-  const selected = selectedSite;
-  const displayed = $('reviewed-site').querySelector('[data-site-signature]');
-  if (!displayed?.dataset.siteSignature.startsWith(`${selected.id}:${selected.candidate}:`)) {
-    $('reviewed-site').replaceChildren(element('p','Loading the selected site…'));
-  }
-  const row = await request(`/api/site?id=${encodeURIComponent(selected.id)}&candidate=${encodeURIComponent(selected.candidate)}`);
-  if (selected !== selectedSite || $('filter').value !== 'captured') return;
-  const signature = `${row.id}:${row.manifest.sites[0].id}:${row.state}:${row.manifest_sha256}`;
-  const previous = $('reviewed-site').querySelector('[data-site-signature]');
-  if (previous?.dataset.siteIdentity===`${row.id}:${row.manifest.sites[0].id}:${row.manifest_sha256}`) {
-    previous.dataset.siteSignature=signature;
-    const status=siteStatus(row),details=status.querySelector('.technical-details');
-    if (details && previous.querySelector('.technical-details[open]')) details.open=true;
-    previous.querySelector('.site-status').replaceWith(status);
-    previous.querySelector('.site-decisions').replaceWith(siteDecisions(row));
-  } else $('reviewed-site').replaceChildren(siteCard(row));
-  for (const card of $('candidates').querySelectorAll('[data-candidate]')) {
-    card.dataset.selected=String(card.dataset.candidate===selected.candidate);
-    card.querySelector('button')?.setAttribute('aria-pressed',card.dataset.selected);
-    if (card.dataset.selected==='true' && (viewChanged || displayed?.dataset.siteIdentity!==`${row.id}:${row.manifest.sites[0].id}:${row.manifest_sha256}`)) revealIn($('candidates'),card);
-  }
-}
-function emptyView(view) {
-  const messages={recommended:['No suggestions to review','Captured sites may still need your indexing decision. New discovery runs are available in Tools & help.'],
-    approved:['No sites awaiting capture','Approve a suggestion to add it to this queue.'],
-    capturing:['No capture running','Downloads begin automatically when an approved site is ready.'],
-    captured:['No captured sites yet','Completed downloads will appear here for a site-by-site indexing decision.'],
-    pending:['All capture decisions are up to date','Use All candidates in Tools & help to revisit earlier decisions.'],
-    all:['No candidates yet','Start a bounded discovery run from Tools & help.']};
-  const [title,message]=messages[view],empty=element('div',undefined,'empty-state');empty.append(element('h3',title),element('p',message));
-  const target=view==='recommended' && data.captured ? 'captured' : ['approved','capturing','captured'].includes(view) ? 'recommended' : null;
-  if (target) empty.append(button(`Go to ${viewNames[target]}`,()=>{$('filter').value=target;offset=0;selectedSite=null;}));
-  return empty;
-}
-async function load(preserveEdits = false) {
-  for (;;) {
-    const filter = $('filter').value, requestedOffset = offset;
-    const result = await request(`/api/queue?filter=${encodeURIComponent(filter)}&offset=${requestedOffset}`);
-    if (filter !== $('filter').value || requestedOffset !== offset) continue;
-    if (offset > 0 && offset >= result.total) {
-      offset = Math.max(0, Math.floor((result.total - 1) / 50) * 50);
-      continue;
-    }
-    data = result;
-    break;
-  }
-  $('status').textContent = `${data.all_count} candidates · ${data.total} in this view · ${data.approved} awaiting capture · ${data.capturing ?? 0} capturing · ${data.captured ?? 0} captured`;
-  const view=$('filter').value,reviewing=view==='captured' && data.candidates.length>0,listScroll=renderedView===view ? $('candidates').scrollTop : 0;
-  $('workspace').classList.toggle('review-mode',reviewing);
-  $('site-picker-heading').hidden=!reviewing;$('site-picker-scroll').hidden=!reviewing;
-  $('site-picker-count').textContent=data.total;
-  $('candidates').tabIndex=reviewing ? 0 : -1;
-  if (reviewing) $('candidates').setAttribute('aria-label','Captured sites');else $('candidates').removeAttribute('aria-label');
-  const previousCandidates = new Map([...$('candidates').querySelectorAll('[data-candidate]')].map(card=>[card.dataset.candidate,card]));
-  $('candidates').replaceChildren(...data.candidates.map(row=>{
-    const card = previousCandidates.get(row.id);
-    return preserveEdits && card?.dataset.state===row.state && card.dataset.manifest===row.manifest_sha256 &&
-      card.querySelector('details[open], [data-scope-draft]') ? card : candidate(row);
-  }));
-  if (!data.candidates.length) $('candidates').append(emptyView(view));
-  $('candidates').scrollTop=listScroll;
-  const viewChanged=renderedView!==view;renderedView=view;
-  await loadSite(viewChanged);
-  $('view-title').textContent=viewNames[$('filter').value];
-  $('view-description').textContent=viewDescriptions[$('filter').value];
-  $('view-total').textContent=`${data.total} site${data.total===1 ? '' : 's'}`;
-  for (const node of document.querySelectorAll('[data-view]')) {
-    if (node.dataset.view===$('filter').value) node.setAttribute('aria-current','page');else node.removeAttribute('aria-current');
-  }
-  const counts={recommended:data.recommended ?? ($('filter').value==='recommended' ? data.total : ''),approved:data.approved,capturing:data.capturing,captured:data.captured};
-  for (const node of document.querySelectorAll('[data-count]')) node.textContent=counts[node.dataset.count] ?? '';
-  saveView();
-  $('operations').replaceChildren(...data.operations.map(operation));
-  $('version').textContent=`Build ${data.version}`;
-  $('page').textContent=data.total ? `${offset+1}–${Math.min(offset+50,data.total)} of ${data.total}` : '0 candidates';
-  $('previous').disabled=offset===0; $('next').disabled=offset+50>=data.total;
-  document.querySelector('.pagination').hidden=data.total<=50 && offset===0;
-  $('discover').disabled=Boolean(activeOperation()); workflow();
-  requestAnimationFrame(updateScrollControls);
-}
-$('filter').addEventListener('change',()=>{$('tools').open=false;perform(async()=>{offset=0;selectedSite=null;});});
-$('previous').addEventListener('click',()=>perform(async()=>{offset=Math.max(0,offset-50);selectedSite=null;}));
-$('next').addEventListener('click',()=>perform(async()=>{offset+=50;selectedSite=null;}));
-$('refresh').addEventListener('click',()=>perform(async()=>{},true));
-$('discover').addEventListener('click',()=>{$('tools').open=false;perform(()=>request('/api/discover',{max_candidates:50,max_usd:2}));});
-for (const node of document.querySelectorAll('[data-view]')) node.addEventListener('click',()=>{
-  $('filter').value=node.dataset.view;$('tools').open=false;
-  perform(async()=>{offset=0;selectedSite=null;});
+$('home').addEventListener('click',event=>{event.preventDefault();openStage('candidates');});
+for (const item of document.querySelectorAll('[data-view]')) item.addEventListener('click',()=>openStage(item.dataset.view));
+$('tools-open').addEventListener('click',()=>$('tools').showModal());$('tools-close').addEventListener('click',()=>$('tools').close());
+$('tools').addEventListener('click',event=>{if (event.target===$('tools') && (event.clientX<$('tools').getBoundingClientRect().left || event.clientX>$('tools').getBoundingClientRect().right)) $('tools').close();});
+$('refresh').addEventListener('click',()=>{if (!busy) refresh();});
+$('discover').addEventListener('click',()=>act('Starting discovery',()=>request('/api/discover',{max_candidates:50,max_usd:2}),'Discovery queued: at most 50 candidates and $2.'));
+$('previous').addEventListener('click',()=>go({offset:Math.max(0,route.offset-50)}));$('next').addEventListener('click',()=>go({offset:route.offset+50}));
+$('site-search').addEventListener('input',()=>{
+  clearTimeout(searchTimer);route.query=$('site-search').value;route.offset=0;writeRoute(true);
+  ++generation;controller?.abort();searchTimer=setTimeout(()=>refresh(),200);
 });
-$('site-picker-scroll').append(scrollControls($('candidates'),'Captured sites'));
-window.addEventListener('resize',updateScrollControls);
-perform(async()=>{});
-setInterval(()=>{if (!busy && data &&
-  (data.approved || activeOperation() || $('filter').value==='captured' || data.batches.some(batch=>['published_waiting_index','indexing'].includes(batch.state)))) perform(async()=>{},true);},5000);
+window.addEventListener('popstate',()=>{remember();route=readRoute();renderShell();refresh(true);});
+window.addEventListener('resize',()=>{measureDock();if (detail && route.panel==='pages' && matchMedia('(min-width:1000px)').matches) {workspaceSignature='';renderWorkspace();restorePosition();}});
+new ResizeObserver(measureDock).observe($('action-dock'));
+renderShell();writeRoute(true);refresh(true);
+setInterval(()=>{if (!busy && !document.hidden) refresh();},5000);
+setInterval(updateCountdown,1000);
