@@ -243,6 +243,10 @@ manifest-bound approvals and metadata-only migration of unapproved mixed capture
 groups; never copy sources or replay already approved publication/import work.
 Keep publication status and explicit retry on the affected site. Preserve the
 selected view/site across reloads and the open source page during status updates.
+Keep the site picker, captured-page browser and document reader visually distinct,
+with named panels, visible scroll affordances and independent keyboard/button
+scrolling. Preserve list and reading positions during status refreshes; exercise
+long lists and sources at phone, tablet and desktop widths in Chromium.
 Terminal indexing retries must bind the failed Job and published manifest,
 create a new numbered Job, retain prior Jobs and reuse the original site budget.
 The non-root curation UID must have a Unix account so OpenSSH can start; exercise

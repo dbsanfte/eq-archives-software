@@ -6,7 +6,7 @@
   <link rel="stylesheet" href="/assets/review.css"><script defer src="/assets/review.js"></script>
 </head>
 <body><main>
-  <header>
+  <header class="app-header">
     <div><p class="eyebrow">EQ ARCHIVES · INTRANET</p><h1>Website curation</h1></div>
     <div class="toolbar">
       <button id="refresh">Refresh</button>
@@ -33,10 +33,13 @@
   <p id="error" role="alert" hidden></p>
   <p id="next-step" class="notice" role="status" aria-live="polite">Loading queue…</p>
   <section id="capture-activity" aria-label="Capture activity" hidden><div id="activity" role="status" aria-live="polite"></div></section>
-  <div class="view-heading"><h2 id="view-title">Suggestions</h2><span id="view-total" class="meta"></span></div>
+  <div class="view-heading"><h2 id="view-title">Suggestions</h2><span id="view-total" class="count"></span></div>
+  <p id="view-description" class="view-description"></p>
   <div id="workspace">
     <section id="candidate-list" aria-label="Sites">
+      <div id="site-picker-heading" class="panel-heading" hidden><div><p class="panel-label">Choose a site</p><h3>Captured sites</h3><p class="browse-hint">Scroll to browse sites ↓</p></div><span id="site-picker-count" class="count"></span></div>
       <div id="candidates"></div>
+      <div id="site-picker-scroll" hidden></div>
       <nav class="pagination" aria-label="Queue pages"><button id="previous" disabled>Previous</button><span id="page"></span><button id="next" disabled>Next</button></nav>
     </section>
     <section id="site-review" aria-label="Selected site" hidden><div id="reviewed-site"></div></section>

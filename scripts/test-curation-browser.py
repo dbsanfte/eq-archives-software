@@ -15,13 +15,115 @@ async def view(page, name):
     else:
         if not await page.locator('#tools').evaluate('(node)=>node.open'):
             await page.locator('#tools > summary').click()
+        bounds=await page.locator('.tools-menu').bounding_box()
+        assert bounds['x']>=0 and bounds['x']+bounds['width']<=await page.evaluate('innerWidth'),bounds
         await page.locator('#filter').select_option(name)
+
+
+async def check_review_navigation(browser, base):
+    """Long site/page lists and a long document remain distinct and independently usable."""
+    for width in (320,390,768,1280,1440):
+        context=await browser.new_context(viewport={'width':width,'height':1000})
+        page=await context.new_page()
+        response=await context.request.get(base+'/api/queue?filter=captured')
+        queue=await response.json()
+        candidate=queue['candidates'][0]
+        review_id=candidate['coverage']['capture']['review_id']
+        response=await context.request.get(f"{base}/api/site?id={review_id}&candidate={candidate['id']}")
+        site=await response.json()
+        template=site['manifest']['captures'][0]
+        site['manifest']['captures']=[{**template,'title':f'Captured page {index+1}',
+            'url':f'http://captured-guild.example/eq/page-{index+1}.html'} for index in range(21)]
+        site['source_slots']=list(range(21))
+        site['page_identities']=[capture['url'] for capture in site['manifest']['captures']]
+        site['state']='awaiting_review'
+        site['job']={'name':'isolated-navigation-fixture'}
+        queue.update(total=12,all_count=12,captured=12,approved=0,capturing=0,operations=[],batches=[],awaiting_site_review=12)
+        queue['candidates']=[{**candidate,'id':candidate['id'] if index==0 else f'{index:024x}',
+            'scope':candidate['scope'] if index==0 else f'http://other-{index}.example/',
+            'state':'captured_awaiting_review','review_state':'awaiting_review'} for index in range(12)]
+        requests=[]
+        async def fixture(route):
+            from urllib.parse import parse_qs,urlsplit
+            requests.append(route.request)
+            assert route.request.method=='GET','Browsing must never approve or publish a site'
+            parsed=urlsplit(route.request.url)
+            if parsed.path=='/api/queue': body=queue
+            elif parsed.path=='/api/site': body=site
+            elif parsed.path=='/api/source':
+                slot=int(parse_qs(parsed.query)['slot'][0])
+                body={'complete_extracted_text':f'Complete page {slot+1}\n'+('An original EverQuest source paragraph.\n'*120)+f'Last line of page {slot+1}.'}
+            else: raise AssertionError(parsed.path)
+            await route.fulfill(status=200,json=body)
+        await page.route('**/api/**',fixture)
+        await page.goto(f"{base}/?view=captured&site={review_id}&candidate={candidate['id']}")
+        await page.locator('.site-source pre').filter(has_text='Last line of page 1.').wait_for()
+        await page.locator('#view-title').filter(has_text='Review & indexing').wait_for()
+        assert await page.get_by_role('heading',name='Captured sites',exact=True).is_visible()
+        assert await page.get_by_role('heading',name='Captured pages',exact=True).is_visible()
+        assert await page.get_by_role('region',name='Document preview',exact=True).count()==1
+        assert await page.locator('.page-navigation .browse-hint').inner_text()=='Scroll to browse pages ↓'
+        assert await page.evaluate('document.documentElement.scrollWidth<=innerWidth'),width
+        await page.get_by_text('Indexing details',exact=True).click()
+        # Check real layout/scroll gutters, not jsdom's unpainted CSS properties.
+        geometry=await page.evaluate('''() => {
+            const list=document.querySelector('.site-pages'),nav=list.parentElement,reader=document.querySelector('.site-source');
+            const a=nav.getBoundingClientRect(),b=reader.getBoundingClientRect();
+            return {gutter:list.offsetWidth-list.clientWidth,overflow:getComputedStyle(list).overflowY,
+                nav:getComputedStyle(nav).backgroundColor,reader:getComputedStyle(reader).backgroundColor,
+                gap:innerWidth<=600 ? b.top-a.bottom : b.left-a.right};
+        }''')
+        assert geometry['gutter']>=12 and geometry['overflow']=='scroll',geometry
+        assert geometry['nav']!=geometry['reader'] and geometry['gap']>=14,geometry
+        pages=page.locator('.site-pages')
+        reader=page.locator('.site-source pre')
+        await page.get_by_role('button',name='Scroll captured pages down',exact=True).click()
+        await page.wait_for_function("document.querySelector('.site-pages').scrollTop>0")
+        assert await reader.evaluate('(node)=>node.scrollTop')==0
+        before=await pages.evaluate('(node)=>node.scrollTop')
+        await pages.focus()
+        await page.keyboard.press('PageDown')
+        await page.wait_for_function('(previous)=>document.querySelector(".site-pages").scrollTop>previous',arg=before)
+        await page.keyboard.press('End')
+        await page.wait_for_function('''()=>{const n=document.querySelector('.site-pages');return n.scrollTop+n.clientHeight>=n.scrollHeight-2}''')
+        await page.get_by_role('button',name='Captured page 21',exact=True).click()
+        await reader.filter(has_text='Last line of page 21.').wait_for()
+        assert await page.locator('.page-position').inner_text()=='Page 21 of 21'
+        assert await page.get_by_role('button',name='Next page',exact=True).is_disabled()
+        assert await page.locator('.site-citation a').get_attribute('href')==f"https://web.archive.org/web/{template['timestamp']}/http://captured-guild.example/eq/page-21.html"
+        await page.get_by_role('button',name='Previous page',exact=True).click()
+        await reader.filter(has_text='Last line of page 20.').wait_for()
+        await page.get_by_role('button',name='Next page',exact=True).click()
+        await reader.filter(has_text='Last line of page 21.').wait_for()
+        await page.get_by_role('button',name='Scroll document text down',exact=True).click()
+        await page.wait_for_function("document.querySelector('.site-source pre').scrollTop>0")
+        await page.get_by_role('button',name='Scroll captured sites down',exact=True).click()
+        positions=await page.evaluate("['#candidates','.site-pages','.site-source pre'].map(s=>document.querySelector(s).scrollTop)")
+        source_requests=len([request for request in requests if '/api/source?' in request.url])
+        # A real status poll updates the decision panel without resetting any reading pane.
+        site['state']='indexing_declined'
+        queue['candidates'][0]['review_state']='indexing_declined'
+        await page.locator('.site-status .capture-phase').filter(has_text='Indexing declined').wait_for(timeout=8000)
+        assert await page.locator('.technical-details').evaluate('(node)=>node.open')
+        assert await page.evaluate("['#candidates','.site-pages','.site-source pre'].map(s=>document.querySelector(s).scrollTop)")==positions
+        assert await page.locator('.site-page [aria-current=page]').inner_text()=='Captured page 21'
+        assert len([request for request in requests if '/api/source?' in request.url])==source_requests
+        assert 'Last line of page 21.' in await reader.inner_text()
+        async with page.expect_response(lambda response:'/api/site?' in response.url):
+            await page.locator('#refresh').click()
+        await page.wait_for_function('!busy')
+        assert await page.evaluate("['#candidates','.site-pages','.site-source pre'].map(s=>document.querySelector(s).scrollTop)")==positions
+        assert await page.locator('.site-page [aria-current=page]').inner_text()=='Captured page 21'
+        await page.screenshot(path=f'/tmp/eqarchives-curation-navigation-{width}.png',full_page=True)
+        assert await page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+        await context.close()
 
 
 async def check(base):
     async with async_playwright() as playwright:
         browser=await playwright.chromium.launch()
         try:
+            await check_review_navigation(browser,base)
             for width in (320,390,1280):
                 context=await browser.new_context(viewport={'width':width,'height':900})
                 page=await context.new_page()
@@ -35,6 +137,7 @@ async def check(base):
                 assert await page.locator('.views [aria-current=page]').get_attribute('data-view')=='recommended'
                 assert await page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                 assert await page.evaluate('window.pwned') is None
+                await page.screenshot(path=f'/tmp/eqarchives-curation-suggestions-{width}.png',full_page=True)
                 await view(page,'all')
                 await page.locator('#status').filter(has_text='5 in this view').wait_for()
                 assert await page.locator('#candidates article').count()==5
@@ -236,9 +339,10 @@ async def check(base):
             await page.locator('#next').click()
             await page.locator('#page').filter(has_text='51–61 of 61').wait_for()
             remaining=47
-            await page.locator('#page').filter(has_text=re.compile(r'^1–47 of 47$')).wait_for(timeout=8000)
+            await page.locator('#page').filter(has_text=re.compile(r'^1–47 of 47$')).wait_for(timeout=8000,state='attached')
             assert await page.locator('#candidates article').count()==47
             assert await page.locator('#previous').is_disabled()
+            assert await page.locator('.pagination').is_hidden()
             await context.close()
             context=await browser.new_context(viewport={'width':390,'height':900})
             page=await context.new_page()
@@ -347,4 +451,4 @@ if __name__=='__main__':
     parser.add_argument('url')
     args=parser.parse_args()
     asyncio.run(check(args.url.rstrip('/')))
-    print('Curation browser checks passed at 320, 390 and 1280 px; direct navigation, bookmarked site reviews, progress, Undo races, scope, whole-site decisions and publication/indexing retries verified')
+    print('Curation browser checks passed: independent site/page/document scrolling at 320, 390, 768, 1280 and 1440 px; direct navigation, bookmarked reviews, progress, Undo races, scope, whole-site decisions and publication/indexing retries verified')
