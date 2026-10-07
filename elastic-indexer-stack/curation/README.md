@@ -16,11 +16,11 @@ Legacy finder/worker/broad reindex Jobs retain their separate lifecycles.
 
 1. Review Luna's grade, reason, verbatim evidence and complete extracted source.
    Archived scripts, HTML and images never execute in this screen.
-2. Choose scope and **Approve for capture**. This queues the site automatically,
-   removes it from **Suggestions**, and moves it into **Awaiting capture**.
+2. Choose scope and **Approve site for capture**. This queues the site automatically,
+   removes it from **Candidates**, and moves it into **Capture queue**.
    The queue has no item-count cap; its 50-row pages are pagination, not a limit.
    New approvals have a 60-second grace period. **Undo approval** returns the
-   site to Suggestions and retains its sources and grade. Undo remains available
+   site to Candidates and retains its sources and grade. Undo remains available
    until the worker atomically claims the site, even after the grace period.
    Deep links default to their containing
    directory and descendants; extensionless paths use that directory itself.
@@ -40,10 +40,10 @@ Legacy finder/worker/broad reindex Jobs retain their separate lifecycles.
    The worker
    spiders HTML links within the scope, including its entry directory, through
    the pinned public Wayback Machine Downloader and serial persistent client.
-4. Completed items move into **Review & indexing**, newest first. Choose **Review
-   site** to browse one site's captured pages and dated Wayback links, including
+4. Completed items move into **Review capture**, newest first. Open a site to browse
+   its captured pages and dated Wayback links, including
    complete extracted source and multiple versions of the same page.
-   **Approve site & queue indexing** approves every captured page within that
+   **Approve site & index** approves every captured page within that
    site's chosen scope. This second approval binds to its complete manifest and
    actual source hashes. Import includes AI enrichment by default, with a separate
    $2 maximum shown for that site before approval. **Decline indexing** keeps its
@@ -57,32 +57,53 @@ Legacy finder/worker/broad reindex Jobs retain their separate lifecycles.
    unsuspended Job in `eqarchives-es`, including pending/retrying Jobs with
    `active=0`. The controller cannot patch, suspend or delete Jobs.
 
-The four navigation buttons open Suggestions, Awaiting capture, Capturing and
-Review & indexing. Captured sites appear in a compact list beside the selected
-site's pages. **Captured sites**, **Captured pages**, and **Document preview**
-have separate labeled panels, contrasting surfaces, and independent scroll
-controls. The lists show scroll hints, persistent gutters, and up/down buttons;
-the reader also has Previous/Next page controls and a page position. On phones
-these panels stack vertically. **Site decision** applies to the entire capture,
-regardless of which page is open. Capture notes and indexing Job details expand
-separately. The view and selected site are retained in the URL across reloads.
-Tools & help holds additional inventory views, discovery and capture limits;
-activity history is collapsed. Publication failures appear on the affected site
-with **Retry publication**, preserving its existing approval and captured files.
-Status updates and decisions retain the page currently being read. Automatic
-and manual refreshes preserve list/document scroll positions and open scope drafts.
+The portal has five active stages: **Candidates**, **Capture queue**, **Capturing**,
+**Review capture**, and **Indexing**. Each candidate belongs to exactly one stage,
+using its durable review status where available. Indexed sites retire automatically
+to **History** and leave every active count; declined, dismissed, already archived,
+and duplicate sites also stay in History. Deferred candidates are in **Saved for
+later**. These two secondary lists are available from More. Restoring a deferred
+or dismissed candidate returns it to Candidates without approving or starting work.
+The portal includes lower-grade candidates after higher-grade ones, so they can
+receive an explicit decision. Stage searches and 50-row pagination do not cap the
+approval queue. Counts describe the entire stage, including rows outside a search.
 
-The screen shows the next action, current capture URL, files staged,
-source bytes, URL checks and site position. Capture progress is durable in SQLite
-and refreshes every five seconds, including while sources or scope drafts are open.
-Actions wait for an in-flight refresh rather than being dropped, and a draining
-queue automatically returns an empty last page to the nearest valid page.
-It shows counts rather than a percentage because the link frontier is discovered
-during traversal. Site status shows review, publication, waits for named
-existing Jobs, enrichment/indexing and completion. Typed candidate transitions
-are centralized in `scripts/archive-crawler/capture_flow.py`; queue claiming and
-Undo use the same SQLite write lock, so only one can succeed. Publication still
-requires its own explicit approval; approving a suggestion does not publish files.
+On phones, bottom navigation opens compact stage lists. A site opens a focused
+workspace showing its evidence/scope, queue position, capture progress, captured
+subset, or publication/indexing status as appropriate. Confirmed manual approvals
+follow the site into its next stage; Undo remains available until the atomic worker
+claim. A failed action cannot advance the site. Background updates refresh counts
+without navigating away from another selected site. Next site and the stage list
+support reviewing multiple sites. Scope edits require Save before approval.
+
+The captured-page browser and complete document reader are separate mobile screens
+with normal vertical scrolling. The searchable page list preserves its position
+when returning from a document. The reader has dated Wayback links, capture-version
+selection and thumb-reachable Previous/Pages/Next controls. On desktop, labeled
+page/document panels appear side by side with independent scroll controls. Whole-site
+approval appears on the site's decision screen, outside the reader. URL navigation
+retains the stage, site, selected page and version across reloads; browser Back,
+status polling and manual refresh preserve page filters, scope drafts and reading
+positions. Sources are plain extracted text; archived HTML/scripts/images never run.
+
+Capture progress refreshes every five seconds and shows actual worker-batch file,
+byte and URL counts, with the current site named. Counts are labeled as batch
+progress rather than attributed to another site. Capture errors stay in Capturing
+with an explicit Resume; queued sites explain why they wait. Indexing separates
+publication, waiting for existing Jobs, and AI enrichment/import, with no invented
+percentage. Publication and indexing failures remain in Indexing with a contextual
+Retry action. Technical Job details expand separately and remain open across polls.
+Recent operations and explicit bounded discovery live in More. There are no
+scheduled paid runs.
+
+Typed candidate transitions remain centralized in
+`scripts/archive-crawler/capture_flow.py`; queue claiming and Undo use the same
+SQLite write lock. `portal.py` projects those states and site review status into
+exclusive presentation stages without replaying approved work or moving sources.
+The stage API reads all review status metadata, independently of the recent-batch
+list limit. `GET /api/candidate?id=…` returns the selected site's review, capture
+operation and queue context, even when it is outside the current list page.
+Legacy queue filters remain available to existing operator clients.
 
 Capture batches are acquisition records. Each completed site receives an
 independent review manifest referencing the existing staged files, so pages from
@@ -249,13 +270,13 @@ pytest, including an over-50-item queue and Undo/worker claim races. The runtime
 defines a Unix account for UID/GID 10001: OpenSSH requires the passwd entry even
 when the private key and destination are supplied explicitly. The container
 smoke check exercises SSH configuration offline as that non-root user. CI also uses
-real Chromium at 320/390/768/1280/1440 px, long site/page lists with independent
-keyboard/button scrolling, document position across status polling, delayed
-source responses, live progress during
-open source/scope edits, moves between workflow views,
-Undo during a delayed refresh, draining pagination, durable site decisions,
-child-page/version browsing, bookmarked navigation, publication retry and
-independent approve/decline/reconsider actions
+real Chromium at 320/390/430/768/1280 px, with touch emulation on phones, long
+page lists and complete document screens, desktop keyboard/button scrolling,
+Back navigation and source position across status polling, delayed source/search
+responses, scope drafts, exclusive stage transitions, Undo during delayed refreshes
+and worker claims, draining pagination, durable whole-site decisions, exact dated
+versions, publication/indexing retry, deferred/dismissed restoration and automatic
+retirement from active views
 in isolated fixtures with no
 paid calls or real archive writes. Real TCP tests reject non-LAN peers and
 forwarded-header spoofs. Deployment checks the live queue/build and hashes

@@ -1,49 +1,40 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>EQ Archives — Site review</title>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#173f32">
+  <title>EQ Archives — Curation</title>
   <link rel="stylesheet" href="/assets/review.css"><script defer src="/assets/review.js"></script>
 </head>
-<body><main>
-  <header class="app-header">
-    <div><p class="eyebrow">EQ ARCHIVES · INTRANET</p><h1>Website curation</h1></div>
-    <div class="toolbar">
-      <button id="refresh">Refresh</button>
-      <details id="tools"><summary>Tools &amp; help</summary><div class="tools-menu">
-        <label>More views <select id="filter">
-          <option value="recommended">Suggestions</option><option value="approved">Awaiting capture</option>
-          <option value="capturing">Capturing</option><option value="captured">Review &amp; indexing</option>
-          <option value="pending">All awaiting review</option><option value="all">All candidates</option>
-        </select></label>
-        <button id="discover">Discover &amp; grade · 50 sites · $2 cap</button>
-        <p>Approve a suggestion to queue capture. You can undo before capture starts. After downloading, review the site's pages and approve indexing separately.</p>
-        <p>Luna grades are suggestions. Shared hosts stay within their account. Captures are bounded subsets, not complete site mirrors.</p>
-        <details><summary>Capture limits &amp; dates</summary><p>One connection, a 3-second delay and 128 KiB/s. Acquisition limits: 5 sites per batch, 20 new URLs per site, 100 HTML files and 64 MiB. The approval queue has no count limit. Prefer 1999–2001; use 2002–2007 when an exact URL has no first-tier capture.</p></details>
-      </div></details>
-    </div>
-  </header>
-  <nav class="views" aria-label="Curation views">
-    <button data-view="recommended">Suggestions <span data-count="recommended" aria-hidden="true"></span></button>
-    <button id="view-awaiting" data-view="approved">Awaiting capture <span data-count="approved" aria-hidden="true"></span></button>
-    <button data-view="capturing">Capturing <span data-count="capturing" aria-hidden="true"></span></button>
-    <button id="view-captured" data-view="captured">Review &amp; indexing <span data-count="captured" aria-hidden="true"></span></button>
+<body>
+  <header class="app-header"><a id="home" href="/?view=candidates" aria-label="Curation home"><span class="eyebrow">EQ ARCHIVES</span><strong>Curation</strong></a><div class="header-actions"><button id="refresh" aria-label="Refresh status">Refresh</button><button id="tools-open" aria-label="Open tools and history">More <span aria-hidden="true">•••</span></button></div></header>
+  <nav id="stages" aria-label="Workflow stages">
+    <button data-view="candidates" aria-label="Candidates"><span class="step-number" aria-hidden="true">1</span><span>Candidates</span><span class="count" data-count="candidates" aria-hidden="true">0</span></button>
+    <button data-view="queued" aria-label="Capture queue"><span class="step-number" aria-hidden="true">2</span><span>Queue</span><span class="count" data-count="queued" aria-hidden="true">0</span></button>
+    <button data-view="capturing" aria-label="Capturing"><span class="step-number" aria-hidden="true">3</span><span>Capture</span><span class="count" data-count="capturing" aria-hidden="true">0</span></button>
+    <button data-view="review" aria-label="Review capture"><span class="step-number" aria-hidden="true">4</span><span>Review</span><span class="count" data-count="review" aria-hidden="true">0</span></button>
+    <button data-view="indexing" aria-label="Indexing"><span class="step-number" aria-hidden="true">5</span><span>Indexing</span><span class="count" data-count="indexing" aria-hidden="true">0</span></button>
   </nav>
-  <p id="status" class="sr-only" role="status" aria-live="polite">Loading queue…</p>
-  <p id="error" role="alert" hidden></p>
-  <p id="next-step" class="notice" role="status" aria-live="polite">Loading queue…</p>
-  <section id="capture-activity" aria-label="Capture activity" hidden><div id="activity" role="status" aria-live="polite"></div></section>
-  <div class="view-heading"><h2 id="view-title">Suggestions</h2><span id="view-total" class="count"></span></div>
-  <p id="view-description" class="view-description"></p>
-  <div id="workspace">
-    <section id="candidate-list" aria-label="Sites">
-      <div id="site-picker-heading" class="panel-heading" hidden><div><p class="panel-label">Choose a site</p><h3>Captured sites</h3><p class="browse-hint">Scroll to browse sites ↓</p></div><span id="site-picker-count" class="count"></span></div>
-      <div id="candidates"></div>
-      <div id="site-picker-scroll" hidden></div>
-      <nav class="pagination" aria-label="Queue pages"><button id="previous" disabled>Previous</button><span id="page"></span><button id="next" disabled>Next</button></nav>
+  <main id="main">
+    <p id="error" role="alert" hidden></p><div id="notice" role="status" aria-live="polite" hidden></div>
+    <p id="status" class="sr-only" role="status" aria-live="polite">Loading sites…</p>
+    <section id="stage-list" aria-labelledby="view-title">
+      <div class="view-heading"><div><p class="eyebrow" id="view-step"></p><h1 id="view-title">Candidates</h1></div><span id="view-total" class="total"></span></div>
+      <p id="view-description" class="description"></p>
+      <div id="stage-activity" hidden></div>
+      <label class="search-label" for="site-search">Find a site</label><input id="site-search" type="search" placeholder="Site name or address" maxlength="200" autocomplete="off">
+      <div id="candidates" class="site-list"></div>
+      <nav id="pagination" aria-label="Site list pages" hidden><button id="previous">Previous</button><span id="page"></span><button id="next">Next</button></nav>
     </section>
-    <section id="site-review" aria-label="Selected site" hidden><div id="reviewed-site"></div></section>
-  </div>
-  <details class="history"><summary>Activity history</summary><div id="operations"></div></details>
-  <footer><p>No scheduled paid runs. Sources stay in staging until you approve publication and indexing.</p><p id="version"></p></footer>
-</main></body></html>
+    <section id="site-workspace" aria-label="Site workspace" hidden></section>
+    <footer><span>Private intranet · no scheduled paid runs</span><span id="version"></span></footer>
+  </main>
+  <div id="action-dock" hidden></div>
+  <dialog id="tools" aria-labelledby="tools-title"><div class="dialog-heading"><h2 id="tools-title">Tools & history</h2><button id="tools-close" aria-label="Close tools">Close</button></div>
+    <div class="tool-links"><button data-view="saved">Saved for later</button><button data-view="history">History</button></div>
+    <section class="tool-section"><h3>Discover more sites</h3><p>Search outward from known EQ sites and grade new candidates with Luna.</p><button id="discover">Discover & grade · 50 sites · $2 cap</button><p class="meta">Each run is explicit. Model grades support your decision; they never approve a capture.</p><div id="discovery-status"></div></section>
+    <details><summary>Capture limits & dates</summary><p>One connection, a 3-second delay and 128 KiB/s. The queue has no count limit. Each worker batch has at most 5 sites, 20 new URLs per site, 100 HTML files and 64 MiB. Captures prefer 1999–2001, then 2002–2007. Downloads are bounded subsets, not complete mirrors.</p></details>
+    <details><summary>Recent activity</summary><div id="operations"></div></details>
+  </dialog>
+</body>
+</html>

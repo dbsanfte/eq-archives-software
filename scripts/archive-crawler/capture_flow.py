@@ -30,6 +30,7 @@ class Action(str, Enum):
     APPROVE_INDEX = 'approve_indexing'
     DECLINE_INDEX = 'decline_indexing'
     RECONSIDER_INDEX = 'reconsider_indexing'
+    RESTORE = 'restore_candidate'
     PUBLISH = 'publish'
     INDEX = 'index'
 
@@ -37,6 +38,7 @@ class Action(str, Enum):
 REVIEWABLE = frozenset(('approval_pending', 'approved_waiting_batch', 'deferred', 'rejected',
                         'discovered', 'sampled', 'sample_error', 'unavailable', 'identity_unresolved'))
 TRANSITIONS = {
+    Action.RESTORE: ({CandidateState.DEFERRED, CandidateState.REJECTED}, CandidateState.SUGGESTED),
     Action.APPROVE: (REVIEWABLE, CandidateState.AWAITING_CAPTURE),
     Action.REJECT: (REVIEWABLE, CandidateState.REJECTED),
     Action.DEFER: (REVIEWABLE, CandidateState.DEFERRED),
