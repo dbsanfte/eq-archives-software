@@ -18,13 +18,13 @@ async def check(base):
                 external=[]
                 page.on('request',lambda request: external.append(request.url) if not request.url.startswith(base) else None)
                 await page.goto(base)
-                await page.locator('#status').filter(has_text='3 candidates').wait_for()
+                await page.locator('#status').filter(has_text='5 candidates').wait_for()
                 assert await page.locator('#candidates article').count()==2
                 assert await page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                 assert await page.evaluate('window.pwned') is None
                 await page.locator('#filter').select_option('all')
-                await page.locator('#status').filter(has_text='3 in this view').wait_for()
-                assert await page.locator('#candidates article').count()==3
+                await page.locator('#status').filter(has_text='5 in this view').wait_for()
+                assert await page.locator('#candidates article').count()==5
                 card=page.locator('#candidates article').filter(has=page.get_by_role('link',name='http://guild.example/eq/news.html',exact=True))
                 await card.locator('summary').click()
                 await card.locator('pre').filter(has_text='Early EverQuest guild history.').wait_for()
@@ -89,14 +89,14 @@ async def check(base):
                         'payload':{'batch_id':'a'*32},'result':{'progress':{'phase':'ready_for_review' if virtual_state=='captured_awaiting_review' else 'downloading',
                         'files':capture_files,'bytes':1234,'urls_checked':1,'sites_done':0,'sites_total':1,'site_url':'http://guild.example/eq/',
                         'current_url':'http://guild.example/eq/guide.html'}}}]
-                    if virtual_state:
+                    if virtual_state=='capturing':
                         from urllib.parse import parse_qs,urlsplit
                         chosen=parse_qs(urlsplit(route.request.url).query)['filter'][0]
                         current={**virtual_row,'state':virtual_state,'coverage':{**virtual_row['coverage'],'capture':{'batch_id':'a'*32}}}
-                        body['candidates']=[current] if chosen in ('all','capturing') and virtual_state=='capturing' or chosen in ('all','captured') and virtual_state=='captured_awaiting_review' else []
-                        body['total']=len(body['candidates'])
+                        if chosen=='capturing':
+                            body['candidates']=[current]
+                            body['total']=1
                         body['capturing']=int(virtual_state=='capturing')
-                        body['captured']=int(virtual_state=='captured_awaiting_review')
                     await route.fulfill(status=200,content_type='application/json',body=json.dumps(body))
                 await page.route('**/api/queue?**',active_operation)
                 await page.locator('#refresh').click()
@@ -104,14 +104,9 @@ async def check(base):
                 await card.locator('summary').click()
                 await card.locator('pre').filter(has_text='Early EverQuest guild history.').wait_for()
                 source_text=await card.locator('pre').inner_text()
-                await page.locator('#batches summary').filter(has_text='Review archive file set').click()
-                included=page.get_by_label('Include this capture')
-                await included.first.uncheck()
                 capture_files=3
                 await page.locator('#activity .capture-counts').filter(has_text='3 HTML files staged').wait_for(timeout=8000)
                 assert await card.locator('pre').inner_text()==source_text
-                assert not await included.first.is_checked()
-                assert await page.get_by_role('button',name='Approve publication & queue indexing').is_enabled()
                 await card.get_by_label('Capture scope',exact=True).select_option('custom')
                 await card.get_by_label('Custom capture folder path').fill('/research')
                 capture_files=4
@@ -135,13 +130,67 @@ async def check(base):
                 assert not await page.get_by_role('button',name='Undo approval',exact=True).count()
                 virtual_state='captured_awaiting_review'
                 await page.locator('#refresh').click()
-                await page.locator('#activity h3').filter(has_text='Capture complete').wait_for()
+                await page.locator('#next-step').filter(has_text='2 captured sites').wait_for()
+                await page.locator('#capture-activity').wait_for(state='hidden')
                 await page.get_by_role('button',name='View recent captures',exact=True).click()
-                await page.locator('#status').filter(has_text='1 in this view').wait_for()
+                await page.locator('#status').filter(has_text='2 in this view').wait_for()
                 assert await page.locator('#filter').input_value()=='captured'
-                assert await page.locator('#candidates article').count()==1
-                await page.locator('#batches .batch-status h3').filter(has_text='Downloaded — review required').wait_for()
+                assert await page.locator('#candidates article').count()==2
                 assert not await page.get_by_role('button',name='Undo approval',exact=True).count()
+                guild=page.locator('#candidates article').filter(has=page.get_by_role('link',name='http://captured-guild.example/eq/',exact=True))
+                other=page.locator('#candidates article').filter(has=page.get_by_role('link',name='http://captured-class.example/eq/',exact=True))
+                await guild.get_by_role('button',name='Review site',exact=True).click()
+                pane=page.locator('#reviewed-site')
+                await pane.locator('p').filter(has_text='2 pages · 3 dated captures').wait_for()
+                assert await pane.locator('article').count()==1
+                assert not await page.get_by_label('Include this capture').count()
+                links=await pane.locator('.site-pages a').evaluate_all('(links)=>links.map(link=>link.href)')
+                assert len(links)==3 and all('web.archive.org/web/' in link and 'captured-guild.example' in link for link in links)
+                assert any('/web/20000101000000/http://captured-guild.example/eq/guide.html' in link for link in links)
+                await pane.get_by_role('button',name='Guild child guide',exact=True).click()
+                await pane.locator('pre').filter(has_text='Last child paragraph.').wait_for()
+                # Updating unrelated acquisition progress must preserve the open page.
+                virtual_state=None
+                capture_files=5
+                await page.locator('#refresh').click()
+                await page.locator('#activity h3').filter(has_text='Capturing sites').wait_for()
+                capture_files=6
+                await page.locator('#activity .capture-counts').filter(has_text='6 HTML files staged').wait_for(timeout=8000)
+                assert 'Last child paragraph.' in await pane.locator('pre').inner_text()
+                await pane.get_by_role('button',name='captured-guild EQ archive',exact=True).click()
+                await pane.get_by_label('Capture version').select_option('1')
+                await pane.locator('pre').filter(has_text='Later EverQuest guild history.').wait_for()
+                await pane.get_by_label('Capture version').select_option('0')
+                await pane.get_by_label('Capture version').select_option('1')
+                await page.wait_for_timeout(500)
+                assert 'Later EverQuest guild history.' in await pane.locator('pre').inner_text()
+                # A slow source response from the previous site cannot replace this site.
+                await pane.get_by_label('Capture version').select_option('0')
+                loading,ready=asyncio.Event(),asyncio.Event()
+                async def held_site(route):
+                    response=await route.fetch()
+                    loading.set()
+                    await ready.wait()
+                    await route.fulfill(response=response)
+                await page.route('**/api/site?**',held_site)
+                await other.get_by_role('button',name='Review site',exact=True).click()
+                await asyncio.wait_for(loading.wait(),timeout=3)
+                assert not await pane.get_by_role('button',name='Approve site & queue indexing').count()
+                ready.set()
+                await pane.locator('pre').filter(has_text='captured-class site content.').wait_for()
+                await page.unroute('**/api/site?**',held_site)
+                assert 'captured-guild site content.' not in await pane.locator('pre').inner_text()
+                await guild.get_by_role('button',name='Review site',exact=True).click()
+                await pane.get_by_role('button',name='Decline indexing',exact=True).click()
+                await pane.locator('.site-status').filter(has_text='Indexing declined').wait_for()
+                assert 'Awaiting indexing decision' in await other.inner_text()
+                await page.reload()
+                await page.get_by_role('button',name='View recent captures',exact=True).click()
+                await guild.get_by_role('button',name='Review site',exact=True).click()
+                await pane.locator('.site-status').filter(has_text='Indexing declined').wait_for()
+                await pane.get_by_role('button',name='Reconsider indexing',exact=True).click()
+                await pane.get_by_role('button',name='Approve site & queue indexing',exact=True).wait_for()
+                await pane.screenshot(path=f'/tmp/eqarchives-site-review-browser-{width}.png')
                 assert await page.evaluate('document.documentElement.scrollWidth <= innerWidth')
                 assert not external,external
                 await context.close()
@@ -172,21 +221,30 @@ async def check(base):
             context=await browser.new_context(viewport={'width':390,'height':900})
             page=await context.new_page()
             await page.goto(base)
-            button=page.get_by_role('button',name='Approve publication & queue indexing')
-            await button.wait_for()
-            await page.locator('#batches p').filter(has_text='AI enrichment on import').wait_for()
-            await page.locator('#batches summary').filter(has_text='Review archive file set').click()
-            files=page.get_by_label('Include this capture')
-            for checkbox in await files.all():
-                await checkbox.uncheck()
-            assert await button.is_disabled()
-            await files.first.check()
-            assert await button.is_enabled()
-            await button.click()
-            await page.locator('#batches h3').filter(has_text='Publishing approved files').wait_for()
+            await page.get_by_role('button',name='View recent captures',exact=True).click()
+            pane=page.locator('#reviewed-site')
+            other=page.locator('#candidates article').filter(has=page.get_by_role('link',name='http://captured-class.example/eq/',exact=True))
+            guild=page.locator('#candidates article').filter(has=page.get_by_role('link',name='http://captured-guild.example/eq/',exact=True))
+            await other.get_by_role('button',name='Review site',exact=True).click()
+            await pane.get_by_role('button',name='Decline indexing',exact=True).click()
+            await pane.locator('.site-status').filter(has_text='Indexing declined').wait_for()
+            await guild.get_by_role('button',name='Review site',exact=True).click()
+            await pane.locator('p').filter(has_text='Maximum enrichment spend: $2 for this site.').wait_for()
+            async with page.expect_request(lambda request:'/api/site-decision' in request.url) as approval:
+                await pane.get_by_role('button',name='Approve site & queue indexing',exact=True).click()
+            payload=(await approval.value).post_data_json
+            assert set(payload)=={'id','manifest_sha256','decision'} and payload['decision']=='approve'
+            await pane.locator('.site-status').filter(has_text='Approved — publication queued').wait_for()
+            snapshot=await context.request.get(base+'/api/queue?filter=captured')
+            sites=(await snapshot.json())['candidates']
+            assert {row['state'] for row in sites}=={'approved_waiting_publication','indexing_declined'}
+            approved=await context.request.get(base+'/api/site?id='+payload['id'])
+            assert len((await approved.json())['manifest']['captures'])==3
             await page.reload()
-            await page.locator('#batches h3').filter(has_text='Publishing approved files').wait_for()
-            assert not await page.get_by_role('button',name='Approve publication & queue indexing').count()
+            await page.get_by_role('button',name='View recent captures',exact=True).click()
+            await guild.get_by_role('button',name='Review site',exact=True).click()
+            await pane.locator('.site-status').filter(has_text='Approved — publication queued').wait_for()
+            assert not await pane.get_by_role('button',name='Approve site & queue indexing').count()
             await context.close()
         finally:
             await browser.close()
@@ -197,4 +255,4 @@ if __name__=='__main__':
     parser.add_argument('url')
     args=parser.parse_args()
     asyncio.run(check(args.url.rstrip('/')))
-    print('Curation browser checks passed at 320, 390 and 1280 px; queue views, progress, Undo/refresh races, draining pagination, scope and publication verified')
+    print('Curation browser checks passed at 320, 390 and 1280 px; queue views, progress, Undo/refresh races, draining pagination, scope and independent whole-site indexing decisions verified')

@@ -16,12 +16,13 @@ def fixture(root):
     with connect(root) as store:
         if store.candidates():
             return
-        for name,grade in (('guild',3),('class',2),('mixed',1)):
+        for name,grade in (('guild',3),('class',2),('mixed',1),('captured-guild',3),('captured-class',3)):
             url=f'http://{name}.example/eq/news.html'
             identifier=digest(url)[:24]
             captures=[]
             for timestamp,when in (('20000101000000','Early'),('20010101000000','Later')):
                 body=(f'<title>{name} EQ archive</title><p>{when} EverQuest guild history.</p>'
+                      f'<p>{name} site content.</p>'
                       '<p>Final paragraph.</p><p>&lt;script&gt;window.pwned=true&lt;/script&gt;</p>'
                       '<img src="https://external.example/never-load.jpg">').encode()
                 path=root/'captures'/identifier/(timestamp+'.html')
@@ -38,10 +39,20 @@ def fixture(root):
                     'signature':digest({'grader':SIGNATURE,'documents':sources(store,current,120000)})}
             store.db.execute('UPDATE candidates SET rating=? WHERE id=?',(json.dumps(rating),identifier))
         store.db.commit()
-        row=record(store,store.candidates()[0])
-        manifest={'schema':1,'batch_id':'a'*32,'sites':[{key:row[key] for key in ('id','url','scope','scope_mode','manifest_sha256')}],
-                  'captures':[{**capture,'candidate_id':row['id'],'archive_path':archive_path(capture)} for capture in row['captures']]}
+        rows=[record(store,row) for row in store.candidates() if 'captured-' in row['url']]
+        manifest={'schema':1,'batch_id':'a'*32,'sites':[{key:row[key] for key in ('id','url','scope','scope_mode','manifest_sha256')} for row in rows],
+                  'captures':[{**capture,'candidate_id':row['id'],'archive_path':archive_path(capture)} for row in rows for capture in row['captures']]}
+        guild=next(row for row in rows if 'captured-guild' in row['url'])
+        raw=b'<title>Guild child guide</title><p>EverQuest guild child guide.</p><p>Last child paragraph.</p>'
+        child_path=root/'captures'/guild['id']/'guide.html'
+        child_path.write_bytes(raw)
+        child={**guild['captures'][0],'candidate_id':guild['id'],'url':'http://captured-guild.example/eq/guide.html','path':str(child_path.relative_to(root)),
+               'bytes':len(raw),'sha256':digest(raw),'title':'Guild child guide'}
+        child['archive_path']=archive_path(child)
+        manifest['captures'].append(child)
         store.db.execute("INSERT INTO batches VALUES (?,'awaiting_review',?,?,NULL,NULL,NULL,'now','now')",('a'*32,json.dumps(manifest),digest(manifest)))
+        for row in rows:
+            store.db.execute("UPDATE candidates SET state='captured_awaiting_review' WHERE id=?",(row['id'],))
         store.db.commit()
 
 

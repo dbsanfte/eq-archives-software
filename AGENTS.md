@@ -213,7 +213,7 @@ hash checks and stale-decision rejection. The pilot stages bounded page samples,
 exports explicit approved batches, and cannot publish archive Git changes or
 write production index documents. The production service in
 `elastic-indexer-stack/curation` adds persistent LAN review, explicit page/directory/
-site-account scopes, bounded acquisition, selected-file publication approval and
+site-account scopes, bounded acquisition, whole-site publication/indexing approval and
 create-only imports. Use its guide, Dockerfile pytest and `scripts/smoke-curation.sh`
 browser/TCP checks for changes. Preserve the exact Linux
 `websites/<host>/<timestamp>/<decoded path>` convention and refuse unsafe names or
@@ -236,7 +236,11 @@ of at most five after a 60-second Undo grace period. Preserve typed transitions,
 atomic Undo/claim locking, durable progress and separate Capturing/Recent captures
 views. A paused capture requires explicit resume and holds the queue. Source
 reading and scope drafts must not prevent progress polling or lose edits. Download
-completion still requires explicit file-set publication approval.
+completion creates an independent review for each site. Review and approve all
+captured pages within one site's chosen scope at a time, with dated Wayback links
+and complete sources. Preserve independent approve/decline/reconsider decisions,
+manifest-bound approvals and metadata-only migration of unapproved mixed capture
+groups; never copy sources or replay already approved publication/import work.
 
 Do not alter, suspend, delete or restart existing indexing Jobs or their source
 checkouts during curation delivery. Its controller has only Jobs get/list/create
@@ -248,7 +252,7 @@ separate enrichment subdirectory writable. They receive their dedicated
 create-only ES account, existing Nomic key and only the paid Luna key item,
 never the publication key. AI enrichment is enabled by default using the
 existing text prompts/schema enums, with source-bound caching, conservative
-reservations and a separate $2 cap per approved batch. Preserve full source,
+reservations and a separate $2 cap per approved site. Preserve full source,
 model provenance and supported date evidence; capture dates are not publication
 estimates. Enrichment failures leave the new document pending. Skip existing
 IDs without paying for enrichment or overwriting their metadata.
