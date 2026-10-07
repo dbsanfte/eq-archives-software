@@ -10,6 +10,12 @@ from common import CrawlError, original_url, site_identity, site_scope, tier, wi
 VERSION = 1
 
 
+class InventoryPause(CrawlError):
+    def __init__(self, reason, message, retryable=True):
+        super().__init__(message)
+        self.reason, self.retryable = reason, retryable
+
+
 class SiteInventory:
     def __init__(self, archive, max_trees=4096, max_bytes=32 * 1024 * 1024, max_seconds=15):
         self.archive = archive
@@ -32,9 +38,12 @@ class SiteInventory:
     def tree(self, oid):
         if oid in self.trees:
             return self.trees[oid]
-        if (self.probes >= self.maximum or len(self.trees) >= 16384 or self.bytes >= self.byte_limit
-                or time.monotonic() - self.started > self.seconds):
-            raise CrawlError('Site inventory metadata budget reached')
+        if self.probes >= self.maximum or len(self.trees) >= 16384:
+            raise InventoryPause('tree_limit', 'The metadata read limit was reached. Continue from the saved position.')
+        if self.bytes >= self.byte_limit:
+            raise InventoryPause('byte_limit', 'The metadata byte limit was reached. Continue from the saved position.')
+        if time.monotonic() - self.started > self.seconds:
+            raise InventoryPause('time_limit', 'The check reached its time limit. Continue from the saved position.')
         if not re.fullmatch(r'[a-f0-9]{40}', oid):
             raise CrawlError('Invalid archive tree identity')
         if self.process is None:
@@ -47,8 +56,13 @@ class SiteInventory:
         if len(header) != 3 or header[1] != b'tree':
             raise CrawlError('Archive metadata unavailable locally; no fetch attempted')
         size = int(header[2])
-        if size > 2 * 1024 * 1024 or self.bytes + size > self.byte_limit:
-            raise CrawlError('Site inventory metadata byte budget reached')
+        # Large shared hosts can have >2 MiB of timestamp entries alone. Account
+        # checks still obey the cumulative byte budget; a smaller per-tree cap
+        # would make every retry stop before reaching a resumable position.
+        if size > self.byte_limit:
+            raise InventoryPause('tree_too_large', 'An archive metadata tree exceeds the check’s total byte limit. Operator attention is required.', False)
+        if self.bytes + size > self.byte_limit:
+            raise InventoryPause('byte_limit', 'The metadata byte limit was reached. Continue from the saved position.')
         data = self.process.stdout.read(size)
         if len(data) != size or self.process.stdout.read(1) != b'\n':
             raise CrawlError('Archive tree metadata is incomplete')
@@ -103,14 +117,15 @@ class SiteInventory:
             for host in matches:
                 captures = self.tree(host['tree']).items()
                 captures = sorted(captures, key=lambda entry: (entry[0] not in timestamps, tier(entry[0]) or 3, entry[0]))
-                for timestamp, (mode, oid) in captures:
-                    if mode != b'40000' or not re.fullmatch(r'\d{14}', timestamp):
-                        continue
+                captures = [(timestamp, entry) for timestamp, entry in captures
+                            if entry[0] == b'40000' and re.fullmatch(r'\d{14}', timestamp)]
+                for capture_index, (timestamp, (mode, oid)) in enumerate(captures):
                     current_cursor = [host['host'], timestamp]
                     if not passed:
                         if current_cursor != cursor:
                             continue
                         passed = True
+                    result['progress'] = {'host': host['host'], 'checked': capture_index, 'total': len(captures)}
                     for path in paths:
                         current = oid
                         pieces = path.split('/') if path else ['index.html']
@@ -119,6 +134,7 @@ class SiteInventory:
                             if entry is None:
                                 break
                             if index == len(pieces) - 1:
+                                result['progress']['checked'] += 1
                                 result.update(status='already_archived', archive_host=host['host'],
                                               archive_path=f"websites/{host['host']}/{timestamp}/{path or 'index.html'}")
                                 self.archive.store.set(cache_key, result)
@@ -126,8 +142,12 @@ class SiteInventory:
                             if entry[0] != b'40000':
                                 break
                             current = entry[1]
-        except (CrawlError, OSError, ValueError):
-            result.update(status='inventory_partial', complete=False)
+                    result['progress']['checked'] += 1
+        except (CrawlError, OSError, ValueError) as error:
+            result.update(status='inventory_partial', complete=False,
+                reason=error.reason if isinstance(error, InventoryPause) else 'metadata_unavailable',
+                message=str(error) if isinstance(error, InventoryPause) else 'Archive metadata is unavailable locally. An operator must restore it before approval; no automatic fetch was attempted.',
+                retryable=error.retryable if isinstance(error, InventoryPause) else False)
             if current_cursor:
                 self.archive.store.set(cache_key + ':cursor', {'position': current_cursor, 'timestamps': timestamps})
         finally:

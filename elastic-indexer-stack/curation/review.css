@@ -99,6 +99,7 @@ progress { width:100%; display:block; margin:18px 0; accent-color:var(--forest);
 .page-position { flex:1; text-align:center; font-size:12px; white-space:nowrap; }
 #notice { padding:12px 14px; margin-bottom:18px; background:#e5efde; border:1px solid #acc2a0; border-radius:9px; font-size:14px; line-height:1.6; }
 #notice button { margin:8px 8px 0 0; }
+#notice[data-tone=attention] { background:#fff4e9; border-color:#d8ae88; color:#7e4525; }
 #error { background:#fff0e7; color:#923b26; padding:14px; border:1px solid #d3a18b; border-radius:9px; }
 #stage-activity .panel { background:#e8f0e2; }
 .reading-layout { min-width:0; }
