@@ -206,7 +206,10 @@ function renderWorkspace() {
     const navigation=node('div',undefined,'workspace-nav');
     navigation.append(control(route.panel==='reader' ? '← Back to pages' : route.panel==='pages' ? '← Back to site review' : `← ${names[route.view]}`,()=>backFromSite(),'quiet back'));
     if (route.panel==='site' && stages.includes(row.stage)) {
-      const next=control('Next site →',()=>{const rows=data.candidates.filter(item=>item.id!==route.candidate);if (rows.length) openSite(rows[0].id);},'quiet back');next.id='next-site';navigation.append(next);
+      const next=control('Next site →',()=>{
+        const rows=data.candidates,index=rows.findIndex(item=>item.id===route.candidate),target=rows[(index+1)%rows.length];
+        if (target && target.id!==route.candidate) openSite(target.id);
+      },'quiet back');next.id='next-site';navigation.append(next);
     }
     root.append(navigation);
     const header=node('header',undefined,'site-header');

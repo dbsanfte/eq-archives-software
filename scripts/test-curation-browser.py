@@ -52,6 +52,15 @@ async def basic_flow(browser,base,width):
     await safe_layout(page,width)
     await open_site(page,'guild.example/eq/')
     assert await page.locator('#stage-list').is_hidden()
+    # Next site visits the current list rather than bouncing between two entries.
+    seen={'guild.example/eq/'}
+    for _ in range(2):
+        await page.get_by_role('button',name='Next site →',exact=True).click()
+        await page.wait_for_function('(seen)=>{const h=document.querySelector("#site-workspace h1");return h && !seen.includes(h.textContent)}',arg=list(seen))
+        seen.add(await page.locator('#site-workspace h1').inner_text())
+    assert len(seen)==3
+    await page.get_by_role('button',name='Next site →',exact=True).click()
+    await page.get_by_role('heading',name='guild.example/eq/',exact=True).wait_for()
     await page.get_by_role('button',name='Read source evidence · 2 captures').click()
     await page.get_by_role('button',name='Read guild EQ archive',exact=True).click()
     source=page.locator('.document-text')
