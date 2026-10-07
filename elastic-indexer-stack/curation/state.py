@@ -59,7 +59,7 @@ def worker_lease(directory):
 def enqueue(store, kind, payload, commit=True):
     if commit:
         store.db.execute("BEGIN IMMEDIATE")
-    if store.db.execute("SELECT 1 FROM operations WHERE state IN ('queued','running')").fetchone():
+    if kind != 'publish' and store.db.execute("SELECT 1 FROM operations WHERE state IN ('queued','running')").fetchone():
         raise CrawlError("A capture or discovery operation is already queued or running")
     operation = identifier()
     store.db.execute("INSERT INTO operations VALUES (?,?,?, ?,NULL,NULL,?,?)",

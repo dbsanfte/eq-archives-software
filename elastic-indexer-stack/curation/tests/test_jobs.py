@@ -114,6 +114,7 @@ def test_new_imports_wait_for_existing_active_pending_and_retrying_jobs(candidat
     with connect(root) as store:
         store.db.execute("INSERT INTO batches VALUES (?,'published_waiting_index',?,?,?,NULL,NULL,'now','now')",
                          (manifest['batch_id'],json.dumps(manifest),expected,json.dumps({'commit':'a'*40})))
+        store.db.execute("UPDATE candidates SET state='published'")
         store.db.commit()
     worker=Worker(root,kube=kube)
     try:

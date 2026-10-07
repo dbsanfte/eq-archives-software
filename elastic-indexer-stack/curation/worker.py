@@ -5,8 +5,11 @@ import os
 from pathlib import Path
 import sqlite3
 import threading
+from datetime import datetime, timedelta
 
 from common import CrawlError, Store, capture_scope, digest, now, save, site_scope
+from capture_flow import Action, UNDO_SECONDS, transition
+from capture_queue import claim
 from crawler import parser
 from discovery import discover
 from acquisition import sample
@@ -87,6 +90,12 @@ class Worker:
             # A terminated paid/download request has uncertain outcome. Require
             # an explicit resume; retained dollar and HTTP reservations still apply.
             store.db.execute("UPDATE operations SET state='interrupted',error='Worker stopped; resume explicitly',updated=? WHERE state='running'", (now(),))
+            # Give legacy approvals the same opportunity to undo on first rollout.
+            for row in store.db.execute("SELECT id,decision FROM candidates WHERE state='approved_waiting_batch'").fetchall():
+                grant = json.loads(row['decision'])
+                if 'capture_after' not in grant:
+                    grant['capture_after'] = (datetime.fromisoformat(now()) + timedelta(seconds=UNDO_SECONDS)).isoformat()
+                    store.db.execute('UPDATE candidates SET decision=? WHERE id=?', (json.dumps(grant), row['id']))
             store.db.commit()
         self.thread = threading.Thread(target=self.run, name="curation-worker", daemon=True)
 
@@ -97,6 +106,28 @@ class Worker:
         self.stop.set()
         self.thread.join(timeout=100)
         self.lease.close()
+
+    def capture_queue(self):
+        with connect(self.root) as store:
+            due = store.db.execute("SELECT 1 FROM candidates WHERE state='approved_waiting_batch' AND json_extract(decision,'$.capture_after')<=?", (now(),)).fetchone()
+            if not due:
+                if store.get('capture_queue_error'):
+                    store.set('capture_queue_error', None)
+                return
+        refresh(self.root)
+        with connect(self.root) as store:
+            store.db.execute('BEGIN IMMEDIATE')
+            if store.db.execute("SELECT 1 FROM operations WHERE state IN ('queued','running') OR kind='capture' AND state='interrupted'").fetchone():
+                store.db.rollback()
+                return
+            rows = store.db.execute("SELECT id FROM candidates WHERE state='approved_waiting_batch' AND json_extract(decision,'$.capture_after')<=? ORDER BY json_extract(decision,'$.capture_after'),rowid LIMIT 5", (now(),)).fetchall()
+            if not rows:
+                store.db.rollback()
+                return
+            claim(store, [row['id'] for row in rows])
+            store.db.commit()
+            if store.get('capture_queue_error'):
+                store.set('capture_queue_error', None)
 
     def operation(self):
         with connect(self.root) as store:
@@ -130,21 +161,34 @@ class Worker:
                     store.db.execute("UPDATE batches SET state='published_waiting_index',publication=?,updated=? WHERE id=?",
                                      (json.dumps(result), now(), batch_id))
                     for site in batch["manifest"]["sites"]:
-                        store.db.execute("UPDATE candidates SET state='published' WHERE id=?", (site["id"],))
+                        row = store.db.execute('SELECT state FROM candidates WHERE id=?', (site['id'],)).fetchone()
+                        store.db.execute('UPDATE candidates SET state=? WHERE id=?', (transition(row['state'], Action.PUBLISH), site['id']))
                     store.db.commit()
             else:
                 with connect(self.root) as store:
                     for site in operation['payload']['sites']:
                         require_new(store, site['url'])
-                manifest = capture_sites(self.root, operation["payload"]["batch_id"], operation["payload"]["sites"])
                 batch_id = operation["payload"]["batch_id"]
+                latest = None
+                def progress(snapshot):
+                    nonlocal latest
+                    latest = snapshot
+                    with connect(self.root) as store:
+                        store.db.execute("UPDATE operations SET result=?,updated=? WHERE id=? AND state='running'",
+                                         (json.dumps({'batch_id': batch_id, 'progress': snapshot}), now(), operation['id']))
+                        store.db.commit()
+                manifest = capture_sites(self.root, batch_id, operation["payload"]["sites"], progress=progress)
                 with connect(self.root) as store:
                     store.db.execute("UPDATE batches SET state='awaiting_review',manifest=?,manifest_sha256=?,error=NULL,updated=? WHERE id=?",
                                      (json.dumps(manifest), digest(manifest), now(), batch_id))
                     for site in manifest["sites"]:
-                        store.db.execute("UPDATE candidates SET state='captured_awaiting_review' WHERE id=?", (site["id"],))
+                        row = store.db.execute('SELECT state,coverage FROM candidates WHERE id=?', (site['id'],)).fetchone()
+                        coverage = json.loads(row['coverage'] or '{}')
+                        coverage['capture'] = {'batch_id':batch_id,'completed_at':now()}
+                        store.db.execute('UPDATE candidates SET state=?,coverage=? WHERE id=?',
+                                         (transition(row['state'], Action.COMPLETE), json.dumps(coverage), site['id']))
                     store.db.commit()
-                result = {"captures": len(manifest["captures"]), "batch_id": batch_id}
+                result = {"captures": len(manifest["captures"]), "batch_id": batch_id, "progress": latest}
             with connect(self.root) as store:
                 store.db.execute("UPDATE operations SET state='completed',result=?,updated=? WHERE id=?", (json.dumps(result), now(), operation["id"]))
                 store.db.commit()
@@ -186,11 +230,20 @@ class Worker:
                                  (state, json.dumps(detail), now(), batch["id"]))
                 if state == "indexed":
                     for site in batch["manifest"]["sites"]:
-                        store.db.execute("UPDATE candidates SET state='indexed' WHERE id=?", (site["id"],))
+                        row = store.db.execute('SELECT state FROM candidates WHERE id=?', (site['id'],)).fetchone()
+                        store.db.execute('UPDATE candidates SET state=? WHERE id=?', (transition(row['state'], Action.INDEX), site['id']))
                 store.db.commit()
 
     def run(self):
         while not self.stop.is_set():
+            try:
+                self.capture_queue()
+            except Exception as error:
+                # Keep invalid/stale approvals queued for an explicit correction.
+                with connect(self.root) as store:
+                    detail = str(error) if isinstance(error, CrawlError) else 'Capture queue paused; staging is unavailable'
+                    if store.get('capture_queue_error') != detail:
+                        store.set('capture_queue_error', detail)
             self.operation()
             if self.stop.is_set():
                 break

@@ -230,6 +230,14 @@ local Git metadata and resume without automatic fetches or archive walks. Custom
 capture folders are absolute URL paths within the site's account; saving a new
 scope invalidates the previous approval and must persist across reloads.
 
+Production approval automatically moves a suggestion to Awaiting capture. The
+queue has no count cap; the worker claims oldest eligible items in serial batches
+of at most five after a 60-second Undo grace period. Preserve typed transitions,
+atomic Undo/claim locking, durable progress and separate Capturing/Recent captures
+views. A paused capture requires explicit resume and holds the queue. Source
+reading and scope drafts must not prevent progress polling or lose edits. Download
+completion still requires explicit file-set publication approval.
+
 Do not alter, suspend, delete or restart existing indexing Jobs or their source
 checkouts during curation delivery. Its controller has only Jobs get/list/create
 permissions and waits for other unfinished, unsuspended Jobs, including pending/

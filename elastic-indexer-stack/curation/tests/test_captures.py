@@ -164,3 +164,31 @@ def test_manifest_rejects_changed_files_duplicate_destinations_and_wrong_layout(
     manifest['captures'][0]['archive_path']='websites/other/filename.html'
     with pytest.raises(CrawlError,match='destination'):
         check_manifest(root,manifest)
+
+
+def test_capture_reports_real_counts_before_requests_and_after_resume(candidate):
+    root,row=candidate
+    reports=[]
+    class Downloader:
+        def __init__(self,*args): pass
+        def call(self,job):
+            assert reports[-1]['current_url']==job['url']
+            assert reports[-1]['phase']==('checking_wayback' if job['op']=='list' else 'downloading')
+            if job['op']=='list':
+                return {'captures':[{'url':job['url'],'timestamp':'20000201000000','digest':'cdx','length':'100'}]}
+            raw=b'<p>EverQuest guide.</p>'
+            Path(job['destination']).write_bytes(raw)
+            return {'url':job['url'],'timestamp':job['timestamp'],'sha256':digest(raw),'bytes':len(raw)}
+        def close(self): pass
+    sites=manifest_for(row)['sites']
+    manifest=capture_sites(root,'a'*32,sites,Downloader,progress=reports.append)
+    assert reports[0]['phase']=='preparing' and reports[0]['files']==1
+    assert reports[-1]['phase']=='ready_for_review'
+    assert reports[-1]['files']==len(manifest['captures'])
+    assert reports[-1]['bytes']==sum(c['bytes'] for c in manifest['captures'])
+    assert reports[-1]['urls_checked']==len(manifest['visited'])
+    assert reports[-1]['sites_done']==reports[-1]['sites_total']==1
+    previous=len(reports)
+    resumed=capture_sites(root,'a'*32,sites,Downloader,progress=reports.append)
+    assert reports[previous]['files']==len(manifest['captures'])
+    assert resumed['captures']==manifest['captures']
