@@ -230,12 +230,27 @@ extraction receives no synthetic capture header and requires source evidence.
 Evidence matching allows only whitespace changes (wrapped lines and NBSPs),
 then retains the original verbatim excerpt. Sources exceeding the 900 KB
 serialized enrichment bound remain pending rather than being truncated.
+Date prompts require one contiguous excerpt: a table's date cell must not be
+joined to its column heading. A received response that fails field, completeness
+or source validation gets at most two correction requests with the complete
+source and specific validation failure. Corrections pass the same strict
+validator; an unsupported quote is never accepted by relaxing the check.
+An explicit model refusal remains pending without correction requests.
 
 Each approved site has a separate cumulative $2 enrichment cap.
 Reservations use conservative long-context rates and precede calls; ambiguous
 failures retain reservations. Paid responses, including rejected evidence, are
 cached by source/prompt/model signature in a writable `enrichment/` subdirectory
-on the PVC. The approved
+on the PVC. Existing results from the previous prompt remain reusable. Corrections
+have separate numbered cache entries linked to their original response, retaining
+all rejected evidence and the final matched verbatim excerpts. The original paid
+response is never overwritten. Each correction slot can spend only once, including
+an ambiguous/lost response, and the two-slot limit survives pod and Job retries.
+An initial request with no received response has at most two reserved attempts.
+Every reservation counts against the same site's $2 cap; retries neither reset
+that cap nor silently create an unenriched document. Exhausted corrections require
+operator attention rather than another paid loop.
+The approved
 sources/manifests remain read-only in import Jobs. Completed results are reused
 on retry without paying again for a received response, while existing document
 IDs incur no model calls. Failed enrichment or an exhausted budget leaves that
@@ -247,6 +262,12 @@ hashes, then queues a new numbered import Job under the original site budget.
 Duplicate/stale retry requests are rejected. The controller retains the failed
 Job, waits for other unfinished Jobs and never republishes or overwrites indexed
 entries. The selected source page stays open during retries and status updates.
+New import Jobs write small diagnostic files beside their enrichment cache. These
+bind to the exact Job name and approved manifest hash; the controller displays the
+matching failure on the site's Indexing screen. Only predefined error messages
+reach the portal/logs, never model output, source excerpts or upstream credentials.
+Diagnostics do not grant the controller any additional Kubernetes permissions or
+allow an older attempt's failure to replace a newer attempt's status.
 
 ## Storage, deployment and checks
 

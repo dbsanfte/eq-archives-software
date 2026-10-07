@@ -284,6 +284,12 @@ IDs without paying for enrichment or overwriting their metadata.
 Cache paid responses before validation, including rejected evidence, to prevent
 repeated charges on retries. Date evidence may vary only in whitespace; retain
 the matched verbatim source excerpt and reject all other content differences.
+Invalid or incomplete received enrichment responses can use at most two separately
+cached correction requests under the original site's budget. Keep rejected responses
+immutable, retain correction provenance, reuse legacy paid caches, and count lost
+correction responses against that durable limit. Refusals remain pending. Surface
+safe predefined failure reasons through Job/manifest-bound diagnostic files; never
+expose model output or let a previous attempt's status override the current Job.
 
 ### Public MCP service
 

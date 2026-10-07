@@ -22,6 +22,7 @@ from captures import check_manifest, verified_source
 from indexer.chunking import CHUNKING_VERSION, DOCUMENT_PREFIX, chunk_source
 from indexer.html_extraction import WEBSITE_EXTRACTION_VERSION, website_markdown
 from indexer.capture_enrichment import Enricher, policy
+from import_status import EnrichmentError, describe, write_status
 
 
 def read_batch(root, relative, expected):
@@ -165,15 +166,28 @@ def main():
     args = parser.parse_args()
     services = None
     enricher = None
+    directory = None
+    job_name = os.environ.get('IMPORT_JOB_NAME', '')
+    def report(state, error=None):
+        if directory is not None:
+            try:
+                write_status(directory, job_name, args.manifest_sha256, state, error)
+            except (OSError, ValueError):
+                print('Import status could not be saved; consult this Job log.', flush=True)
     try:
         batch = read_batch(args.root, args.batch, args.manifest_sha256)
         settings = policy(batch["manifest"])
-        enricher = Enricher(args.enrichment_root / batch["manifest"]["batch_id"], "/run/secrets/luna_api_key",
+        directory = args.enrichment_root / batch['manifest']['batch_id']
+        enricher = Enricher(directory, "/run/secrets/luna_api_key",
                             maximum=settings["max_enrichment_usd"])
+        report('running')
         services = Services(enricher=enricher)
         print(json.dumps(index_batch(args.root, batch, services)), flush=True)
-    except (CrawlError, OSError, httpx.HTTPError):
-        print("Capture indexing failed; no existing documents were overwritten. Retry the verified manifest.", flush=True)
+        report('completed')
+    except (CrawlError, OSError, httpx.HTTPError) as error:
+        report('failed', error)
+        detail = str(error) if isinstance(error, EnrichmentError) else describe('indexing')
+        print('Capture indexing failed: ' + detail + ' No existing documents were overwritten.', flush=True)
         return 1
     finally:
         if services:

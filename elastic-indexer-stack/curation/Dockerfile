@@ -21,7 +21,7 @@ FROM dependencies AS test
 COPY elastic-indexer-stack/curation/requirements-dev.txt /app/requirements-dev.txt
 RUN pip install --no-cache-dir --require-hashes -r /app/requirements-dev.txt
 WORKDIR /app/curation
-RUN python -m pytest --cov=server --cov=worker --cov=state --cov=publisher --cov=captures --cov=capture_queue --cov=capture_flow --cov=site_reviews --cov=portal --cov=jobs --cov=seed --cov=coverage_check --cov=site_inventory --cov=index_captures --cov=indexer.capture_enrichment --cov-report=term-missing && touch /tests-passed
+RUN python -m pytest --cov=server --cov=worker --cov=state --cov=publisher --cov=captures --cov=capture_queue --cov=capture_flow --cov=site_reviews --cov=portal --cov=jobs --cov=seed --cov=coverage_check --cov=site_inventory --cov=index_captures --cov=indexer.capture_enrichment --cov=import_status --cov-report=term-missing && touch /tests-passed
 
 FROM dependencies AS runtime
 COPY --from=test /tests-passed /tests-passed

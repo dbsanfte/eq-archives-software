@@ -153,7 +153,33 @@ def test_import_job_only_mounts_staging_readonly_and_separate_indexing_secrets()
     secret_names=[source['secret']['name'] for source in spec['volumes'][1]['projected']['sources']]
     assert secret_names == ['eqarchives-capture-indexer-secrets','search-eqarchives-secrets','eqarchives-curation-secrets']
     assert spec['volumes'][1]['projected']['sources'][2]['secret']['items']==[{'key':'luna_api_key','path':'luna_api_key'}]
+    assert next(row['value'] for row in spec['containers'][0]['env'] if row['name']=='IMPORT_JOB_NAME')==import_name(batch)
     with pytest.raises(CrawlError): import_job(batch,'latest')
+
+
+def test_failed_job_exposes_only_its_manifest_bound_import_diagnostic(candidate):
+    from import_status import EnrichmentError, write_status
+    from server import create_app
+    from test_server import call
+    root,row=candidate;batch=failed_import(root,row)
+    job=import_job(batch,IMAGE)
+    job['status']={'conditions':[{'type':'Failed','status':'True'}]}
+    class FakeKube:
+        def jobs(self):return [job]
+        def create(self,*args):raise AssertionError('Do not restart the failed Job')
+    directory=root/'enrichment'/batch['id'];directory.mkdir(parents=True)
+    write_status(directory,job['metadata']['name'],batch['manifest_sha256'],'failed',EnrichmentError('correction_limit','source_evidence'))
+    with connect(root) as store:
+        store.db.execute("UPDATE batches SET state='indexing'");store.db.commit()
+    worker=Worker(root,kube=FakeKube())
+    try:
+        worker.indexing()
+        detail=call(create_app(root,start_worker=False),'GET','/api/candidate?id='+row['id']).json()
+        assert detail['review']['state']=='index_failed'
+        assert 'two correction attempts' in detail['review']['error']
+        assert 'verbatim source excerpt' in detail['review']['error']
+        assert detail['review']['job']['name']==job['metadata']['name']
+    finally:worker.lease.close()
 
 
 def failed_import(root,row):

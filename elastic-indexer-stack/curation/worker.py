@@ -21,6 +21,7 @@ from publisher import publish
 from state import connect, unpack, worker_lease
 from coverage_check import refresh, require_new
 from site_reviews import materialize, migrate
+from import_status import read_error
 
 
 def campaign(root, operation):
@@ -209,6 +210,7 @@ class Worker:
         self.kube = self.kube or Kubernetes()
         jobs = self.kube.jobs()
         for batch in batches:
+            import_error = None
             name = import_name(batch)
             attempt_detail = {"attempt": import_attempt(batch)}
             if (batch.get('job') or {}).get('previous_name'):
@@ -221,6 +223,8 @@ class Worker:
                 conditions = {c["type"]: c["status"] for c in existing.get("status", {}).get("conditions", [])}
                 state = "indexed" if conditions.get("Complete") == "True" else "index_failed" if conditions.get("Failed") == "True" else "indexing"
                 detail = {**attempt_detail, "name": name, "state": state}
+                if state == 'index_failed':
+                    import_error = read_error(self.root, batch, name)
             else:
                 waiting = blockers(jobs, name)
                 if waiting:
@@ -232,8 +236,8 @@ class Worker:
                     # No further submissions until the next list sees this Job.
                     jobs.append({"metadata": {"name": name}, "spec": {}, "status": {}})
             with connect(self.root) as store:
-                store.db.execute("UPDATE batches SET state=?,job=?,error=NULL,updated=? WHERE id=?",
-                                 (state, json.dumps(detail), now(), batch["id"]))
+                store.db.execute("UPDATE batches SET state=?,job=?,error=?,updated=? WHERE id=?",
+                                 (state, json.dumps(detail), import_error, now(), batch["id"]))
                 if state == "indexed":
                     for site in batch["manifest"]["sites"]:
                         row = store.db.execute('SELECT state FROM candidates WHERE id=?', (site['id'],)).fetchone()
