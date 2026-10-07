@@ -20,6 +20,7 @@ from jobs import Kubernetes, blockers, import_job
 from publisher import publish
 from state import connect, unpack, worker_lease
 from coverage_check import refresh, require_new
+from site_reviews import materialize, migrate
 
 
 def campaign(root, operation):
@@ -86,6 +87,7 @@ class Worker:
         self.stop = threading.Event()
         self.lease = worker_lease(self.root)
         refresh(self.root)
+        migrate(self.root)
         with connect(self.root) as store:
             # A terminated paid/download request has uncertain outcome. Require
             # an explicit resume; retained dollar and HTTP reservations still apply.
@@ -187,6 +189,7 @@ class Worker:
                         coverage['capture'] = {'batch_id':batch_id,'completed_at':now()}
                         store.db.execute('UPDATE candidates SET state=?,coverage=? WHERE id=?',
                                          (transition(row['state'], Action.COMPLETE), json.dumps(coverage), site['id']))
+                    materialize(store, unpack(store.db.execute('SELECT * FROM batches WHERE id=?',(batch_id,)).fetchone()))
                     store.db.commit()
                 result = {"captures": len(manifest["captures"]), "batch_id": batch_id, "progress": latest}
             with connect(self.root) as store:

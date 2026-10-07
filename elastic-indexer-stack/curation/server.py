@@ -19,9 +19,11 @@ from worker import Worker
 from coverage_check import refresh, require_new
 from capture_flow import Action, UNDO_SECONDS, transition
 from capture_queue import claim
+from site_reviews import get as get_site_review, migrate
 
 NETWORK = ipaddress.ip_network("192.168.0.0/16")
 STATIC = Path(__file__).parent
+CAPTURED_STATES = ('captured_awaiting_review','approved_waiting_publication','indexing_declined','published','indexed')
 
 
 class Intranet:
@@ -76,6 +78,7 @@ def create_app(root=None, origin=None, start_worker=True):
     origin = origin or os.environ.get("CURATION_ORIGIN", "http://192.168.50.100:8090")
     with connect(root):
         pass
+    migrate(root)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -124,18 +127,19 @@ def create_app(root=None, origin=None, start_worker=True):
                     selected == "pending" and row["state"] in ("approval_pending", "deferred") or
                     selected == "approved" and row["state"] == 'approved_waiting_batch' or
                     selected == "capturing" and row['state'] == 'capturing' or
-                    selected == "captured" and row['state'] in ('captured_awaiting_review','published','indexed')]
+                    selected == "captured" and row['state'] in CAPTURED_STATES]
             if selected == 'approved':
                 rows.sort(key=lambda row: (row['decision'] or {}).get('reviewed_at', ''))
             elif selected == 'captured':
                 rows.sort(key=lambda row: ((row['coverage'] or {}).get('capture') or {}).get('completed_at', ''), reverse=True)
             operations = [unpack(row) for row in store.db.execute("SELECT * FROM operations ORDER BY CASE state WHEN 'running' THEN 0 WHEN 'queued' THEN 1 WHEN 'interrupted' THEN 2 ELSE 3 END,created DESC LIMIT 20")]
-            batches = [unpack(row) for row in store.db.execute("SELECT * FROM batches ORDER BY created DESC LIMIT 100")]
+            batches = [unpack(row) for row in store.db.execute("SELECT * FROM batches WHERE state!='capture_group' ORDER BY created DESC LIMIT 100")]
             return JSONResponse({"candidates": rows[offset:offset + 50], "total": len(rows), "offset": offset,
                                  "all_count": len(all_rows), "approved": sum(row["state"] == "approved_waiting_batch" for row in all_rows),
                                  "operations": operations, "batches": batches, "limits": LIMITS, "undo_seconds": UNDO_SECONDS,
                                  "capturing": sum(row['state']=='capturing' for row in all_rows),
-                                 "captured": sum(row['state'] in ('captured_awaiting_review','published','indexed') for row in all_rows),
+                                 "captured": sum(row['state'] in CAPTURED_STATES for row in all_rows),
+                                 "awaiting_site_review": store.db.execute("SELECT COUNT(*) FROM batches WHERE state='awaiting_review'").fetchone()[0],
                                  "capture_queue_error": store.get('capture_queue_error'),
                                  "version": os.environ.get("GIT_SHA", "development"), "last_campaign": store.get("last_campaign"),
                                  "pilot_grading": store.get("grading_result")})
@@ -168,6 +172,51 @@ def create_app(root=None, origin=None, start_worker=True):
                     raise CrawlError("Unknown source slot")
                 result = sources[slot]
             return JSONResponse(result)
+
+    def site_review(request):
+        with connect(root) as store:
+            return JSONResponse(get_site_review(store,request.query_params.get('id'),request.query_params.get('candidate')))
+
+    async def site_decision(request):
+        payload = await body(request)
+        if (not isinstance(payload,dict) or set(payload) != {'id','manifest_sha256','decision'}
+                or not all(isinstance(value,str) for value in payload.values())
+                or payload['decision'] not in ('approve','decline','reconsider')):
+            raise CrawlError('Site decision requires the review ID, manifest hash and approve/decline/reconsider')
+        if payload['decision'] == 'approve':
+            refresh(root)
+            with connect(root) as store:
+                current = get_site_review(store,payload['id'])
+                require_new(store,current['manifest']['sites'][0]['url'])
+        with connect(root) as store:
+            store.db.execute('BEGIN IMMEDIATE')
+            reviewed = get_site_review(store,payload['id'])
+            if reviewed['manifest_sha256'] != payload['manifest_sha256']:
+                raise CrawlError('Captured site changed since review')
+            expected_state = 'indexing_declined' if payload['decision'] == 'reconsider' else 'awaiting_review'
+            if reviewed['state'] != expected_state:
+                raise CrawlError('Site decision is no longer available')
+            manifest = reviewed['manifest']
+            candidate_id = manifest['sites'][0]['id']
+            row = store.db.execute('SELECT state FROM candidates WHERE id=?',(candidate_id,)).fetchone()
+            if not row:
+                raise CrawlError('Captured site candidate is unavailable')
+            action = {'approve':Action.APPROVE_INDEX,'decline':Action.DECLINE_INDEX,'reconsider':Action.RECONSIDER_INDEX}[payload['decision']]
+            state = transition(row['state'],action)
+            operation = None
+            if payload['decision'] == 'approve':
+                # Hash and validate the complete site, never a mixed batch or subset.
+                check_manifest(root,manifest)
+                operation = enqueue(store,'publish',{'batch_id':reviewed['id'],'manifest_sha256':reviewed['manifest_sha256']},commit=False)
+                batch_state = 'publication_requested'
+            else:
+                batch_state = 'indexing_declined' if payload['decision'] == 'decline' else 'awaiting_review'
+            store.db.execute('UPDATE batches SET state=?,updated=? WHERE id=?',(batch_state,now(),reviewed['id']))
+            store.db.execute('UPDATE candidates SET state=? WHERE id=?',(state,candidate_id))
+            store.db.execute('INSERT INTO events(candidate,action,detail,created) VALUES (?,?,?,?)',
+                             (candidate_id,'site_indexing_'+payload['decision'],json.dumps(payload),now()))
+            store.db.commit()
+        return JSONResponse({'state':state,'operation':operation},status_code=202 if operation else 200)
 
     async def decide(request):
         incoming = await body(request)
@@ -269,6 +318,8 @@ def create_app(root=None, origin=None, start_worker=True):
             if batch["state"] != "awaiting_review" or batch["manifest_sha256"] != payload["manifest_sha256"]:
                 raise CrawlError("Batch changed since review or is already approved")
             manifest = batch["manifest"]
+            if len(manifest['sites']) != 1:
+                raise CrawlError('Review and approve one captured site at a time')
             slots = payload.get("slots", list(range(len(manifest["captures"]))))
             if (not isinstance(slots, list) or not slots or not all(type(slot) is int and 0 <= slot < len(manifest["captures"]) for slot in slots)
                     or len(set(slots)) != len(slots)):
@@ -304,6 +355,7 @@ def create_app(root=None, origin=None, start_worker=True):
 
     app = Starlette(routes=[Route("/", screen), Route("/assets/{name}", asset), Route("/healthz", health),
                             Route("/api/queue", listing), Route("/api/source", source),
+                            Route('/api/site',site_review), Route('/api/site-decision',site_decision,methods=['POST']),
                             Route("/api/decisions", decide, methods=["POST"]),
                             Route("/api/undo", undo, methods=["POST"]), Route("/api/scope", scope_change, methods=["POST"]), Route('/api/coverage', coverage_check, methods=['POST']), Route("/api/discover", discovery, methods=["POST"]),
                             Route("/api/capture", capture, methods=["POST"]), Route("/api/publish", publication, methods=["POST"]),

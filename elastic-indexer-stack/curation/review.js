@@ -2,6 +2,8 @@
 const $ = id => document.getElementById(id);
 let offset = 0, data = null, busy = false;
 let actions = Promise.resolve();
+let selectedSite = null;
+const capturedStates = ['captured_awaiting_review','approved_waiting_publication','indexing_declined','published','indexed'];
 function element(tag, text, className) {
   const node = document.createElement(tag);
   if (text !== undefined) node.textContent = text;
@@ -42,7 +44,7 @@ function jump(text, target) {
   const node = element('a', text); node.href = target; return node;
 }
 function workflow() {
-  const active = activeOperation(), ready = data.batches.filter(row => row.state === 'awaiting_review');
+  const active = activeOperation(), ready = data.awaiting_site_review ?? data.batches.filter(row => row.state === 'awaiting_review').length;
   const messages = [];
   if (active?.kind === 'capture') messages.push(active.state === 'queued' ? 'Capture queued; waiting for the worker.' : 'Capture is running. Live progress appears below.');
   else if (active?.kind === 'publish') messages.push(active.state === 'queued' ? 'Publication queued; it will start after the current operation.' : 'Publishing the approved files. AI enrichment and indexing will queue automatically afterward.');
@@ -50,17 +52,16 @@ function workflow() {
   if (data.approved) messages.push(`${data.approved} site${data.approved === 1 ? '' : 's'} awaiting automatic capture. New approvals have a ${data.undo_seconds ?? 60}-second grace period. Undo is available in Awaiting capture until the worker starts. There is no queue count limit.`);
   if (data.capture_queue_error) messages.push(`Capture queue paused: ${data.capture_queue_error}`);
   if (data.operations.some(op=>op.kind==='capture' && op.state==='interrupted')) messages.push('The capture queue is paused until the interrupted capture is resumed.');
-  if (ready.length) messages.push(`${ready.length} downloaded batch${ready.length === 1 ? '' : 'es'} awaiting your file review and publication approval.`);
+  if (ready) messages.push(`${ready} captured site${ready === 1 ? '' : 's'} awaiting your indexing decision. Browse each site and its pages in Recent captures.`);
   if (!messages.length) messages.push('Review a suggestion’s source and scope, then Approve for capture. It moves to Awaiting capture and downloads automatically after the grace period.');
   const text = messages.join(' ');
   if ($('next-step').textContent !== text) $('next-step').textContent = text;
   $('view-awaiting').disabled = !data.approved;
-  $('view-captured').disabled = !data.captured && !ready.length;
+  $('view-captured').disabled = !data.captured && !ready;
   const visible = data.operations.filter(op => ['capture','publish'].includes(op.kind) &&
-    (['queued','running','interrupted'].includes(op.state) || op.kind === 'capture' && ready.some(row => row.id === op.payload.batch_id)));
+    ['queued','running','interrupted'].includes(op.state));
   $('capture-activity').hidden = !visible.length;
   $('activity').replaceChildren(...visible.map(operation));
-  if (ready.length) $('activity').append(jump('Review downloaded batches', '#capture-batches'));
 }
 function age(value) {
   const seconds = Math.max(0, Math.floor((Date.now() - Date.parse(value)) / 1000));
@@ -87,7 +88,7 @@ function operation(op) {
       const indicator = element('progress'); indicator.setAttribute('aria-label','Capture in progress'); card.append(indicator);
       card.append(element('p','Progress refreshes every 5 seconds. The number of pages is discovered during capture, so a completion percentage is unavailable.','meta'));
     }
-    if (op.state === 'completed') card.append(jump('Next: review files and approve publication', '#capture-batches'));
+    if (op.state === 'completed') card.append(button('Review captured sites',()=>{$('filter').value='captured';offset=0;}));
   }
   if (op.kind === 'publish' && ['queued','running'].includes(op.state)) card.append(element('p','Publishing the reviewed files in one archive commit. Git publication can take several minutes.'));
   if (op.error) card.append(element('p',op.error));
@@ -124,6 +125,15 @@ function sources(container, captures, candidate, batch) {
 function candidate(row) {
   const card = element('article', undefined, 'card'); card.dataset.candidate = row.id;
   card.dataset.state = row.state; card.dataset.manifest = row.manifest_sha256;
+  if (capturedStates.includes(row.state)) {
+    const capture = row.coverage?.capture || {}, reviewId = capture.review_id || capture.batch_id;
+    card.classList.add('site-summary');
+    const title = element('h3'); title.append(link(row.scope)); card.append(title);
+    const states = {captured_awaiting_review:'Awaiting indexing decision',approved_waiting_publication:'Approved for indexing',indexing_declined:'Indexing declined',published:'Published — indexing queued',indexed:'Indexed'};
+    card.append(element('p', `${states[row.state]}${capture.pages !== undefined ? ` · ${capture.pages} pages · ${capture.files} captures` : ''}`, 'meta'));
+    card.append(button('Review site',()=>{selectedSite={id:reviewId,candidate:row.id};$('filter').value='captured';offset=0;$('site-review').scrollIntoView();},!reviewId));
+    return card;
+  }
   const rating = row.rating;
   const title = element('h3'); title.append(element('span', rating ? `Grade ${rating.grade}/3` : 'Ungraded', 'badge'), link(row.url)); card.append(title);
   const states = {approved_waiting_batch:'Awaiting capture',capturing:'Capture in progress',captured_awaiting_review:'Downloaded — awaiting publication approval',published:'Published — indexing queued',indexed:'Indexed'};
@@ -144,9 +154,8 @@ function candidate(row) {
     card.append(button('Undo approval',()=>request('/api/undo',{id:row.id,manifest_sha256:row.manifest_sha256})));
     return card;
   }
-  if (['capturing','captured_awaiting_review','published','indexed'].includes(row.state)) {
-    const batchId = row.coverage?.capture?.batch_id;
-    card.append(jump(row.state==='capturing' ? 'View capture progress' : 'Review captured files and publication status', row.state==='capturing' ? '#capture-activity' : batchId ? '#batch-'+batchId : '#capture-batches'));
+  if (row.state==='capturing') {
+    card.append(jump('View capture progress','#capture-activity'));
     return card;
   }
   const editable = ['approval_pending','deferred','rejected'].includes(row.state);
@@ -185,17 +194,11 @@ function candidate(row) {
   if (row.state === 'coverage_unverified') controls.append(button('Recheck archive coverage', () => request('/api/coverage',{id:row.id,manifest_sha256:row.manifest_sha256})));
   card.append(controls); return card;
 }
-function batchStatus(row) {
-  const status = element('div', undefined, 'batch-status');
-  const labels = {capturing:'Capturing approved scopes',awaiting_review:'Downloaded — review required',publication_requested:'Publishing approved files',published_waiting_index:'Published — waiting to index',indexing:'AI enrichment and indexing in progress',indexed:'Indexed — complete',index_failed:'Indexing failed — attention needed'};
-  status.append(element('h3', `Batch ${row.id.slice(0,8)} · ${labels[row.state] || row.state.replaceAll('_',' ')}`));
-  const step = {capturing:0,awaiting_review:1,publication_requested:2,published_waiting_index:3,indexing:3,index_failed:3,indexed:4}[row.state] ?? 0;
-  const stages = element('ol', undefined, 'flow'); stages.setAttribute('aria-label','Batch progress');
-  ['Capture','Review files','Publish','Enrich & index'].forEach((label,index) => {
-    const stage = element('li', `${index < step ? '✓ ' : ''}${label}`, index < step ? 'done' : index === step ? 'current' : '');
-    if (index === step) stage.setAttribute('aria-current','step'); stages.append(stage);
-  }); status.append(stages);
-  const next = {capturing:'Downloads are staged here. Live capture progress appears above.',awaiting_review:'Next: review the downloaded files below, then approve publication. No archive commit has been made yet.',publication_requested:'Publishing the reviewed file set. Indexing queues automatically after publication.',published_waiting_index:'AI enrichment and indexing will start automatically when other indexing Jobs finish.',indexing:'The import Job includes Luna enrichment and indexing. Its completion is checked automatically.',indexed:'This batch is published and indexed.',index_failed:'Inspect the failed import Job before retrying. The published files are retained.'};
+function siteStatus(row) {
+  const status = element('div', undefined, 'site-status');
+  const labels = {awaiting_review:'Awaiting indexing decision',indexing_declined:'Indexing declined — files retained in staging',publication_requested:'Approved — publication queued or in progress',published_waiting_index:'Published — waiting to index',indexing:'AI enrichment and indexing in progress',indexed:'Indexed — complete',index_failed:'Indexing failed — attention needed'};
+  status.append(element('p',labels[row.state] || row.state.replaceAll('_',' '),'capture-phase'));
+  const next = {awaiting_review:'Browse the pages below, then approve or decline indexing for this entire captured site.',indexing_declined:'This site will not be published or indexed. Reconsider to return it to review.',publication_requested:'All captured pages from this site are approved. AI enrichment and indexing queue automatically after publication.',published_waiting_index:'AI enrichment and indexing will start when the worker is available and other indexing Jobs finish.',indexing:'The import Job includes Luna enrichment and indexing. Its completion is checked automatically.',indexed:'This site is published and indexed.',index_failed:'Inspect the failed import Job before retrying. The published files are retained.'};
   status.append(element('p',next[row.state] || 'Awaiting the next workflow step.'));
   if (row.error) status.append(element('p',row.error));
   if (row.job?.waiting_for?.length) status.append(element('p',`Waiting for existing Jobs: ${row.job.waiting_for.join(', ')}`));
@@ -203,33 +206,91 @@ function batchStatus(row) {
   if (row.publication?.commit) status.append(link(`https://github.com/dbsanfte/eq-archives/commit/${row.publication.commit}`,'View archive commit'));
   return status;
 }
-function batch(row) {
-  const card = element('article', undefined, 'card'); card.dataset.batch = row.id;
-  card.id = 'batch-'+row.id;
-  card.dataset.signature = `${row.state}:${row.manifest_sha256}`;
-  card.append(batchStatus(row));
-  if (row.manifest) {
-    const captures = row.manifest.captures;
-    const slots = new Set(captures.map((_,index)=>index));
-    let publish;
-    card.append(element('p', `${captures.length} HTML files · ${(captures.reduce((total,c)=>total+c.bytes,0)/1048576).toFixed(2)} MiB`, 'meta'));
-    card.append(element('p', `AI enrichment on import: Luna summaries, categories, tags and supported date estimates · $${row.manifest.indexing?.max_enrichment_usd ?? 2} maximum for this batch.`, 'meta'));
-    const details = element('details'); details.append(element('summary','Review archive file set'));
-    captures.forEach((capture,slot) => {
-      const file = element('div',undefined,'file');
-      if (row.state==='awaiting_review') {
-        const label=element('label','Include this capture'),checkbox=element('input'); checkbox.type='checkbox'; checkbox.checked=true;
-        checkbox.addEventListener('change',()=>{if(checkbox.checked)slots.add(slot);else slots.delete(slot);if(publish){publish.dataset.selectedCount=slots.size;publish.disabled=!slots.size;}});
-        label.prepend(checkbox);file.append(label);
-      }
-      file.append(element('div',capture.archive_path), link(`https://web.archive.org/web/${capture.timestamp}/${capture.url}`),element('div',`Tier ${capture.tier} · SHA256 ${capture.sha256}`,'meta')); details.append(file);
-    }); card.append(details); sources(card,captures,null,row.id);
-    if (row.manifest.notes?.length) for (const note of row.manifest.notes) card.append(element('p',`${note.url}: ${note.note}`,'meta'));
-    if (row.state === 'awaiting_review') {
-      publish = button('Approve publication & queue indexing', () => request('/api/publish',{id:row.id,manifest_sha256:row.manifest_sha256,slots:[...slots]}), !slots.size);
-      publish.className='primary'; publish.dataset.selectedCount=slots.size; card.append(publish);
-    }
-  } return card;
+function captureDate(timestamp) { return `${timestamp.slice(0,4)}-${timestamp.slice(4,6)}-${timestamp.slice(6,8)} ${timestamp.slice(8,10)}:${timestamp.slice(10,12)}:${timestamp.slice(12,14)} UTC`; }
+function sitePages(container, row) {
+  const captures = row.manifest.captures, pages = new Map();
+  captures.forEach((capture,slot) => {
+    const identity = row.page_identities?.[slot] || capture.url;
+    if (!pages.has(identity)) pages.set(identity,[]);
+    pages.get(identity).push(slot);
+  });
+  const layout = element('div',undefined,'site-browser'), list = element('ul',undefined,'site-pages');
+  list.setAttribute('aria-label','Captured pages');
+  const reader = element('div',undefined,'site-source'), title = element('h4','Page source');
+  const version = element('select'); version.setAttribute('aria-label','Capture version');
+  const citation = element('div',undefined,'site-citation'), text = element('pre','Choose a captured page to read its complete extracted source.');
+  reader.append(title,version,citation,text);
+  let generation = 0;
+  async function read(slot) {
+    const current = ++generation, capture = captures[slot];
+    title.textContent = capture.title || new URL(capture.url).pathname;
+    citation.replaceChildren(link(`https://web.archive.org/web/${capture.timestamp}/${capture.url}`,'Open this capture in Wayback'),element('p',capture.url,'meta'));
+    text.textContent = 'Loading verified source…';
+    try {
+      const source = await request(`/api/source?batch=${encodeURIComponent(row.id)}&slot=${row.source_slots[slot]}`);
+      if (current === generation) text.textContent = source.complete_extracted_text;
+    } catch (error) { if (current === generation) text.textContent = error.message; }
+  }
+  version.addEventListener('change',()=>read(Number(version.value)));
+  for (const [identity,slots] of pages) {
+    const item = element('li',undefined,'site-page'), capture = captures[slots[0]];
+    const choose = element('button',capture.title || new URL(identity).pathname);
+    choose.addEventListener('click',()=>{
+      for (const active of list.querySelectorAll('[aria-current]')) active.removeAttribute('aria-current');
+      choose.setAttribute('aria-current','page');
+      version.replaceChildren(...slots.map(slot=>{const option=element('option',captureDate(captures[slot].timestamp));option.value=slot;return option;}));
+      read(slots[0]);
+    });
+    item.append(choose,element('p',identity,'meta'));
+    for (const slot of slots) item.append(link(`https://web.archive.org/web/${captures[slot].timestamp}/${captures[slot].url}`,`${captureDate(captures[slot].timestamp)} · Wayback`));
+    list.append(item);
+  }
+  layout.append(list,reader); container.append(layout);
+  if (captures.length) list.querySelector('button').click();
+  else text.textContent = 'No pages were captured within this scope. This site cannot be indexed.';
+}
+function siteCard(row) {
+  const card = element('article',undefined,'card'); card.dataset.siteSignature = `${row.id}:${row.manifest.sites[0].id}:${row.state}:${row.manifest_sha256}`;
+  const site = row.manifest.sites[0], captures = row.manifest.captures, title = element('h3');
+  title.append(link(site.scope)); card.append(title,siteStatus(row));
+  const pages = new Set(row.page_identities || captures.map(capture=>capture.url)).size;
+  card.append(element('p',`${pages} pages · ${captures.length} dated captures · ${(captures.reduce((total,c)=>total+c.bytes,0)/1048576).toFixed(2)} MiB`,'meta'));
+  card.append(element('p',`Capture scope: ${site.scope}${site.scope_mode==='page' ? ' (linked page only)' : ' and descendants'}`,'scope'));
+  const controls = element('div',undefined,'actions');
+  const decision = value => request('/api/site-decision',{id:row.id,manifest_sha256:row.manifest_sha256,decision:value});
+  if (row.state==='awaiting_review') {
+    card.append(element('p',`Approval publishes every captured page listed below and queues indexing with Luna enrichment. Maximum enrichment spend: $${row.manifest.indexing?.max_enrichment_usd ?? 2} for this site.`));
+    const approve = button('Approve site & queue indexing',()=>decision('approve'),!captures.length); approve.className='primary';
+    controls.append(approve,button('Decline indexing',()=>decision('decline')));
+  } else if (row.state==='indexing_declined') controls.append(button('Reconsider indexing',()=>decision('reconsider')));
+  card.append(controls);
+  if (row.manifest.notes?.length) {
+    const notes=element('details');notes.append(element('summary','Capture coverage notes'));
+    for (const note of row.manifest.notes) notes.append(element('p',`${note.url}: ${note.note}`,'meta'));
+    card.append(notes);
+  }
+  sitePages(card,row); return card;
+}
+async function loadSite() {
+  $('site-review').hidden = $('filter').value !== 'captured';
+  if ($('site-review').hidden) return;
+  if (!selectedSite) {
+    const row = data.candidates.find(row=>row.state==='captured_awaiting_review') || data.candidates[0];
+    const capture = row?.coverage?.capture;
+    selectedSite = capture ? {id:capture.review_id || capture.batch_id,candidate:row.id} : null;
+  }
+  if (!selectedSite) { $('reviewed-site').replaceChildren(element('p','No captured sites in this view.')); return; }
+  const selected = selectedSite;
+  const displayed = $('reviewed-site').querySelector('[data-site-signature]');
+  if (!displayed?.dataset.siteSignature.startsWith(`${selected.id}:${selected.candidate}:`)) {
+    $('reviewed-site').replaceChildren(element('p','Loading the selected site…'));
+  }
+  const row = await request(`/api/site?id=${encodeURIComponent(selected.id)}&candidate=${encodeURIComponent(selected.candidate)}`);
+  if (selected !== selectedSite || $('filter').value !== 'captured') return;
+  const signature = `${row.id}:${row.manifest.sites[0].id}:${row.state}:${row.manifest_sha256}`;
+  const previous = $('reviewed-site').querySelector('[data-site-signature]');
+  if (previous?.dataset.siteSignature===signature) previous.querySelector('.site-status').replaceWith(siteStatus(row));
+  else $('reviewed-site').replaceChildren(siteCard(row));
 }
 async function load(preserveEdits = false) {
   for (;;) {
@@ -251,29 +312,20 @@ async function load(preserveEdits = false) {
       card.querySelector('details[open], [data-scope-draft]') ? card : candidate(row);
   }));
   if (!data.candidates.length) $('candidates').append(element('p','No candidates in this view.'));
-  const previousBatches = new Map([...$('batches').querySelectorAll('[data-batch]')].map(card=>[card.dataset.batch,card]));
-  $('batches').replaceChildren(...data.batches.map(row => {
-    const card = previousBatches.get(row.id);
-    if (!card || card.dataset.signature !== `${row.state}:${row.manifest_sha256}`) return batch(row);
-    card.querySelector('.batch-status').replaceWith(batchStatus(row));
-    const publish = card.querySelector('[data-selected-count]');
-    if (publish) publish.disabled = !Number(publish.dataset.selectedCount);
-    return card;
-  }));
-  if (!data.batches.length) $('batches').append(element('p','No capture batches yet.'));
+  await loadSite();
   $('operations').replaceChildren(...data.operations.map(operation));
   $('version').textContent=`Build ${data.version}`;
   $('page').textContent=data.total ? `${offset+1}–${Math.min(offset+50,data.total)} of ${data.total}` : '0 candidates';
   $('previous').disabled=offset===0; $('next').disabled=offset+50>=data.total;
   $('discover').disabled=Boolean(activeOperation()); workflow();
 }
-$('filter').addEventListener('change',()=>perform(async()=>{offset=0;}));
-$('previous').addEventListener('click',()=>perform(async()=>{offset=Math.max(0,offset-50);}));
-$('next').addEventListener('click',()=>perform(async()=>{offset+=50;}));
+$('filter').addEventListener('change',()=>perform(async()=>{offset=0;selectedSite=null;}));
+$('previous').addEventListener('click',()=>perform(async()=>{offset=Math.max(0,offset-50);selectedSite=null;}));
+$('next').addEventListener('click',()=>perform(async()=>{offset+=50;selectedSite=null;}));
 $('refresh').addEventListener('click',()=>perform(async()=>{}));
 $('discover').addEventListener('click',()=>perform(()=>request('/api/discover',{max_candidates:50,max_usd:2})));
 $('view-awaiting').addEventListener('click',()=>perform(async()=>{$('filter').value='approved';offset=0;}));
-$('view-captured').addEventListener('click',()=>perform(async()=>{$('filter').value='captured';offset=0;}).then(()=>$('capture-batches').scrollIntoView()));
+$('view-captured').addEventListener('click',()=>perform(async()=>{$('filter').value='captured';offset=0;selectedSite=null;}).then(()=>$('site-review').scrollIntoView()));
 perform(async()=>{});
 setInterval(()=>{if (!busy && data &&
-  (data.approved || activeOperation() || data.batches.some(batch=>['published_waiting_index','indexing'].includes(batch.state)))) perform(async()=>{},true);},5000);
+  (data.approved || activeOperation() || $('filter').value==='captured' || data.batches.some(batch=>['published_waiting_index','indexing'].includes(batch.state)))) perform(async()=>{},true);},5000);

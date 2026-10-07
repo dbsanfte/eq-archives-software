@@ -40,16 +40,19 @@ Legacy finder/worker/broad reindex Jobs retain their separate lifecycles.
    The worker
    spiders HTML links within the scope, including its entry directory, through
    the pinned public Wayback Machine Downloader and serial persistent client.
-4. Completed items move into **Recent captures**, newest first. Review the
-   resulting archive file set and complete sources, uncheck unwanted
-   captures and **Approve publication & queue indexing**. This second approval
-   binds to the actual source hashes and selected subset, which can differ from
-   the initial samples Luna assessed. Import includes AI enrichment by default,
-   with a separate $2 limit shown before publication approval.
+4. Completed items move into **Recent captures**, newest first. Choose **Review
+   site** to browse one site's captured pages and dated Wayback links, including
+   complete extracted source and multiple versions of the same page.
+   **Approve site & queue indexing** approves every captured page within that
+   site's chosen scope. This second approval binds to its complete manifest and
+   actual source hashes. Import includes AI enrichment by default, with a separate
+   $2 maximum shown for that site before approval. **Decline indexing** keeps its
+   files in staging without publication or indexing; **Reconsider indexing**
+   returns a declined site to review. Decisions are independent for each site.
    Publication can be queued during another capture; the serial worker publishes
    it before claiming another capture batch, so a large capture queue cannot
    prevent publication of already reviewed files.
-5. Publication makes one fast-forward archive commit, including
+5. Publication makes one fast-forward archive commit per approved site, including
    `crawl-manifests/<batch-id>.json`. Import waits for every other unfinished,
    unsuspended Job in `eqarchives-es`, including pending/retrying Jobs with
    `active=0`. The controller cannot patch, suspend or delete Jobs.
@@ -60,11 +63,20 @@ and refreshes every five seconds, including while sources or scope drafts are op
 Actions wait for an in-flight refresh rather than being dropped, and a draining
 queue automatically returns an empty last page to the nearest valid page.
 It shows counts rather than a percentage because the link frontier is discovered
-during traversal. Batch stages show file review, publication, waits for named
+during traversal. Site status shows review, publication, waits for named
 existing Jobs, enrichment/indexing and completion. Typed candidate transitions
 are centralized in `scripts/archive-crawler/capture_flow.py`; queue claiming and
 Undo use the same SQLite write lock, so only one can succeed. Publication still
 requires its own explicit approval; approving a suggestion does not publish files.
+
+Capture batches are acquisition records. Each completed site receives an
+independent review manifest referencing the existing staged files, so pages from
+different sites or shared-host accounts never share a review decision. Existing
+unapproved mixed batches are split idempotently on startup, without copying or
+downloading files. Original capture manifests and hashes remain as provenance.
+Previously approved publication/import records retain their original identities.
+The legacy file-subset API remains available for single-site operator requests;
+the review screen and site-decision API always approve the complete captured site.
 
 [Capture limits](captures.py): five sites, 20 additional URL attempts per site,
 100 files, 1 MiB per response, 64 MiB source/transport budget, 500 HTTP requests
@@ -173,7 +185,7 @@ extraction receives no synthetic capture header and requires verbatim source
 evidence. Sources exceeding the 900 KB serialized enrichment bound remain
 pending rather than being truncated.
 
-Each approved publication batch has a separate cumulative $2 enrichment cap.
+Each approved site has a separate cumulative $2 enrichment cap.
 Reservations use conservative long-context rates and precede calls; ambiguous
 failures retain reservations. Verified results are cached by source/prompt/model
 signature in a writable `enrichment/` subdirectory on the PVC. The approved
@@ -196,7 +208,10 @@ One replica uses `Recreate` and an exclusive worker lease. A one-time init copie
 only the pilot database and listed captures from a read-only mount, excluding
 its tree reader, screenshots and orphan downloads. Both archive checkouts,
 existing ingestion Jobs and the model service stay untouched. Rollback applies
-the preceding immutable curation digest and retains the PVC. Unchanged deployment
+the preceding compatible immutable curation digest and retains the PVC. After
+site decisions have been recorded, use a worker that supports the site-review
+states; finish pending publications before downgrading to the earlier batch-review
+worker. Unchanged deployment
 inputs preserve the Deployment generation/pod UID.
 
 ```bash
@@ -211,8 +226,9 @@ The image build runs Python 3.13 API/state/scope/source/campaign/publication/imp
 pytest, including an over-50-item queue and Undo/worker claim races. CI also uses
 real Chromium at 320/390/1280 px, delayed source responses, live progress during
 open source/scope edits, moves between workflow views,
-Undo during a delayed refresh, draining pagination, durable decisions and final
-publication approval in isolated fixtures with no
+Undo during a delayed refresh, draining pagination, durable site decisions,
+child-page/version browsing and independent approve/decline/reconsider actions
+in isolated fixtures with no
 paid calls or real archive writes. Real TCP tests reject non-LAN peers and
 forwarded-header spoofs. Deployment checks the live queue/build and hashes
 existing unfinished Job specs before/after; it never saves their credential-

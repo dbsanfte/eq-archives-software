@@ -204,7 +204,7 @@ def capture_sites(root, batch_id, sites, downloader_factory=Downloader, progress
         draft["transport"] = transport_store.get("wayback_transport", {})
         save(draft_path, draft)
         transport_store.close()
-    # Every newly acquired file needs a second, explicit batch publication approval.
+    # Each site's captured pages need a second, explicit indexing approval.
     check_manifest(root, draft)
     report('ready_for_review')
     return draft
