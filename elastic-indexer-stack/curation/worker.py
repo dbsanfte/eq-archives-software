@@ -16,7 +16,7 @@ from acquisition import sample
 from grading import grade
 from graph import staged_links
 from captures import capture_sites
-from jobs import Kubernetes, blockers, import_job
+from jobs import Kubernetes, blockers, import_attempt, import_job, import_name
 from publisher import publish
 from state import connect, unpack, worker_lease
 from coverage_check import refresh, require_new
@@ -209,7 +209,10 @@ class Worker:
         self.kube = self.kube or Kubernetes()
         jobs = self.kube.jobs()
         for batch in batches:
-            name = "eqarchives-captures-" + batch["id"]
+            name = import_name(batch)
+            attempt_detail = {"attempt": import_attempt(batch)}
+            if (batch.get('job') or {}).get('previous_name'):
+                attempt_detail['previous_name'] = batch['job']['previous_name']
             existing = next((job for job in jobs if job["metadata"]["name"] == name), None)
             if existing:
                 annotations = existing["metadata"].get("annotations", {})
@@ -217,15 +220,15 @@ class Worker:
                     raise CrawlError("Import Job does not match the approved manifest")
                 conditions = {c["type"]: c["status"] for c in existing.get("status", {}).get("conditions", [])}
                 state = "indexed" if conditions.get("Complete") == "True" else "index_failed" if conditions.get("Failed") == "True" else "indexing"
-                detail = {"name": name, "state": state}
+                detail = {**attempt_detail, "name": name, "state": state}
             else:
                 waiting = blockers(jobs, name)
                 if waiting:
-                    state, detail = "published_waiting_index", {"waiting_for": waiting}
+                    state, detail = "published_waiting_index", {**attempt_detail, "waiting_for": waiting}
                 else:
                     (self.root / "enrichment").mkdir(exist_ok=True, mode=0o700)
                     self.kube.create(import_job(batch, os.environ.get("IMPORT_IMAGE", "")))
-                    state, detail = "indexing", {"name": name, "state": "submitted"}
+                    state, detail = "indexing", {**attempt_detail, "name": name, "state": "submitted"}
                     # No further submissions until the next list sees this Job.
                     jobs.append({"metadata": {"name": name}, "spec": {}, "status": {}})
             with connect(self.root) as store:

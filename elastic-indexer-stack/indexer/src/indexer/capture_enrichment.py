@@ -89,7 +89,13 @@ def validate(response, source):
         require({item["date"] for item in evidence} == set(dates))
         for item in evidence:
             require(set(item) == {"date", "excerpt"} and isinstance(item["excerpt"], str))
-            require(1 <= len(item["excerpt"]) <= 500 and item["excerpt"] in source)
+            require(1 <= len(item["excerpt"]) <= 500 and item["excerpt"].strip())
+            # HTML headings often contain NBSPs or wrap across Markdown lines.
+            # Only whitespace may differ; retain the actual verbatim source.
+            pattern = r"\s+".join(re.escape(part) for part in re.split(r"\s+", item["excerpt"].strip()))
+            match = re.search(pattern, source)
+            require(match is not None)
+            item["excerpt"] = match.group(0)
     except (ValueError, KeyError, TypeError, AttributeError):
         raise CrawlError("Luna enrichment failed schema/source validation; indexing remains pending") from None
     return result
@@ -134,7 +140,10 @@ class Enricher:
         self.store.db.commit()
         self.client = self.client or self.client_factory(self.key_file)
         response = self.client.request(payload)
-        result = validate(response, source)
+        # Retain paid evidence even when validation rejects it. A retry can
+        # revalidate this exact source-bound response without another API call.
+        self.store.set("enrichment:" + signature, {"response": response, "signature": signature,
+                       "source_sha256": capture["sha256"], "received_at": now()})
         usage = response.get("usage", {})
         input_tokens, output_tokens = usage.get("input_tokens", 0), usage.get("output_tokens", 0)
         long_context = input_tokens > 272000
@@ -142,7 +151,10 @@ class Enricher:
                   + output_tokens * PRICING["output_per_million"] * (1.5 if long_context else 1)) / 1_000_000
         if not math.isfinite(actual):
             raise CrawlError("Invalid enrichment usage; reservation retained")
-        self.store.db.execute("UPDATE attempts SET actual=?,status='enriched' WHERE id=?", (actual, attempt))
-        self.store.set("enrichment:" + signature, {"response": response, "signature": signature, "source_sha256": capture["sha256"], "enriched_at": now()})
+        self.store.db.execute("UPDATE attempts SET actual=?,status='received' WHERE id=?", (actual, attempt))
+        self.store.db.commit()
+        result = validate(response, source)
+        self.store.db.execute("UPDATE attempts SET status='enriched' WHERE id=?", (attempt,))
+        self.store.db.commit()
         return {**{key: result[key] for key in SCHEMA["required"] if key != "date_evidence"},
                 "llm_model_name": response.get("model", MODEL), "llm_enrichment_signature": signature}

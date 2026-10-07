@@ -64,6 +64,40 @@ def test_missing_date_remains_null_and_capture_timestamp_cannot_replace_it():
     with pytest.raises(CrawlError,match='incomplete'):validate({'status':'incomplete'},SOURCE)
 
 
+def test_date_evidence_accepts_wrapped_nbsp_headings_and_retains_verbatim_source():
+    source='EverQuest news. AUGUST\n3 \u00a02000. Final paragraph.'
+    result=copy.deepcopy(RESULT)
+    result.update(llm_guessed_date='2000-08-03',llm_extracted_dates=[{'date':'2000-08-03'}],
+                  date_evidence=[{'date':'2000-08-03','excerpt':'AUGUST 3  2000'}])
+    validated=validate(response(result),source)
+    assert validated['date_evidence']==[{'date':'2000-08-03','excerpt':'AUGUST\n3 \u00a02000'}]
+    for excerpt in ('AUGUST 4 2000','August 3 2000','AUGUST 3 2001','   '):
+        result['date_evidence'][0]['excerpt']=excerpt
+        with pytest.raises(CrawlError,match='source validation'):validate(response(result),source)
+
+
+def test_invalid_paid_response_is_retained_and_retry_does_not_pay_again(candidate,tmp_path):
+    _,row=candidate
+    capture={**row['captures'][0],'archive_path':'websites/guild.example/20000101000000/eq/news.html'}
+    invalid=copy.deepcopy(RESULT)
+    invalid['date_evidence'][0]['excerpt']='Invented evidence.'
+    calls=[]
+    class FakeLuna:
+        def __init__(self,*args):pass
+        def request(self,payload):calls.append(payload);return response(invalid)
+        def close(self):pass
+    directory=tmp_path/'enrichment'
+    for _ in range(2):
+        client=Enricher(directory,'dummy-key-file',client_factory=FakeLuna)
+        try:
+            with pytest.raises(CrawlError,match='source validation'):client.enrich(capture,SOURCE)
+            saved=client.store.db.execute("SELECT value FROM meta WHERE key LIKE 'enrichment:%'").fetchall()
+            assert len(saved)==1 and json.loads(saved[0][0])['response']==response(invalid)
+            assert client.store.db.execute('SELECT COUNT(*) FROM attempts').fetchone()[0]==1
+        finally:client.close()
+    assert len(calls)==1
+
+
 def test_budget_is_reserved_before_unknown_failure_and_survives_retry(candidate,tmp_path):
     _,row=candidate
     capture={**row['captures'][0],'archive_path':'websites/guild.example/20000101000000/eq/news.html'}

@@ -189,20 +189,27 @@ summary, content flavour, tags and supported date estimates using the existing
 archive text prompts/schema enums. It stores the actual model and enrichment
 signature, and embeds its short summary with Nomic. The complete original body
 is retained separately; model estimates never replace capture dates. Date
-extraction receives no synthetic capture header and requires verbatim source
-evidence. Sources exceeding the 900 KB serialized enrichment bound remain
-pending rather than being truncated.
+extraction receives no synthetic capture header and requires source evidence.
+Evidence matching allows only whitespace changes (wrapped lines and NBSPs),
+then retains the original verbatim excerpt. Sources exceeding the 900 KB
+serialized enrichment bound remain pending rather than being truncated.
 
 Each approved site has a separate cumulative $2 enrichment cap.
 Reservations use conservative long-context rates and precede calls; ambiguous
-failures retain reservations. Verified results are cached by source/prompt/model
-signature in a writable `enrichment/` subdirectory on the PVC. The approved
+failures retain reservations. Paid responses, including rejected evidence, are
+cached by source/prompt/model signature in a writable `enrichment/` subdirectory
+on the PVC. The approved
 sources/manifests remain read-only in import Jobs. Completed results are reused
-on retry, while existing document IDs incur no model calls. Failed enrichment
-or an exhausted budget leaves that document pending instead of silently creating
-an unenriched entry. There is no index/mapping creation, RabbitMQ or broad scan.
-Kubernetes retries twice; terminal failures remain visible for
-operator investigation, without deleting/replacing an existing Job.
+on retry without paying again for a received response, while existing document
+IDs incur no model calls. Failed enrichment or an exhausted budget leaves that
+document pending instead of silently creating an unenriched entry. There is no
+index/mapping creation, RabbitMQ or broad scan.
+Kubernetes retries twice. A terminal failure shows **Retry indexing** on the
+affected site's review. It verifies the saved publication approval and all source
+hashes, then queues a new numbered import Job under the original site budget.
+Duplicate/stale retry requests are rejected. The controller retains the failed
+Job, waits for other unfinished Jobs and never republishes or overwrites indexed
+entries. The selected source page stays open during retries and status updates.
 
 ## Storage, deployment and checks
 

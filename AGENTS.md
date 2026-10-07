@@ -243,6 +243,8 @@ manifest-bound approvals and metadata-only migration of unapproved mixed capture
 groups; never copy sources or replay already approved publication/import work.
 Keep publication status and explicit retry on the affected site. Preserve the
 selected view/site across reloads and the open source page during status updates.
+Terminal indexing retries must bind the failed Job and published manifest,
+create a new numbered Job, retain prior Jobs and reuse the original site budget.
 The non-root curation UID must have a Unix account so OpenSSH can start; exercise
 the real SSH configuration offline in the built-image smoke check.
 
@@ -260,6 +262,9 @@ reservations and a separate $2 cap per approved site. Preserve full source,
 model provenance and supported date evidence; capture dates are not publication
 estimates. Enrichment failures leave the new document pending. Skip existing
 IDs without paying for enrichment or overwriting their metadata.
+Cache paid responses before validation, including rejected evidence, to prevent
+repeated charges on retries. Date evidence may vary only in whitespace; retain
+the matched verbatim source excerpt and reject all other content differences.
 
 ### Public MCP service
 

@@ -299,6 +299,44 @@ async def check(base):
             await pane.locator('.site-status').filter(has_text='Approved — publication queued').wait_for()
             assert not await pane.get_by_role('button',name='Retry publication',exact=True).count()
             assert 'Last child paragraph.' in await pane.locator('pre').inner_text()
+            await page.unroute('**/api/queue?**',publication_status)
+            await page.unroute('**/api/site?**',publication_status)
+            indexing_retrying=False
+            failed_job='eqarchives-captures-'+payload['id']
+            async def indexing_status(route):
+                response=await route.fetch()
+                body=await response.json()
+                if '/api/site?' in route.request.url:
+                    body.update(state='published_waiting_index' if indexing_retrying else 'index_failed',
+                                publication={'commit':'1'*40},
+                                job={'attempt':2,'state':'retry_queued'} if indexing_retrying else {'name':failed_job,'state':'index_failed'},
+                                operation={**publish_op,'state':'completed','error':None})
+                else:
+                    body['operations']=[]
+                    for row in body['candidates']:
+                        if row['coverage']['capture']['review_id']==payload['id']:
+                            row['review_state']='published_waiting_index' if indexing_retrying else 'index_failed'
+                await route.fulfill(response=response,json=body)
+            async def retry_indexing(route):
+                nonlocal indexing_retrying
+                assert route.request.post_data_json=={'id':payload['id'],'manifest_sha256':payload['manifest_sha256'],'job_name':failed_job}
+                indexing_retrying=True
+                await route.fulfill(status=202,json={'state':'published_waiting_index','attempt':2})
+            await page.route('**/api/queue?**',indexing_status)
+            await page.route('**/api/site?**',indexing_status)
+            await page.route('**/api/index-retry',retry_indexing)
+            await page.locator('#refresh').click()
+            await pane.locator('.site-status').filter(has_text='Indexing failed').wait_for()
+            assert 'Indexing failed' in await guild.inner_text()
+            assert await pane.get_by_role('button',name='Retry indexing',exact=True).is_enabled()
+            assert 'same $2 site budget' in await pane.locator('.site-status').inner_text()
+            assert 'Last child paragraph.' in await pane.locator('pre').inner_text()
+            await pane.get_by_role('button',name='Retry indexing',exact=True).click()
+            await pane.locator('.site-status').filter(has_text='Published — waiting to index').wait_for()
+            assert not await pane.get_by_role('button',name='Retry indexing',exact=True).count()
+            assert not await pane.get_by_role('button',name='Approve site & queue indexing').count()
+            assert 'Last child paragraph.' in await pane.locator('pre').inner_text()
+            assert await page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             await context.close()
         finally:
             await browser.close()
@@ -309,4 +347,4 @@ if __name__=='__main__':
     parser.add_argument('url')
     args=parser.parse_args()
     asyncio.run(check(args.url.rstrip('/')))
-    print('Curation browser checks passed at 320, 390 and 1280 px; direct navigation, bookmarked site reviews, progress, Undo races, scope, whole-site decisions and publication retry verified')
+    print('Curation browser checks passed at 320, 390 and 1280 px; direct navigation, bookmarked site reviews, progress, Undo races, scope, whole-site decisions and publication/indexing retries verified')

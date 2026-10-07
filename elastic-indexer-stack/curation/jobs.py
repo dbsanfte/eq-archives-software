@@ -63,14 +63,27 @@ def blockers(jobs, own_name):
                   and not finished(job) and not job["spec"].get("suspend", False))
 
 
+def import_attempt(batch):
+    attempt = (batch.get('job') or {}).get('attempt', 1)
+    if type(attempt) is not int or not 1 <= attempt <= 999999:
+        raise CrawlError('Invalid indexing attempt')
+    return attempt
+
+
+def import_name(batch):
+    attempt = import_attempt(batch)
+    return 'eqarchives-captures-' + batch['id'] + (f'-r{attempt}' if attempt > 1 else '')
+
+
 def import_job(batch, image):
     if not re.fullmatch(r"dbsanfte/frontend@sha256:[a-f0-9]{64}", image):
         raise CrawlError("Targeted indexing requires the immutable deployed curation image")
     batch_id = batch["id"]
     return {"apiVersion": "batch/v1", "kind": "Job",
-            "metadata": {"name": "eqarchives-captures-" + batch_id,
+            "metadata": {"name": import_name(batch),
                          "namespace": "eqarchives-es", "labels": {"app": "eqarchives-capture-import"},
-                         "annotations": {"eqarchives.org/manifest-sha256": batch["manifest_sha256"]}},
+                         "annotations": {"eqarchives.org/manifest-sha256": batch["manifest_sha256"],
+                                         "eqarchives.org/import-attempt": str(import_attempt(batch))}},
             "spec": {"backoffLimit": 2, "activeDeadlineSeconds": 21600,
                      "template": {"metadata": {"labels": {"app": "eqarchives-capture-import"}},
                                   "spec": {"restartPolicy": "Never", "automountServiceAccountToken": False,
