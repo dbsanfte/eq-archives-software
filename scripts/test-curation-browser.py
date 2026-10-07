@@ -280,6 +280,7 @@ async def status_flow(browser,base):
             elif parsed.path=='/api/index-retry':
                 assert route.request.post_data_json=={'id':detail['review']['id'],'manifest_sha256':detail['review']['manifest_sha256'],'job_name':'failed-import'}
                 detail['review']['state']='published_waiting_index';detail['candidate']['review_state']='published_waiting_index'
+                detail['review']['error']=None
             else:raise AssertionError(parsed.path)
             await route.fulfill(status=202,json={'accepted':True});return
         if parsed.path=='/api/candidate': body=detail
@@ -297,10 +298,13 @@ async def status_flow(browser,base):
     await page.get_by_role('button',name='Retry publication',exact=True).click()
     await page.get_by_role('heading',name='Publishing approved files',exact=True).wait_for()
     detail['review']['state']='index_failed';detail['candidate']['review_state']='index_failed';detail['review']['job']={'name':'failed-import'}
+    detail['review']['error']='AI enrichment stopped after two correction attempts. Luna date evidence is not a verbatim source excerpt.'
     await page.locator('#refresh').click()
     await page.get_by_role('heading',name='Indexing needs attention',exact=True).wait_for()
+    await page.get_by_text(detail['review']['error'],exact=True).wait_for()
     await page.get_by_role('button',name='Retry indexing',exact=True).click()
     await page.get_by_role('heading',name='Waiting to index',exact=True).wait_for()
+    assert not await page.get_by_text('AI enrichment stopped after two correction attempts.',exact=False).count()
     detail['review']['state']='indexing';detail['candidate']['review_state']='indexing'
     await page.locator('#refresh').click()
     await page.get_by_role('heading',name='AI enrichment & indexing',exact=True).wait_for()

@@ -97,6 +97,7 @@ def import_job(batch, image):
                                                            "--batch", f"batches/{batch_id}/approved.json",
                                                            "--manifest-sha256", batch["manifest_sha256"]],
                                                "env": [{"name": "ELASTICSEARCH_URL", "value": "http://elasticsearch.eqarchives-es.svc.cluster.local:9200"},
+                                                       {"name": "IMPORT_JOB_NAME", "value": import_name(batch)},
                                                        {"name": "EMBEDDING_URL", "value": "http://nomic-embeddings.eqarchives-es.svc.cluster.local:8080"},
                                                        {"name": "EMBEDDING_MODEL", "value": "text-embedding-nomic-embed-text-v1.5@q8_0"}],
                                                "resources": {"requests": {"cpu": "100m", "memory": "128Mi"},
