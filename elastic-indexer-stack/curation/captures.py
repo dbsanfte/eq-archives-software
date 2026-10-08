@@ -8,12 +8,16 @@ from urllib.parse import urlsplit
 
 from acquisition import Downloader
 from archive_layout import archive_path
-from common import CrawlError, Page, Store, TIERS, decode, digest, now, original_url, save, tier, within_scope
+from common import CAPTURE_WINDOW, CrawlError, Page, Store, decode, digest, in_capture_window, now, original_url, save, tier, within_scope
 from discovery import SKIP
 from indexer.capture_enrichment import DEFAULT_POLICY
 
 LIMITS = {"sites": 5, "pages_per_site": 20, "files": 100, "bytes": 64 * 1024 * 1024,
           "requests": 500, "seconds": 1800, "page_bytes": 1024 * 1024}
+
+
+class CaptureBound(CrawlError):
+    pass
 
 
 def verified_source(root, capture):
@@ -74,6 +78,8 @@ def check_manifest(root, manifest):
     seen, size = set(), 0
     for capture in manifest["captures"]:
         verified_source(root, capture)
+        if manifest.get('capture_window') and not in_capture_window(capture['timestamp'], manifest['capture_window']):
+            raise CrawlError('Capture is outside the saved date window')
         site = sites.get(capture.get("candidate_id"))
         if ezboard:
             page, _ = document(root, capture)
@@ -107,6 +113,8 @@ def capture_sites(root, batch_id, sites, downloader_factory=Downloader, progress
                  "sites": sites, "captures": [], "visited": [], "notes": [], "indexing": dict(DEFAULT_POLICY)}
         for site in sites:
             for capture in site["captures"]:
+                if not in_capture_window(capture['timestamp']):
+                    continue
                 verified_source(root, capture)
                 path = archive_path(capture)
                 existing = next((item for item in draft["captures"] if item["archive_path"] == path), None)
@@ -116,10 +124,24 @@ def capture_sites(root, batch_id, sites, downloader_factory=Downloader, progress
                     continue
                 draft["captures"].append({**capture, "candidate_id": site["id"], "archive_path": path})
         save(draft_path, draft)
+    # A paused legacy traversal may have marked a URL finished after one sample.
+    # Revisit its catalogs, retaining sources and the original transport budget.
+    # Already completed review/publication manifests never pass through here.
+    if not draft.get('capture_window'):
+        draft['capture_window'] = dict(CAPTURE_WINDOW)
+        draft['captures'] = [c for c in draft['captures'] if in_capture_window(c['timestamp'])]
+        draft['visited'] = []
+        draft['catalogs'] = {}
+        draft['capture_coverage'] = {}
+        save(draft_path, draft)
+    if draft['capture_window'] != CAPTURE_WINDOW:
+        raise CrawlError('Saved capture date policy changed')
+    catalogs = draft['catalogs']
+    coverage = draft['capture_coverage']
     # Each batch owns a separate durable, cumulative HTTP budget.
     transport_store = Store(directory)
     downloader = None
-    seen = {(c["candidate_id"], original_url(c["url"])) for c in draft["captures"]}
+    seen = {(c["candidate_id"], original_url(c["url"]), c['timestamp']) for c in draft["captures"]}
     visited = {tuple(entry) for entry in draft["visited"]}
     site_index, site_url = 0, None
     def report(phase, current_url=None):
@@ -127,7 +149,8 @@ def capture_sites(root, batch_id, sites, downloader_factory=Downloader, progress
             progress({"phase": phase, "files": len(draft["captures"]),
                       "bytes": sum(c["bytes"] for c in draft["captures"]), "urls_checked": len(visited),
                       "sites_done": site_index if phase == 'ready_for_review' else max(0, site_index - 1),
-                      "sites_total": len(sites), "site_url": site_url, "current_url": current_url})
+                      "sites_total": len(sites), "site_url": site_url, "current_url": current_url,
+                      "capture_window": draft['capture_window']})
     report('preparing')
     args = SimpleNamespace(delay=3, bytes_per_second=131072, max_requests=LIMITS["requests"],
                            max_page_bytes=LIMITS["page_bytes"], max_bytes=LIMITS["bytes"], max_seconds=LIMITS["seconds"])
@@ -135,13 +158,18 @@ def capture_sites(root, batch_id, sites, downloader_factory=Downloader, progress
         try:
             return downloader.call(job)
         except CrawlError as error:
-            if str(error).startswith(("Wayback HTTP 404", "Wayback HTTP 410", "Response exceeds byte limit", "Expanded response exceeds byte limit")):
-                draft["notes"].append({"url": job["url"], "note": str(error) + "; URL excluded"})
+            if job['op'] == 'capture' and str(error).startswith(("Wayback HTTP 404", "Wayback HTTP 410", "Response exceeds byte limit", "Expanded response exceeds byte limit")):
+                note(job['url'], 'Capture ' + job['timestamp'] + ': ' + str(error) + '; version excluded')
                 return None
             raise
+    def note(url, detail):
+        item = {'url': url, 'note': detail}
+        if item not in draft['notes']:
+            draft['notes'].append(item)
     try:
         for site_index, site in enumerate(sites, 1):
             site_url = site['url']
+            coverage[site['id']] = {'state': 'capturing', 'reason': 'Reading all dated versions in the approved scope'}
             frontier = deque([site["scope"], site["url"]])
             for capture in site.get('reviewed_captures', []):
                 page, _ = document(root, capture)
@@ -157,59 +185,86 @@ def capture_sites(root, batch_id, sites, downloader_factory=Downloader, progress
                 if not url or url in checked or not allowed or SKIP.search(urlsplit(url).path):
                     continue
                 checked.add(url)
-                if (site["id"], url) in seen or (site["id"], url) in visited:
+                if (site["id"], url) in visited:
                     continue
                 # Count attempts, including unavailable URLs, to keep traversal finite.
-                attempted = sum(key[0] == site["id"] for key in visited)
-                if attempted >= LIMITS["pages_per_site"] or len(draft["captures"]) >= LIMITS["files"]:
-                    draft["notes"].append({"url": url, "note": "Traversal limit reached; bounded subset staged for review"})
-                    break
-                if sum(c["bytes"] for c in draft["captures"]) >= LIMITS["bytes"] - LIMITS["page_bytes"]:
-                    raise CrawlError("Batch source byte budget reached")
-                downloader = downloader or downloader_factory(transport_store, args)
-                for level, (start, end) in TIERS.items():
-                    report('checking_wayback', url)
-                    listing = acquire({"op": "list", "url": url, "from": start, "to": end})
-                    if listing is None:
-                        break
-                    records = sorted(listing["captures"], key=lambda row: row["timestamp"])
-                    if not records:
+                key = digest([site['id'], url])
+                attempted = sum(c['site'] == site['id'] for c in catalogs.values())
+                if key not in catalogs:
+                    if attempted >= LIMITS['pages_per_site']:
+                        raise CaptureBound('URL traversal limit reached; full date coverage remains incomplete')
+                    catalogs[key] = {'site': site['id'], 'url': url, 'records': [], 'offset': 0, 'resume_key': None, 'end': False}
+                catalog = catalogs[key]
+                while True:
+                    if catalog['offset'] >= len(catalog['records']):
+                        if catalog['end']:
+                            break
+                        report('checking_wayback', url)
+                        downloader = downloader or downloader_factory(transport_store, args)
+                        listing = acquire({'op': 'capture_list', 'url': url, 'from': CAPTURE_WINDOW['from'],
+                                           'to': CAPTURE_WINDOW['to'], 'resume_key': catalog['resume_key']})
+                        if listing is None:
+                            catalog.update(records=[], offset=0, end=True)
+                            break
+                        resume = listing.get('resume_key')
+                        if resume and resume == catalog['resume_key']:
+                            raise CrawlError('CDX repeated its continuation key; date coverage is unresolved')
+                        catalog.update(records=listing['captures'], offset=0, resume_key=resume, end=not resume)
+                        save(draft_path, draft)
                         continue
-                    record = records[0]
-                    folder = directory / "captures" / site["id"]
-                    folder.mkdir(parents=True, exist_ok=True, mode=0o700)
-                    destination = folder / (digest(url) + "-" + record["timestamp"] + ".html")
-                    report('downloading', record['url'])
-                    capture = acquire({"op": "capture", "url": record["url"], "timestamp": record["timestamp"],
-                                       "from": start, "to": end, "destination": str(destination)})
-                    if capture is None:
-                        break
-                    if original_url(capture["url"]) != url or tier(capture["timestamp"]) != level:
-                        raise CrawlError("Downloaded source changed original URL or date tier")
-                    capture.update(path=str(destination.relative_to(root)), tier=level, source="wayback",
-                                   candidate_id=site["id"], retrieved_at=now(), cdx_digest=record["digest"],
-                                   cdx_length=record["length"], site_coverage="bounded_link_traversal")
-                    page, encoding = document(root, capture)
-                    capture.update(encoding=encoding, title=" ".join(page.title), archive_path=archive_path(capture))
-                    collision = next((item for item in draft["captures"] if item["archive_path"] == capture["archive_path"]), None)
-                    if collision:
-                        if original_url(collision["url"]) != url or collision["sha256"] != capture["sha256"]:
-                            draft["notes"].append({"url": url, "note": "Excluded: archive filename collides with another capture"})
-                    elif " ".join(page.text).strip():
-                        draft["captures"].append(capture)
-                        seen.add((site["id"], url))
-                        frontier.extend(link["url"] for link in page.links)
-                    else:
-                        draft["notes"].append({"url": url, "note": "No readable source text"})
-                    break
+                    record = catalog['records'][catalog['offset']]
+                    if original_url(record['url']) != url or not in_capture_window(record['timestamp']):
+                        raise CrawlError('Capture listing changed original URL or date window')
+                    if (site['id'], url, record['timestamp']) not in seen:
+                        if len(draft['captures']) >= LIMITS['files']:
+                            raise CaptureBound('Capture file limit reached; full date coverage remains incomplete')
+                        if sum(c['bytes'] for c in draft['captures']) >= LIMITS['bytes'] - LIMITS['page_bytes']:
+                            raise CaptureBound('Batch source byte budget reached')
+                        capture = catalog.get('receipt')
+                        if not capture:
+                            folder = directory / 'captures' / site['id']
+                            folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+                            destination = folder / (digest(url) + '-' + record['timestamp'] + '.html')
+                            report('downloading', record['url'])
+                            downloader = downloader or downloader_factory(transport_store, args)
+                            capture = acquire({'op': 'capture', 'url': record['url'], 'timestamp': record['timestamp'],
+                                               'from': CAPTURE_WINDOW['from'], 'to': CAPTURE_WINDOW['to'], 'destination': str(destination)})
+                            if capture:
+                                capture.update(path=str(destination.relative_to(root)), candidate_id=site['id'],
+                                               requested_timestamp=record['timestamp'], retrieved_at=now())
+                                catalog['receipt'] = capture
+                                save(draft_path, draft)
+                        if capture:
+                            if original_url(capture['url']) != url or not in_capture_window(capture['timestamp']):
+                                raise CrawlError('Downloaded source changed original URL or date window')
+                            capture.update(tier=tier(capture['timestamp']), source='wayback', cdx_digest=record['digest'],
+                                           cdx_length=record['length'], site_coverage='bounded_all_versions')
+                            page, encoding = document(root, capture)
+                            capture.update(encoding=encoding, title=' '.join(page.title), archive_path=archive_path(capture))
+                            collision = next((item for item in draft['captures'] if item['archive_path'] == capture['archive_path']), None)
+                            if collision:
+                                if original_url(collision['url']) != url or collision['sha256'] != capture['sha256']:
+                                    note(url, 'Excluded: archive filename collides with another capture')
+                            elif ' '.join(page.text).strip():
+                                draft['captures'].append(capture)
+                                seen.add((site['id'], url, capture['timestamp']))
+                                frontier.extend(link['url'] for link in page.links)
+                            else:
+                                note(url, 'No readable source text')
+                    catalog['offset'] += 1
+                    catalog.pop('receipt', None)
+                    save(draft_path, draft)
                 visited.add((site["id"], url))
                 draft["visited"] = sorted(visited)
                 save(draft_path, draft)
                 report('checking_wayback')
+            coverage[site['id']] = {'state': 'complete', 'reason': 'All listed 1999–2006 versions of discovered pages checked; Wayback may have missing pages or captures'}
     except CrawlError as error:
-        if "budget" not in str(error).lower():
+        if not isinstance(error, CaptureBound) and "budget" not in str(error).lower():
             raise
-        draft["notes"].append({"url": url, "note": str(error) + "; bounded subset staged for review"})
+        note(url, str(error) + '; bounded subset staged for review')
+        for pending_site in sites[site_index - 1:]:
+            coverage[pending_site['id']] = {'state': 'bounded', 'reason': str(error) + '; capture of the full 1999–2006 window is incomplete'}
     finally:
         if downloader:
             downloader.close()
@@ -217,6 +272,7 @@ def capture_sites(root, batch_id, sites, downloader_factory=Downloader, progress
         save(draft_path, draft)
         transport_store.close()
     # Each site's captured pages need a second, explicit indexing approval.
-    check_manifest(root, draft)
+    manifest = {key: value for key, value in draft.items() if key != 'catalogs'}
+    check_manifest(root, manifest)
     report('ready_for_review')
-    return draft
+    return manifest

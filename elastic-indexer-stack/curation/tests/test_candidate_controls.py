@@ -7,6 +7,21 @@ from state import connect
 from test_server import call
 
 
+def test_early_capture_priority_breaks_equal_grade_ties_before_pagination(tmp_path):
+    root=tmp_path/'state'
+    early=add_candidate(root,url='http://z-early.example/',grade=2)
+    later=add_candidate(root,url='http://a-later.example/',grade=2)
+    strongest=add_candidate(root,url='http://best-later.example/',grade=3)
+    with connect(root) as store:
+        for row in (later,strongest):
+            captures=row['captures']
+            captures[0].update(timestamp='20060101000000',tier=2)
+            store.db.execute('UPDATE candidates SET captures=?,priority=1000 WHERE id=?',(json.dumps(captures),row['id']))
+        store.db.commit()
+    response=call(create_app(root,start_worker=False),'GET','/api/queue?filter=candidates&min_grade=2').json()
+    assert [row['id'] for row in response['candidates']]==[strongest['id'],early['id'],later['id']]
+
+
 def test_minimum_grade_sorting_and_ungraded_filter_precede_pagination(tmp_path):
     root = tmp_path / 'state'
     for grade in (0, 1, 2, 3, None):

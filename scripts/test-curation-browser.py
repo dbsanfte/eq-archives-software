@@ -1220,6 +1220,7 @@ async def ezboard_flow(browser,base,width):
     await page.route('**/api/**',fixture)
     await page.goto(base+'/?view=candidates&candidate='+row['id']);await settled(page)
     assert await page.get_by_label('Download scope',exact=True).input_value()=='ezboard'
+    await page.get_by_text('Capture window: 1 January 1999–31 December 2006.',exact=False).wait_for()
     await page.get_by_text('Board identity: eqasylum.',exact=False).wait_for()
     await safe_layout(page,width)
     await page.get_by_label('Download scope',exact=True).select_option('page')
@@ -1231,12 +1232,18 @@ async def ezboard_flow(browser,base,width):
                   timestamp='20020602023020',title='Lanys raid thread',candidate_id=row['id'])
     row.update(stage='review',state='captured_awaiting_review',review_state='awaiting_review')
     review={'id':'c'*32,'state':'awaiting_review','manifest_sha256':'e'*64,'page_identities':[source['url']],'source_slots':[0],
-            'manifest':{'sites':[row],'captures':[source],'notes':[],
+            'manifest':{'sites':[row],'captures':[source],'notes':[{'url':source['url'],'reason':'Unavailable archived discussion'}],
+                        'capture_window':{'from':'19990101000000','to':'20061231235959','versions':'all_available'},
+                        'capture_coverage':{row['id']:{'state':'bounded','reason':'Full 1999–2006 date coverage is incomplete; file limit reached'}},
                         'ezboard':{'coverage':{'state':'bounded','hosts':2,'forums':22,'catalogs_remaining':3,
                           'reason':'Capture file limit reached; pending captures are retained','counts':{'excluded':1,'unavailable':2}}}}}
     await page.goto(base+'/?view=review&candidate='+row['id']);await settled(page)
     await page.get_by_text('Capture file limit reached; pending captures are retained',exact=True).wait_for()
     await page.get_by_text('3 captures unavailable or excluded',exact=False).wait_for()
+    await page.get_by_text('Requested window:',exact=False).filter(has_text='2006').wait_for()
+    await page.get_by_text('Full 1999–2006 date coverage is incomplete; file limit reached',exact=True).wait_for()
+    await page.get_by_text('Read coverage notes',exact=True).click()
+    await page.get_by_text(source['url']+': Unavailable archived discussion',exact=True).wait_for()
     await safe_layout(page,width)
     await page.screenshot(path=f'/tmp/curation-ezboard-{width}.png',full_page=True)
     await page.get_by_role('button',name='Browse 1 captured page',exact=True).click()

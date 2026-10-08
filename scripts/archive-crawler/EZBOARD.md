@@ -77,7 +77,10 @@ metadata and source path. It refuses ambiguous path/content collisions.
 | Active downloader time across resumes | 3,600 seconds |
 | Request spacing / transfer rate | 3 seconds / 128 KiB/s |
 
-The first two date tiers are **1999–2001**, then **2002–2007**. Each known host
+New captures cover **1999-01-01 through 2006-12-31 inclusive UTC**, retaining all
+available dated versions in both **1999–2001** and **2002–2006**, even when the
+first tier has results. Early availability gives sites discovery priority; it
+does not exclude later snapshots from an approved capture. Each known host
 gets narrow `b<board>` and `f<board>` CDX prefix queries. The downloader follows
 [CDX resumption keys](https://github.com/internetarchive/wayback/tree/master/wayback-cdx-server#resumption-key)
 in 200-row pages, without collapsing different pages or dated versions. It
@@ -104,6 +107,8 @@ condition. `complete` means the saved catalogs for the known hosts were exhauste
 captures, error pages and unverified membership. `status` reads metadata only;
 `verify` explicitly reads the manifest's sources and checks hashes. Simultaneous
 commands for the same work directory are refused.
+The date window is saved with the plan. A legacy operator plan keeps its former
+1999–2007 window on resume rather than silently changing captured evidence.
 
 This command does not grade, publish, commit, push or index. Its operator manifest
 is not a portal publication approval. Keep all state outside both repositories.

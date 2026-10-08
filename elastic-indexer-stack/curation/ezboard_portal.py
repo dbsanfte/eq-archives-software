@@ -108,6 +108,7 @@ def capture_board(root, batch_id, site, downloader_factory, progress=None):
         if not captures:
             raise CrawlError('No verified board discussion pages were recovered. ' + result['coverage']['reason'])
         manifest = {'schema': 1, 'batch_id': batch_id, 'created_at': result['created_at'], 'sites': [site],
+                    'capture_window': result['capture_window'],
                     'captures': captures, 'limits': PORTAL_LIMITS, 'indexing': dict(DEFAULT_POLICY),
                     'ezboard': {key: result[key] for key in ('board', 'coverage', 'hosts', 'forums')},
                     'notes': result['notes'] + [{'url': site['url'], 'reason': result['coverage']['reason']}], 'visited': []}

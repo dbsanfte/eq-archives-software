@@ -154,7 +154,7 @@ Add a site, also in Candidates, accepts an original HTTP(S) URL or a Wayback
 replay/calendar link. Bare addresses use HTTP; original protocol, path case,
 escaping and query order are preserved. Wayback links identify the original page,
 with the submitted link retained as provenance; sampling still prefers 1999–2001,
-then 2002–2007. Submitting explicitly permits checking **one site, up to $2**.
+then 2002–2006. Submitting explicitly permits checking **one site, up to $2**.
 The single worker checks archive/account coverage, takes the usual bounded samples
 and runs the normal Luna grader. It does not spider out to other sites. Results
 join Candidates with the ordinary evidence, sources, grade and capture-scope
@@ -205,15 +205,22 @@ Previously approved publication/import records retain their original identities.
 The legacy file-subset API remains available for single-site operator requests;
 the review screen and site-decision API always approve the complete captured site.
 
-[Capture limits](captures.py): five sites, 20 additional URL attempts per site,
+[Capture limits](captures.py): five sites, 20 URL attempts per site,
 100 files, 1 MiB per response, 64 MiB source/transport budget, 500 HTTP requests
 including retries and 1,800 seconds per batch. Requests are serial, at least
 three seconds apart, throttled to 128 KiB/s, with bounded 422/429/server-error
-backoff. Each exact URL first tries inclusive UTC 1999–2001, then 2002–2007 if
-no exact first-tier capture is listed. Initial samples can retain two versions;
-traversal adds the oldest returned version per URL. CDX listings are bounded
-and can be incomplete. These are HTML subsets, excluding images/assets and
-current live pages; they are not complete mirrors. Reaching a batch budget
+backoff. Approved capture requests **every available dated version from
+1999-01-01 through 2006-12-31 inclusive UTC**, including later versions of the
+sampled page. Exact-page CDX listings use 200-row pages and saved resume keys,
+without digest collapsing; equal-content versions on different dates remain
+distinct captures. Each completed version and catalog position is checkpointed
+before the next request. Links from recovered versions extend the chosen scope's
+frontier. The requested date window and per-site completion/limit reason are saved
+in the review manifest. Discovery alone uses 1999–2001 as its preferred sampling
+tier; equally graded candidates with early captures sort before later-only sites.
+Existing captured reviews and published manifests keep their original sources
+and dates, including legacy 2007 evidence. These are HTML subsets, excluding
+images/assets and current live pages; they are not complete mirrors. Reaching a batch budget
 stages its valid subset for review with an explicit coverage note. Other
 interrupted operations need an explicit resume within their original budgets.
 

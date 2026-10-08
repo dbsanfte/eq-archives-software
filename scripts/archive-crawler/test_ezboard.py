@@ -83,6 +83,23 @@ class EzboardTests(unittest.TestCase):
             self.assertIsNone(candidate(url, 'eqasylum'))
         self.assertEqual(address(MOVED)['kind'], 'message')
 
+    def test_new_board_capture_includes_both_date_tiers_through_end_of_2006(self):
+        self.capture.plan(BOARD)
+        self.listing(BOARD, [(BOARD, '19990101000000')])
+        self.listing(BOARD, [(BOARD, '20061231235959'), (BOARD, '20070101000000')], tier=2)
+        FakeDownloader.sources = {(BOARD, stamp): html(FORUM) for stamp in ('19990101000000','20061231235959')}
+        manifest = self.capture.run(FakeDownloader)
+        self.assertEqual({c['timestamp'] for c in manifest['captures']}, {'19990101000000','20061231235959'})
+        self.assertEqual(manifest['capture_window']['to'], '20061231235959')
+        self.assertEqual(manifest['coverage']['state'], 'complete')
+        self.assertTrue(all(call['to'] <= '20061231235959' for call in FakeDownloader.instances[0].calls))
+
+    def test_saved_legacy_operator_plan_keeps_its_window_on_resume(self):
+        self.capture.plan(BOARD)
+        del self.capture.config['date_tiers']
+        self.store.set('ezboard_config', self.capture.config)
+        self.assertEqual(Capture(self.store).capture_window()['to'], '20071231235959')
+
     def test_pagination_moves_exact_query_paths_and_idempotent_resume(self):
         self.fixture()
         manifest = self.capture.run(FakeDownloader)

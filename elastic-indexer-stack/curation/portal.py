@@ -68,7 +68,7 @@ def grade_value(row):
 def candidate_filter(rows, minimum=None, needs_grade=False):
     if minimum is not None and minimum not in ('0', '1', '2', '3'):
         raise CrawlError('Minimum grade must be between 0 and 3')
-    rows = sorted(rows, key=lambda row: (-grade_value(row), -row['priority'], row['url']))
+    rows = sorted(rows, key=lambda row: (-grade_value(row), min((c.get('tier') or 3 for c in row.get('captures') or []), default=3), -row['priority'], row['url']))
     if needs_grade:
         return [row for row in rows if grade_value(row) < 0 or not row.get('captures')]
     if minimum is not None:
