@@ -17,6 +17,8 @@ def refresh(root, candidate_id=None, force=False):
     repository = os.environ.get('ARCHIVE_REPO')
     if not repository:
         return
+    from sitepowerup_portal import consolidate
+    consolidate(root)
     with connect(root) as store:
         archive = Archive(repository, store)
         inventory = SiteInventory(archive)

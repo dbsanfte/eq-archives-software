@@ -93,7 +93,7 @@ def campaign(root, operation):
             grade(args, run)
         with connect(root) as main:
             main.db.execute("ATTACH DATABASE ? AS campaign", (str(directory / "crawl.sqlite3"),))
-            for table in ("hosts", "tree_state", "files", "scans", "links", "ezboard_aliases", "ezboard_archive_boards", "ezboard_archive_forums"):
+            for table in ("hosts", "tree_state", "files", "scans", "links", "ezboard_aliases", "ezboard_archive_boards", "ezboard_archive_forums", "sitepowerup_archive_boards"):
                 main.db.execute(f"INSERT OR REPLACE INTO {table} SELECT * FROM campaign.{table}")
             retain_ezboard_progress(main, run)
             for row in run.candidates():

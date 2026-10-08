@@ -52,6 +52,11 @@ def prepare(run, operation, downloader=None):
     """Check only this account's Git metadata; no link spider or archive walk."""
     target = operation['payload']['target']
     url = target['url']
+    from sitepowerup import shard, board_url as sitepowerup_board
+    if shard(urlsplit(url).netloc):
+        url = sitepowerup_board(url)
+        if not url:
+            raise CrawlError('Use a SitePowerUp board or message URL with one numeric BoardID; no Luna call was made.')
     from ezboard import board_url, candidate_url
     from ezboard_discovery import resolve
     resolved = candidate_url(run, url)
@@ -74,6 +79,8 @@ def prepare(run, operation, downloader=None):
     coverage = {'status': check['status'], 'site_check': check, 'manual_operation': operation['id']}
     if board_url(url):
         coverage['scope_mode'] = 'ezboard'
+    elif sitepowerup_board(url):
+        coverage['scope_mode'] = 'sitepowerup'
     evidence = [{'kind': 'manual_submission', 'source_url': target['submitted_url'], 'original_url': url,
                  'submitted_at': operation.get('created') or now(), 'linked_url': target['url']}]
     run.db.execute('INSERT OR IGNORE INTO candidates(id,url,scope,priority,coverage,evidence) VALUES (?,?,?,?,?,?)',

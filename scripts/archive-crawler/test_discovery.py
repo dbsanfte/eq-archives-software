@@ -54,6 +54,17 @@ class DiscoveryTests(unittest.TestCase):
             self.assertIsNone(original_url(bad))
         self.assertNotEqual(original_url("http://eq.example/A?a=1&b=2"), original_url("https://eq.example/a?b=2&a=1"))
 
+    def test_sitepowerup_discovery_queues_boards_not_messages_or_post_forms(self):
+        from test_sitepowerup import BOARD, MESSAGE
+        links = [MESSAGE, MESSAGE.replace('12155','12154'), BOARD, BOARD.replace('102010','104254'), BOARD.replace('Display','Post')]
+        self.file('seed.example','20000101000000','index.html',
+                  '<title>EverQuest forums</title>' + ''.join('<a href="'+url+'">EQ forum</a>' for url in links))
+        self.commit()
+        discover(self.args(),self.store)
+        rows=self.store.candidates()
+        self.assertEqual({row['url'] for row in rows},{BOARD,BOARD.replace('102010','104254')})
+        self.assertTrue(all(json.loads(row['coverage'])['scope_mode']=='sitepowerup' for row in rows))
+
     def test_inclusive_tiers_and_shared_host_scope(self):
         for date in ("19990101000000", "20011231235959"):
             self.assertEqual(tier(date), 1)

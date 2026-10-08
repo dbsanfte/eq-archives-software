@@ -12,6 +12,15 @@ from common import CrawlError, Page, decode, original_url
 SHARD = re.compile(r'(?:www\.)?(?:server|pub|p|b)[0-9]+\.ezboard\.com\Z', re.I)
 NAME = re.compile(r'[a-zA-Z0-9_]{1,120}\Z')
 READ_ACTIONS = {'showMessage', 'showMessageRange', 'showNextMessage', 'showPrevMessage'}
+CATALOG_KINDS = ('b', 'f')
+
+
+def catalog_url(board, query):
+    return 'http://' + query['host'] + '/' + query['kind'] + board
+
+
+def catalog_member(item, query):
+    return item['host'] == query['host'] and item['token'][0] == query['kind']
 
 
 def shard(host):

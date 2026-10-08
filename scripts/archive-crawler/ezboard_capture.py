@@ -14,7 +14,7 @@ from acquisition import Downloader
 from archive_layout import archive_path
 from common import LEGACY_TIERS, CrawlError, Store, TIERS, digest, in_capture_window, now, original_url, save, tier
 from discovery import Archive
-from ezboard import address, belongs, board_name, candidate, forum_links, shard, source_page, source_problem
+import ezboard
 
 DEFAULT_LIMITS = {'max_captures': 2000, 'max_catalog_rows': 100000, 'max_hosts': 512,
                   'max_requests': 4000, 'max_bytes': 256 * 1024 * 1024, 'max_seconds': 3600,
@@ -26,7 +26,10 @@ class BoundReached(CrawlError):
 
 
 class Capture:
-    def __init__(self, store):
+    def __init__(self, store, platform=ezboard):
+        self.platform, self.name = platform, platform.__name__
+        if store.get(('sitepowerup' if self.name == 'ezboard' else 'ezboard') + '_config'):
+            raise CrawlError('This directory already contains a different board platform. Use its saved capture command.')
         self.store, self.db, self.root = store, store.db, store.root
         self.db.executescript('''
             CREATE TABLE IF NOT EXISTS ez_queries (
@@ -41,7 +44,7 @@ class Capture:
             CREATE TABLE IF NOT EXISTS ez_forums (token TEXT PRIMARY KEY, evidence TEXT);
             CREATE TABLE IF NOT EXISTS ez_hosts (host TEXT PRIMARY KEY, evidence TEXT);
         ''')
-        self.config = store.get('ezboard_config')
+        self.config = store.get(self.name + '_config')
 
     def date_tiers(self):
         # A saved operator plan keeps its original date policy on resume.
@@ -54,26 +57,26 @@ class Capture:
     def plan(self, url, hosts=(), limits=None, archive_repo=None):
         if self.config:
             raise CrawlError('This directory already has a plan. Resume capture or use a new private directory.')
-        board = board_name(url)
+        board = self.platform.board_name(url)
         self.config = {'schema': 1, 'board': board, 'url': original_url(url), 'created_at': now(),
                        'limits': {**DEFAULT_LIMITS, **(limits or {})}, 'date_tiers': TIERS}
         self.validate_limits(self.config['limits'])
-        names = {address(url)['host']: {'source': 'submitted_url', 'url': original_url(url)}}
+        names = {self.platform.address(url)['host']: {'source': 'submitted_url', 'url': original_url(url)}}
         for host in hosts:
-            if not shard(host):
-                raise CrawlError('Additional hosts must be numbered Ezboard servers')
+            if not self.platform.shard(host):
+                raise CrawlError('Additional host is not supported by this board platform')
             names[host.lower()] = {'source': 'operator'}
         if archive_repo:
             archive = Archive(archive_repo, self.store)
             self.config['archive_sha'] = archive.sha
             # Root host trees only. Do not enumerate dates/files or fetch blobs.
             for row in self.db.execute('SELECT host FROM hosts'):
-                if shard(row['host']):
+                if self.platform.shard(row['host']):
                     names.setdefault(row['host'].lower(), {'source': 'archive_host_inventory', 'sha': archive.sha})
         if len(names) > self.config['limits']['max_hosts']:
             raise CrawlError('Host inventory exceeds the saved host limit')
         self.config['initial_hosts'] = names
-        self.store.set('ezboard_config', self.config)
+        self.store.set(self.name + '_config', self.config)
         for host, evidence in names.items():
             self.add_host(host, evidence)
         self.set_status('planned', 'Plan saved; capture has not started')
@@ -98,24 +101,24 @@ class Capture:
             raise CrawlError('Extensions must increase cumulative limits, without resetting usage')
         before = dict(self.config['limits'])
         self.config['limits'] = limits
-        self.store.event(None, 'ezboard_limits_extended', {'previous': before, 'limits': limits})
-        self.store.set('ezboard_config', self.config)
+        self.store.event(None, self.name + '_limits_extended', {'previous': before, 'limits': limits})
+        self.store.set(self.name + '_config', self.config)
         return self.status()
 
     def require_plan(self):
         if not self.config:
-            raise CrawlError('Create an Ezboard capture plan first')
+            raise CrawlError('Create a board capture plan first')
 
     def add_host(self, host, evidence):
         if self.db.execute('SELECT 1 FROM ez_hosts WHERE host=?', (host,)).fetchone():
             return
-        if not shard(host):
-            raise CrawlError('Invalid Ezboard shard')
+        if not self.platform.shard(host):
+            raise CrawlError('Invalid board host')
         if self.db.execute('SELECT COUNT(*) FROM ez_hosts').fetchone()[0] >= self.config['limits']['max_hosts']:
-            raise BoundReached('Ezboard host limit reached; continuation is saved')
+            raise BoundReached('Board host limit reached; continuation is saved')
         self.db.execute('INSERT INTO ez_hosts VALUES (?,?)', (host, json.dumps(evidence)))
         for level in TIERS:
-            for kind in ('b', 'f'):
+            for kind in self.platform.CATALOG_KINDS:
                 self.db.execute('INSERT INTO ez_queries(host,kind,tier) VALUES (?,?,?)', (host, kind, level))
         self.db.commit()
 
@@ -124,40 +127,40 @@ class Capture:
 
     def learn(self, page, result):
         board = self.config['board']
-        parsed = candidate(result['url'], board)
+        parsed = self.platform.candidate(result['url'], board)
         evidence = {key: result[key] for key in ('url', 'timestamp', 'sha256')}
-        tokens = forum_links(page, result['url'], board)
+        tokens = self.platform.forum_links(page, result['url'], board)
         if parsed['kind'] != 'board':
             tokens.append(parsed['token'])
         for token in tokens:
             self.db.execute('INSERT OR IGNORE INTO ez_forums VALUES (?,?)', (token, json.dumps(evidence)))
         self.db.commit()
         for link in page.links:
-            target = candidate(link['url'], board)
+            target = self.platform.candidate(link['url'], board)
             if target:
                 self.add_host(target['host'], {**evidence, 'source': 'captured_link', 'link': link['url']})
 
     def set_status(self, state, reason):
-        self.store.set('ezboard_status', {'state': state, 'reason': reason, 'updated_at': now()})
+        self.store.set(self.name + '_status', {'state': state, 'reason': reason, 'updated_at': now()})
 
     def seed(self, captures, source_root):
         """Reuse explicitly reviewed sources without another Wayback request."""
         self.require_plan()
         source_root = Path(source_root).resolve()
         for capture in captures:
-            parsed = candidate(capture['url'], self.config['board'])
+            parsed = self.platform.candidate(capture['url'], self.config['board'])
             if not parsed or not in_capture_window(capture['timestamp'], self.capture_window()):
                 continue
             source = source_root / capture['path']
             if source_root not in source.resolve().parents or source.is_symlink():
-                raise CrawlError('Reviewed Ezboard source escaped staging')
+                raise CrawlError('Reviewed board source escaped staging')
             if source.stat().st_size != capture['bytes'] or capture['bytes'] > self.config['limits']['max_page_bytes']:
-                raise CrawlError('Reviewed Ezboard source size changed')
+                raise CrawlError('Reviewed board source size changed')
             data = source.read_bytes()
             if digest(data) != capture['sha256']:
-                raise CrawlError('Reviewed Ezboard source hash changed')
-            page, _ = source_page(data, capture['url'], capture.get('content_type') or '')
-            if not belongs(page, capture['url'], self.config['board'], self.forums()):
+                raise CrawlError('Reviewed board source hash changed')
+            page, _ = self.platform.source_page(data, capture['url'], capture.get('content_type') or '')
+            if not self.platform.belongs(page, capture['url'], self.config['board'], self.forums()):
                 continue
             key = digest([capture['url'], capture['timestamp']])
             if self.db.execute('SELECT 1 FROM ez_records WHERE id=?', (key,)).fetchone():
@@ -177,7 +180,7 @@ class Capture:
     def status(self):
         self.require_plan()
         counts = dict(self.db.execute('SELECT state,COUNT(*) FROM ez_records GROUP BY state'))
-        return {**self.store.get('ezboard_status', {}), 'board': self.config['board'],
+        return {**self.store.get(self.name + '_status', {}), 'board': self.config['board'],
                 'capture_window': self.capture_window(),
                 'counts': counts, 'hosts': self.db.execute('SELECT COUNT(*) FROM ez_hosts').fetchone()[0],
                 'forums': self.db.execute('SELECT COUNT(*) FROM ez_forums').fetchone()[0],
@@ -186,19 +189,19 @@ class Capture:
 
     def catalog(self, downloader, query):
         start, end = self.date_tiers()[query['tier']]
-        url = 'http://' + query['host'] + '/' + query['kind'] + self.config['board']
-        result = downloader.call({'op': 'ezboard_list', 'url': url, 'from': start, 'to': end,
+        url = self.platform.catalog_url(self.config['board'], query)
+        result = downloader.call({'op': self.name + '_list', 'url': url, 'from': start, 'to': end,
                                   'resume_key': query['resume']})
         resume = result['resume_key']
         if resume and resume == query['resume']:
             raise CrawlError('CDX repeated its continuation key; catalog completeness is unresolved')
         records = result['captures']
-        used = self.store.get('ezboard_catalog_rows', 0)
+        used = self.store.get(self.name + '_catalog_rows', 0)
         if used + len(records) > self.config['limits']['max_catalog_rows']:
             raise BoundReached('CDX row budget reached; the current catalog position is retained')
         for record in records:
-            parsed = candidate(record['url'], self.config['board'])
-            if (not parsed or parsed['host'] != query['host'] or parsed['token'][0] != query['kind']
+            parsed = self.platform.candidate(record['url'], self.config['board'])
+            if (not parsed or not self.platform.catalog_member(parsed, query)
                     or tier(record['timestamp']) != query['tier'] or not start <= record['timestamp'] <= end):
                 continue
             key = digest([record['url'], record['timestamp']])
@@ -206,7 +209,7 @@ class Capture:
                             (key, record['url'], record['timestamp'], query['tier'], parsed['kind'], record['digest'], record['length']))
         self.db.execute('UPDATE ez_queries SET resume=?,done=? WHERE host=? AND kind=? AND tier=?',
                         (resume, int(not resume), query['host'], query['kind'], query['tier']))
-        self.db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)', ('ezboard_catalog_rows', json.dumps(used + len(records))))
+        self.db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)', (self.name + '_catalog_rows', json.dumps(used + len(records))))
         self.db.commit()
 
     def stage(self, downloader, row):
@@ -243,14 +246,14 @@ class Capture:
         output = self.root / 'sources' / destination
         source = temporary if temporary.exists() else output
         data = self.read_source(source, result)
-        page, encoding = source_page(data, result['url'], result.get('content_type') or '')
-        reason = source_problem(page)
-        if not reason and not belongs(page, result['url'], self.config['board'], self.forums()):
+        page, encoding = self.platform.source_page(data, result['url'], result.get('content_type') or '')
+        reason = self.platform.source_problem(page)
+        if not reason and not self.platform.belongs(page, result['url'], self.config['board'], self.forums()):
             reason = 'Board membership is unverified or points to another board'
         metadata = {**result, 'path': str(source.relative_to(self.root)), 'tier': row['tier'],
                     'cdx_digest': row['cdx_digest'], 'cdx_length': row['cdx_length'], 'retrieved_at': result.get('retrieved_at') or now(),
                     'encoding': encoding, 'title': ' '.join(page.title), 'source': 'wayback',
-                    'site_coverage': 'bounded_ezboard_catalog', 'archive_path': destination}
+                    'site_coverage': 'bounded_' + self.name + '_catalog', 'archive_path': destination}
         if reason:
             self.db.execute("UPDATE ez_records SET state='excluded',metadata=?,reason=? WHERE id=?",
                             (json.dumps(metadata), reason, row['id']))
@@ -321,7 +324,7 @@ class Capture:
                 if progress:
                     progress({**self.status(), 'phase': 'downloading' if row and (not query or row['tier'] <= query['tier']) else 'checking_wayback',
                               'current_url': row['url'] if row and (not query or row['tier'] <= query['tier']) else
-                                             'http://' + query['host'] + '/' + query['kind'] + self.config['board']})
+                                             self.platform.catalog_url(self.config['board'], query)})
                 if row and (not query or row['tier'] <= query['tier']):
                     self.stage(downloader, row)
                 else:
@@ -341,13 +344,13 @@ class Capture:
         self.require_plan()
         captures = [json.loads(row[0]) for row in self.db.execute("SELECT metadata FROM ez_records WHERE state='captured' ORDER BY tier,url,stamp")]
         notes = [dict(row) for row in self.db.execute('SELECT url,stamp,state,reason FROM ez_records WHERE reason IS NOT NULL ORDER BY url,stamp')]
-        manifest = {'schema': 1, 'strategy': 'ezboard-v1', 'board': self.config['board'],
+        manifest = {'schema': 1, 'strategy': self.name + '-v1', 'board': self.config['board'],
                     'capture_window': self.capture_window(),
                     'seed_url': self.config['url'], 'created_at': self.config['created_at'],
                     'coverage': self.status(), 'hosts': [dict(row) for row in self.db.execute('SELECT * FROM ez_hosts ORDER BY host')],
                     'forums': [dict(row) for row in self.db.execute('SELECT * FROM ez_forums ORDER BY token')],
                     'captures': captures, 'notes': notes}
-        save(self.root / 'ezboard-manifest.json', manifest)
+        save(self.root / (self.name + '-manifest.json'), manifest)
         return manifest
 
     def verify(self):
@@ -370,7 +373,7 @@ def locked_store(root):
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            raise CrawlError('Another Ezboard command is using this directory') from None
+            raise CrawlError('Another board capture command is using this directory') from None
         store = Store(root)
         try:
             yield store

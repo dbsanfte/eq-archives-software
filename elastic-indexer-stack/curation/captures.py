@@ -50,8 +50,19 @@ def manifest_hash(manifest):
 def check_manifest(root, manifest):
     sites = {site["id"]: site for site in manifest.get("sites", [])}
     ezboard = any(site.get('scope_mode') == 'ezboard' for site in sites.values())
+    sitepowerup = any(site.get('scope_mode') == 'sitepowerup' for site in sites.values())
     limits = LIMITS
     board, forums = None, set()
+    if sitepowerup:
+        import sitepowerup as platform
+        from sitepowerup_capture import LIMITS as BOARD_LIMITS
+        if len(sites) != 1:
+            raise CrawlError('Review each SitePowerUp board as one independent capture')
+        site = next(iter(sites.values()))
+        board = platform.board_name(site['scope'])
+        if platform.board_name(site['url']) != board or platform.board_url(site['scope']) != site['scope']:
+            raise CrawlError('SitePowerUp capture scope changed')
+        limits = {**LIMITS, 'files': BOARD_LIMITS['max_captures'], 'bytes': BOARD_LIMITS['max_bytes']}
     if ezboard:
         from ezboard_portal import PORTAL_LIMITS
         from ezboard import board_name, board_url, belongs, candidate, forum_links
@@ -84,6 +95,9 @@ def check_manifest(root, manifest):
         if ezboard:
             page, _ = document(root, capture)
             allowed = site is not None and belongs(page, capture['url'], board, forums)
+        elif sitepowerup:
+            page, _ = platform.source_page(verified_source(root, capture), capture['url'], capture.get('content_type') or '')
+            allowed = site is not None and platform.belongs(page, capture['url'], board)
         else:
             allowed = (original_url(capture["url"]) == original_url(site["url"]) if site and site.get("scope_mode") == "page"
                        else within_scope(capture["url"], site["scope"]) if site else False)
@@ -98,6 +112,11 @@ def check_manifest(root, manifest):
 
 
 def capture_sites(root, batch_id, sites, downloader_factory=Downloader, progress=None):
+    if any(site.get('scope_mode') == 'sitepowerup' for site in sites):
+        if len(sites) != 1:
+            raise CrawlError('Capture each whole SitePowerUp board independently')
+        from sitepowerup_portal import capture_board
+        return capture_board(root, batch_id, sites[0], downloader_factory, progress)
     if any(site.get('scope_mode') == 'ezboard' for site in sites):
         if len(sites) != 1:
             raise CrawlError('Capture each whole Ezboard independently')

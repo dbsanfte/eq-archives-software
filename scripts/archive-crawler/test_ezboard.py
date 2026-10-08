@@ -201,7 +201,7 @@ class EzboardTests(unittest.TestCase):
         with (directory/'.ezboard.lock').open('a') as lock:
             fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
             busy=subprocess.run(command+['status'],capture_output=True,text=True)
-            self.assertEqual(busy.returncode,1);self.assertIn('Another Ezboard command',busy.stderr)
+            self.assertEqual(busy.returncode,1);self.assertIn('Another board capture command',busy.stderr)
         repo=Path(self.directory.name)/'checkout';(repo/'.git').mkdir(parents=True)
         unsafe=subprocess.run([*command[:3],str(repo/'state'),'status'],capture_output=True,text=True)
         self.assertEqual(unsafe.returncode,1);self.assertFalse((repo/'state').exists())

@@ -238,6 +238,10 @@ def discover(args, store, *, cached_only=False, deadline=None):
             break
         from ezboard import address, board_url, candidate_url
         linked_url = url
+        from sitepowerup import candidate_url as board_candidate, board_url as sitepowerup_board
+        url = board_candidate(url)
+        if not url:
+            continue
         url = candidate_url(store, url)
         if url is None:
             resolution = store.get('ezboard_resolution:' + digest(linked_url)) or {}
@@ -255,7 +259,7 @@ def discover(args, store, *, cached_only=False, deadline=None):
             archive.site_inventory = SiteInventory(archive)
         site_coverage = archive.site_inventory.check(url)
         if site_coverage["status"] != "new_site":
-            if board_url(url) and site_coverage['status'] == 'inventory_partial':
+            if (board_url(url) or sitepowerup_board(url)) and site_coverage['status'] == 'inventory_partial':
                 coverage_pending.append({'url': url, 'result': site_coverage})
             continue
         coverage = archive.coverage(url)
@@ -265,6 +269,9 @@ def discover(args, store, *, cached_only=False, deadline=None):
         if board_url(url):
             coverage['scope_mode'] = 'ezboard'
             scope = board_url(url)
+        elif sitepowerup_board(url):
+            coverage['scope_mode'] = 'sitepowerup'
+            scope = sitepowerup_board(url)
         scopes.add(identity)
         identifier = digest(url)[:24]
         store.db.execute("INSERT OR IGNORE INTO candidates(id,url,scope,priority,coverage,evidence) VALUES (?,?,?,?,?,?)",

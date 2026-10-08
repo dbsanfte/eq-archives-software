@@ -25,6 +25,9 @@ def record(store, row):
     result["scope_mode"] = (result["coverage"] or {}).get("scope_mode", "directory")
     from ezboard import board_url, board_name
     result['ezboard'] = board_name(result['url']) if board_url(result['url']) else None
+    from sitepowerup import address
+    board = address(result['url'])
+    result['sitepowerup'] = board['board'] if board else None
     result["manifest_sha256"] = digest({key: result[key] for key in ("id", "url", "scope", "scope_mode", "captures", "rating")})
     return result
 

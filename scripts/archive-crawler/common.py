@@ -139,6 +139,10 @@ def within_scope(url, scope):
 
 def site_identity(url, store=None):
     """Discovery identity only; source URL and document identity stay exact."""
+    from sitepowerup import address as board_address
+    board = board_address(url)
+    if board:
+        return ('sitepowerup.com', '/mb/view.asp', 'BoardID=' + board['board'])
     from ezboard import board_url, board_name, candidate_url
     if store is not None:
         url = candidate_url(store, url) or url
@@ -149,6 +153,12 @@ def site_identity(url, store=None):
 
 
 def capture_scope(url, mode="directory", path=None):
+    if mode == 'sitepowerup':
+        from sitepowerup import board_url
+        result = board_url(url)
+        if not result:
+            raise CrawlError('Whole SitePowerUp capture requires a numeric BoardID')
+        return result
     if mode == 'ezboard':
         from ezboard import board_url
         result = board_url(url)
@@ -280,6 +290,7 @@ class Store:
             CREATE TABLE IF NOT EXISTS ezboard_aliases(token TEXT PRIMARY KEY, board TEXT, url TEXT, evidence TEXT);
             CREATE TABLE IF NOT EXISTS ezboard_archive_boards(sha TEXT, board TEXT, host TEXT, path TEXT, PRIMARY KEY(sha,board));
             CREATE TABLE IF NOT EXISTS ezboard_archive_forums(sha TEXT, token TEXT, host TEXT, path TEXT, PRIMARY KEY(sha,token));
+            CREATE TABLE IF NOT EXISTS sitepowerup_archive_boards(sha TEXT, board TEXT, host TEXT, path TEXT, PRIMARY KEY(sha,board));
         """)
         (self.root / "crawl.sqlite3").chmod(0o600)
         archive = self.get("archive_repository")
