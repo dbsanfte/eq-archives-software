@@ -186,7 +186,7 @@ function renderShell() {
 function renderList() {
   $('view-total').textContent=`${data.total} ${data.total===1 ? 'site' : 'sites'}`;
   if (route.candidate) return;
-  const signature=JSON.stringify([route.view,route.offset,route.query,route.minGrade,route.needsGrade,data.candidates,data.candidates.map(row=>Boolean(drafts.get(row.id)?.dirty)),hasOperation()]);
+  const signature=JSON.stringify([route.view,route.offset,route.query,route.minGrade,route.needsGrade,data.candidates,data.candidates.map(row=>Boolean(drafts.get(row.id)?.dirty)),hasOperation(),route.view==='capturing' ? data.operations : null]);
   if (signature!==listSignature) {
     activeSwipe?.cancel();
     const items=data.candidates.map(row=>{
@@ -198,10 +198,14 @@ function renderList() {
       const capture=row.coverage?.capture;
       const issue=candidateIssue(row);
       const description=row.stage==='candidates' ? row.rating?.reason || (issue ? '' : 'Source review is needed.') :
-        row.stage==='queued' ? 'Approved scope saved. Undo before capture starts.' : row.stage==='capturing' ? 'Download progress is available inside.' :
+        row.stage==='queued' ? 'Approved scope saved. Undo before capture starts.' : row.stage==='capturing' ? 'Capture progress updates automatically.' :
         row.stage==='indexing' ? (row.review_state==='index_failed' ? 'Sources are retained. Open this site to retry.' : 'Publication and AI-enriched indexing are automatic.') :
         row.stage==='saved' ? 'Set aside for a later decision.' : capture ? `${capture.pages} pages · ${capture.files} dated captures` : 'Saved decision and source evidence.';
       if (description) item.append(node('p',description));
+      if (row.stage==='capturing') {
+        const op=data.operations.find(op=>op.kind==='capture' && op.payload.sites?.some(site=>site.id===row.id));
+        item.append(captureMeter(op,true));
+      }
       if (issue) item.append(node('p',issue.message,'candidate-issue-summary'));
       if (row.rating?.grading_criteria) item.append(node('p',`Graded for: ${row.rating.grading_criteria}`,'grading-focus'));
       const bottom=node('div',undefined,'tile-bottom');bottom.append(node('span',row.rating?.category?.replaceAll('_',' ') || 'Website'),node('span','Open site →','open-label'));item.append(bottom);
@@ -591,6 +595,51 @@ function renderHistory(root,row,review) {
   if (row.state==='already_archived') {const coverage=coveragePanel(row);if (coverage) root.append(coverage);}
   if (review) root.append(captureSummary(row,review));else appendEvidenceLink(root,row);
 }
+function captureMeter(op,compact=false) {
+  const progress=op?.result?.progress,completion=progress?.completion || {},paused=op?.state==='interrupted';
+  const {total,remaining,completed}=completion;
+  const known=Number.isInteger(total) && total>0 && Number.isInteger(remaining) && remaining>=0 && remaining<=total && completed===total-remaining;
+  const meter=node('div',undefined,'capture-meter');meter.dataset.paused=String(paused);
+  if (op?.payload?.sites?.length>1) meter.append(node('p',`Batch of ${op.payload.sites.length} sites · Current site: ${progress?.site_url || 'preparing'}`,'meta'));
+  meter.append(node('p',known ? `${remaining.toLocaleString()} captures left` : 'Counting remaining captures…','capture-remaining'));
+  const bar=node('progress');bar.setAttribute('aria-label','Listed capture progress');
+  if (known) {
+    bar.max=total;bar.value=completed;
+    bar.setAttribute('aria-valuetext',`${completed.toLocaleString()} of ${total.toLocaleString()} listed captures processed; ${remaining.toLocaleString()} left`);
+    meter.append(node('p',`${completed.toLocaleString()} of ${total.toLocaleString()} listed captures processed · ${Math.floor(completed/total*100)}%`,'capture-fraction'));
+  } else bar.setAttribute('aria-valuetext','The capture inventory is still being listed');
+  meter.append(bar);
+  const eta=node('p',undefined,'capture-eta');eta.dataset.paused=String(paused);
+  eta.dataset.empty=String(known && remaining===0);eta.dataset.phase=progress?.phase || '';
+  const stamp=Date.parse(completion.updated_at),seconds=completion.eta_seconds;
+  if (known && Number.isFinite(stamp) && Number.isFinite(seconds) && seconds>0) eta.dataset.finish=String(stamp+seconds*1000);
+  meter.append(eta);updateCaptureEta(eta);
+  if (!compact) {
+    meter.append(node('p','Counts cover the files listed so far and can grow as more pages and supporting files are found. ETA uses recent capture speed.','meta'));
+    const board=progress?.ezboard || progress?.sitepowerup;
+    const catalogs=progress?.catalogs_pending ?? board?.catalogs_remaining;
+    if (catalogs>0) meter.append(node('p',`${catalogs.toLocaleString()} archive listings still being checked.`,'meta'));
+    if (progress?.unavailable>0) meter.append(node('p',`${progress.unavailable.toLocaleString()} unavailable captures will be listed as coverage gaps.`,'meta'));
+  }
+  return meter;
+}
+function updateCaptureEta(target) {
+  for (const eta of target ? [target] : document.querySelectorAll('.capture-eta')) {
+    if (eta.dataset.paused==='true') eta.textContent='ETA paused. Recalculates after resume.';
+    else if (eta.dataset.empty==='true') eta.textContent='Checking for any remaining files…';
+    else if (!eta.dataset.finish) eta.textContent='ETA calculating after the next captures…';
+    else {
+      const seconds=(Number(eta.dataset.finish)-Date.now())/1000;
+      if (seconds<=0) eta.textContent='ETA updating: waiting for the next capture.';
+      else {
+        const minutes=Math.ceil(seconds/60),hours=Math.floor(minutes/60);
+        const duration=seconds<60 ? 'less than a minute' : hours ? `${hours} hr${minutes%60 ? ` ${minutes%60} min` : ''}` : `${minutes} min`;
+        const finish=new Date(Number(eta.dataset.finish)).toLocaleString(undefined,{...(hours>=24 ? {weekday:'short'} : {}),hour:'2-digit',minute:'2-digit'});
+        eta.textContent=`ETA: about ${duration} remaining (around ${finish}).`;
+      }
+    }
+  }
+}
 function renderLive() {
   const host=$('stage-live');if (!host || !detail) return;
   const {candidate:row,review,capture_operation:op}=detail;
@@ -612,12 +661,11 @@ function renderLive() {
     if (progress) {
       const phases={preparing:'Preparing sources',checking_wayback:'Checking Wayback captures',downloading:'Downloading a capture',ready_for_review:'Preparing site reviews'};
       box.append(node('p',phases[progress.phase] || 'Working through the approved scope','progress-title'),node('p',`${progress.files} ${progress.capture_policy ? 'files' : 'HTML files'} staged · ${(progress.bytes/1048576).toFixed(2)} MiB · ${progress.urls_checked} ${progress.ezboard || progress.sitepowerup || progress.capture_policy ? 'capture records' : 'URLs'} checked`));
-      if (progress.capture_policy) box.append(node('p',`${progress.versions_found} versions found · ${progress.versions_pending} waiting · ${progress.unavailable} unavailable · ${progress.catalogs_pending} catalogs still being checked`));
+      box.append(captureMeter(op));
       if (progress.site_url) box.append(node('p',`Current site: ${progress.site_url}`,'meta'));
       if (progress.current_url) box.append(external(progress.current_url));
       box.append(node('p',`Worker batch progress · ${progress.sites_total} approved ${progress.sites_total===1 ? 'site' : 'sites'}. Each completed site receives its own review.`,'meta'));
-    } else box.append(node('p','Waiting for the worker’s first progress update.'));
-    if (!paused) {const bar=node('progress');bar.setAttribute('aria-label','Capture in progress');box.append(bar);}
+    } else {box.append(node('p','Waiting for the worker’s first progress update.'),captureMeter(op));}
     host.append(box);
   } else if (row.stage==='indexing' && review) {
     const state=review.state,publishing=state==='publication_requested',paused=publishing && review.operation?.state==='interrupted',failed=state==='index_failed';
@@ -945,4 +993,4 @@ window.addEventListener('pointerdown',event=>{if (!event.isPrimary) activeSwipe?
 new ResizeObserver(measureDock).observe($('action-dock'));
 renderShell();writeRoute(true);refresh(true);
 setInterval(()=>{if (!busy && !document.hidden) refresh();},5000);
-setInterval(updateCountdown,1000);
+setInterval(()=>{updateCountdown();updateCaptureEta();},1000);

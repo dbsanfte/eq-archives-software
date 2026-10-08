@@ -160,9 +160,14 @@ retains the stage, site, selected page and version across reloads; browser Back,
 status polling and manual refresh preserve page filters, scope drafts and reading
 positions. Sources are plain extracted text; archived HTML/scripts/images never run.
 
-Capture progress refreshes every five seconds and shows actual worker-batch file,
-byte and URL counts, with the current site named. Counts are labeled as batch
-progress rather than attributed to another site. Capture errors stay in Capturing
+Capture cards and workspaces refresh every five seconds with remaining captures,
+processed/known totals, a percentage bar and a running ETA, alongside actual file,
+byte and URL counts. Totals can grow as catalogs and supporting files are discovered;
+unknown totals stay indeterminate. ETA uses up to 30 recent progress samples from
+the current attempt, excluding reused sources and paused time. A slow replay cannot
+make the countdown claim completion. Counts persist across reloads and pauses;
+resume recalculates the estimate. Multi-site operations are labeled as batch
+progress with the current site named. Capture errors stay in Capturing
 with an explicit Resume; queued sites explain why they wait. Indexing separates
 publication, waiting for existing Jobs, and AI enrichment/import, with no invented
 percentage. Publication and indexing failures remain in Indexing with a contextual

@@ -86,6 +86,10 @@ plus the entry URL and redirect chain; they are never relabelled as the entry
 page. Out-of-scope redirects pause for a scope edit or separate candidate. Actual
 capture replay must retain its listed source identity and selected date window.
 Date provenance records Memento headers when available, otherwise the replay URL.
+Replay URLs may add or remove the protocol's default port (`:80` for HTTP,
+`:443` for HTTPS). These equivalent spellings retain the CDX original in `url`
+and the differing replay spelling in `replay_original_url`. Other ports, schemes,
+paths and queries remain distinct; exact-file captures still reject date substitution.
 
 These tiers select **discovery evidence**, not the approved capture date range.
 The production portal captures all available dated versions from 1999-01-01

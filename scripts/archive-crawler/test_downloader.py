@@ -366,6 +366,60 @@ class DownloaderTests(unittest.TestCase):
         self.assertTrue(captured["ok"], captured)
         self.assertEqual(captured["result"]["url"], original)
 
+    def test_replay_default_port_redirects_keep_catalog_identity_and_source_bytes(self):
+        self.configure(max_requests=40, max_total_bytes=32768)
+        for scheme, port in [('http', 80), ('https', 443)]:
+            plain = self.url.replace('http:', scheme + ':')
+            explicit = plain.replace('guild.example/', f'guild.example:{port}/')
+            for original, replayed in [(explicit, plain), (plain, explicit)]:
+                for operation in ('capture', 'capture_file'):
+                    with self.subTest(scheme=scheme, original=original, operation=operation):
+                        start = '/web/20000101000000id_/' + original
+                        finish = '/web/20000101000000id_/' + replayed
+                        self.server.replays = {start: {'status': 302, 'location': finish, 'body': b'Redirect'}}
+                        result = self.call({**self.job(operation), 'url': original})
+                        self.assertTrue(result['ok'], result)
+                        self.assertEqual(result['result']['url'], original)
+                        self.assertEqual(result['result']['replay_original_url'], replayed)
+                        self.assertEqual(result['result']['timestamp'], '20000101000000')
+                        self.assertEqual(result['result']['sha256'], hashlib.sha256(self.server.body).hexdigest())
+                        self.assertEqual(self.destination.read_bytes(), self.server.body)
+        self.assertEqual(self.server.connections, 1)
+
+    def test_port_equivalence_does_not_accept_other_sources_or_substitute_dates(self):
+        self.configure(max_requests=50, max_total_bytes=32768)
+        original = self.url.replace('guild.example/', 'guild.example:80/')
+        variants = [self.url.replace('guild.example/', 'guild.example:8080/'),
+                    self.url.replace('guild.example/', 'guild.example:443/'),
+                    self.url.replace('http:', 'https:'), self.url.replace('guild.example', 'other.example'),
+                    self.url.replace('Guide', 'guide'), self.url.replace('%2F', '/'),
+                    self.url.replace('a=1&b=2', 'b=2&a=1')]
+        for operation in ('capture', 'capture_file'):
+            for target in variants:
+                with self.subTest(operation=operation, target=target):
+                    self.server.replays = {'/web/20000101000000id_/' + original:
+                        {'status': 302, 'location': '/web/20000101000000id_/' + target, 'body': b'Redirect'}}
+                    result = self.call({**self.job(operation), 'url': original})
+                    self.assertFalse(result['ok'], result)
+                    self.assertIn('different original URL', result['error'])
+                    self.assertFalse(self.destination.exists())
+                    self.assertFalse(Path(str(self.destination) + '.part').exists())
+        # Guildsay's failing replay also selects an earlier date. The complete
+        # file engine must still mark that requested version unavailable.
+        self.server.replays = {'/web/20000101000000id_/' + original:
+            {'status': 302, 'location': '/web/19991231000000id_/' + self.url, 'body': b'Redirect'}}
+        self.server.memento = 'Fri, 31 Dec 1999 00:00:00 GMT'
+        result = self.call({**self.job('capture_file'), 'url': original})
+        self.assertFalse(result['ok'], result)
+        self.assertIn('different dated version', result['error'])
+        self.assertFalse(self.destination.exists())
+        self.assertFalse(Path(str(self.destination) + '.part').exists())
+        result = self.call({**self.job('capture'), 'url': original})
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(result['result']['timestamp'], '19991231000000')
+        self.assertEqual(result['result']['requested_timestamp'], '20000101000000')
+        self.assertEqual(result['result']['url'], original)
+
     def test_vendor_files_match_pinned_upstream_and_preserve_license(self):
         root = Path(__file__).parent / "vendor" / "wayback-machine-downloader"
         upstream = json.loads((root / "UPSTREAM.json").read_text())
