@@ -66,9 +66,19 @@ to **History** and leave every active count; declined, dismissed, already archiv
 and duplicate sites also stay in History. Deferred candidates are in **Saved for
 later**. These two secondary lists are available from More. Restoring a deferred
 or dismissed candidate returns it to Candidates without approving or starting work.
-The portal includes lower-grade candidates after higher-grade ones, so they can
-receive an explicit decision. Stage searches and 50-row pagination do not cap the
-approval queue. Counts describe the entire stage, including rows outside a search.
+The minimum-grade slider under Discover more sites defaults to **2** and remembers
+your choice in this browser. Grades sort highest first before pagination; lower
+grades remain available by lowering the slider. **Needs grading** opens sites
+without readable samples or a validated grade. Stage searches, grade filters and
+50-row pagination do not cap the approval queue. Stage counts include hidden rows.
+The operator API remains unfiltered unless `min_grade=0..3` or `needs_grade=1` is
+supplied to `GET /api/queue?filter=candidates`.
+
+**Dismiss all candidates** confirms the full remaining count, including sites hidden
+by grade/search filters and other pages, then moves those sites to History. It
+does not affect any other stage or start work. The confirmation offers **Undo
+dismiss all**. Both actions are atomic and reject a changed review snapshot;
+individual History restores remain available if a later decision prevents bulk Undo.
 
 On phones, bottom navigation opens compact stage lists. A site opens a focused
 workspace showing its evidence/scope, queue position, capture progress, captured
@@ -136,6 +146,24 @@ The single worker checks archive/account coverage, takes the usual bounded sampl
 and runs the normal Luna grader. It does not spider out to other sites. Results
 join Candidates with the ordinary evidence, sources, grade and capture-scope
 review. Missing sources or invalid grades remain unapproved.
+
+An existing ungraded candidate has **Find samples & grade** or **Grade source
+evidence** on its card and workspace. This explicitly checks one site with a
+maximum $2 Luna budget, rechecks coverage before spending, and uses existing
+hash-verified source files when present. Otherwise it requests exact Wayback
+samples through the same serial, throttled downloader and date tiers. Sampling
+failures and unresolved URL identity are shown directly, instead of the generic
+"graded source evidence required" message. The card shows queued/coverage/sampling/
+grading progress. **Retry evidence & grading** resumes that operation's original
+Luna and Wayback budgets and reuses a saved valid grade. It never auto-approves
+capture. Concurrent human decisions or changed source manifests prevent a stale
+result from replacing the current candidate.
+
+`POST /api/check-candidate` requires `id`, `manifest_sha256` and an explicit
+`max_usd` up to 2. It returns the new or reused operation ID and original cap.
+Private run ledgers retain evidence and spending across interruption; saved sources
+are hardlinked rather than copied. Completed grades appear in Graded sites when
+they meet the selected minimum. No paid check starts from a filter change or poll.
 
 `POST /api/submit-site` requires `{"url":"https://example.org/eq/","max_usd":2}`.
 It returns an operation ID, or the existing candidate ID for that website/account.

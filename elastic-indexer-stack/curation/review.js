@@ -15,7 +15,7 @@ const aliases = {recommended:'candidates',approved:'queued',captured:'review',pe
 const labels = {approval_pending:'Needs a capture decision',coverage_unverified:'Coverage needs checking',deferred:'Saved for later',rejected:'Dismissed',already_archived:'Already archived',duplicate_candidate:'Duplicate candidate',approved_waiting_batch:'Queued for capture',capturing:'Capture in progress',captured_awaiting_review:'Ready to review',approved_waiting_publication:'Publication approved',awaiting_review:'Ready to review',publication_requested:'Publishing',published_waiting_index:'Waiting to index',indexing:'Enriching & indexing',index_failed:'Indexing needs attention',indexed:'Indexed',indexing_declined:'Indexing declined'};
 let route = readRoute(), data = null, detail = null, busy = false, generation = 0, controller = null;
 let listSignature = '', workspaceSignature = '', dockSignature = '', liveSignature = '', sourceGeneration = 0;
-let searchTimer;
+let searchTimer,gradeTimer,dismissSnapshot=null;
 let manualResult=null,manualSignature='';
 let activeSwipe=null;
 const drafts = new Map(), positions = new Map(), pageQueries = new Map(), sourceCache = new Map();
@@ -37,18 +37,28 @@ function external(url, text=url) {
 function badge(text,tone='') { const item=node('span',text,'badge');item.dataset.tone=tone;return item; }
 function tone(row) { return row.review_state==='index_failed' || row.state==='coverage_unverified' ? 'attention' : (row.review_state || row.state)==='indexed' ? 'complete' : ['queued','capturing','indexing'].includes(row.stage) ? 'active' : ''; }
 function siteName(row) { const url=new URL(row.scope);return url.host+(url.pathname==='/' ? '' : url.pathname); }
-function statusLabel(row) { return labels[row.review_state] || labels[row.state] || row.state.replaceAll('_',' '); }
+function statusLabel(row) {
+  const check=row.candidate_check;
+  if (row.stage==='candidates' && check && ['queued','running'].includes(check.state)) return {coverage:'Checking coverage',sampling:'Finding Wayback samples',grading:'Grading with Luna'}[check.phase] || 'Evidence check queued';
+  if (row.stage==='candidates' && row.state==='approval_pending' && (!row.rating || !row.captures?.length)) return row.captures?.length ? 'Needs a grade' : 'Needs source evidence';
+  return labels[row.review_state] || labels[row.state] || {unavailable:'No samples found',sample_error:'Sampling failed',identity_unresolved:'Exact source needed',grade_error:'Grading failed',sampled:'Needs a grade',discovered:'Needs source evidence'}[row.state] || row.state.replaceAll('_',' ');
+}
 function captureDate(stamp) { return `${stamp.slice(0,4)}-${stamp.slice(4,6)}-${stamp.slice(6,8)} ${stamp.slice(8,10)}:${stamp.slice(10,12)} UTC`; }
 function readRoute() {
   const query=new URLSearchParams(location.search),view=aliases[query.get('view')] || query.get('view');
+  let preferred='2';try {preferred=localStorage.getItem('candidate-min-grade') || '2';} catch (_) {}
+  const minimum=query.get('min_grade') ?? preferred;
   return {view:Object.hasOwn(names,view) ? view : 'candidates',candidate:query.get('candidate') || null,
     panel:['pages','reader'].includes(query.get('screen')) ? query.get('screen') : 'site',
     page:Math.max(0,Number(query.get('page')) || 0),slot:Math.max(0,Number(query.get('slot')) || 0),
-    offset:Math.max(0,Number(query.get('offset')) || 0),query:(query.get('search') || '').slice(0,200)};
+    offset:Math.max(0,Number(query.get('offset')) || 0),query:(query.get('search') || '').slice(0,200),
+    minGrade:/^[0-3]$/.test(minimum) ? Number(minimum) : 2,needsGrade:query.get('needs_grade')==='1'};
 }
 function routeKey(value=route) { return JSON.stringify(value); }
 function writeRoute(replace=false, parent=null) {
   const url=new URL(location.href);url.search='';url.searchParams.set('view',route.view);
+  if (route.view==='candidates' || route.minGrade!==2) url.searchParams.set('min_grade',route.minGrade);
+  if (route.view==='candidates' && route.needsGrade) url.searchParams.set('needs_grade','1');
   if (route.candidate) { url.searchParams.set('candidate',route.candidate);
     if (route.panel!=='site') { url.searchParams.set('screen',route.panel);url.searchParams.set('page',route.page);url.searchParams.set('slot',route.slot); }
   } else { if (route.offset) url.searchParams.set('offset',route.offset);if (route.query) url.searchParams.set('search',route.query); }
@@ -69,7 +79,7 @@ function go(change,{replace=false}={}) {
   activeSwipe?.cancel();
   remember();const parent={...route};route={...route,...change};writeRoute(replace,parent);$('tools').close();$('error').hidden=true;$('notice').hidden=true;
   if (!route.candidate) {
-    if (parent.view!==route.view || parent.query!==route.query || parent.offset!==route.offset) {
+    if (parent.view!==route.view || parent.query!==route.query || parent.offset!==route.offset || parent.minGrade!==route.minGrade || parent.needsGrade!==route.needsGrade) {
       $('candidates').replaceChildren(node('p','Loading sites…','description'));listSignature='';
     } else if (data) renderList(); // Apply retained scope drafts before the next response.
   }
@@ -106,7 +116,7 @@ async function act(label,action,confirmation,{returnToCandidates=false,undo=null
         writeRoute(true);
       }
     }
-    message((typeof confirmation==='function' ? confirmation(outcome) : confirmation) || 'Saved.',undo,outcome?.coverage?.complete===false ? 'attention' : '');workspaceSignature='';dockSignature='';
+    message((typeof confirmation==='function' ? confirmation(outcome) : confirmation) || 'Saved.',typeof undo==='function' ? undo(outcome) : undo,outcome?.coverage?.complete===false ? 'attention' : '');workspaceSignature='';dockSignature='';
     await refresh(true);
     if (approved) {
       message(approved.stage==='queued' ? `Queued ${siteName(approved)} for capture. Undo before it starts.` : `${siteName(approved)} is now in ${names[approved.stage]}.`,
@@ -126,7 +136,7 @@ async function refresh(navigated=false) {
   const signal=controller.signal;
   try {
     const [listing,context]=await Promise.all([
-      request(`/api/queue?filter=${requested.view}&offset=${requested.offset}&search=${encodeURIComponent(requested.query)}`,undefined,signal),
+      request(`/api/queue?filter=${requested.view}&offset=${requested.offset}&search=${encodeURIComponent(requested.query)}${requested.view==='candidates' ? `&min_grade=${requested.minGrade}&needs_grade=${requested.needsGrade ? 1 : 0}` : ''}`,undefined,signal),
       requested.candidate ? request(`/api/candidate?id=${encodeURIComponent(requested.candidate)}`,undefined,signal) : Promise.resolve(null)
     ]);
     if (token!==generation || routeKey(requested)!==routeKey()) return;
@@ -173,7 +183,7 @@ function renderShell() {
 function renderList() {
   $('view-total').textContent=`${data.total} ${data.total===1 ? 'site' : 'sites'}`;
   if (route.candidate) return;
-  const signature=JSON.stringify([route.view,route.offset,route.query,data.candidates,data.candidates.map(row=>Boolean(drafts.get(row.id)?.dirty))]);
+  const signature=JSON.stringify([route.view,route.offset,route.query,route.minGrade,route.needsGrade,data.candidates,data.candidates.map(row=>Boolean(drafts.get(row.id)?.dirty)),hasOperation()]);
   if (signature!==listSignature) {
     activeSwipe?.cancel();
     const items=data.candidates.map(row=>{
@@ -194,6 +204,10 @@ function renderList() {
     if (!items.length) {
       const empty=node('div',undefined,'empty');empty.append(node('h2',route.query ? 'No matching sites' : `Nothing in ${names[route.view].toLowerCase()}`),node('p',route.query ? 'Try another name or address.' : ({candidates:'Use Discover & grade above to find candidates, or review captures already waiting for a decision.',queued:'Approve a candidate and it will wait here until capture starts.',capturing:'Downloads appear here as soon as the worker starts.',review:'Completed downloads arrive here for your indexing decision.',indexing:'Approved captures appear here until indexing is complete.',saved:'Sites you save for later will appear here.',history:'Completed, declined, and dismissed sites will appear here.'})[route.view]));
       if (route.query) empty.append(control('Clear search',()=>go({query:'',offset:0},{replace:true})));
+      else if (route.view==='candidates' && !route.needsGrade) {
+        empty.replaceChildren(node('h2',`No candidates at Grade ${route.minGrade}+`),node('p','Lower the minimum grade, check sites that need grading, or discover more sites.'));
+        if (data.candidate_grades?.['-1']) empty.append(control('View sites needing grading',()=>go({needsGrade:true,offset:0})));
+      }
       else if (route.view==='candidates' && data.stage_counts.review) empty.append(control('Review captured sites',()=>openStage('review')));
       items.push(empty);
     }
@@ -213,10 +227,13 @@ function renderList() {
 function approvalBlock(row) {
   if (getDraft(row).dirty) return 'Open site to save your scope changes.';
   if (row.state==='coverage_unverified') return 'Verify archive coverage before approving.';
-  if (row.state!=='approval_pending' || !row.rating || !row.captures?.length) return 'Graded source evidence is required to approve.';
+  if ((!row.rating || !row.captures?.length) && row.candidate_check?.state==='interrupted') return 'Use Retry evidence & grading below before approving.';
+  if (!row.captures?.length) return 'No source samples yet. Use Find samples & grade below.';
+  if (!row.rating) return 'Source samples are ready. Use Grade source evidence below.';
+  if (row.state!=='approval_pending') return 'Review this site’s current status before approving.';
   return '';
 }
-function canDismiss(row) { return ['approval_pending','discovered','sampled','sample_error','unavailable','identity_unresolved'].includes(row.state); }
+function canDismiss(row) { return ['approval_pending','discovered','sampled','sample_error','unavailable','identity_unresolved','grade_error','coverage_unverified'].includes(row.state); }
 function decideCandidate(row,decision) {
   if (busy || route.candidate || route.view!=='candidates') return;
   const current=data.candidates.find(item=>item.id===row.id);
@@ -242,7 +259,9 @@ function candidateCard(row,item) {
     const button=control(label,()=>decideCandidate(row,decision),decision==='approve' ? 'primary' : '');
     button.setAttribute('aria-label',`${label}: ${siteName(row)}`);button.dataset.mutation='';button.dataset.blocked=String(disabled);button.disabled=disabled || busy;actions.append(button);
   }
-  front.append(item,actions);card.append(backdrop,front);
+  front.append(item,actions);
+  if (!row.rating || !row.captures?.length) front.append(recoveryControls(row));
+  card.append(backdrop,front);
   let gesture=null,suppressUntil=0;
   const reset=()=>{
     if (gesture?.horizontal) suppressUntil=performance.now()+500;
@@ -297,20 +316,39 @@ function renderSpending() {
   $('spend-status').textContent=!spend ? 'Loading spend…' : !valid ? 'Spend is temporarily incomplete. Retrying automatically.' :
     `Includes discovery, manual grading and indexing enrichment in this portal. UTC calendar days and months. Usage-based estimates, not an account bill. Unresolved reservations: today ${usd(spend.today.unresolved_usd)}, this month ${usd(spend.month.unresolved_usd)}.`;
 }
+function recoveryControls(row) {
+  const box=node('div',undefined,'candidate-recovery'),check=row.candidate_check;
+  const active=check && ['queued','running'].includes(check.state),paused=check?.state==='interrupted';
+  const label=active ? statusLabel(row) : paused ? 'Retry evidence & grading' : row.captures?.length ? 'Grade source evidence' : 'Find samples & grade';
+  const button=mutation(label,()=>request('/api/check-candidate',{id:row.id,manifest_sha256:row.manifest_sha256,max_usd:2}),
+    'Evidence check queued for this site. Progress appears on its card.',true,Boolean(active || hasOperation()));
+  button.setAttribute('aria-label',`${label}: ${siteName(row)}`);box.append(button);
+  box.append(node('p',active ? 'This site is being checked. Approval becomes available after readable samples receive a grade.' :
+    `${check ? 'Original' : 'One site ·'} $${check?.max_usd ?? 2} cap for Luna. ${row.captures?.length ? 'Uses the saved source samples.' : 'Finds exact Wayback samples from 1999–2007 before grading.'}`,'meta'));
+  if (check?.error && check.error!==row.error) box.append(node('p',check.error,'candidate-block'));
+  else if (row.state==='identity_unresolved') box.append(node('p','Wayback listed different original URLs. This check preserves the exact page identity; it cannot grade an unrelated redirect.','meta'));
+  if (!active && hasOperation()) box.append(node('p','Another task is running. This action becomes available when it finishes.','meta'));
+  return box;
+}
 function panel(title,text,className='') {
   const box=node('section',undefined,`panel ${className}`);box.append(node('h2',title));if (text) box.append(node('p',text));return box;
 }
 function scopeDescription(row) { return row.scope_mode==='page' ? 'Exact linked page only' : row.scope_mode==='site' ? 'Whole site / shared account' : row.scope_mode==='custom' ? 'Custom folder and descendants' : 'Linked directory and descendants'; }
 function getDraft(row) {
   let draft=drafts.get(row.id);
-  if (!draft || draft.hash!==row.manifest_sha256) { draft={hash:row.manifest_sha256,mode:row.scope_mode,path:new URL(row.scope).pathname,dirty:false};drafts.set(row.id,draft); }
+  if (!draft || draft.hash!==row.manifest_sha256) {
+    // A new source grade must not discard edits to the unchanged saved scope.
+    draft=draft?.dirty && draft.savedScope===row.scope && draft.savedMode===row.scope_mode ? {...draft,hash:row.manifest_sha256} :
+      {hash:row.manifest_sha256,mode:row.scope_mode,path:new URL(row.scope).pathname,dirty:false,savedScope:row.scope,savedMode:row.scope_mode};
+    drafts.set(row.id,draft);
+  }
   return draft;
 }
 function renderWorkspace() {
   if (!detail || !route.candidate) { workspaceSignature='';return; }
   const row=detail.candidate,review=detail.review;
   if (route.panel!=='site') { const {groups}=pageGroups(row,review);if (groups.length) { route.page=Math.min(route.page,groups.length-1);if (!groups[route.page].slots.includes(route.slot)) route.slot=groups[route.page].slots[0];writeRoute(true); } }
-  const signature=JSON.stringify([row.id,row.stage,row.state,row.manifest_sha256,review?.manifest_sha256,route.panel,route.page,route.slot,route.panel==='site' ? row.coverage?.site_check : null]);
+  const signature=JSON.stringify([row.id,row.stage,row.state,row.manifest_sha256,review?.manifest_sha256,route.panel,route.page,route.slot,route.panel==='site' ? [row.coverage?.site_check,row.candidate_check,hasOperation()] : null]);
   if (signature!==workspaceSignature) {
     const root=$('site-workspace');root.replaceChildren();
     const navigation=node('div',undefined,'workspace-nav');
@@ -368,6 +406,7 @@ function coveragePanel(row) {
   return box;
 }
 function renderCandidate(root,row) {
+  if (!row.rating || !row.captures?.length) root.append(recoveryControls(row));
   const columns=node('div',undefined,'site-columns'),left=node('div'),right=node('div');
   const evidence=panel('Why capture this site?',row.rating?.reason || row.error || 'This site needs verified source evidence before approval.');
   if (row.rating) evidence.prepend(badge(`Luna grade ${row.rating.grade}/3 · ${row.rating.category.replaceAll('_',' ')}`));
@@ -581,10 +620,16 @@ function renderDock(force=false) {
 function measureDock() { document.documentElement.style.setProperty('--dock',`${$('action-dock').hidden ? 0 : $('action-dock').getBoundingClientRect().height}px`); }
 function hasOperation() { return data?.operations.some(op=>['queued','running'].includes(op.state)); }
 function currentDiscovery() { return data?.operations.find(op=>op.kind==='discover' && ['queued','running','interrupted'].includes(op.state)); }
-function operationLabel(op) { return op.kind==='discover' && op.payload.target ? 'Site check' : {publish:'Archive publication',capture:'Capture',discover:'Discovery'}[op.kind] || 'Another task'; }
+function operationLabel(op) { return op.kind==='discover' && op.payload.target ? 'Site check' : {publish:'Archive publication',capture:'Capture',discover:'Discovery',candidate_check:'Evidence & grading'}[op.kind] || 'Another task'; }
 function renderDiscovery() {
   $('discovery').hidden=route.view!=='candidates' || Boolean(route.candidate);
   $('manual-site').hidden=$('discovery').hidden;
+  $('minimum-grade').value=route.minGrade;$('minimum-grade-value').value=route.minGrade;
+  $('grade-help').textContent=route.needsGrade ? 'Sites needing source evidence or a grade. Completed grades appear in Graded sites at your chosen minimum.' : `Show Grade ${route.minGrade} and above, highest first. Lower the slider to see lower grades.`;
+  $('graded-view').setAttribute('aria-pressed',String(!route.needsGrade));$('ungraded-view').setAttribute('aria-pressed',String(route.needsGrade));
+  $('ungraded-view').textContent=`Needs grading (${data?.candidate_grades?.['-1'] ?? 0})`;
+  $('dismiss-all').textContent=`Dismiss all candidates (${data?.dismissal?.count ?? data?.stage_counts.candidates ?? 0})`;
+  $('dismiss-all').disabled=busy || !data?.dismissal?.count;
   const active=data?.operations.find(op=>['queued','running'].includes(op.state)),discovery=currentDiscovery();
   const paused=discovery?.state==='interrupted';
   $('discover').textContent=paused ? discovery.payload.target ? 'Resume site check' : 'Resume discovery' : 'Discover & grade';
@@ -652,6 +697,29 @@ $('tools-open').addEventListener('click',()=>$('tools').showModal());$('tools-cl
 $('tools').addEventListener('click',event=>{if (event.target===$('tools') && (event.clientX<$('tools').getBoundingClientRect().left || event.clientX>$('tools').getBoundingClientRect().right)) $('tools').close();});
 $('refresh').addEventListener('click',()=>{if (!busy) refresh();});
 $('discover').addEventListener('click',startDiscovery);
+$('minimum-grade').addEventListener('input',()=>{
+  clearTimeout(gradeTimer);activeSwipe?.cancel();
+  route={...route,minGrade:Number($('minimum-grade').value),needsGrade:false,offset:0};
+  try {localStorage.setItem('candidate-min-grade',String(route.minGrade));} catch (_) {}
+  writeRoute(true);++generation;controller?.abort();renderDiscovery();
+  $('candidates').replaceChildren(node('p','Loading sites…','description'));listSignature='';
+  gradeTimer=setTimeout(()=>refresh(),180);
+});
+$('graded-view').addEventListener('click',()=>go({needsGrade:false,offset:0}));
+$('ungraded-view').addEventListener('click',()=>go({needsGrade:true,offset:0}));
+$('dismiss-all').addEventListener('click',()=>{
+  if (busy || !data?.dismissal?.count) return;
+  dismissSnapshot={...data.dismissal};
+  $('dismiss-description').textContent=`Move all ${dismissSnapshot.count} remaining candidates to History, including sites hidden by grade or search filters and other pages. Queued captures and other stages stay as they are. Undo will be available.`;
+  $('dismiss-dialog').showModal();
+});
+$('dismiss-cancel').addEventListener('click',()=>$('dismiss-dialog').close());
+$('dismiss-confirm').addEventListener('click',()=>{
+  if (!dismissSnapshot || busy) return;
+  const snapshot=dismissSnapshot;dismissSnapshot=null;$('dismiss-dialog').close();remember();
+  act('Dismissing candidates',()=>request('/api/dismiss-candidates',{token:snapshot.token}),result=>`Moved ${result.dismissed} candidates to History.`,
+    {undo:result=>({path:'/api/undo-dismissal',payload:{dismissal:result.dismissal},label:'Undo dismiss all'})});
+});
 $('manual-form').addEventListener('submit',submitManualSite);
 $('manual-url').addEventListener('input',renderDiscovery);
 $('previous').addEventListener('click',()=>go({offset:Math.max(0,route.offset-50)}));$('next').addEventListener('click',()=>go({offset:route.offset+50}));

@@ -10,7 +10,7 @@ from state import connect
 
 EDITABLE = {'approval_pending', 'approved_waiting_batch', 'deferred', 'rejected',
             'discovered', 'sampled', 'sample_error', 'unavailable', 'identity_unresolved',
-            'already_archived', 'duplicate_candidate', 'coverage_unverified'}
+            'already_archived', 'duplicate_candidate', 'coverage_unverified', 'grade_error'}
 
 
 def refresh(root, candidate_id=None, force=False):
@@ -52,7 +52,7 @@ def refresh(root, candidate_id=None, force=False):
             elif owners[site_identity(row['url'])] != row['id']:
                 state = 'duplicate_candidate'
                 coverage['duplicate_of'] = owners[site_identity(row['url'])]
-            elif site_check['status'] == 'inventory_partial':
+            elif site_check['status'] == 'inventory_partial' and state not in ('rejected', 'deferred'):
                 if state != 'coverage_unverified':
                     coverage['previous_state'] = state
                 state = 'coverage_unverified'

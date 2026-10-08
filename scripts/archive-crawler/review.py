@@ -84,7 +84,7 @@ def _apply_decisions(store, incoming, capture_delay=0):
         row = current.get(decision["id"])
         if not row or row["manifest_sha256"] != decision["manifest_sha256"]:
             raise CrawlError("Review decision refers to changed or unknown staged evidence")
-        if row["state"] in ("already_archived", "duplicate_candidate", "coverage_unverified"):
+        if row["state"] in ("already_archived", "duplicate_candidate") or row['state'] == 'coverage_unverified' and decision['decision'] == 'approve':
             raise CrawlError("Candidate is already archived, duplicated or its coverage is unverified")
         if row["state"] in ("capturing", "captured_awaiting_review", "publication_requested", "published", "indexed"):
             raise CrawlError("Candidate already belongs to a capture batch")

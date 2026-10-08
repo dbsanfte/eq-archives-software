@@ -23,6 +23,7 @@ from coverage_check import refresh, require_new
 from site_reviews import materialize, migrate
 from import_status import read_error
 from manual import existing_site, prepare as prepare_manual
+from candidate_checks import run as check_candidate
 
 
 def campaign(root, operation):
@@ -155,6 +156,8 @@ class Worker:
         try:
             if operation["kind"] == "discover":
                 result = campaign(self.root, operation)
+            elif operation['kind'] == 'candidate_check':
+                result = check_candidate(self.root, operation)
             elif operation["kind"] == "publish":
                 batch_id = operation["payload"]["batch_id"]
                 with connect(self.root) as store:

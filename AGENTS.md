@@ -262,7 +262,17 @@ Candidates support direct mobile swipe-right approval and swipe-left dismissal,
 with equivalent accessible buttons, saved scope shown, and Undo. Preserve vertical
 scrolling and tap-to-open; short, cancelled, reversed or stale gestures cannot
 submit decisions. Keep coverage/grading checks and unsaved-scope blocking identical
-to the workspace. Luna spend in the upper-right header totals UTC today/month from
+to the workspace. Candidates default to minimum grade 2, sort descending by grade
+before pagination, and retain lower grades behind the 0–3 slider. Keep ungraded
+sites accessible through Needs grading and preserve unfiltered operator API calls.
+The one-site evidence/grading action is explicit, source-bound and capped at $2;
+show sampling failures and phase progress. Reuse verified staged sources and retain
+the same operation, transport/spend budgets and cached valid grade on retry. Recheck
+coverage before spending and reject stale merges after source or human decisions
+change. Dismiss all confirms and atomically moves every Candidate-stage row to
+History, including filtered/paginated rows, without changing other stages. Bulk
+Undo must reject intervening changes atomically. Neither filtering nor polling
+can start paid work. Luna spend in the upper-right header totals UTC today/month from
 the pilot, initialized run and enrichment ledgers, independently of list caps.
 Keep known usage estimates separate from unresolved reservations; include rejected
 and correction attempts without double-counting cached responses or retries.

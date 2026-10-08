@@ -21,9 +21,11 @@ from capture_flow import Action, UNDO_SECONDS, transition
 from capture_queue import claim
 from site_reviews import get as get_site_review, migrate
 from jobs import import_attempt, import_name
-from portal import Stage, decorate, counts, search_matches
+from portal import Stage, decorate, counts, search_matches, candidate_filter, dismissal_preview, grade_value
 from manual import existing_site, site_url
 from spending import Spending
+from candidate_actions import dismiss_all, undo_dismissal
+from candidate_checks import attach_checks, start as start_candidate_check
 
 NETWORK = ipaddress.ip_network("192.168.0.0/16")
 STATIC = Path(__file__).parent
@@ -122,7 +124,7 @@ def create_app(root=None, origin=None, start_worker=True):
         except ValueError:
             raise CrawlError("Invalid queue offset") from None
         with connect(root) as store:
-            all_rows = decorate(store, queue(store))
+            all_rows = attach_checks(store, decorate(store, queue(store)))
             selected = request.query_params.get("filter", "recommended")
             if selected not in ("recommended", "pending", "approved", "captured", "all", *Stage):
                 raise CrawlError("Invalid queue filter")
@@ -135,6 +137,10 @@ def create_app(root=None, origin=None, start_worker=True):
                     selected == "pending" and row["state"] in ("approval_pending", "deferred") or
                     selected == "approved" and row["state"] == 'approved_waiting_batch' or
                     selected == "captured" and row['state'] in CAPTURED_STATES]
+            if selected == 'candidates':
+                if request.query_params.get('needs_grade', '0') not in ('0', '1'):
+                    raise CrawlError('Invalid needs-grading filter')
+                rows = candidate_filter(rows, request.query_params.get('min_grade'), request.query_params.get('needs_grade') == '1')
             if selected in ('approved', 'queued'):
                 rows.sort(key=lambda row: (row['decision'] or {}).get('reviewed_at', ''))
             elif selected in ('captured', 'review', 'indexing', 'history'):
@@ -146,6 +152,8 @@ def create_app(root=None, origin=None, start_worker=True):
             page_rows = rows[offset:offset + 50]
             return JSONResponse({"candidates": page_rows, "total": len(rows), "offset": offset,
                                  "stage_counts": counts(all_rows),
+                                 "candidate_grades": {str(grade): sum(row['stage'] == Stage.CANDIDATES and grade_value(row) == grade for row in all_rows) for grade in range(-1, 4)},
+                                 "dismissal": dismissal_preview(all_rows),
                                  "luna_spend": spending.snapshot(),
                                  "all_count": len(all_rows), "approved": sum(row["state"] == "approved_waiting_batch" for row in all_rows),
                                  "recommended": sum(row['state'] in ('approval_pending','deferred') and (row['rating'] or {}).get('grade',-1)>=2 for row in all_rows),
@@ -162,7 +170,7 @@ def create_app(root=None, origin=None, start_worker=True):
             row = store.db.execute('SELECT * FROM candidates WHERE id=?', (request.query_params.get('id'),)).fetchone()
             if not row:
                 raise CrawlError('Unknown candidate')
-            candidate = decorate(store, [record(store, row)])[0]
+            candidate = attach_checks(store, decorate(store, [record(store, row)]))[0]
             capture = (candidate.get('coverage') or {}).get('capture') or {}
             review_id = capture.get('review_id') or capture.get('batch_id')
             review = get_site_review(store, review_id, candidate['id']) if review_id and candidate['stage'] != Stage.CAPTURING else None
@@ -276,6 +284,33 @@ def create_app(root=None, origin=None, start_worker=True):
         with connect(root) as store:
             apply_decisions(store, incoming, capture_delay=UNDO_SECONDS)
         return JSONResponse({"recorded": len(incoming)})
+
+    async def dismiss_candidates(request):
+        payload = await body(request)
+        if not isinstance(payload, dict) or set(payload) != {'token'} or not isinstance(payload['token'], str):
+            raise CrawlError('Dismiss all requires the reviewed Candidates snapshot.')
+        with connect(root) as store:
+            result = dismiss_all(store, payload['token'])
+        return JSONResponse(result)
+
+    async def undo_candidates(request):
+        payload = await body(request)
+        if not isinstance(payload, dict) or set(payload) != {'dismissal'}:
+            raise CrawlError('Undo requires a dismissal ID.')
+        refresh(root)
+        with connect(root) as store:
+            result = undo_dismissal(store, valid_id(payload['dismissal']))
+        return JSONResponse(result)
+
+    async def check_candidate(request):
+        payload = await body(request)
+        if (not isinstance(payload, dict) or set(payload) != {'id', 'manifest_sha256', 'max_usd'}
+                or not all(isinstance(payload[key], str) for key in ('id', 'manifest_sha256'))
+                or type(payload['max_usd']) not in (int, float) or not 0 < payload['max_usd'] <= 2):
+            raise CrawlError('Evidence and grading require the candidate hash and an explicit one-site budget up to $2.')
+        with connect(root) as store:
+            result = start_candidate_check(store, payload)
+        return JSONResponse(result, status_code=202)
 
     async def index_retry(request):
         payload = await body(request)
@@ -465,6 +500,9 @@ def create_app(root=None, origin=None, start_worker=True):
                             Route('/api/site',site_review), Route('/api/site-decision',site_decision,methods=['POST']),
                             Route('/api/index-retry',index_retry,methods=['POST']),
                             Route("/api/decisions", decide, methods=["POST"]),
+                            Route('/api/dismiss-candidates', dismiss_candidates, methods=['POST']),
+                            Route('/api/undo-dismissal', undo_candidates, methods=['POST']),
+                            Route('/api/check-candidate', check_candidate, methods=['POST']),
                             Route("/api/undo", undo, methods=["POST"]), Route("/api/scope", scope_change, methods=["POST"]), Route('/api/coverage', coverage_check, methods=['POST']), Route("/api/discover", discovery, methods=["POST"]),
                             Route('/api/submit-site', submit_site, methods=['POST']),
                             Route("/api/capture", capture, methods=["POST"]), Route("/api/publish", publication, methods=["POST"]),
