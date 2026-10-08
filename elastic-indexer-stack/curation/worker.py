@@ -12,7 +12,7 @@ from capture_flow import Action, UNDO_SECONDS, transition
 from capture_queue import claim
 from crawler import parser
 from discovery import discover
-from acquisition import sample
+from acquisition import Downloader, sample
 from grading import grade
 from graph import staged_links
 from captures import capture_sites
@@ -24,7 +24,7 @@ from site_reviews import materialize, migrate
 from import_status import read_error
 from manual import existing_site, prepare as prepare_manual
 from candidate_checks import run as check_candidate
-from discovery_run import fill
+from discovery_run import fill, retain_ezboard_progress
 
 
 def campaign(root, operation):
@@ -47,17 +47,31 @@ def campaign(root, operation):
             for table in ("candidates", "attempts", "events", "operations", "batches"):
                 run.db.execute(f"DELETE FROM {table}")
             run.db.execute("DELETE FROM meta WHERE key IN ('acquisition_started','wayback_transport','luna_budget_usd','grading_result', 'discovery_completed','sampling_completed','discovery_result','sampling_result','staged_graph_result')")
+            run.db.execute("DELETE FROM meta WHERE key LIKE 'ezboard_resolution:%' OR key='ezboard_pending_links'")
             run.set("excluded_scopes", excluded)
         finally:
             run.close()
         (directory / "initialized").touch(mode=0o600)
     run = Store(directory)
+    downloader = None
     try:
         payload = operation["payload"]
         if payload.get("fill_queue"):
             return fill(root, operation, run)
         options = parser()
-        acquire = prepare_manual(run, operation) if target else True
+        from ezboard import candidate_url
+        if target and candidate_url(run, target['url']) is None:
+            args = options.parse_args(['--work-dir', str(directory), 'sample', '--max-candidates', '1', '--max-seconds', '1800'])
+            downloader = Downloader(run, args)
+        acquire = prepare_manual(run, operation, downloader=downloader) if target else True
+        if target:
+            with connect(root) as main:
+                existing = existing_site(main, run.candidates()[0]['url'])
+                if existing:
+                    main.db.executemany('INSERT OR IGNORE INTO ezboard_aliases VALUES (?,?,?,?)',
+                                        [tuple(row) for row in run.db.execute('SELECT * FROM ezboard_aliases')])
+                    main.db.commit()
+                    return {'candidate_id': existing['id'], 'existing': True, 'candidates': 0}
         if not target and not run.get("discovery_completed"):
             run.set("staged_graph_result", staged_links(root, run))
             args = options.parse_args(["--work-dir", str(directory), "discover", "--archive-repo", os.environ.get("ARCHIVE_REPO", "/archive"),
@@ -67,7 +81,10 @@ def campaign(root, operation):
         if acquire and not run.get("sampling_completed"):
             args = options.parse_args(["--work-dir", str(directory), "sample", "--max-candidates", str(payload["max_candidates"]),
                                        "--max-seconds", "1800", "--retry-unresolved"])
-            sample(args, run)
+            if downloader is None:
+                sample(args, run)
+            else:
+                sample(args, run, downloader=downloader)
             run.set("sampling_completed", True)
         args = options.parse_args(["--work-dir", str(directory), "grade", "--api-key-file", "/run/secrets/luna_api_key",
                                    "--max-candidates", str(payload["max_candidates"]), "--max-usd", str(payload["max_usd"])])
@@ -75,11 +92,12 @@ def campaign(root, operation):
             grade(args, run)
         with connect(root) as main:
             main.db.execute("ATTACH DATABASE ? AS campaign", (str(directory / "crawl.sqlite3"),))
-            for table in ("hosts", "tree_state", "files", "scans", "links"):
+            for table in ("hosts", "tree_state", "files", "scans", "links", "ezboard_aliases", "ezboard_archive_boards", "ezboard_archive_forums"):
                 main.db.execute(f"INSERT OR REPLACE INTO {table} SELECT * FROM campaign.{table}")
+            retain_ezboard_progress(main, run)
             for row in run.candidates():
                 record = dict(row)
-                record["scope"] = capture_scope(record["url"])
+                record["scope"] = capture_scope(record["url"], json.loads(record['coverage'] or '{}').get('scope_mode', 'directory'))
                 captures = json.loads(record["captures"])
                 for capture in captures:
                     capture["path"] = f"runs/{operation['id']}/" + capture["path"]
@@ -91,8 +109,10 @@ def campaign(root, operation):
             main.set("last_campaign", {"id": operation["id"], "discovery": run.get("discovery_result"),
                                        "sampling": run.get("sampling_result"), "grading": run.get("grading_result")})
         return {"candidates": len(run.candidates()), "grading": run.get("grading_result"), "staged_graph": run.get("staged_graph_result"),
-                **({'candidate_id': digest(target['url'])[:24]} if target else {})}
+                **({'candidate_id': run.candidates()[0]['id']} if target else {})}
     finally:
+        if downloader is not None:
+            downloader.close()
         run.close()
 
 
@@ -101,6 +121,8 @@ class Worker:
         self.root, self.kube = Path(root), kube
         self.stop = threading.Event()
         self.lease = worker_lease(self.root)
+        from ezboard_portal import consolidate
+        consolidate(self.root)
         refresh(self.root)
         migrate(self.root)
         with connect(self.root) as store:
@@ -137,10 +159,16 @@ class Worker:
             if store.db.execute("SELECT 1 FROM operations WHERE state IN ('queued','running') OR kind='capture' AND state='interrupted'").fetchone():
                 store.db.rollback()
                 return
-            rows = store.db.execute("SELECT id FROM candidates WHERE state='approved_waiting_batch' AND json_extract(decision,'$.capture_after')<=? ORDER BY json_extract(decision,'$.capture_after'),rowid LIMIT 5", (now(),)).fetchall()
+            rows = store.db.execute("SELECT id,json_extract(coverage,'$.scope_mode') AS mode FROM candidates WHERE state='approved_waiting_batch' AND json_extract(decision,'$.capture_after')<=? ORDER BY json_extract(decision,'$.capture_after'),rowid LIMIT 5", (now(),)).fetchall()
             if not rows:
                 store.db.rollback()
                 return
+            # Preserve FIFO and give each board an independent catalog budget.
+            if rows[0]['mode'] == 'ezboard':
+                rows = rows[:1]
+            else:
+                first_board = next((i for i, row in enumerate(rows) if row['mode'] == 'ezboard'), len(rows))
+                rows = rows[:first_board]
             claim(store, [row['id'] for row in rows])
             store.db.commit()
             if store.get('capture_queue_error'):

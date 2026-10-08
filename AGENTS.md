@@ -334,6 +334,18 @@ correction responses against that durable limit. Refusals remain pending. Surfac
 safe predefined failure reasons through Job/manifest-bound diagnostic files; never
 expose model output or let a previous attempt's status override the current Job.
 
+Ezboard uses the [custom capture engine](scripts/archive-crawler/EZBOARD.md).
+Candidates represent a source-verified top-level board across numbered Ezboard
+servers, never individual forum/message URLs. Preserve exact source URLs, query
+strings and dates. Resolve ambiguous concatenated forum names using archived
+navigation; do not infer ownership from prefixes alone. Archive coverage shares
+bounded resumable Git metadata across boards and blocks unresolved forum-only
+matches. Whole-board capture is an explicit scope, with paginated CDX prefixes,
+durable budgets and source-verified publication. Keep existing approved scopes
+and active work unchanged when consolidating unapproved legacy suggestions.
+Operator captures never publish/index automatically. Run the crawler tests,
+curation image tests and real browser checks when changing this flow.
+
 ### Public MCP service
 
 The service in `elastic-indexer-stack/mcp` uses Python 3.13 in production and

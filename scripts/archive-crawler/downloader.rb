@@ -207,6 +207,57 @@ class BoundedDownloader < WaybackMachineDownloader
     files
   end
 
+  # Ezboard boards/forums are sibling URL prefixes, not directories. Keep
+  # this operation narrow: no host/domain-wide CDX scans, arbitrary wildcards,
+  # digest collapse (which can hide distinct pages), or parallel connections.
+  def ezboard_catalog
+    uri = URI(@base_url)
+    unless ['http', 'https'].include?(uri.scheme) && !uri.userinfo &&
+           uri.host&.match?(/\A(?:www\.)?(?:server|pub|p|b)[0-9]+\.ezboard\.com\z/i) &&
+           uri.port == (uri.scheme == 'https' ? 443 : 80) && !uri.query && !uri.fragment &&
+           uri.path.match?(/\A\/[bf][a-zA-Z0-9_]{1,120}\z/)
+      raise CaptureFailure, 'Ezboard listing requires a board or forum prefix on a numbered Ezboard server'
+    end
+    params = [['url', @base_url], ['matchType', 'prefix'], ['output', 'json'],
+              ['fl', 'timestamp,original,mimetype,statuscode,digest,length'],
+              ['filter', 'statuscode:200'], ['filter', 'mimetype:text/html'],
+              ['from', @from_timestamp.to_s], ['to', @to_timestamp.to_s],
+              ['limit', '200'], ['showResumeKey', 'true']]
+    if @job['resume_key']
+      key = @job['resume_key']
+      unless key.is_a?(String) && key.bytesize.between?(1, 4096) && key.match?(/\A[\x21-\x7e]+\z/)
+        raise CaptureFailure, 'Invalid CDX resume key'
+      end
+      # CDX emits an already URL-encoded resumption key. Decode once before
+      # encode_www_form; double encoding resumes at the wrong position.
+      params << ['resumeKey', URI.decode_www_form_component(key)]
+    end
+    rows = JSON.parse(@transport.get('/cdx/search/cdx?' + URI.encode_www_form(params)).fetch('body'))
+    return { 'captures' => [], 'resume_key' => nil } if rows == []
+    unless rows.is_a?(Array) && rows.shift == ['timestamp', 'original', 'mimetype', 'statuscode', 'digest', 'length']
+      raise CaptureFailure, 'Unexpected CDX schema'
+    end
+    resume = nil
+    if rows.last.is_a?(Array) && rows.last.length == 1
+      resume = rows.pop[0]
+      unless resume.is_a?(String) && resume.bytesize.between?(1, 4096) && resume.match?(/\A[\x21-\x7e]+\z/)
+        raise CaptureFailure, 'Invalid CDX resume key'
+      end
+      raise CaptureFailure, 'Unexpected CDX continuation' unless rows.pop == []
+    end
+    unless rows.length <= 200 && rows.all? { |row| row.is_a?(Array) && row.length == 6 &&
+      row.all? { |field| field.is_a?(String) } && row[0].match?(/\A\d{14}\z/) &&
+      row[0] >= @from_timestamp.to_s && row[0] <= @to_timestamp.to_s && row[2] == 'text/html' && row[3] == '200' }
+      raise CaptureFailure, 'Unexpected CDX record'
+    end
+    { 'captures' => rows.map { |r| { 'timestamp' => r[0], 'url' => r[1], 'digest' => r[4], 'length' => r[5] } },
+      'resume_key' => resume }
+  rescue JSON::ParserError
+    raise CaptureFailure, 'CDX returned invalid JSON; availability remains unresolved'
+  rescue URI::InvalidURIError
+    raise CaptureFailure, 'Invalid Ezboard listing URL'
+  end
+
   def capture
     timestamp = @job.fetch('timestamp')
     raise CaptureFailure, 'Capture timestamp invalid' unless timestamp.match?(/^\d{14}$/)
@@ -256,6 +307,7 @@ if $PROGRAM_NAME == __FILE__
                  when 'list' then { 'captures' => downloader.catalog, 'listing_limited' => downloader.limited,
                                     'available_rows' => downloader.available_rows, 'identity_variants' => downloader.identity_variants }
                  when 'capture' then downloader.capture
+                 when 'ezboard_list' then downloader.ezboard_catalog
                  else raise CaptureFailure, 'Unknown downloader operation'
                  end
       end

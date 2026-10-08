@@ -194,6 +194,8 @@ def discover(args, store, *, cached_only=False, deadline=None):
         text, encoding = decode(data)
         page = Page(url)
         page.feed(text)
+        from ezboard import remember_page
+        remember_page(store, page, {'url': url, 'timestamp': timestamp, 'sha256': digest(data)})
         for link in page.links:
             target = link["url"]
             if SKIP.search(urlsplit(target).path) or urlsplit(target).hostname == "web.archive.org":
@@ -226,12 +228,24 @@ def discover(args, store, *, cached_only=False, deadline=None):
     if not store.get("acquisition_started"):
         store.db.execute("DELETE FROM candidates WHERE state='discovered' AND captures='[]' AND rating IS NULL")
     existing = store.candidates()
-    scopes = {site_identity(row["url"]) for row in existing}
-    scopes.update(site_identity(url) for url in store.get("excluded_scopes", []))
+    scopes = {site_identity(row["url"], store) for row in existing}
+    scopes.update(site_identity(url, store) for url in store.get("excluded_scopes", []))
     added = len(existing)
+    unresolved = []
+    coverage_pending = []
     for priority, url, evidence in ranked:
         if added >= args.max_candidates or deadline is not None and time.time() >= deadline:
             break
+        from ezboard import address, board_url, candidate_url
+        linked_url = url
+        url = candidate_url(store, url)
+        if url is None:
+            resolution = store.get('ezboard_resolution:' + digest(linked_url)) or {}
+            if address(linked_url) and not resolution.get('unresolved') and len(unresolved) < 50:
+                unresolved.append(linked_url)
+            continue
+        if url != linked_url:
+            evidence = [{**entry, 'linked_url': linked_url, 'resolved_board_url': url} for entry in evidence]
         scope = site_scope(url)
         identity = site_identity(url)
         if identity in scopes:
@@ -241,17 +255,29 @@ def discover(args, store, *, cached_only=False, deadline=None):
             archive.site_inventory = SiteInventory(archive)
         site_coverage = archive.site_inventory.check(url)
         if site_coverage["status"] != "new_site":
+            if board_url(url) and site_coverage['status'] == 'inventory_partial':
+                coverage_pending.append({'url': url, 'result': site_coverage})
             continue
         coverage = archive.coverage(url)
         if coverage["status"] == "present_tier1":
             continue
         coverage["site_check"] = site_coverage
+        if board_url(url):
+            coverage['scope_mode'] = 'ezboard'
+            scope = board_url(url)
         scopes.add(identity)
         identifier = digest(url)[:24]
         store.db.execute("INSERT OR IGNORE INTO candidates(id,url,scope,priority,coverage,evidence) VALUES (?,?,?,?,?,?)",
                          (identifier, url, scope, priority, json.dumps(coverage), json.dumps(evidence)))
+        if board_url(url):
+            from ezboard_discovery import evidence as parent_evidence
+            captures = parent_evidence(store, linked_url, url)
+            if captures:
+                store.db.execute("UPDATE candidates SET captures=?,state='sampled' WHERE id=? AND captures='[]'", (json.dumps(captures), identifier))
         added += 1
     store.db.commit()
+    store.set('ezboard_pending_links', unresolved)
+    store.set('ezboard_coverage_pending', coverage_pending)
     store.set("discovery_limits", vars(args) | {"handler": None})
     store.set("discovery_result", {"seed_reads": reads, "seed_bytes": read_bytes, "seed_failures": failures, "seed_probes": probes,
                                    "distinct_linked_urls": len(grouped), "candidates": len(store.candidates())})

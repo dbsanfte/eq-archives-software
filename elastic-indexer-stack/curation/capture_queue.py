@@ -18,7 +18,7 @@ def claim(store, ids):
         if not site['decision'] or site['decision']['manifest_sha256'] != site['manifest_sha256']:
             raise CrawlError('Site approval is stale')
         checked_sources(store, site)
-        snapshots = [item for item in site['captures'] if
+        snapshots = [item for item in site['captures'] if site['scope_mode'] == 'ezboard' or
                      (original_url(item['url']) == original_url(site['url']) if site['scope_mode'] == 'page'
                       else within_scope(item['url'], site['scope']))]
         if not snapshots and site['scope_mode'] != 'custom':
@@ -27,6 +27,8 @@ def claim(store, ids):
                       'captures': snapshots, 'reviewed_captures': site['captures']})
     if not 1 <= len(sites) <= LIMITS['sites']:
         raise CrawlError('Capture batches require 1–5 sites')
+    if len(sites) != 1 and any(site['scope_mode'] == 'ezboard' for site in sites):
+        raise CrawlError('Capture a whole Ezboard separately from other sites')
     batch_id = identifier()
     operation = enqueue(store, 'capture', {'batch_id': batch_id, 'sites': sites}, commit=False)
     store.db.execute("INSERT INTO batches VALUES (?,'capturing',NULL,NULL,NULL,NULL,NULL,?,?)", (batch_id, now(), now()))

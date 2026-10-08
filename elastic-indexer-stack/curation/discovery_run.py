@@ -24,10 +24,10 @@ def merge_site(root, operation, row, minimum):
                                   (row['id'], operation['id'])).fetchone()
         if receipt:
             return json.loads(receipt[0])['accepted']
-        if any(site_identity(item['url']) == site_identity(row['url']) for item in main.candidates()):
+        if any(site_identity(item['url'], main) == site_identity(row['url'], main) for item in main.candidates()):
             return False
         record = dict(row)
-        record['scope'] = capture_scope(record['url'])
+        record['scope'] = capture_scope(record['url'], json.loads(record['coverage'] or '{}').get('scope_mode', 'directory'))
         record['captures'] = json.dumps([{**capture, 'path': f"runs/{operation['id']}/" + capture['path']}
                                         for capture in json.loads(record['captures'])])
         keys = list(record)
@@ -44,7 +44,7 @@ def owned_or_new(root, operation, row):
     with connect(root) as main:
         owned = main.db.execute("SELECT 1 FROM events WHERE candidate=? AND action='discovery_result' AND json_extract(detail,'$.operation')=?",
                                 (row['id'], operation['id'])).fetchone()
-        exists = any(site_identity(item['url']) == site_identity(row['url']) for item in main.candidates())
+        exists = any(site_identity(item['url'], main) == site_identity(row['url'], main) for item in main.candidates())
         if owned:
             return 'owned'
         if exists:
@@ -60,9 +60,18 @@ def retain_graph(root, store):
         if not store.get('archive_sha') or store.get('archive_sha') != main.get('archive_sha'):
             return
         main.db.execute('ATTACH DATABASE ? AS discovery', (str(store.root / 'crawl.sqlite3'),))
-        for table in ('hosts', 'tree_state', 'files', 'scans', 'links'):
+        for table in ('hosts', 'tree_state', 'files', 'scans', 'links', 'ezboard_aliases', 'ezboard_archive_boards', 'ezboard_archive_forums'):
             main.db.execute(f'INSERT OR IGNORE INTO {table} SELECT * FROM discovery.{table}')
+        retain_ezboard_progress(main, store)
         main.db.commit()
+
+
+def retain_ezboard_progress(main, store):
+    for row in store.db.execute("SELECT key,value FROM meta WHERE key LIKE 'ezboard_archive_inventory:v1:%'"):
+        incoming = json.loads(row['value'])
+        previous = main.get(row['key']) or {}
+        if incoming.get('checked', 0) >= previous.get('checked', 0):
+            main.db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)', (row['key'], row['value']))
 
 
 def fill(root, operation, store):
@@ -129,6 +138,22 @@ def fill(root, operation, store):
                 progress('finding_links')
                 pending = [row for row in store.candidates() if row['id'] not in checkpoint['done']]
                 if not pending:
+                    unresolved = store.get('ezboard_pending_links', [])
+                    if unresolved and time.time() < checkpoint['deadline']:
+                        progress('resolving_ezboard')
+                        if downloader is None:
+                            previous = store.get('wayback_transport', {}) or {}
+                            sample_args.max_seconds = previous.get('seconds', 0) + max(0, checkpoint['deadline'] - time.time())
+                            downloader = Downloader(store, sample_args)
+                        from ezboard_discovery import resolve
+                        resolve(store, unresolved[0], downloader)
+                        continue
+                    coverage_pending = store.get('ezboard_coverage_pending', [])
+                    if coverage_pending and time.time() < checkpoint['deadline']:
+                        progress('checking_coverage')
+                        if all(item['result'].get('retryable') for item in coverage_pending):
+                            continue
+                        raise CrawlError('Ezboard archive coverage is unverified; saved metadata progress is retained. Recheck coverage before grading.')
                     return finish('time_limit' if time.time() >= checkpoint['deadline'] else 'links_exhausted')
             row = pending[0]
             progress('checking_coverage')

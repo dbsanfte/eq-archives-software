@@ -22,16 +22,20 @@ def refresh(root, candidate_id=None, force=False):
         inventory = SiteInventory(archive)
         rows = store.candidates()
         owners = {}
-        published = {site_identity(row['url']): row['id'] for row in rows if row['state'] in ('published', 'indexed')}
+        published = {site_identity(row['url'], store): row['id'] for row in rows if row['state'] in ('published', 'indexed')}
         for row in sorted(rows, key=lambda row: row['state'] in EDITABLE):
-            owners.setdefault(site_identity(row['url']), row['id'])
+            if row['state'] == 'duplicate_candidate':
+                continue
+            owners.setdefault(site_identity(row['url'], store), row['id'])
         for row in rows:
             if row['state'] not in EDITABLE or candidate_id and row['id'] != candidate_id:
                 continue
-            site_check = inventory.check(row['url'], force=force, timestamps=[capture['timestamp'] for capture in json.loads(row['captures'] or '[]')])
-            if site_identity(row['url']) in published:
+            from ezboard import candidate_url
+            checked_url = candidate_url(store, row['url']) or row['url']
+            site_check = inventory.check(checked_url, force=force, timestamps=[capture['timestamp'] for capture in json.loads(row['captures'] or '[]')])
+            if site_identity(row['url'], store) in published:
                 site_check = {**site_check, 'status': 'already_archived', 'complete': True,
-                              'published_candidate': published[site_identity(row['url'])]}
+                              'published_candidate': published[site_identity(row['url'], store)]}
             coverage = json.loads(row['coverage'] or '{}')
             coverage['site_check'] = site_check
             state = row['state']
@@ -49,9 +53,9 @@ def refresh(root, candidate_id=None, force=False):
                         decision = None
             if site_check['status'] == 'already_archived':
                 state = 'already_archived'
-            elif owners[site_identity(row['url'])] != row['id']:
+            elif owners[site_identity(row['url'], store)] != row['id']:
                 state = 'duplicate_candidate'
-                coverage['duplicate_of'] = owners[site_identity(row['url'])]
+                coverage['duplicate_of'] = owners[site_identity(row['url'], store)]
             elif site_check['status'] == 'inventory_partial' and state not in ('rejected', 'deferred'):
                 if state != 'coverage_unverified':
                     coverage['previous_state'] = state
@@ -71,7 +75,7 @@ def refresh(root, candidate_id=None, force=False):
 
 
 def require_new(store, url):
-    if any(row['state'] in ('published', 'indexed') and site_identity(row['url']) == site_identity(url) for row in store.candidates()):
+    if any(row['state'] in ('published', 'indexed') and site_identity(row['url'], store) == site_identity(url, store) for row in store.candidates()):
         raise CrawlError('Website/account was already published by another batch')
     repository = os.environ.get('ARCHIVE_REPO')
     if not repository:
