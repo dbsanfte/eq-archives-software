@@ -14,6 +14,8 @@ EDITABLE = {'approval_pending', 'approved_waiting_batch', 'deferred', 'rejected'
 
 
 def refresh(root, candidate_id=None, force=False):
+    from candidate_actions import retire_excluded
+    retire_excluded(root)
     repository = os.environ.get('ARCHIVE_REPO')
     if not repository:
         return

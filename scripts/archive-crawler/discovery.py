@@ -8,7 +8,7 @@ import subprocess
 import time
 from urllib.parse import urlsplit
 
-from common import CrawlError, Page, decode, digest, original_url, site_identity, site_scope, tier
+from common import CrawlError, Page, candidate_exclusion, decode, digest, original_url, site_identity, site_scope, tier
 
 SKIP = re.compile(r"\.(?:gif|jpe?g|png|webp|css|js|ico|zip|exe|mp[34]|wav|pdf)(?:$|\?)", re.I)
 SIGNALS = re.compile(r"everquest|\beq\b|norrath|guild|class|cleric|druid|shaman|monk|wizard|enchanter|necromancer|bard|paladin|ranger|rogue|warrior|shadow.?knight|news|forum|raid|tradeskill|spell|quest|blog", re.I)
@@ -236,6 +236,8 @@ def discover(args, store, *, cached_only=False, deadline=None):
     for priority, url, evidence in ranked:
         if added >= args.max_candidates or deadline is not None and time.time() >= deadline:
             break
+        if candidate_exclusion(url):
+            continue
         from ezboard import address, board_url, candidate_url
         linked_url = url
         from sitepowerup import candidate_url as board_candidate, board_url as sitepowerup_board

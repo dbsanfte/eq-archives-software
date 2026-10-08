@@ -101,6 +101,60 @@ def test_unresolved_legacy_message_is_saved_without_guessing_or_spending(tmp_pat
         assert not store.db.execute('SELECT 1 FROM attempts').fetchone()
 
 
+def test_legacy_port_profiles_leave_candidates_without_changing_approved_or_active_work(tmp_path):
+    from state import enqueue
+    root=tmp_path/'state'
+    url='http://server2.ezboard.com:8080/ufscnitro.showPublicProfile'
+    pending=add_candidate(root,url=url,grade=None)
+    approved=add_candidate(root,url=url.replace('ufscnitro','uapproved'))
+    active=add_candidate(root,url=url.replace('ufscnitro','uactive'),grade=None)
+    with connect(root) as store:
+        apply_decisions(store,[{'id':approved['id'],'manifest_sha256':approved['manifest_sha256'],'decision':'approve'}])
+        enqueue(store,'candidate_check',{'id':active['id'],'manifest_sha256':active['manifest_sha256'],'max_usd':2})
+    consolidate(root)
+    with connect(root) as store:
+        rows={row['id']:record(store,row) for row in store.candidates()}
+        assert rows[pending['id']]['state']=='deferred'
+        assert rows[pending['id']]['coverage']['ezboard_parent_required']
+        assert rows[approved['id']]['state']=='approved_waiting_batch'
+        for original in (pending,approved,active):
+            assert rows[original['id']]['manifest_sha256']==original['manifest_sha256']
+        assert rows[active['id']]['state']=='sampled'
+        assert not store.db.execute('SELECT 1 FROM attempts').fetchone()
+
+
+@pytest.mark.parametrize('port',['',':8080'])
+def test_profile_evidence_checks_are_rejected_before_queueing_downloads_or_luna(tmp_path,port):
+    root=tmp_path/'state'
+    row=add_candidate(root,url='http://server2.ezboard.com'+port+'/ufscnitro.showPublicProfile',grade=None)
+    app=create_app(root,start_worker=False)
+    result=call(app,'POST','/api/check-candidate',{'id':row['id'],'manifest_sha256':row['manifest_sha256'],'max_usd':2})
+    assert result.status_code==409 and 'top-level board URL' in result.json()['error']
+    with connect(root) as store:
+        assert not store.db.execute('SELECT 1 FROM operations').fetchone()
+        assert not store.db.execute('SELECT 1 FROM attempts').fetchone()
+
+
+@pytest.mark.parametrize('action',['approve','check'])
+def test_consolidation_rechecks_decisions_made_while_it_reads_sources(tmp_path,action):
+    from captures import verified_source
+    from state import enqueue
+    root=tmp_path/'state'
+    row=add_candidate(root,url='http://server2.ezboard.com:8080/urace.showPublicProfile')
+    def concurrent_decision(*args):
+        data=verified_source(*args)
+        with connect(root) as store:
+            payload={'id':row['id'],'manifest_sha256':row['manifest_sha256']}
+            if action=='approve':apply_decisions(store,[{**payload,'decision':'approve'}])
+            else:enqueue(store,'candidate_check',{**payload,'max_usd':2})
+        return data
+    with patch('captures.verified_source',side_effect=concurrent_decision):consolidate(root)
+    with connect(root) as store:
+        current=record(store,store.candidates()[0])
+        assert current['state']==('approved_waiting_batch' if action=='approve' else 'approval_pending')
+        assert current['manifest_sha256']==row['manifest_sha256']
+
+
 class ResolverDownloader:
     def __init__(self, *args): self.calls=[]; self.closed=False
     def call(self, job):

@@ -65,6 +65,24 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual({row['url'] for row in rows},{BOARD,BOARD.replace('102010','104254')})
         self.assertTrue(all(json.loads(row['coverage'])['scope_mode']=='sitepowerup' for row in rows))
 
+    def test_ezboard_profiles_on_legacy_ports_do_not_become_site_candidates(self):
+        self.file('seed.example','20000101000000','index.html',
+                  '<title>EverQuest forums</title>'
+                  '<a href="http://server2.ezboard.com:8080/ufscnitro.showPublicProfile">Author</a>'
+                  '<a href="http://server2.ezboard.com:8080/utanas.showPublicProfile">Author</a>'
+                  '<a href="http://pub2.ezboard.com/uother.showPublicProfile">Author</a>')
+        self.commit()
+        discover(self.args(),self.store)
+        self.assertEqual(self.store.candidates(),[])
+
+    def test_freeservers_signup_ad_is_excluded_without_blocking_hosted_sites(self):
+        ad='http://www.freeservers.com/cgi-bin/redirect?id=ezboard-r1'
+        hosted='http://clerics.freeservers.com/eq/index.html'
+        self.file('seed.example','20000101000000','index.html',
+                  '<title>EverQuest guild links</title>'+''.join('<a href="'+url+'">EQ links</a>' for url in (ad,hosted)))
+        self.commit();discover(self.args(),self.store)
+        self.assertEqual({row['url'] for row in self.store.candidates()},{hosted})
+
     def test_inclusive_tiers_and_shared_host_scope(self):
         for date in ("19990101000000", "20011231235959"):
             self.assertEqual(tier(date), 1)

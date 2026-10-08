@@ -394,6 +394,8 @@ async def unavailable_candidate(browser,base):
         await route.fulfill(status=200,json=body)
     await page.route('**/api/**',fixture)
     await page.goto(base+'/?view=candidates&candidate='+row['id'])
+    await page.get_by_role('heading',name='No archived source found',exact=True).wait_for()
+    await page.get_by_text('Technical detail',exact=True).click()
     await page.get_by_text('No usable Wayback capture was found.',exact=True).wait_for()
     assert await page.get_by_role('button',name='Approve site for capture',exact=True).is_disabled()
     assert await page.get_by_role('button',name='Save for later',exact=True).is_enabled()
@@ -1266,6 +1268,66 @@ async def ezboard_flow(browser,base,width):
     await context.close()
 
 
+async def candidate_failure_feedback(browser,base,width):
+    context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
+    page=await context.new_page();errors=[];posts=[]
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    snapshot=await (await context.request.get(base+'/api/queue?filter=candidates')).json()
+    row=copy.deepcopy(snapshot['candidates'][0])
+    raw='No exact HTML captures found within the two tiers'
+    row.update(url='http://www.freeservers.com/cgi-bin/redirect?id=ezboard-r1',
+               scope='http://www.freeservers.com/cgi-bin/redirect/',stage='candidates',state='unavailable',
+               captures=[],rating=None,error=raw,review_state=None,
+               candidate_check={'id':'e'*32,'state':'interrupted','phase':'sampling','error':raw,'max_usd':2})
+    async def fixture(route):
+        parsed=urlsplit(route.request.url)
+        if route.request.method!='GET':posts.append(parsed.path);raise AssertionError('Feedback must never start work')
+        if parsed.path=='/api/candidate':body={'candidate':row,'review':None}
+        elif parsed.path=='/api/queue':
+            body={**snapshot,'candidates':[row],'total':1,'operations':[],
+                  'stage_counts':{name:int(name==row['stage']) for name in ('candidates','queued','capturing','review','indexing','saved','history')}}
+        else:raise AssertionError(parsed.path)
+        await route.fulfill(status=200,json=body)
+    await page.route('**/api/**',fixture)
+    await page.goto(base+'/?view=candidates&needs_grade=1');await settled(page)
+    await page.locator('.candidate-issue-summary').filter(has_text='no matching HTML page').wait_for()
+    await open_site(page,'www.freeservers.com/cgi-bin/redirect/')
+    alert=page.locator('.candidate-issue[role=alert]')
+    await alert.get_by_role('heading',name='No archived source found',exact=True).wait_for()
+    await alert.get_by_text('Retry checks the same URL again.',exact=False).wait_for()
+    assert await alert.get_by_role('link',name='Check this URL in Wayback').get_attribute('href')=='https://web.archive.org/web/*/'+row['url']
+    assert (await alert.bounding_box())['y'] < (await page.locator('#site-workspace .candidate-recovery').first.bounding_box())['y']
+    await alert.get_by_text('Technical detail',exact=True).click()
+    await alert.get_by_text(raw,exact=True).wait_for()
+    await safe_layout(page,width)
+    await page.screenshot(path=f'/tmp/curation-candidate-error-{width}.png',full_page=True)
+    # A new error can arrive with unchanged candidate state and manifest hash.
+    row['error']='Wayback HTTP 429';row['candidate_check']['error']=row['error']
+    await page.evaluate('refresh()')
+    await alert.get_by_role('heading',name='Wayback is limiting requests',exact=True).wait_for()
+    await alert.get_by_text('Technical detail',exact=True).click()
+    await alert.get_by_text('Wayback HTTP 429',exact=True).wait_for()
+    row['candidate_check'].update(state='queued',error=None)
+    await page.evaluate('refresh()')
+    assert not await page.locator('.candidate-issue').count()  # Never show a stale failure as the current result.
+    row['error']='Complete source exceeds grading limit; leave candidate unjudged'
+    row['candidate_check'].update(state='interrupted',phase='grading',error=row['error'])
+    row['state']='grade_error'
+    await page.evaluate('refresh()')
+    await alert.get_by_role('heading',name='Source is too large to grade',exact=True).wait_for()
+    await alert.get_by_text('Retrying cannot reduce its size.',exact=False).wait_for()
+    row.update(state='rejected',stage='history')
+    row['coverage']['candidate_exclusion']='FreeServers hosting signup advertisement from Ezboard footers. Submit the EQ site’s direct URL instead.'
+    await page.goto(base+'/?view=history&candidate='+row['id']);await settled(page)
+    await alert.get_by_role('heading',name='Excluded promotion',exact=True).wait_for()
+    await alert.get_by_text('hosting signup advertisement',exact=False).wait_for()
+    assert not await page.get_by_role('button',name='Restore to Candidates',exact=True).count()
+    await page.get_by_role('button',name='Back to Candidates',exact=True).wait_for()
+    await safe_layout(page,width)
+    assert not errors and not posts,(errors,posts)
+    await context.close()
+
+
 async def sitepowerup_flow(browser,base,width):
     context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
     page=await context.new_page();errors=[];posts=[]
@@ -1436,6 +1498,7 @@ async def check(base):
         browser=await playwright.chromium.launch()
         try:
             for width in (320,390,430,768,1280):
+                await candidate_failure_feedback(browser,base,width)
                 await sitepowerup_flow(browser,base,width)
                 await advanced_grading_flow(browser,base,width)
                 await ezboard_flow(browser,base,width)

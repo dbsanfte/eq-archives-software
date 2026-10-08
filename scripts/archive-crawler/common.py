@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 import re
 import sqlite3
-from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, unquote, urljoin, urlsplit, urlunsplit
 
 TIERS = {1: ("19990101000000", "20011231235959"),
          2: ("20020101000000", "20061231235959")}
@@ -83,6 +83,19 @@ def original_url(value, base=None):
         return urlunsplit((parsed.scheme, netloc, parsed.path or "/", parsed.query, ""))
     except ValueError:
         return None
+
+
+def candidate_exclusion(url):
+    """Narrow, evidenced platform promotions; never exclude hosted accounts."""
+    value = original_url(url)
+    if not value:
+        return None
+    parsed = urlsplit(value)
+    if (parsed.hostname in ('freeservers.com', 'www.freeservers.com')
+            and parsed.path.rstrip('/') == '/cgi-bin/redirect'
+            and parse_qsl(parsed.query, keep_blank_values=True) == [('id', 'ezboard-r1')]):
+        return 'FreeServers hosting signup advertisement from Ezboard footers. Submit the EQ site’s direct URL instead.'
+    return None
 
 
 def site_scope(url):
