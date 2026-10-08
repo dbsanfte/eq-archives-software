@@ -18,6 +18,8 @@ Legacy finder/worker/broad reindex Jobs retain their separate lifecycles.
    Archived scripts, HTML and images never execute in this screen.
 2. Choose scope and **Approve site for capture**. This queues the site automatically,
    removes it from **Candidates**, and moves it into **Capture queue**.
+   The screen returns to the Candidates list with its search and position retained,
+   plus a confirmation and **Undo approval** action so you can keep reviewing sites.
    The queue has no item-count cap; its 50-row pages are pagination, not a limit.
    New approvals have a 60-second grace period. **Undo approval** returns the
    site to Candidates and retains its sources and grade. Undo remains available
@@ -70,9 +72,10 @@ approval queue. Counts describe the entire stage, including rows outside a searc
 
 On phones, bottom navigation opens compact stage lists. A site opens a focused
 workspace showing its evidence/scope, queue position, capture progress, captured
-subset, or publication/indexing status as appropriate. Confirmed manual approvals
-follow the site into its next stage; Undo remains available until the atomic worker
-claim. A failed action cannot advance the site. Background updates refresh counts
+subset, or publication/indexing status as appropriate. Capture approval returns to
+Candidates; publication/indexing approval follows the site into Indexing. Undo
+remains available until the atomic worker claim. A failed action cannot advance
+the site or return to the list. Background updates refresh counts
 without navigating away from another selected site. Next site and the stage list
 support reviewing multiple sites. Scope edits require Save before approval.
 
