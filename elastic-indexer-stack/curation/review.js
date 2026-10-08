@@ -68,7 +68,11 @@ function restorePosition() {
 function go(change,{replace=false}={}) {
   activeSwipe?.cancel();
   remember();const parent={...route};route={...route,...change};writeRoute(replace,parent);$('tools').close();$('error').hidden=true;$('notice').hidden=true;
-  if (!route.candidate && parent.view!==route.view) { $('candidates').replaceChildren(node('p','Loading sites…','description'));listSignature=''; }
+  if (!route.candidate) {
+    if (parent.view!==route.view || parent.query!==route.query || parent.offset!==route.offset) {
+      $('candidates').replaceChildren(node('p','Loading sites…','description'));listSignature='';
+    } else if (data) renderList(); // Apply retained scope drafts before the next response.
+  }
   const cached=detail?.candidate.id===route.candidate;
   renderShell();if (cached) {renderWorkspace();renderDock();restorePosition();} refresh(!cached);
 }

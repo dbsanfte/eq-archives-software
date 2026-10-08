@@ -785,6 +785,7 @@ async def candidate_quick_actions(browser,base,width):
            'month':{'estimated_usd':4.5672,'unresolved_usd':.03}}
     posts=[];errors=[];fail_approval=True
     submitted,release=asyncio.Event(),asyncio.Event()
+    queue_release=asyncio.Event();queue_release.set()
     page.on('pageerror',lambda error:errors.append(str(error)))
     async def fixture(route):
         nonlocal fail_approval
@@ -810,6 +811,7 @@ async def candidate_quick_actions(browser,base,width):
                 row.update(stage='candidates',state='approval_pending')
             await route.fulfill(status=200,json={'saved':1});return
         if path=='/api/queue':
+            await queue_release.wait()
             selected=[row for row in rows if row['stage']==args['filter'][0]]
             await route.fulfill(status=200,json={**snapshot,'operations':[],'luna_spend':spend,'candidates':selected,
                 'total':len(selected),'offset':0,'stage_counts':{name:sum(row['stage']==name for row in rows)
@@ -877,7 +879,12 @@ async def candidate_quick_actions(browser,base,width):
     # Drafts survive a return to the list; quick approval cannot bypass Save.
     await page.get_by_label('Download scope',exact=True).select_option('custom')
     await page.get_by_label('Custom capture folder path').fill('/unsaved')
-    await stage(page,'candidates')
+    queue_release.clear()
+    await page.locator('#stages [data-view=candidates]').click()
+    await page.locator('#candidates').get_by_text('Loading sites…',exact=True).wait_for()
+    assert not await page.get_by_role('button',name='Approve capture: swipe-0.example/eq/',exact=True).count()
+    queue_release.set()
+    await tile(0).wait_for();await settled(page)
     assert await page.get_by_role('button',name='Approve capture: swipe-0.example/eq/',exact=True).is_disabled()
     if width<1000:await swipe(0,125)
     assert not posts
