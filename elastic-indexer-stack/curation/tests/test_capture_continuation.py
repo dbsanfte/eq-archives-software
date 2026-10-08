@@ -255,6 +255,28 @@ def test_regeneration_undo_and_claim_have_one_atomic_winner(tmp_path):
         worker.lease.close()
 
 
+def test_queue_positions_follow_regeneration_order_not_old_approval_dates(tmp_path):
+    root = tmp_path / 'state'
+    first, a = legacy(root)
+    second, b = legacy(root, identifier='b' * 32, url='http://second.example/')
+    app = create_app(root, start_worker=False)
+    assert regenerate(app, b).status_code == 202
+    assert regenerate(app, a).status_code == 202
+    for view in ('queued', 'approved'):
+        rows = call(app, 'GET', '/api/queue?filter=' + view).json()['candidates']
+        assert [row['id'] for row in rows] == [second['id'], first['id']]
+    assert detail(app, second)['queue_position'] == 1
+    assert detail(app, first)['queue_position'] == 2
+    worker = Worker(root)
+    try:
+        with patch('worker.now', return_value='2030-01-01T00:00:00+00:00'):
+            worker.capture_queue()
+        assert detail(app, second)['candidate']['stage'] == 'capturing'
+        assert detail(app, first)['candidate']['stage'] == 'queued'
+    finally:
+        worker.lease.close()
+
+
 @pytest.mark.parametrize('payload', [{}, [], {'id': 'bad', 'manifest_sha256': 'stale'}, {'id': 1, 'manifest_sha256': 'stale'}])
 def test_regeneration_rejects_invalid_requests(tmp_path, payload):
     assert call(create_app(tmp_path / 'state', start_worker=False), 'POST', '/api/continue-capture', payload).status_code == 409

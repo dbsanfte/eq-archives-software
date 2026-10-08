@@ -19,7 +19,7 @@ from state import connect, enqueue, unpack, valid_id
 from worker import Worker
 from coverage_check import refresh, require_new
 from capture_flow import Action, UNDO_SECONDS, transition
-from capture_queue import claim
+from capture_queue import claim, queue_order
 from capture_continuation import start as continue_capture, require_complete
 from site_reviews import get as get_site_review, migrate
 from jobs import import_attempt, import_name
@@ -148,7 +148,8 @@ def create_app(root=None, origin=None, start_worker=True):
                     raise CrawlError('Invalid needs-grading filter')
                 rows = candidate_filter(rows, request.query_params.get('min_grade'), request.query_params.get('needs_grade') == '1')
             if selected in ('approved', 'queued'):
-                rows.sort(key=lambda row: (row['decision'] or {}).get('reviewed_at', ''))
+                positions = {candidate: index for index, candidate in enumerate(queue_order(store))}
+                rows.sort(key=lambda row: positions[row['id']])
             elif selected in ('captured', 'review', 'indexing', 'history'):
                 rows.sort(key=lambda row: ((row['coverage'] or {}).get('capture') or {}).get('completed_at', ''), reverse=True)
             if search:
@@ -185,8 +186,7 @@ def create_app(root=None, origin=None, start_worker=True):
             operation = store.db.execute("""SELECT * FROM operations WHERE kind='capture' AND EXISTS
                 (SELECT 1 FROM json_each(operations.payload,'$.sites') WHERE json_extract(value,'$.id')=?)
                 ORDER BY created DESC,rowid DESC LIMIT 1""", (candidate['id'],)).fetchone()
-            queued = store.db.execute("SELECT id FROM candidates WHERE state='approved_waiting_batch' ORDER BY json_extract(decision,'$.reviewed_at'),rowid").fetchall()
-            ids = [item['id'] for item in queued]
+            ids = queue_order(store)
             blocker = store.db.execute("SELECT id,kind,state FROM operations WHERE state IN ('running','queued') OR (kind='capture' AND state='interrupted') ORDER BY CASE state WHEN 'interrupted' THEN 0 ELSE 1 END,created LIMIT 1").fetchone()
             return JSONResponse({'candidate': candidate, 'review': review,
                 'capture_operation': unpack(operation) if operation else None,
