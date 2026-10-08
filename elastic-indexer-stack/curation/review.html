@@ -43,7 +43,7 @@
           <label for="manual-url">Website or Wayback URL</label>
           <div class="manual-fields"><input id="manual-url" type="text" inputmode="url" autocomplete="url" autocapitalize="none" spellcheck="false" placeholder="https://…" maxlength="4096" required aria-describedby="manual-help manual-budget"><button id="manual-submit" type="submit" disabled aria-describedby="manual-budget discovery-status">Add & grade site</button></div>
           <p id="manual-budget" class="meta">One site · $2 maximum for Luna grading.</p>
-          <p id="manual-help" class="meta">Wayback links use the original page. Coverage is checked first; samples prefer 1999–2001, then 2002–2007.</p>
+          <p id="manual-help" class="meta">Wayback links use the original page. Coverage is checked first; discovery samples prefer 1999–2001, then 2002–2006. Approved capture covers the full 1999–2006 window.</p>
         </form>
         <div id="manual-result" role="status" aria-live="polite" hidden></div>
       </section>
@@ -65,7 +65,7 @@
   <dialog id="review-dialog" aria-labelledby="review-dialog-title"><h2 id="review-dialog-title"></h2><div class="review-dialog-body"><p id="review-dialog-description"></p><p id="review-dialog-budget"></p><details><summary>Sites included</summary><ul id="review-dialog-sites"></ul></details></div><div class="dialog-actions"><button id="review-dialog-cancel" type="button">Cancel</button><button id="review-dialog-confirm" type="button"></button></div></dialog>
   <dialog id="tools" aria-labelledby="tools-title"><div class="dialog-heading"><h2 id="tools-title">Tools & history</h2><button id="tools-close" aria-label="Close tools">Close</button></div>
     <div class="tool-links"><button data-view="saved">Saved for later</button><button data-view="history">History</button></div>
-    <details><summary>Capture limits & dates</summary><p>One connection, a 3-second delay and 128 KiB/s. The queue has no count limit. Each worker batch has at most 5 sites, 20 new URLs per site, 100 HTML files and 64 MiB. Captures prefer 1999–2001, then 2002–2007. Downloads are bounded subsets, not complete mirrors.</p></details>
+    <details><summary>Capture limits & dates</summary><p>One connection, a 3-second delay and 128 KiB/s. The queue has no count limit. Ordinary site batches have at most 5 sites, 20 URLs per site, 100 HTML files and 64 MiB; each whole Ezboard has a separate 2,000-capture, 256 MiB limit. Approved captures request all available dated versions from 1 January 1999 through 31 December 2006. Sites with 1999–2001 captures have discovery priority. Reviews show when limits leave coverage incomplete.</p></details>
     <details><summary>Recent activity</summary><div id="operations"></div></details>
   </dialog>
 </body>

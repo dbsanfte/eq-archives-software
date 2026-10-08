@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 from acquisition import Downloader
 from archive_layout import archive_path
-from common import CrawlError, Store, TIERS, digest, now, original_url, save, tier
+from common import LEGACY_TIERS, CrawlError, Store, TIERS, digest, in_capture_window, now, original_url, save, tier
 from discovery import Archive
 from ezboard import address, belongs, board_name, candidate, forum_links, shard, source_page, source_problem
 
@@ -43,12 +43,20 @@ class Capture:
         ''')
         self.config = store.get('ezboard_config')
 
+    def date_tiers(self):
+        # A saved operator plan keeps its original date policy on resume.
+        return {int(key): value for key, value in self.config.get('date_tiers', LEGACY_TIERS).items()}
+
+    def capture_window(self):
+        tiers = self.date_tiers()
+        return {'from': tiers[1][0], 'to': tiers[2][1], 'versions': 'all_available'}
+
     def plan(self, url, hosts=(), limits=None, archive_repo=None):
         if self.config:
             raise CrawlError('This directory already has a plan. Resume capture or use a new private directory.')
         board = board_name(url)
         self.config = {'schema': 1, 'board': board, 'url': original_url(url), 'created_at': now(),
-                       'limits': {**DEFAULT_LIMITS, **(limits or {})}}
+                       'limits': {**DEFAULT_LIMITS, **(limits or {})}, 'date_tiers': TIERS}
         self.validate_limits(self.config['limits'])
         names = {address(url)['host']: {'source': 'submitted_url', 'url': original_url(url)}}
         for host in hosts:
@@ -138,7 +146,7 @@ class Capture:
         source_root = Path(source_root).resolve()
         for capture in captures:
             parsed = candidate(capture['url'], self.config['board'])
-            if not parsed or not tier(capture['timestamp']):
+            if not parsed or not in_capture_window(capture['timestamp'], self.capture_window()):
                 continue
             source = source_root / capture['path']
             if source_root not in source.resolve().parents or source.is_symlink():
@@ -170,13 +178,14 @@ class Capture:
         self.require_plan()
         counts = dict(self.db.execute('SELECT state,COUNT(*) FROM ez_records GROUP BY state'))
         return {**self.store.get('ezboard_status', {}), 'board': self.config['board'],
+                'capture_window': self.capture_window(),
                 'counts': counts, 'hosts': self.db.execute('SELECT COUNT(*) FROM ez_hosts').fetchone()[0],
                 'forums': self.db.execute('SELECT COUNT(*) FROM ez_forums').fetchone()[0],
                 'catalogs_remaining': self.db.execute('SELECT COUNT(*) FROM ez_queries WHERE done=0').fetchone()[0],
                 'limits': self.config['limits'], 'transport': self.store.get('wayback_transport', {})}
 
     def catalog(self, downloader, query):
-        start, end = TIERS[query['tier']]
+        start, end = self.date_tiers()[query['tier']]
         url = 'http://' + query['host'] + '/' + query['kind'] + self.config['board']
         result = downloader.call({'op': 'ezboard_list', 'url': url, 'from': start, 'to': end,
                                   'resume_key': query['resume']})
@@ -190,7 +199,7 @@ class Capture:
         for record in records:
             parsed = candidate(record['url'], self.config['board'])
             if (not parsed or parsed['host'] != query['host'] or parsed['token'][0] != query['kind']
-                    or tier(record['timestamp']) != query['tier']):
+                    or tier(record['timestamp']) != query['tier'] or not start <= record['timestamp'] <= end):
                 continue
             key = digest([record['url'], record['timestamp']])
             self.db.execute('INSERT OR IGNORE INTO ez_records(id,url,stamp,tier,kind,cdx_digest,cdx_length) VALUES (?,?,?,?,?,?,?)',
@@ -209,7 +218,7 @@ class Capture:
             consumed = self.db.execute("SELECT COUNT(*) FROM ez_records WHERE metadata IS NOT NULL").fetchone()[0]
             if consumed >= self.config['limits']['max_captures']:
                 raise BoundReached('Capture file limit reached; pending captures are retained')
-            start, end = TIERS[row['tier']]
+            start, end = self.date_tiers()[row['tier']]
             try:
                 result = downloader.call({'op': 'capture', 'url': row['url'], 'timestamp': row['stamp'],
                                           'from': start, 'to': end, 'destination': str(temporary)})
@@ -224,7 +233,8 @@ class Capture:
             # moving it. Resume this receipt without paying for another replay.
             self.db.execute("UPDATE ez_records SET state='downloaded',metadata=? WHERE id=?", (json.dumps(result), row['id']))
             self.db.commit()
-        if result['url'] != row['url'] or tier(result['timestamp']) != row['tier']:
+        if (result['url'] != row['url'] or tier(result['timestamp']) != row['tier'] or
+                not in_capture_window(result['timestamp'], self.capture_window())):
             raise CrawlError('Replay failed exact URL/date validation')
         source_bytes = self.db.execute("SELECT COALESCE(SUM(json_extract(metadata,'$.bytes')),0) FROM ez_records").fetchone()[0]
         if source_bytes > self.config['limits']['max_bytes']:
@@ -332,6 +342,7 @@ class Capture:
         captures = [json.loads(row[0]) for row in self.db.execute("SELECT metadata FROM ez_records WHERE state='captured' ORDER BY tier,url,stamp")]
         notes = [dict(row) for row in self.db.execute('SELECT url,stamp,state,reason FROM ez_records WHERE reason IS NOT NULL ORDER BY url,stamp')]
         manifest = {'schema': 1, 'strategy': 'ezboard-v1', 'board': self.config['board'],
+                    'capture_window': self.capture_window(),
                     'seed_url': self.config['url'], 'created_at': self.config['created_at'],
                     'coverage': self.status(), 'hosts': [dict(row) for row in self.db.execute('SELECT * FROM ez_hosts ORDER BY host')],
                     'forums': [dict(row) for row in self.db.execute('SELECT * FROM ez_forums ORDER BY token')],

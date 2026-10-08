@@ -334,6 +334,15 @@ correction responses against that durable limit. Refusals remain pending. Surfac
 safe predefined failure reasons through Job/manifest-bound diagnostic files; never
 expose model output or let a previous attempt's status override the current Job.
 
+New approved captures cover all available dated versions from inclusive UTC
+1999-01-01 through 2006-12-31. The 1999–2001 preference ranks discovery evidence
+and equally graded candidates; it must not truncate an approved site's date
+coverage. Ordinary page/directory/site captures use paginated, uncollapsed exact
+CDX listings, including URLs with saved grading samples. Keep per-version and
+catalog checkpoints, shared serial transport and cumulative limits. Display the
+requested window and incomplete coverage when limits stop capture. Preserve
+already reviewed/published manifests and saved legacy operator date policies.
+
 Ezboard uses the [custom capture engine](scripts/archive-crawler/EZBOARD.md).
 Candidates represent a source-verified top-level board across numbered Ezboard
 servers, never individual forum/message URLs. Preserve exact source URLs, query

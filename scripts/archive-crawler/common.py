@@ -11,7 +11,11 @@ import sqlite3
 from urllib.parse import unquote, urljoin, urlsplit, urlunsplit
 
 TIERS = {1: ("19990101000000", "20011231235959"),
-         2: ("20020101000000", "20071231235959")}
+         2: ("20020101000000", "20061231235959")}
+# Retain validation of already reviewed/published evidence from the former
+# window. New acquisition uses TIERS or the explicit complete capture window.
+LEGACY_TIERS = {**TIERS, 2: ("20020101000000", "20071231235959")}
+CAPTURE_WINDOW = {"from": "19990101000000", "to": "20061231235959", "versions": "all_available"}
 CATEGORIES = ["guild", "news", "aggregator", "personal_blog", "forum", "class",
               "independent_information", "other", "unrelated"]
 SHARED_HOSTS = ("geocities.com", "angelfire.com", "members.aol.com", "home.att.net",
@@ -39,7 +43,12 @@ def tier(timestamp):
         datetime.strptime(timestamp, "%Y%m%d%H%M%S")
     except ValueError:
         return None
-    return next((n for n, (start, end) in TIERS.items() if start <= timestamp <= end), None)
+    return next((n for n, (start, end) in LEGACY_TIERS.items() if start <= timestamp <= end), None)
+
+
+def in_capture_window(timestamp, window=None):
+    window = window or CAPTURE_WINDOW
+    return bool(tier(timestamp) and window['from'] <= timestamp <= window['to'])
 
 
 def original_url(value, base=None):

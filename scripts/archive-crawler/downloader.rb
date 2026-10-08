@@ -218,7 +218,21 @@ class BoundedDownloader < WaybackMachineDownloader
            uri.path.match?(/\A\/[bf][a-zA-Z0-9_]{1,120}\z/)
       raise CaptureFailure, 'Ezboard listing requires a board or forum prefix on a numbered Ezboard server'
     end
-    params = [['url', @base_url], ['matchType', 'prefix'], ['output', 'json'],
+    paginated_catalog('prefix')
+  rescue URI::InvalidURIError
+    raise CaptureFailure, 'Invalid Ezboard listing URL'
+  end
+
+  def capture_catalog
+    # A complete dated listing for one approved original page. CDX can return
+    # scheme/query variants even for exact matching; retain exact identity.
+    result = paginated_catalog('exact')
+    result['captures'].select! { |row| same_original?(row['url'], @base_url) }
+    result
+  end
+
+  def paginated_catalog(match)
+    params = [['url', @base_url], ['matchType', match], ['output', 'json'],
               ['fl', 'timestamp,original,mimetype,statuscode,digest,length'],
               ['filter', 'statuscode:200'], ['filter', 'mimetype:text/html'],
               ['from', @from_timestamp.to_s], ['to', @to_timestamp.to_s],
@@ -254,8 +268,6 @@ class BoundedDownloader < WaybackMachineDownloader
       'resume_key' => resume }
   rescue JSON::ParserError
     raise CaptureFailure, 'CDX returned invalid JSON; availability remains unresolved'
-  rescue URI::InvalidURIError
-    raise CaptureFailure, 'Invalid Ezboard listing URL'
   end
 
   def capture
@@ -308,6 +320,7 @@ if $PROGRAM_NAME == __FILE__
                                     'available_rows' => downloader.available_rows, 'identity_variants' => downloader.identity_variants }
                  when 'capture' then downloader.capture
                  when 'ezboard_list' then downloader.ezboard_catalog
+                 when 'capture_list' then downloader.capture_catalog
                  else raise CaptureFailure, 'Unknown downloader operation'
                  end
       end

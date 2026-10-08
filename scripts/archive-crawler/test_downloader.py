@@ -155,6 +155,29 @@ class DownloaderTests(unittest.TestCase):
         result = self.call({**self.job('ezboard_list'), 'url': 'http://server3.ezboard.com/btest'})
         self.assertFalse(result['ok'])
 
+    def test_full_window_exact_catalog_retains_equal_content_versions_and_paginates(self):
+        job = {**self.job('capture_list'), 'to': '20061231235959'}
+        self.server.catalog = [self.server.catalog[0],
+            ['19990101000000', self.url, 'text/html', '200', 'SAME', '123'],
+            ['20061231235959', self.url, 'text/html', '200', 'SAME', '123'],
+            ['20061231235959', self.url.replace('http:', 'https:'), 'text/html', '200', 'OTHER', '123'],
+            [], ['resume%2Bkey']]
+        listing = self.call(job)
+        self.assertTrue(listing['ok'], listing)
+        self.assertEqual([c['timestamp'] for c in listing['result']['captures']], ['19990101000000','20061231235959'])
+        self.assertEqual(listing['result']['resume_key'], 'resume%2Bkey')
+        self.server.catalog = [self.server.catalog[0]]
+        self.assertTrue(self.call({**job,'resume_key':'resume%2Bkey'})['ok'])
+        params = parse_qs(urlsplit(self.server.requests[-1][0]).query)
+        self.assertEqual(params['matchType'], ['exact'])
+        self.assertEqual(params['from'], ['19990101000000'])
+        self.assertEqual(params['to'], ['20061231235959'])
+        self.assertEqual(params['resumeKey'], ['resume+key'])
+        self.assertNotIn('collapse', params)
+        self.assertEqual(self.server.connections, 1)
+        self.server.catalog.append(['20070101000000', self.url, 'text/html', '200', 'LATE', '123'])
+        self.assertFalse(self.call(job)['ok'])
+
     def test_empty_listing_is_known_unavailable_but_malformed_is_unresolved(self):
         self.server.catalog = []
         result = self.call(self.job("list"))

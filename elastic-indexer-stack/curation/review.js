@@ -326,7 +326,7 @@ function recoveryControls(row) {
     'Evidence check queued for this site. Progress appears on its card.',true,Boolean(active || hasOperation()));
   button.setAttribute('aria-label',`${label}: ${siteName(row)}`);box.append(button);
   box.append(node('p',active ? 'This site is being checked. Approval becomes available after readable samples receive a grade.' :
-    `${check ? 'Original' : 'One site ·'} $${check?.max_usd ?? 2} cap for Luna. ${row.captures?.length ? 'Uses the saved source samples.' : 'Finds exact Wayback samples from 1999–2007 before grading.'}`,'meta'));
+    `${check ? 'Original' : 'One site ·'} $${check?.max_usd ?? 2} cap for Luna. ${row.captures?.length ? 'Uses the saved source samples.' : 'Finds exact Wayback samples from 1999–2006 before grading.'}`,'meta'));
   if (check?.error && check.error!==row.error) box.append(node('p',check.error,'candidate-block'));
   else if (row.state==='identity_unresolved') box.append(node('p','Wayback listed different original URLs. This check preserves the exact page identity; it cannot grade an unrelated redirect.','meta'));
   if (!active && hasOperation()) box.append(node('p','Another task is running. This action becomes available when it finishes.','meta'));
@@ -426,9 +426,10 @@ function renderCandidate(root,row) {
     origin.append(details);left.append(origin);
   }
   const settings=panel('Choose capture scope');settings.append(node('p','Approve this scope once. The download starts automatically after the Undo grace period.','meta'));
+  settings.append(node('p','Capture window: 1 January 1999–31 December 2006. Download all available dated versions within this scope. Sites with 1999–2001 captures have discovery priority.','meta'));
   const draft=getDraft(row),fields=node('div',undefined,'fields'),scopeLabel=node('label','Download scope'),select=node('select');select.id='capture-scope';select.setAttribute('aria-label','Download scope');
   const scopeOptions=row.ezboard ? [['ezboard','Whole Ezboard · all forums and threads'],['page','Board index page only'],...(['directory','site','custom'].includes(row.scope_mode) ? [[row.scope_mode,'Keep saved scope']] : [])] : [['directory','Linked directory and below'],['page','Linked page only'],['site','Whole site / shared account'],['custom','Custom folder and below']];
-  if (row.ezboard) settings.append(node('p',`Board identity: ${row.ezboard}. Whole-board capture checks historical servers and dated forum/message listings, prioritising 1999–2001, then 2002–2007. Limited to 2,000 downloaded captures, 256 MiB and one hour; incomplete coverage is shown for review.`,'meta'));
+  if (row.ezboard) settings.append(node('p',`Board identity: ${row.ezboard}. Whole-board capture checks historical servers and dated forum/message listings across the full 1999–2006 window. Limited to 2,000 downloaded captures, 256 MiB and one hour; incomplete coverage is shown for review.`,'meta'));
   for (const [value,label] of scopeOptions) {
     const option=node('option',label);option.value=value;select.append(option);
   }
@@ -452,6 +453,9 @@ function captureSummary(row,review) {
   box.append(stats);
   const dates=captures.map(c=>c.timestamp).sort();
   if (dates.length) box.append(node('p',`Capture dates: ${captureDate(dates[0]).slice(0,10)} to ${captureDate(dates.at(-1)).slice(0,10)}`,'meta'));
+  const window=review?.manifest.capture_window,coverage=review?.manifest.capture_coverage?.[row.id];
+  if (window) box.append(node('p',`Requested window: ${captureDate(window.from).slice(0,10)} to ${captureDate(window.to).slice(0,10)} · all available dated versions`,'meta'));
+  if (coverage) box.append(node('p',coverage.reason,coverage.state==='complete' ? 'meta' : 'candidate-block'));
   box.append(node('p','This is a bounded capture of the chosen scope. It may contain only part of the original site.','meta'));
   if (review?.manifest.ezboard) {
     const coverage=review.manifest.ezboard.coverage;
@@ -469,7 +473,7 @@ function renderCaptureReview(root,row,review) {
   if (review.manifest.notes?.length) {
     const notes=panel('Capture coverage',`${review.manifest.notes.length} coverage notes. Check these before approving the captured subset.`,'attention');
     const list=node('details');list.append(node('summary','Read coverage notes'));
-    for (const note of review.manifest.notes) list.append(node('p',`${note.url}: ${note.note}`));notes.append(list);root.append(notes);
+    for (const note of review.manifest.notes) list.append(node('p',`${note.url}: ${note.note || note.reason}`));notes.append(list);root.append(notes);
   }
   const decision=panel('Decide for the whole site',`Approval publishes all ${review.manifest.captures.length} captured files and queues AI-enriched indexing. Maximum enrichment spend: $${review.manifest.indexing?.max_enrichment_usd ?? 2} for this site.`);
   decision.append(node('p','Declining retains these sources in History. You can reconsider later.','meta'),mutation('Decline indexing',()=>siteDecision('decline'),'Indexing declined. Sources retained in History.'));root.append(decision);
