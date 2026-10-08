@@ -335,7 +335,7 @@ function recoveryControls(row) {
 function panel(title,text,className='') {
   const box=node('section',undefined,`panel ${className}`);box.append(node('h2',title));if (text) box.append(node('p',text));return box;
 }
-function scopeDescription(row) { return row.scope_mode==='page' ? 'Exact linked page only' : row.scope_mode==='site' ? 'Whole site / shared account' : row.scope_mode==='custom' ? 'Custom folder and descendants' : 'Linked directory and descendants'; }
+function scopeDescription(row) { return row.scope_mode==='ezboard' ? 'Whole Ezboard · forums and threads across servers' : row.scope_mode==='page' ? 'Exact linked page only' : row.scope_mode==='site' ? 'Whole site / shared account' : row.scope_mode==='custom' ? 'Custom folder and descendants' : 'Linked directory and descendants'; }
 function getDraft(row) {
   let draft=drafts.get(row.id);
   if (!draft || draft.hash!==row.manifest_sha256) {
@@ -372,6 +372,7 @@ function renderWorkspace() {
       else if (row.stage==='review') renderCaptureReview(root,row,review);
       else if (row.stage==='saved') {
         root.append(panel('Saved for later','Your source evidence and capture scope are retained. Restore this site to Candidates when you’re ready.'));
+        if (row.coverage?.ezboard_parent_required) root.append(panel('Parent board needed',row.error));
         appendEvidenceLink(root,row);
       } else if (row.stage==='history') renderHistory(root,row,review);
       else {
@@ -426,7 +427,9 @@ function renderCandidate(root,row) {
   }
   const settings=panel('Choose capture scope');settings.append(node('p','Approve this scope once. The download starts automatically after the Undo grace period.','meta'));
   const draft=getDraft(row),fields=node('div',undefined,'fields'),scopeLabel=node('label','Download scope'),select=node('select');select.id='capture-scope';select.setAttribute('aria-label','Download scope');
-  for (const [value,label] of [['directory','Linked directory and below'],['page','Linked page only'],['site','Whole site / shared account'],['custom','Custom folder and below']]) {
+  const scopeOptions=row.ezboard ? [['ezboard','Whole Ezboard · all forums and threads'],['page','Board index page only'],...(['directory','site','custom'].includes(row.scope_mode) ? [[row.scope_mode,'Keep saved scope']] : [])] : [['directory','Linked directory and below'],['page','Linked page only'],['site','Whole site / shared account'],['custom','Custom folder and below']];
+  if (row.ezboard) settings.append(node('p',`Board identity: ${row.ezboard}. Whole-board capture checks historical servers and dated forum/message listings, prioritising 1999–2001, then 2002–2007. Limited to 2,000 downloaded captures, 256 MiB and one hour; incomplete coverage is shown for review.`,'meta'));
+  for (const [value,label] of scopeOptions) {
     const option=node('option',label);option.value=value;select.append(option);
   }
   select.value=draft.mode;scopeLabel.append(select);fields.append(scopeLabel);
@@ -450,6 +453,13 @@ function captureSummary(row,review) {
   const dates=captures.map(c=>c.timestamp).sort();
   if (dates.length) box.append(node('p',`Capture dates: ${captureDate(dates[0]).slice(0,10)} to ${captureDate(dates.at(-1)).slice(0,10)}`,'meta'));
   box.append(node('p','This is a bounded capture of the chosen scope. It may contain only part of the original site.','meta'));
+  if (review?.manifest.ezboard) {
+    const coverage=review.manifest.ezboard.coverage;
+    box.append(node('p',`${coverage.hosts} Ezboard servers checked or queued · ${coverage.forums} forums identified · ${coverage.catalogs_remaining} catalog queries remaining`,'meta'));
+    box.append(node('p',coverage.reason,coverage.state==='complete' ? 'meta' : 'candidate-block'));
+    const gaps=(coverage.counts?.excluded || 0)+(coverage.counts?.unavailable || 0);
+    if (gaps) box.append(node('p',`${gaps} captures unavailable or excluded, including pages whose board ownership could not be verified. Their evidence is retained.`,'candidate-block'));
+  }
   if (count) box.append(control(`Browse ${count} captured ${count===1 ? 'page' : 'pages'}`,()=>go({panel:'pages',page:0,slot:0}),'wide primary'));
   return box;
 }
@@ -492,7 +502,7 @@ function renderLive() {
     if (op?.error) box.append(node('p',op.error));
     if (progress) {
       const phases={preparing:'Preparing sources',checking_wayback:'Checking Wayback captures',downloading:'Downloading a capture',ready_for_review:'Preparing site reviews'};
-      box.append(node('p',phases[progress.phase] || 'Working through the approved scope','progress-title'),node('p',`${progress.files} HTML files staged · ${(progress.bytes/1048576).toFixed(2)} MiB · ${progress.urls_checked} URLs checked`));
+      box.append(node('p',phases[progress.phase] || 'Working through the approved scope','progress-title'),node('p',`${progress.files} HTML files staged · ${(progress.bytes/1048576).toFixed(2)} MiB · ${progress.urls_checked} ${progress.ezboard ? 'capture records' : 'URLs'} checked`));
       if (progress.site_url) box.append(node('p',`Current site: ${progress.site_url}`,'meta'));
       if (progress.current_url) box.append(external(progress.current_url));
       box.append(node('p',`Worker batch progress · ${progress.sites_total} approved ${progress.sites_total===1 ? 'site' : 'sites'}. Each completed site receives its own review.`,'meta'));
@@ -651,7 +661,7 @@ function renderDiscoveryProgress() {
   const progress=operation?.result?.progress,box=$('discovery-progress');box.hidden=!progress;
   if (!progress) return;
   $('discovery-meter').max=progress.target;$('discovery-meter').value=progress.accepted;
-  const phases={finding_links:'Finding linked sites',checking_coverage:'Checking archive coverage',sampling:'Reading Wayback samples',grading:'Grading with Luna',paused:'Paused'};
+  const phases={finding_links:'Finding linked sites',resolving_ezboard:'Identifying the parent Ezboard',checking_coverage:'Checking archive coverage',sampling:'Reading Wayback samples',grading:'Grading with Luna',paused:'Paused'};
   const reasons={target_reached:'Target reached',time_limit:'One-hour limit reached',spend_limit:'Luna budget reached',links_exhausted:'No more new sites in the available link graph'};
   const remaining=Math.max(0,Math.ceil((progress.deadline-Date.now()/1000)/60));
   const state=operation.state==='interrupted' ? 'Paused — resume within the original limits' : reasons[progress.stop_reason] || phases[progress.phase] || 'Waiting for the worker';

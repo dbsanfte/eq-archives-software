@@ -23,6 +23,8 @@ def record(store, row):
     for field in ("coverage", "evidence", "captures", "rating", "decision"):
         result[field] = json.loads(result[field]) if result[field] else None
     result["scope_mode"] = (result["coverage"] or {}).get("scope_mode", "directory")
+    from ezboard import board_url, board_name
+    result['ezboard'] = board_name(result['url']) if board_url(result['url']) else None
     result["manifest_sha256"] = digest({key: result[key] for key in ("id", "url", "scope", "scope_mode", "captures", "rating")})
     return result
 

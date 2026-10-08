@@ -4,9 +4,10 @@ from collections import deque
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from urllib.parse import unquote_plus, urlsplit
+from urllib.parse import urlsplit
 
 from acquisition import Downloader
+from archive_layout import archive_path
 from common import CrawlError, Page, Store, TIERS, decode, digest, now, original_url, save, tier, within_scope
 from discovery import SKIP
 from indexer.capture_enrichment import DEFAULT_POLICY
@@ -30,26 +31,6 @@ def verified_source(root, capture):
     return data
 
 
-def archive_path(capture):
-    # Match the public downloader's Linux all-timestamps convention, including
-    # CGI::unescape and extensionless-page directory/index.html handling. Keep
-    # exact original URL identity in the manifest; refuse ambiguous collisions.
-    url = capture["url"]
-    canonical = original_url(url)
-    if not canonical or not tier(capture["timestamp"]):
-        raise CrawlError("Invalid source URL or timestamp for archive destination")
-    try:
-        path = unquote_plus(url.split("/", 3)[3] if len(url.split("/", 3)) == 4 else "", errors="strict")
-    except UnicodeError:
-        raise CrawlError("URL has an invalid encoded archive filename") from None
-    if (any(ord(c) < 32 or ord(c) == 127 for c in path) or "\\" in path or path.startswith("/")
-            or any(piece in (".", "..") or len(piece.encode()) > 255 for piece in path.split("/"))):
-        raise CrawlError("URL cannot be safely represented in the existing archive layout")
-    if not path or url.endswith("/") or "." not in path.rstrip("/").split("/")[-1]:
-        path = path.rstrip("/") + ("/" if path else "") + "index.html"
-    return f"websites/{urlsplit(canonical).netloc}/{capture['timestamp']}/{path}"
-
-
 def document(root, capture):
     raw = verified_source(root, capture)
     text, encoding = decode(raw, capture.get("content_type") or "")
@@ -63,28 +44,59 @@ def manifest_hash(manifest):
 
 
 def check_manifest(root, manifest):
-    if manifest.get("schema") != 1 or not 1 <= len(manifest.get("captures", [])) <= LIMITS["files"]:
-        raise CrawlError("Invalid capture batch")
     sites = {site["id"]: site for site in manifest.get("sites", [])}
+    ezboard = any(site.get('scope_mode') == 'ezboard' for site in sites.values())
+    limits = LIMITS
+    board, forums = None, set()
+    if ezboard:
+        from ezboard_portal import PORTAL_LIMITS
+        from ezboard import board_name, board_url, belongs, candidate, forum_links
+        if len(sites) != 1:
+            raise CrawlError('Review each Ezboard as one independent capture')
+        site = next(iter(sites.values()))
+        board = board_name(site['scope'])
+        if board_name(site['url']) != board or board_url(site['scope']) != site['scope']:
+            raise CrawlError('Ezboard capture scope changed')
+        limits = {**LIMITS, 'files': PORTAL_LIMITS['max_captures'], 'bytes': PORTAL_LIMITS['max_bytes']}
+    if manifest.get("schema") != 1 or not 1 <= len(manifest.get("captures", [])) <= limits["files"]:
+        raise CrawlError("Invalid capture batch")
     if not 1 <= len(sites) <= LIMITS["sites"]:
         raise CrawlError("Invalid approved site set")
+    if ezboard:
+        for capture in manifest['captures']:
+            parsed = candidate(capture['url'], board)
+            if parsed and parsed['kind'] in ('board', 'forum'):
+                page, _ = document(root, capture)
+                if belongs(page, capture['url'], board):
+                    forums.update(forum_links(page, capture['url'], board))
+                    if parsed['kind'] == 'forum':
+                        forums.add(parsed['token'])
     seen, size = set(), 0
     for capture in manifest["captures"]:
         verified_source(root, capture)
         site = sites.get(capture.get("candidate_id"))
-        allowed = (original_url(capture["url"]) == original_url(site["url"]) if site and site.get("scope_mode") == "page"
-                   else within_scope(capture["url"], site["scope"]) if site else False)
+        if ezboard:
+            page, _ = document(root, capture)
+            allowed = site is not None and belongs(page, capture['url'], board, forums)
+        else:
+            allowed = (original_url(capture["url"]) == original_url(site["url"]) if site and site.get("scope_mode") == "page"
+                       else within_scope(capture["url"], site["scope"]) if site else False)
         if not allowed:
             raise CrawlError("Capture is outside the approved site scope")
         if capture.get("archive_path") != archive_path(capture) or capture["archive_path"] in seen:
             raise CrawlError("Invalid or duplicate archive destination")
         seen.add(capture["archive_path"])
         size += capture["bytes"]
-    if size > LIMITS["bytes"]:
+    if size > limits["bytes"]:
         raise CrawlError("Batch exceeds the source byte limit")
 
 
 def capture_sites(root, batch_id, sites, downloader_factory=Downloader, progress=None):
+    if any(site.get('scope_mode') == 'ezboard' for site in sites):
+        if len(sites) != 1:
+            raise CrawlError('Capture each whole Ezboard independently')
+        from ezboard_portal import capture_board
+        return capture_board(root, batch_id, sites[0], downloader_factory, progress)
     directory = Path(root) / "batches" / batch_id
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     draft_path = directory / "draft.json"

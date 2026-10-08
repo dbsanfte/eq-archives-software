@@ -1191,11 +1191,70 @@ async def review_bulk_actions(browser,base,width):
     await context.close()
 
 
+async def ezboard_flow(browser,base,width):
+    context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
+    page=await context.new_page();errors=[];posts=[]
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    snapshot=await (await context.request.get(base+'/api/queue?filter=candidates')).json()
+    row=copy.deepcopy(snapshot['candidates'][0])
+    url='http://pub4.ezboard.com/beqasylum'
+    row.update(url=url,scope=url,scope_mode='ezboard',ezboard='eqasylum',stage='candidates',state='approval_pending')
+    row['coverage']={'site_check':{'status':'new_site','complete':True}}
+    review=None
+    async def fixture(route):
+        nonlocal review
+        parsed=urlsplit(route.request.url)
+        if route.request.method=='POST':
+            assert parsed.path=='/api/scope'
+            payload=route.request.post_data_json;posts.append(payload)
+            assert payload['mode']=='ezboard' and payload['id']==row['id']
+            row['manifest_sha256']='d'*64
+            await route.fulfill(status=200,json={'scope':url});return
+        if parsed.path=='/api/queue':
+            body={**snapshot,'operations':[],'candidates':[row],'total':1,
+                  'stage_counts':{name:int(name==row['stage']) for name in ('candidates','queued','capturing','review','indexing','saved','history')}}
+        elif parsed.path=='/api/candidate':body={'candidate':row,'review':review}
+        elif parsed.path=='/api/source':body={**review['manifest']['captures'][0],'complete_extracted_text':'EverQuest Lanys thread, replies 21 through 37.'}
+        else:raise AssertionError(parsed.path)
+        await route.fulfill(status=200,json=body)
+    await page.route('**/api/**',fixture)
+    await page.goto(base+'/?view=candidates&candidate='+row['id']);await settled(page)
+    assert await page.get_by_label('Download scope',exact=True).input_value()=='ezboard'
+    await page.get_by_text('Board identity: eqasylum.',exact=False).wait_for()
+    await safe_layout(page,width)
+    await page.get_by_label('Download scope',exact=True).select_option('page')
+    await page.get_by_label('Download scope',exact=True).select_option('ezboard')
+    await page.get_by_role('button',name='Save capture scope',exact=True).click();await settled(page)
+    assert len(posts)==1 and await page.get_by_label('Download scope',exact=True).input_value()=='ezboard'
+    source=copy.deepcopy(row['captures'][0])
+    source.update(url='http://pub110.ezboard.com/feqasylumfrm25.showMessageRange?topicID=2358.topic&start=21&stop=37',
+                  timestamp='20020602023020',title='Lanys raid thread',candidate_id=row['id'])
+    row.update(stage='review',state='captured_awaiting_review',review_state='awaiting_review')
+    review={'id':'c'*32,'state':'awaiting_review','manifest_sha256':'e'*64,'page_identities':[source['url']],'source_slots':[0],
+            'manifest':{'sites':[row],'captures':[source],'notes':[],
+                        'ezboard':{'coverage':{'state':'bounded','hosts':2,'forums':22,'catalogs_remaining':3,
+                          'reason':'Capture file limit reached; pending captures are retained','counts':{'excluded':1,'unavailable':2}}}}}
+    await page.goto(base+'/?view=review&candidate='+row['id']);await settled(page)
+    await page.get_by_text('Capture file limit reached; pending captures are retained',exact=True).wait_for()
+    await page.get_by_text('3 captures unavailable or excluded',exact=False).wait_for()
+    await safe_layout(page,width)
+    await page.screenshot(path=f'/tmp/curation-ezboard-{width}.png',full_page=True)
+    await page.get_by_role('button',name='Browse 1 captured page',exact=True).click()
+    await page.get_by_role('button',name='Read Lanys raid thread',exact=True).click()
+    await page.locator('.document-text').filter(has_text='replies 21 through 37').wait_for()
+    links=await page.locator('a[href*="web.archive.org/web/20020602023020/"]').all()
+    hrefs=[await link.get_attribute('href') for link in links]
+    assert hrefs and any(source['url'] in href for href in hrefs)
+    assert not errors,errors
+    await context.close()
+
+
 async def check(base):
     async with async_playwright() as playwright:
         browser=await playwright.chromium.launch()
         try:
             for width in (320,390,430,768,1280):
+                await ezboard_flow(browser,base,width)
                 await review_bulk_actions(browser,base,width)
                 await candidate_grade_controls(browser,base,width)
                 await candidate_quick_actions(browser,base,width)

@@ -213,3 +213,38 @@ def test_metadata_cache_merge_preserves_newer_archive_snapshot(tmp_path):
             assert main.db.execute('SELECT COUNT(*) FROM hosts').fetchone()[0] == 1
     finally:
         run.close()
+
+
+def test_fill_resolves_ezboard_threads_before_creating_one_board_candidate(run_fixture,monkeypatch):
+    root,clock,client,downloader,settings,operation,observed,discovered=run_fixture
+    board='http://pub4.ezboard.com/beqasylum'
+    message='http://pub110.ezboard.com/feqasylumgeneral.showMessage?topicID=2.topic'
+    calls=[]
+    def discover_board(args,store,**kwargs):
+        calls.append(kwargs)
+        if not store.get('resolved_board'):
+            store.set('ezboard_pending_links',[message]);return
+        row=add_candidate(store.root,url=board,grade=None)
+        store.db.execute('UPDATE candidates SET coverage=? WHERE id=?',
+                         (json.dumps({'scope_mode':'ezboard','site_check':{'status':'new_site','complete':True}}),row['id']))
+        store.db.commit();store.set('ezboard_pending_links',[])
+    def resolve_board(store,url,transport):
+        assert url==message and transport is downloader
+        client.request.assert_not_called()
+        assert not store.candidates()
+        store.set('resolved_board',board)
+        return board
+    monkeypatch.setattr('discovery_run.discover',discover_board)
+    resolver=Mock(side_effect=resolve_board)
+    monkeypatch.setattr('ezboard_discovery.resolve',resolver)
+    client.request.side_effect=None
+    client.request.return_value={'status':'completed','output':[{'type':'message','content':[{'type':'output_text','text':json.dumps({
+        'grade':3,'category':'forum','confidence':'high','reason':'EverQuest forum evidence.',
+        'evidence':[{'slot':0,'excerpt':'EverQuest guild history.'}]})}]}],'usage':{'input_tokens':100,'output_tokens':100}}
+    result=campaign(root,operation(target=1))
+    assert result['progress']['accepted']==1 and result['progress']['stop_reason']=='target_reached'
+    assert resolver.call_count==1 and client.request.call_count==1 and downloader.close.call_count==1
+    assert len(calls)==2
+    with connect(root) as main:
+        rows=main.candidates()
+        assert len(rows)==1 and rows[0]['url']==board and rows[0]['scope']==board

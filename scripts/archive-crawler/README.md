@@ -16,6 +16,13 @@ archive commit/push and index just the changed files. Surviving live sites can
 appear as candidates; this pilot acquires historical captures only. Live capture
 needs separate provenance and URL mapping before ingestion.
 
+## Ezboard boards
+
+The [Ezboard guide](EZBOARD.md) documents the archive research, custom
+`ezboard_capture.py` operator command, whole-board portal scope, server moves,
+resumable CDX pagination and exact archive filenames. Ezboard discovery creates
+board candidates; forum and message links must resolve to a verified parent.
+
 ## Bounded pilot
 
 Keep state outside both repositories. Use an existing archive checkout whose

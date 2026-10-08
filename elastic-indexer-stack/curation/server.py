@@ -202,6 +202,8 @@ def create_app(root=None, origin=None, start_worker=True):
             row = store.db.execute('SELECT * FROM candidates WHERE id=?',(payload['id'],)).fetchone()
             if not row or record(store,row)['manifest_sha256'] != payload['manifest_sha256']:
                 raise CrawlError('Candidate changed since review')
+            if json.loads(row['coverage'] or '{}').get('ezboard_parent_required'):
+                raise CrawlError('Submit the top-level Ezboard URL to resolve its board identity before restoring a candidate.')
             state = transition(row['state'], Action.RESTORE)
             store.db.execute('UPDATE candidates SET state=?,decision=NULL WHERE id=?',(state,row['id']))
             store.db.execute('INSERT INTO events(candidate,action,detail,created) VALUES (?,?,?,?)',
@@ -426,7 +428,7 @@ def create_app(root=None, origin=None, start_worker=True):
             for row in store.db.execute("SELECT * FROM operations WHERE kind='discover' AND state IN ('queued','running','interrupted') ORDER BY created"):
                 operation = unpack(row)
                 target = operation['payload'].get('target')
-                if target and site_identity(target['url']) == site_identity(url):
+                if target and site_identity(target['url'], store) == site_identity(url, store):
                     return JSONResponse({'operation': operation['id'], 'url': target['url'], 'existing': True})
             operation = enqueue(store, 'discover', {'max_candidates': 1, 'max_usd': payload['max_usd'],
                 'target': {'url': url, 'submitted_url': payload['url'].strip()}}, commit=False)

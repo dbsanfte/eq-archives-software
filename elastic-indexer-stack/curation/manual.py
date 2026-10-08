@@ -40,14 +40,28 @@ def site_url(value):
 
 
 def existing_site(store, url):
-    identity = site_identity(url)
-    return next((row for row in store.candidates() if site_identity(row['url']) == identity), None)
+    from ezboard import candidate_url
+    url = candidate_url(store, url)
+    if not url:
+        return None
+    identity = site_identity(url, store)
+    return next((row for row in store.candidates() if row['state'] != 'duplicate_candidate' and site_identity(row['url'], store) == identity), None)
 
 
-def prepare(run, operation):
+def prepare(run, operation, downloader=None):
     """Check only this account's Git metadata; no link spider or archive walk."""
     target = operation['payload']['target']
     url = target['url']
+    from ezboard import board_url, candidate_url
+    from ezboard_discovery import resolve
+    resolved = candidate_url(run, url)
+    if resolved is None:
+        if downloader is None:
+            raise CrawlError('Ezboard parent-board evidence is required before creating a candidate')
+        resolved = resolve(run, url, downloader)
+        if not resolved:
+            raise CrawlError('Could not verify the parent Ezboard. Submit its top-level b… board URL; no Luna call was made.')
+    url = resolved
     repository = os.environ.get('ARCHIVE_REPO')
     if not repository:
         raise CrawlError('Archive metadata is not configured; the site check cannot continue')
@@ -58,11 +72,18 @@ def prepare(run, operation):
         raise CrawlError('Archive coverage is still unverified.' + detail + ' ' + check.get('message', 'Resume the site check to continue.'))
     identifier = digest(url)[:24]
     coverage = {'status': check['status'], 'site_check': check, 'manual_operation': operation['id']}
+    if board_url(url):
+        coverage['scope_mode'] = 'ezboard'
     evidence = [{'kind': 'manual_submission', 'source_url': target['submitted_url'], 'original_url': url,
-                 'submitted_at': operation.get('created') or now()}]
+                 'submitted_at': operation.get('created') or now(), 'linked_url': target['url']}]
     run.db.execute('INSERT OR IGNORE INTO candidates(id,url,scope,priority,coverage,evidence) VALUES (?,?,?,?,?,?)',
-                   (identifier, url, capture_scope(url), 100, json.dumps(coverage), json.dumps(evidence)))
+                   (identifier, url, capture_scope(url, coverage.get('scope_mode', 'directory')), 100, json.dumps(coverage), json.dumps(evidence)))
     run.db.execute('UPDATE candidates SET coverage=? WHERE id=?', (json.dumps(coverage), identifier))
+    if check['status'] == 'new_site':
+        from ezboard_discovery import evidence as parent_evidence
+        captures = parent_evidence(run, target['url'], url)
+        if captures:
+            run.db.execute("UPDATE candidates SET captures=?,state='sampled' WHERE id=? AND captures='[]'", (json.dumps(captures), identifier))
     if check['status'] == 'already_archived':
         run.db.execute("UPDATE candidates SET state='already_archived' WHERE id=?", (identifier,))
     run.db.commit()

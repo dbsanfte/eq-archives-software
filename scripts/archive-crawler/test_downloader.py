@@ -124,6 +124,37 @@ class DownloaderTests(unittest.TestCase):
         self.assertEqual(self.server.connections, 1)
         self.assertEqual(result["transport"]["requests"], 2)
 
+    def test_ezboard_paginated_catalog_keeps_all_versions_and_encoded_resume(self):
+        url = 'http://pub4.ezboard.com/feqasylum'
+        message = url + 'general.showMessageRange?topicID=391.topic&start=21&stop=40'
+        key = 'com%2Cezboard%2Cpub4%29%2Ffeqasylum+20010101000000%21'
+        self.server.catalog = [self.server.catalog[0],
+            ['20000101000000', message, 'text/html', '200', 'SAME', '123'],
+            ['20010101000000', message, 'text/html', '200', 'SAME', '123'], [], [key]]
+        job = {**self.job('ezboard_list'), 'url': url}
+        first = self.call(job)
+        self.assertTrue(first['ok'], first)
+        self.assertEqual(len(first['result']['captures']), 2)
+        self.assertEqual(first['result']['resume_key'], key)
+        self.server.catalog = [self.server.catalog[0]]
+        second = self.call({**job, 'resume_key': key})
+        self.assertTrue(second['ok'], second)
+        params = parse_qs(urlsplit(self.server.requests[-1][0]).query)
+        self.assertEqual(params['resumeKey'], ['com,ezboard,pub4)/feqasylum 20010101000000!'])
+        self.assertEqual(params['matchType'], ['prefix'])
+        self.assertNotIn('collapse', params)
+        self.assertEqual(self.server.connections, 1)
+
+    def test_ezboard_catalog_rejects_broad_scopes_and_malformed_continuations(self):
+        for url in ('http://pub4.ezboard.com/', 'http://evil.example/feqasylum',
+                    'http://pub4.ezboard.com:8080/feqasylum', 'http://pub4.ezboard.com/feqasylum*'):
+            result = self.call({**self.job('ezboard_list'), 'url': url})
+            self.assertFalse(result['ok'], result)
+        self.assertEqual(len(self.server.requests), 0)
+        self.server.catalog = [self.server.catalog[0], ['bad footer']]
+        result = self.call({**self.job('ezboard_list'), 'url': 'http://server3.ezboard.com/btest'})
+        self.assertFalse(result['ok'])
+
     def test_empty_listing_is_known_unavailable_but_malformed_is_unresolved(self):
         self.server.catalog = []
         result = self.call(self.job("list"))

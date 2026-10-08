@@ -39,6 +39,8 @@ def staged_links(root, run, *, max_reads=66, max_bytes=16 * 1024 * 1024):
                 html, _ = decode(raw, capture.get("content_type") or "")
                 page = Page(capture["url"])
                 page.feed(html)
+                from ezboard import remember_page
+                remember_page(run, page, capture)
                 source = "staging/" + capture["path"]
                 for link in page.links:
                     if (SKIP.search(urlsplit(link["url"]).path) or site_scope(link["url"]) == site_scope(capture["url"])

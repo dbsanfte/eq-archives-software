@@ -80,6 +80,10 @@ class SiteInventory:
     def check(self, url, force=False, timestamps=()):
         self.probes = 0
         url = original_url(url)
+        from ezboard import board_url
+        if board_url(url):
+            from ezboard_inventory import check_board
+            return check_board(self, url, timestamps)
         identity = site_identity(url)
         cache_key = 'site_inventory:' + repr((VERSION, self.archive.sha, identity))
         cached = self.archive.store.get(cache_key)

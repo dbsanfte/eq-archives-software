@@ -416,3 +416,15 @@ paid calls or real archive writes. Real TCP tests reject non-LAN peers and
 forwarded-header spoofs. Deployment checks the live queue/build and hashes
 existing unfinished Job specs before/after; it never saves their credential-
 bearing JSON to disk.
+
+## Ezboard capture
+
+Ezboard candidates represent a complete board across historical servers.
+Forum/message submissions resolve their parent before sampling/grading creates
+a candidate; existing boards are reused. New board candidates default to
+**Whole Ezboard**, which uses paginated board/forum capture catalogs and the
+serial downloader, with its own 2,000-capture/256-MiB/one-hour budget. Capture
+limits and missing pages are visible during review. Existing approved scopes
+and indexing Jobs are preserved. See the [Ezboard guide](../../scripts/archive-crawler/EZBOARD.md)
+for the verified URL forms, operator commands, limits, migration and source
+validation.

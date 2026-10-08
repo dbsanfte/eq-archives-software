@@ -111,6 +111,25 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(archive.coverage("http://known.example/3.html")["status"], "inventory_partial")
         self.assertEqual(self.store.db.execute("SELECT SUM(entries) FROM tree_state").fetchone()[0], 2)
 
+    def test_ezboard_discovery_creates_only_top_level_boards_and_retains_deep_provenance(self):
+        from ezboard import remember_page
+        from common import digest
+        from test_ezboard import BOARD, FORUM, html
+        body = html(BOARD, FORUM)
+        page = Page(BOARD); page.feed(body.decode())
+        remember_page(self.store, page, {'url': BOARD, 'timestamp': '20000101000000', 'sha256': digest(body)})
+        links = [FORUM + '.showMessage?topicID=1.topic', 'http://pub110.ezboard.com/feqasylumgeneral?page=2',
+                 'http://server3.ezboard.com/beqasylum.html', 'http://pub4.ezboard.com/funknownboardgeneral.showMessage?topicID=2.topic']
+        self.file('seed.example', '20000101000000', 'links.html', ''.join(f'<a href="{url}">EQ forum</a>' for url in links))
+        self.commit()
+        discover(self.args(), self.store)
+        rows = self.store.candidates()
+        self.assertEqual(len(rows), 1)
+        self.assertIn('/beqasylum', rows[0]['url'])
+        self.assertEqual(json.loads(rows[0]['coverage'])['scope_mode'], 'ezboard')
+        self.assertEqual(self.store.get('ezboard_pending_links'), [links[-1]])
+        self.assertFalse(any('/f' in row['url'].split('.com')[-1] for row in rows))
+
     def test_known_site_is_excluded_even_when_root_page_inventory_is_exhausted(self):
         self.file('seed.example','20000101000000','links.html','<a href="http://www.mythiran.com/">EQ research</a><a href="http://new.example/">EQ guild</a>')
         self.file('mythiran.com','19990918084825','research/spells.html','EverQuest research')
