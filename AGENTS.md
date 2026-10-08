@@ -247,8 +247,10 @@ dismissed and duplicate sites also stay there. Deferred sites live in Saved for
 later. Restore can return only deferred/dismissed candidates to Candidates, without
 approving or starting work. Stage counts and filtering use all review status metadata,
 independently of capped batch inventories. Preserve existing operator API filters. The
-queue has no count cap; the worker claims oldest eligible items in serial batches
-of at most five after a 60-second Undo grace period. Preserve typed transitions,
+queue has no count cap; after a 60-second grace period the automatic worker claims
+one oldest eligible site immediately before starting it. Keep later sites queued
+and undoable until they start; the explicit operator API retains its five-site
+batch limit and existing claimed work remains unchanged. Preserve typed transitions,
 atomic Undo/claim locking and durable progress in the appropriate stage. A paused
 capture requires explicit resume and holds the queue. Source
 reading and scope drafts must not prevent progress polling or lose edits. Download
@@ -266,8 +268,10 @@ Keep publication status and explicit retry on the affected site. Preserve the
 selected view/site across reloads and the open source page during status updates.
 Design for phones first: bottom stage navigation, compact site lists, focused site
 workspaces and a reachable action bar. Confirmed capture approval returns to the
-Candidates list, retaining search/pagination/position and offering Undo in the
-confirmation. Publication/indexing approval follows the site into Indexing.
+Candidates list, retaining search/pagination/position without an approval popup.
+Undo approval lives directly on each Queue entry and its workspace until capture
+starts, including after the grace period. Publication/indexing approval follows
+the site into Indexing.
 Candidates support direct mobile swipe-right approval and swipe-left dismissal,
 with equivalent accessible buttons, saved scope shown, and Undo. Preserve vertical
 scrolling and tap-to-open; short, cancelled, reversed or stale gestures cannot
@@ -275,6 +279,15 @@ submit decisions. Keep coverage/grading checks and unsaved-scope blocking identi
 to the workspace. Candidates default to minimum grade 2, sort descending by grade
 before pagination, and retain lower grades behind the 0–3 slider. Keep ungraded
 sites accessible through Needs grading and preserve unfiltered operator API calls.
+Advanced grading accepts optional content criteria (at most 1,000 characters) for
+new discovery/manual runs and explicit one-site regrades. Blank preserves the
+legacy EQ-only signature. Scores require both EQ relevance and the requested
+focus; show the criteria with the grade. Freeze criteria on queued/running runs
+and resume with their saved criteria/deadline/budget. Changing criteria cannot
+reset one-site budgets. Bind source signatures and immutable paid-response caches
+to the criteria; retain earlier valid grades for reuse and reject stale merges.
+Block capture approval while a site's check runs. Edits/polling never start paid
+work. Browser-local discovery drafts must survive polling and reloads.
 The one-site evidence/grading action is explicit, source-bound and capped at $2;
 show sampling failures and phase progress. Reuse verified staged sources and retain
 the same operation, transport/spend budgets and cached valid grade on retry. Recheck

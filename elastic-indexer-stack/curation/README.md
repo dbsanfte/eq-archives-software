@@ -19,7 +19,8 @@ Legacy finder/worker/broad reindex Jobs retain their separate lifecycles.
 2. Choose scope and **Approve site for capture**. This queues the site automatically,
    removes it from **Candidates**, and moves it into **Capture queue**.
    The screen returns to the Candidates list with its search and position retained,
-   plus a confirmation and **Undo approval** action so you can keep reviewing sites.
+   without a capture approval popup. **Undo approval** lives directly on each
+   **Capture queue** entry and in its workspace.
    The queue has no item-count cap; its 50-row pages are pagination, not a limit.
    New approvals have a 60-second grace period. **Undo approval** returns the
    site to Candidates and retains its sources and grade. Undo remains available
@@ -34,9 +35,11 @@ Legacy finder/worker/broad reindex Jobs retain their separate lifecycles.
    Shared hosts retain their account boundaries. A scope change clears an
    earlier approval and changes its manifest hash.
    Unidentified shared-host accounts remain exact-page scopes, including roots.
-3. The worker automatically processes the oldest eligible approvals in serial
-   batches of up to five sites. This is a per-batch resource bound, not a queue
-   size limit. Existing approvals receive a one-time grace period on migration;
+3. The worker automatically claims the oldest eligible approval just before
+   starting that site's capture. Only one site is claimed at a time, keeping later
+   sites in Queue and available to Undo. The explicit operator batch API still
+   accepts up to five sites; existing claimed batches keep their saved work.
+   Existing approvals receive a one-time grace period on migration;
    restarting does not reset it. A paused capture holds the queue until explicitly
    resumed, retaining its budgets. Items move into **Capturing** when claimed.
    The worker
@@ -104,10 +107,33 @@ release threshold are shown while dragging. Vertical scrolling, short/reversed
 swipes and cancelled touches make no decision. Each card shows its saved scope and
 has equivalent Approve capture/Dismiss buttons for keyboard and pointer use.
 Coverage, grading, source identity and unsaved-scope checks still apply. Confirmed
-decisions remove the card while keeping Candidates open; the visible confirmation
-offers Undo (until capture starts for approvals). Tapping the card still opens its
+decisions remove the card while keeping Candidates open. Capture approval has no
+popup; Undo stays on the Queue entry until capture starts, even beyond 60 seconds.
+Dismissal retains its Undo confirmation. Tapping the card still opens its
 evidence and scope workspace. Polling cancels an outdated gesture before it can
 submit a stale decision.
+
+**Advanced · Luna grading criteria** under Discover more sites adds an optional
+content focus, such as “Cleric class sites and healing guides” or “guild communities.”
+It applies to new discovery runs and **Add & grade site**, and is retained in this
+browser. Blank uses the original general EQ grading. Scores remain 0–3; a high
+score requires both EQ relevance and a match to the requested focus, using only
+the supplied source evidence. The minimum-grade filter applies to that score.
+Criteria do not alter crawling scope, dates, discovery limits or indexing enrichment.
+
+Each run saves its criteria; paused runs resume with those criteria and their
+original deadline and budget, regardless of later edits to Advanced. Repeated
+manual submissions reuse the existing site/check without changing its criteria
+or decision. A candidate workspace shows **Graded for** and its own Advanced
+control to explicitly **Regrade with these criteria**. One-site regrades reuse the
+same operation and original total budget (at most $2, including all earlier
+attempts); they never replenish it. Criteria are limited to 1,000 characters and
+become part of the prompt/source signature. Paid responses, including invalid
+responses, and earlier valid assessments are cached by that signature. Switching
+back to cached criteria reuses the assessment without another API request.
+Approval waits while the site's grading check runs. Source changes and concurrent
+human decisions still reject stale results. Editing criteria or polling starts
+no paid work; custom criteria affect only an explicitly requested grade.
 
 The upper-right Luna counter shows estimated USD spend today and this month using
 UTC calendar boundaries. Expand it for the scope of accounting and unresolved

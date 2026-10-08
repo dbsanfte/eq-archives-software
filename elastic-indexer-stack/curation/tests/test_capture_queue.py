@@ -65,10 +65,12 @@ def test_queue_exceeds_one_page_and_drains_in_bounded_batches(tmp_path,monkeypat
         make_due(root)
         worker.capture_queue()
         current=call(app,'GET','/api/queue?filter=approved').json()
-        assert current['approved']==56 and current['capturing']==5
+        assert current['approved']==60 and current['capturing']==1
         assert len(current['operations'])==1
         claimed=current['operations'][0]['payload']['sites']
-        assert [row['id'] for row in claimed]==[row['id'] for row in rows[:5]]
+        assert [row['id'] for row in claimed]==[rows[0]['id']]
+        # Later sites remain undoable even after the grace period has expired.
+        assert call(app,'POST','/api/undo',{'id':rows[1]['id'],'manifest_sha256':rows[1]['manifest_sha256']}).status_code==200
         worker.capture_queue()
         assert len(call(app,'GET','/api/queue?filter=all').json()['operations'])==1
         def complete(root,batch_id,sites,progress):
@@ -77,10 +79,10 @@ def test_queue_exceeds_one_page_and_drains_in_bounded_batches(tmp_path,monkeypat
         monkeypatch.setattr('worker.capture_sites',complete)
         worker.operation()
         recent=call(app,'GET','/api/queue?filter=captured').json()
-        assert recent['total']==5 and all(row['coverage']['capture']['batch_id'] for row in recent['candidates'])
+        assert recent['total']==1 and all(row['coverage']['capture']['batch_id'] for row in recent['candidates'])
         assert call(app,'POST','/api/undo',{'id':rows[0]['id'],'manifest_sha256':rows[0]['manifest_sha256']}).status_code==409
         worker.capture_queue()
-        assert call(app,'GET','/api/queue?filter=approved').json()['approved']==51
+        assert call(app,'GET','/api/queue?filter=approved').json()['approved']==58
     finally:worker.lease.close()
 
 

@@ -28,6 +28,13 @@
         <div class="discovery-controls"><p id="discovery-limits">Target 50 new candidates · 1 hour · $2 total cap</p><button id="discover" type="button" class="primary" aria-describedby="discovery-limits discovery-status" disabled>Discover & grade</button></div>
         <p id="discovery-status" role="status" aria-live="polite">Checking worker availability…</p>
         <div id="discovery-progress" hidden><progress id="discovery-meter" max="50" value="0" aria-label="New sites meeting the minimum grade"></progress><p id="discovery-progress-text" role="status" aria-live="polite"></p></div>
+        <details id="grading-advanced" class="grading-options"><summary>Advanced · Luna grading criteria</summary>
+          <label for="grading-criteria">Additional grading criteria</label>
+          <textarea id="grading-criteria" rows="3" maxlength="1000" placeholder="For example: Cleric class sites and healing guides, or EverQuest guild communities" aria-describedby="grading-help"></textarea>
+          <p id="grading-help">Optional focus for new discovery runs and sites you add. Luna grades both EverQuest relevance and your criteria; a strong match to both scores highest. Leave blank for general EQ relevance. Editing this does not start grading.</p>
+          <button id="grading-default" type="button" class="quiet">Use default grading</button>
+        </details>
+        <p id="run-criteria" class="meta" hidden></p>
         <div class="grade-controls">
           <label for="minimum-grade">Minimum Luna grade <output id="minimum-grade-value" for="minimum-grade">2</output></label>
           <input id="minimum-grade" type="range" min="0" max="3" step="1" value="2" aria-describedby="grade-help">
@@ -65,7 +72,7 @@
   <dialog id="review-dialog" aria-labelledby="review-dialog-title"><h2 id="review-dialog-title"></h2><div class="review-dialog-body"><p id="review-dialog-description"></p><p id="review-dialog-budget"></p><details><summary>Sites included</summary><ul id="review-dialog-sites"></ul></details></div><div class="dialog-actions"><button id="review-dialog-cancel" type="button">Cancel</button><button id="review-dialog-confirm" type="button"></button></div></dialog>
   <dialog id="tools" aria-labelledby="tools-title"><div class="dialog-heading"><h2 id="tools-title">Tools & history</h2><button id="tools-close" aria-label="Close tools">Close</button></div>
     <div class="tool-links"><button data-view="saved">Saved for later</button><button data-view="history">History</button></div>
-    <details><summary>Capture limits & dates</summary><p>One connection, a 3-second delay and 128 KiB/s. The queue has no count limit. Ordinary site batches have at most 5 sites, 20 URLs per site, 100 HTML files and 64 MiB; each whole Ezboard has a separate 2,000-capture, 256 MiB limit. Approved captures request all available dated versions from 1 January 1999 through 31 December 2006. Sites with 1999–2001 captures have discovery priority. Reviews show when limits leave coverage incomplete.</p></details>
+    <details><summary>Capture limits & dates</summary><p>One connection, a 3-second delay and 128 KiB/s. The queue has no count limit. The automatic worker starts one site at a time; Undo stays on waiting Queue entries until capture starts. Ordinary captures have at most 20 URLs, 100 HTML files and 64 MiB; each whole Ezboard has a separate 2,000-capture, 256 MiB limit. Approved captures request all available dated versions from 1 January 1999 through 31 December 2006. Sites with 1999–2001 captures have discovery priority. Reviews show when limits leave coverage incomplete.</p></details>
     <details><summary>Recent activity</summary><div id="operations"></div></details>
   </dialog>
 </body>

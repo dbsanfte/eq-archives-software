@@ -46,6 +46,14 @@ The default view shows grades 2–3; **All candidates** also shows low grades an
 unresolved acquisition/grading. Grades are model judgments about supplied
 captures. User approval is separate.
 
+The paid `grade` command also accepts `--grading-criteria "Cleric class sites"`
+(up to 1,000 characters). A high grade then requires both EQ relevance and that
+content focus; blank retains the default rubric and legacy source signature.
+Criteria are recorded in each rating and its source signature. Regrading within
+the same work directory retains its original spend ledger and reuses cached
+assessments/responses for matching sources and criteria. The production portal
+exposes this through Advanced, with a fixed original budget for each site check.
+
 | Resource | Default limit |
 | --- | --- |
 | Candidate shortlist | 50; frozen when acquisition starts |

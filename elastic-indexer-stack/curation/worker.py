@@ -88,6 +88,7 @@ def campaign(root, operation):
             run.set("sampling_completed", True)
         args = options.parse_args(["--work-dir", str(directory), "grade", "--api-key-file", "/run/secrets/luna_api_key",
                                    "--max-candidates", str(payload["max_candidates"]), "--max-usd", str(payload["max_usd"])])
+        args.grading_criteria = payload.get('grading_criteria', '')
         if acquire:
             grade(args, run)
         with connect(root) as main:
@@ -159,16 +160,12 @@ class Worker:
             if store.db.execute("SELECT 1 FROM operations WHERE state IN ('queued','running') OR kind='capture' AND state='interrupted'").fetchone():
                 store.db.rollback()
                 return
-            rows = store.db.execute("SELECT id,json_extract(coverage,'$.scope_mode') AS mode FROM candidates WHERE state='approved_waiting_batch' AND json_extract(decision,'$.capture_after')<=? ORDER BY json_extract(decision,'$.capture_after'),rowid LIMIT 5", (now(),)).fetchall()
+            rows = store.db.execute("SELECT id FROM candidates WHERE state='approved_waiting_batch' AND json_extract(decision,'$.capture_after')<=? ORDER BY json_extract(decision,'$.capture_after'),rowid LIMIT 1", (now(),)).fetchall()
             if not rows:
                 store.db.rollback()
                 return
-            # Preserve FIFO and give each board an independent catalog budget.
-            if rows[0]['mode'] == 'ezboard':
-                rows = rows[:1]
-            else:
-                first_board = next((i for i, row in enumerate(rows) if row['mode'] == 'ezboard'), len(rows))
-                rows = rows[:first_board]
+            # Claim only the site about to start. Later approvals remain queued
+            # and undoable throughout an earlier site's download.
             claim(store, [row['id'] for row in rows])
             store.db.commit()
             if store.get('capture_queue_error'):

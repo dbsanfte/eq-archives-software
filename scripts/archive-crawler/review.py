@@ -7,13 +7,13 @@ from pathlib import Path
 
 from capture_flow import Action, transition
 from common import CrawlError, digest, now, save
-from grading import SIGNATURE, sources
+from grading import judgment_signature, sources
 
 
 def checked_sources(store, row):
     documents = sources(store, row, 10000000)
     rating = row["rating"]
-    if rating and rating.get("signature") != digest({"grader": SIGNATURE, "documents": documents}):
+    if rating and rating.get("signature") != judgment_signature(documents, rating.get('grading_criteria', '')):
         raise CrawlError("Source judgment is stale; grade and review again")
     return documents
 
@@ -65,14 +65,14 @@ def decisions(args, store):
     print(f"Recorded {len(incoming)} decisions; archive publication has not been invoked")
 
 
-def apply_decisions(store, incoming, capture_delay=0):
+def apply_decisions(store, incoming, capture_delay=0, before_approve=None):
     with store.db:
         store.db.execute("BEGIN IMMEDIATE")
-        _apply_decisions(store, incoming, capture_delay)
+        _apply_decisions(store, incoming, capture_delay, before_approve)
     store.event(None, "decisions_imported", {"count": len(incoming)})
 
 
-def _apply_decisions(store, incoming, capture_delay=0):
+def _apply_decisions(store, incoming, capture_delay=0, before_approve=None):
     if not isinstance(incoming, list) or len(incoming) > 500:
         raise CrawlError("Expected a bounded list of review decisions")
     current = {r["id"]: r for r in queue(store)}
@@ -91,6 +91,8 @@ def _apply_decisions(store, incoming, capture_delay=0):
         if row["state"] in ("capturing", "captured_awaiting_review", "publication_requested", "published", "indexed"):
             raise CrawlError("Candidate already belongs to a capture batch")
         if decision["decision"] == "approve":
+            if before_approve:
+                before_approve(store, row)
             if not row["rating"] or not row["captures"]:
                 raise CrawlError("Only graded, staged captures can be approved")
             checked_sources(store, row)  # Recheck artifacts and the judgment before approval.

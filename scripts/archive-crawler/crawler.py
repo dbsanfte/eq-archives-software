@@ -52,6 +52,7 @@ def parser():
     command.add_argument("--max-candidates", type=positive, default=50)
     command.add_argument("--max-usd", type=float, required=True)
     command.add_argument("--max-source-characters", type=positive, default=120000)
+    command.add_argument('--grading-criteria', default='', help='Optional additional EQ topic/content focus (up to 1,000 characters)')
     command.set_defaults(handler=grade)
     command = commands.add_parser("review", help="Export an offline approval queue")
     command.set_defaults(handler=review)
