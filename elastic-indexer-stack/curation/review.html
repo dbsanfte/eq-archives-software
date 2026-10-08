@@ -7,7 +7,9 @@
   <link rel="stylesheet" href="/assets/review.css"><script defer src="/assets/review.js"></script>
 </head>
 <body>
-  <header class="app-header"><a id="home" href="/?view=candidates" aria-label="Curation home"><span class="eyebrow">EQ ARCHIVES</span><strong>Curation</strong></a><div class="header-actions"><button id="refresh" aria-label="Refresh status">Refresh</button><button id="tools-open" aria-label="Open tools and history">More <span aria-hidden="true">•••</span></button></div></header>
+  <header class="app-header"><a id="home" href="/?view=candidates" aria-label="Curation home"><span class="eyebrow">EQ ARCHIVES</span><strong>Curation</strong></a><div class="header-actions"><button id="refresh" aria-label="Refresh status">Refresh</button><button id="tools-open" aria-label="Open tools and history">More <span aria-hidden="true">•••</span></button></div>
+    <details id="luna-spend"><summary aria-label="Luna spend details"><span class="spend-heading">Luna · estimated USD</span><span>Today <strong id="spend-today">—</strong></span><span>This month <strong id="spend-month">—</strong></span></summary><p id="spend-status">Loading spend…</p></details>
+  </header>
   <nav id="stages" aria-label="Workflow stages">
     <button data-view="candidates" aria-label="Candidates"><span class="step-number" aria-hidden="true">1</span><span>Candidates</span><span class="count" data-count="candidates" aria-hidden="true">0</span></button>
     <button data-view="queued" aria-label="Capture queue"><span class="step-number" aria-hidden="true">2</span><span>Queue</span><span class="count" data-count="queued" aria-hidden="true">0</span></button>
@@ -38,6 +40,7 @@
       </section>
       <div id="stage-activity" hidden></div>
       <label class="search-label" for="site-search">Find a site</label><input id="site-search" type="search" placeholder="Site name or address" maxlength="200" autocomplete="off">
+      <p id="swipe-help" class="meta" hidden>Swipe right to approve capture · left to dismiss. Tap a site for details or to change its scope.</p>
       <div id="candidates" class="site-list"></div>
       <nav id="pagination" aria-label="Site list pages" hidden><button id="previous">Previous</button><span id="page"></span><button id="next">Next</button></nav>
     </section>

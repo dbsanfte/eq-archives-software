@@ -258,6 +258,16 @@ Design for phones first: bottom stage navigation, compact site lists, focused si
 workspaces and a reachable action bar. Confirmed capture approval returns to the
 Candidates list, retaining search/pagination/position and offering Undo in the
 confirmation. Publication/indexing approval follows the site into Indexing.
+Candidates support direct mobile swipe-right approval and swipe-left dismissal,
+with equivalent accessible buttons, saved scope shown, and Undo. Preserve vertical
+scrolling and tap-to-open; short, cancelled, reversed or stale gestures cannot
+submit decisions. Keep coverage/grading checks and unsaved-scope blocking identical
+to the workspace. Luna spend in the upper-right header totals UTC today/month from
+the pilot, initialized run and enrichment ledgers, independently of list caps.
+Keep known usage estimates separate from unresolved reservations; include rejected
+and correction attempts without double-counting cached responses or retries.
+Use bounded, cached, read-only metadata queries; never walk sources or archive Git.
+Incomplete accounting must be visible rather than displayed as zero.
 Failures cannot advance it or return to the list. Discover & grade is a primary action
 on Candidates, with its explicit 50-candidate/$2 cap and a visible shared-worker
 blocker. Polling may enable it but must never start a paid run. Paused discovery

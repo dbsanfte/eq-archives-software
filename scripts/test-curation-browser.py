@@ -773,11 +773,171 @@ async def capture_approval_navigation(browser,base,width):
     await context.close()
 
 
+async def candidate_quick_actions(browser,base,width):
+    context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<1000,has_touch=width<1000)
+    page=await context.new_page()
+    snapshot=await (await context.request.get(base+'/api/queue?filter=candidates')).json()
+    rows=[{**copy.deepcopy(snapshot['candidates'][0]),'id':f'{index+101:024x}',
+           'url':f'http://swipe-{index}.example/eq/news.html','scope':f'http://swipe-{index}.example/eq/',
+           'scope_mode':'directory','stage':'candidates','state':'approval_pending'} for index in range(12)]
+    rows[1]['state']='coverage_unverified'
+    spend={'complete':True,'today':{'estimated_usd':.1234,'unresolved_usd':.02},
+           'month':{'estimated_usd':4.5672,'unresolved_usd':.03}}
+    posts=[];errors=[];fail_approval=True
+    submitted,release=asyncio.Event(),asyncio.Event()
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    async def fixture(route):
+        nonlocal fail_approval
+        path=urlsplit(route.request.url).path
+        args=parse_qs(urlsplit(route.request.url).query)
+        if route.request.method=='POST':
+            payload=route.request.post_data_json;posts.append((path,payload))
+            decision=payload[0] if path=='/api/decisions' else payload
+            row=next(row for row in rows if row['id']==decision['id'])
+            assert decision['manifest_sha256']==row['manifest_sha256']
+            if path=='/api/decisions':
+                if decision['decision']=='approve':
+                    if fail_approval:
+                        fail_approval=False
+                        await route.fulfill(status=409,json={'error':'Coverage changed; review this site again.'});return
+                    submitted.set();await release.wait()
+                    row.update(stage='queued',state='approved_waiting_batch')
+                else:
+                    assert decision['decision']=='reject'
+                    row.update(stage='history',state='rejected')
+            else:
+                assert path in ('/api/undo','/api/restore')
+                row.update(stage='candidates',state='approval_pending')
+            await route.fulfill(status=200,json={'saved':1});return
+        if path=='/api/queue':
+            selected=[row for row in rows if row['stage']==args['filter'][0]]
+            await route.fulfill(status=200,json={**snapshot,'operations':[],'luna_spend':spend,'candidates':selected,
+                'total':len(selected),'offset':0,'stage_counts':{name:sum(row['stage']==name for row in rows)
+                    for name in ('candidates','queued','capturing','review','indexing','saved','history')}})
+        elif path=='/api/candidate':
+            await route.fulfill(status=200,json={'candidate':next(row for row in rows if row['id']==args['id'][0]),'review':None})
+        else:raise AssertionError(path)
+    await page.route('**/api/**',fixture)
+    await page.goto(base+'/?view=candidates&search=swipe-');await settled(page)
+    assert await page.locator('#spend-today').inner_text()=='$0.123'
+    assert await page.locator('#spend-month').inner_text()=='$4.567'
+    await page.get_by_label('Luna spend details',exact=True).click()
+    assert await page.locator('#spend-status').is_visible()
+    assert 'UTC calendar' in await page.locator('#spend-status').inner_text()
+    assert 'today $0.020' in await page.locator('#spend-status').inner_text()
+    await safe_layout(page,width)
+    box=await page.locator('#spend-status').bounding_box()
+    assert box['x']>=0 and box['x']+box['width']<=width
+    spend['today']['estimated_usd']=.246
+    await page.locator('#refresh').click()
+    await page.locator('#spend-today').filter(has_text='$0.246').wait_for()
+    assert await page.locator('#luna-spend').get_attribute('open') is not None
+    spend['complete']=False
+    await page.locator('#refresh').click()
+    await page.locator('#spend-status').filter(has_text='temporarily incomplete').wait_for()
+    assert await page.locator('#spend-today').inner_text()=='—'
+    spend['complete']=True
+    await page.get_by_label('Luna spend details',exact=True).click()
+    cdp=await context.new_cdp_session(page)
+    def tile(index):return page.get_by_role('button',name=f'Open swipe-{index}.example/eq/',exact=True)
+    async def swipe(index,dx,dy=0,cancel=False,reverse=False):
+        item=tile(index)
+        await item.evaluate('(el)=>window.scrollTo(0,el.getBoundingClientRect().top+scrollY-170)')
+        await page.wait_for_timeout(60)
+        box=await item.bounding_box()
+        x,y=box['x']+box['width']/2,box['y']+65
+        before_scroll=await page.evaluate('scrollY')
+        await cdp.send('Input.dispatchTouchEvent',{'type':'touchStart','touchPoints':[{'x':x,'y':y}]})
+        for step in range(1,7):
+            await cdp.send('Input.dispatchTouchEvent',{'type':'touchMove','touchPoints':[{'x':x+dx*step/6,'y':y+dy*step/6}]})
+        if abs(dx)>=125 and not dy and not await page.evaluate('busy'):
+            card=item.locator('..').locator('..')
+            assert await card.get_attribute('data-direction')==('approve' if dx>0 else 'reject')
+            if dx<0 or rows[index]['state']=='approval_pending' and not await page.evaluate('(id)=>drafts.get(id)?.dirty',rows[index]['id']):
+                await page.wait_for_function('(id)=>document.querySelector(`[data-candidate="${id}"]`).closest(".candidate-card").classList.contains("swipe-ready")',arg=rows[index]['id'],timeout=2000)
+                assert 'swipe-ready' in await card.get_attribute('class')
+                assert await card.locator('.reject-cue' if dx<0 else '.approve-cue').inner_text()==('Release to dismiss' if dx<0 else 'Release to approve')
+        if reverse:
+            await cdp.send('Input.dispatchTouchEvent',{'type':'touchMove','touchPoints':[{'x':x,'y':y}]})
+        await cdp.send('Input.dispatchTouchEvent',{'type':'touchCancel' if cancel else 'touchEnd','touchPoints':[]})
+        await page.wait_for_timeout(220)
+        if dy:assert abs(await page.evaluate('scrollY')-before_scroll)>10
+    if width<1000:
+        # Real Chromium touch scrolling and cancelled/short/reversed drags must
+        # neither decide nor accidentally open the site under the finger.
+        await swipe(0,0,-80)
+        await swipe(0,25)
+        await swipe(0,125,cancel=True)
+        await swipe(0,-125,reverse=True)
+        assert not posts and 'candidate=' not in page.url
+        await swipe(1,125)
+        assert not posts and await page.get_by_role('button',name='Approve capture: swipe-1.example/eq/',exact=True).is_disabled()
+        await tile(0).tap();await page.get_by_role('heading',name='Choose capture scope',exact=True).wait_for()
+    else:await open_site(page,'swipe-0.example/eq/')
+    # Drafts survive a return to the list; quick approval cannot bypass Save.
+    await page.get_by_label('Download scope',exact=True).select_option('custom')
+    await page.get_by_label('Custom capture folder path').fill('/unsaved')
+    await stage(page,'candidates')
+    assert await page.get_by_role('button',name='Approve capture: swipe-0.example/eq/',exact=True).is_disabled()
+    if width<1000:await swipe(0,125)
+    assert not posts
+    await page.reload();await settled(page)
+    async def decide(index,approve):
+        if width<1000:await swipe(index,125 if approve else -125)
+        else:await page.get_by_role('button',name=f'{"Approve capture" if approve else "Dismiss"}: swipe-{index}.example/eq/',exact=True).press('Enter')
+    await decide(0,False);await settled(page)
+    assert not await tile(0).count() and rows[0]['stage']=='history'
+    assert 'candidate=' not in page.url and 'view=candidates' in page.url
+    undo=page.locator('#notice').get_by_role('button',name='Undo dismissal',exact=True)
+    assert await undo.is_visible()
+    await undo.click();await tile(0).wait_for();await settled(page)
+    assert posts[-1][0]=='/api/restore' and rows[0]['stage']=='candidates'
+    await decide(0,True)
+    await page.locator('#error').filter(has_text='Coverage changed').wait_for()
+    assert await tile(0).count() and rows[0]['stage']=='candidates'
+    assert 'candidate=' not in page.url
+    await decide(0,True);await asyncio.wait_for(submitted.wait(),timeout=3)
+    count=len(posts)
+    assert await page.get_by_role('button',name='Approve capture: swipe-0.example/eq/',exact=True).is_disabled()
+    if width<1000:await swipe(2,125)
+    assert len(posts)==count and rows[0]['stage']=='candidates'
+    release.set();await page.wait_for_function('()=>!busy && data.stage_counts.queued===1')
+    assert not await tile(0).count() and rows[0]['stage']=='queued'
+    undo=page.locator('#notice').get_by_role('button',name='Undo approval',exact=True)
+    assert await undo.is_visible()
+    await safe_layout(page,width)
+    await undo.click();await tile(0).wait_for();await settled(page)
+    assert posts[-1][0]=='/api/undo' and posts[-1][1]['id']==rows[0]['id']
+    assert rows[0]['stage']=='candidates' and 'candidate=' not in page.url
+    if width<1000:
+        item=tile(0);await item.scroll_into_view_if_needed()
+        box=await item.bounding_box();x,y=box['x']+box['width']/2,box['y']+65
+        count=len(posts)
+        await cdp.send('Input.dispatchTouchEvent',{'type':'touchStart','touchPoints':[{'id':0,'x':x,'y':y}]})
+        await cdp.send('Input.dispatchTouchEvent',{'type':'touchMove','touchPoints':[{'id':0,'x':x+40,'y':y}]})
+        await cdp.send('Input.dispatchTouchEvent',{'type':'touchStart','touchPoints':[{'id':0,'x':x+40,'y':y},{'id':1,'x':x-30,'y':y+30}]})
+        await cdp.send('Input.dispatchTouchEvent',{'type':'touchEnd','touchPoints':[]})
+        assert len(posts)==count and not await page.locator('.candidate-card.dragging').count()
+        # A metadata poll during a swipe cancels the obsolete gesture, instead
+        # of submitting an approval for evidence which has just changed.
+        item=tile(0);await item.scroll_into_view_if_needed()
+        box=await item.bounding_box();x,y=box['x']+box['width']/2,box['y']+65
+        await cdp.send('Input.dispatchTouchEvent',{'type':'touchStart','touchPoints':[{'x':x,'y':y}]})
+        await cdp.send('Input.dispatchTouchEvent',{'type':'touchMove','touchPoints':[{'x':x+125,'y':y}]})
+        count=len(posts);rows[0]['manifest_sha256']='f'*64
+        await page.evaluate('refresh()')
+        await cdp.send('Input.dispatchTouchEvent',{'type':'touchEnd','touchPoints':[]})
+        assert len(posts)==count
+    assert not errors,errors
+    await context.close()
+
+
 async def check(base):
     async with async_playwright() as playwright:
         browser=await playwright.chromium.launch()
         try:
             for width in (320,390,430,768,1280):
+                await candidate_quick_actions(browser,base,width)
                 await capture_approval_navigation(browser,base,width)
                 await discovery_flow(browser,base,width)
                 await manual_site_flow(browser,base,width)
