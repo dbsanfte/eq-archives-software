@@ -7,6 +7,13 @@ from review import checked_sources, record
 from state import enqueue, identifier
 
 
+def queue_order(store):
+    """Use the worker's eligibility time and insertion-order tie break."""
+    return [row['id'] for row in store.db.execute("""SELECT id FROM candidates
+        WHERE state='approved_waiting_batch'
+        ORDER BY COALESCE(json_extract(decision,'$.capture_after'), json_extract(decision,'$.reviewed_at')),rowid""")]
+
+
 def claim(store, ids):
     """Caller owns BEGIN IMMEDIATE; undo and claiming cannot both win."""
     sites = []
