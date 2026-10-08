@@ -59,6 +59,17 @@ p { font-size:15px; line-height:1.6; overflow-wrap:anywhere; margin-bottom:12px;
 .candidate-recovery { padding:0 16px 16px; }
 .candidate-recovery button { width:100%; }
 .candidate-recovery p { font-size:12px; margin:8px 0 0; }
+.grading-options { grid-column:1/-1; min-width:0; }
+.grading-options label { display:block; font-size:13px; font-weight:650; margin:6px 0 8px; }
+.grading-options textarea { display:block; width:100%; min-width:0; min-height:108px; padding:12px; border:1px solid var(--line); border-radius:8px; background:var(--paper); color:var(--ink); font:16px/1.5 system-ui; resize:vertical; }
+.grading-options textarea:focus-visible { outline:3px solid #af7924; outline-offset:3px; }
+.grading-options p { margin:12px 0; font-size:13px; }
+.grading-options > button { width:100%; margin-top:12px; }
+.grading-focus { white-space:pre-wrap; font-size:13px; padding:10px 12px; border-left:3px solid #7c9c70; background:#edf2e7; }
+#run-criteria { grid-column:1/-1; white-space:pre-wrap; }
+.queue-card { border:1px solid var(--line); border-radius:12px; background:var(--paper); min-width:0; display:flex; flex-direction:column; }
+.queue-card .site-tile { border:0; box-shadow:none; flex:1; }
+.queue-card > button:last-child { margin:0 16px 16px; }
 #dismiss-dialog, #review-dialog { color:var(--ink); background:var(--paper); border:1px solid var(--line); border-radius:14px; padding:22px; width:calc(100% - 24px); max-width:420px; max-height:calc(100dvh - 24px); overflow-y:auto; }
 #dismiss-dialog::backdrop, #review-dialog::backdrop { background:#102c23a0; }
 .dialog-actions { display:flex; gap:10px; margin-top:20px; }

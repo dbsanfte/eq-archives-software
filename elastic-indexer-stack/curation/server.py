@@ -26,7 +26,8 @@ from portal import Stage, decorate, counts, search_matches, candidate_filter, di
 from manual import existing_site, site_url
 from spending import Spending
 from candidate_actions import dismiss_all, undo_dismissal
-from candidate_checks import attach_checks, start as start_candidate_check
+from candidate_checks import attach_checks, require_finished, start as start_candidate_check
+from grading import criteria
 from review_actions import (preview as review_preview, decide_all as decide_all_reviews,
                             apply_decision as apply_site_decision, validate_decision as validate_site_decision,
                             undo_dismissal as undo_review_dismissal)
@@ -287,7 +288,7 @@ def create_app(root=None, origin=None, start_worker=True):
         incoming = await body(request)
         refresh(root)
         with connect(root) as store:
-            apply_decisions(store, incoming, capture_delay=UNDO_SECONDS)
+            apply_decisions(store, incoming, capture_delay=UNDO_SECONDS, before_approve=require_finished)
         return JSONResponse({"recorded": len(incoming)})
 
     async def dismiss_candidates(request):
@@ -309,10 +310,12 @@ def create_app(root=None, origin=None, start_worker=True):
 
     async def check_candidate(request):
         payload = await body(request)
-        if (not isinstance(payload, dict) or set(payload) != {'id', 'manifest_sha256', 'max_usd'}
+        if (not isinstance(payload, dict) or set(payload) - {'grading_criteria'} != {'id', 'manifest_sha256', 'max_usd'}
                 or not all(isinstance(payload[key], str) for key in ('id', 'manifest_sha256'))
                 or type(payload['max_usd']) not in (int, float) or not 0 < payload['max_usd'] <= 2):
             raise CrawlError('Evidence and grading require the candidate hash and an explicit one-site budget up to $2.')
+        if 'grading_criteria' in payload:
+            payload['grading_criteria'] = criteria(payload['grading_criteria'])
         with connect(root) as store:
             result = start_candidate_check(store, payload)
         return JSONResponse(result, status_code=202)
@@ -405,21 +408,23 @@ def create_app(root=None, origin=None, start_worker=True):
 
     async def discovery(request):
         payload = await body(request)
-        if (not isinstance(payload, dict) or set(payload) not in ({"max_candidates", "max_usd"}, {"max_candidates", "max_usd", "min_grade"})
+        if (not isinstance(payload, dict) or set(payload) - {'grading_criteria'} not in ({"max_candidates", "max_usd"}, {"max_candidates", "max_usd", "min_grade"})
                 or type(payload["max_candidates"]) is not int or not 1 <= payload["max_candidates"] <= 50
                 or type(payload["max_usd"]) not in (int, float) or not 0 < payload["max_usd"] <= 2
                 or type(payload.get("min_grade", 2)) is not int or payload.get("min_grade", 2) not in range(4)):
             raise CrawlError("Discovery requires explicit bounds: 1–50 candidates and up to $2")
+        payload['grading_criteria'] = criteria(payload.get('grading_criteria', ''))
         with connect(root) as store:
             operation = enqueue(store, "discover", {**payload, "min_grade": payload.get("min_grade", 2), "fill_queue": True})
         return JSONResponse({"operation": operation}, status_code=202)
 
     async def submit_site(request):
         payload = await body(request)
-        if (not isinstance(payload, dict) or set(payload) != {'url', 'max_usd'}
+        if (not isinstance(payload, dict) or set(payload) - {'grading_criteria'} != {'url', 'max_usd'}
                 or type(payload['max_usd']) not in (int, float) or not 0 < payload['max_usd'] <= 2):
             raise CrawlError('A site submission requires a URL and an explicit budget of up to $2')
         url = site_url(payload['url'])
+        focus = criteria(payload.get('grading_criteria', ''))
         with connect(root) as store:
             store.db.execute('BEGIN IMMEDIATE')
             existing = existing_site(store, url)
@@ -431,6 +436,7 @@ def create_app(root=None, origin=None, start_worker=True):
                 if target and site_identity(target['url'], store) == site_identity(url, store):
                     return JSONResponse({'operation': operation['id'], 'url': target['url'], 'existing': True})
             operation = enqueue(store, 'discover', {'max_candidates': 1, 'max_usd': payload['max_usd'],
+                'grading_criteria': focus,
                 'target': {'url': url, 'submitted_url': payload['url'].strip()}}, commit=False)
             store.db.commit()
         return JSONResponse({'operation': operation, 'url': url}, status_code=202)

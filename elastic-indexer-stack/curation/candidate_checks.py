@@ -7,7 +7,7 @@ from acquisition import sample
 from common import CrawlError, Store, digest, now
 from coverage_check import refresh, require_new
 from crawler import parser
-from grading import grade, sources
+from grading import criteria, grade, sources
 from portal import Stage, decorate
 from review import record
 from state import connect, enqueue, unpack
@@ -22,7 +22,8 @@ def attach_checks(store, rows):
         operation = unpack(item)
         latest[operation['payload']['id']] = {
             'id': operation['id'], 'state': operation['state'], 'error': operation['error'],
-            'phase': (operation['result'] or {}).get('phase'), 'max_usd': operation['payload']['max_usd']}
+            'phase': (operation['result'] or {}).get('phase'), 'max_usd': operation['payload']['max_usd'],
+            'grading_criteria': operation['payload'].get('grading_criteria', '')}
     for row in rows:
         row['candidate_check'] = latest.get(row['id'])
     return rows
@@ -42,16 +43,25 @@ def source_identity(row):
     return digest({'url': row['url'], 'captures': row['captures']})
 
 
+def require_finished(store, row):
+    if store.db.execute("SELECT 1 FROM operations WHERE kind='candidate_check' AND state IN ('queued','running') AND json_extract(payload,'$.id')=?", (row['id'],)).fetchone():
+        raise CrawlError('Wait for this site’s evidence and grading check before approving capture.')
+
+
 def start(store, payload):
     store.db.execute('BEGIN IMMEDIATE')
     _, row = current(store, payload)
-    if row['rating'] and row['captures']:
-        raise CrawlError('This candidate already has a source grade. Review its capture scope.')
     previous = store.db.execute("SELECT * FROM operations WHERE kind='candidate_check' AND json_extract(payload,'$.id')=? ORDER BY created DESC,rowid DESC LIMIT 1", (row['id'],)).fetchone()
+    previous = unpack(previous) if previous else None
+    focus = criteria(payload.get('grading_criteria', previous['payload'].get('grading_criteria', '') if previous else (row['rating'] or {}).get('grading_criteria', '')))
+    payload = {**payload, 'grading_criteria': focus}
+    if previous and previous['state'] in ('queued', 'running'):
+        if focus != previous['payload'].get('grading_criteria', ''):
+            raise CrawlError('This check is already running with saved grading criteria. Wait for it to finish before changing them.')
+        return {'operation': previous['id'], 'max_usd': previous['payload']['max_usd'], 'existing': True}
+    if row['rating'] and row['captures'] and focus == row['rating'].get('grading_criteria', ''):
+        raise CrawlError('This candidate already has a source grade for these criteria. Review its capture scope or change the criteria.')
     if previous:
-        previous = unpack(previous)
-        if previous['state'] in ('queued', 'running'):
-            return {'operation': previous['id'], 'max_usd': previous['payload']['max_usd'], 'existing': True}
         if (previous['payload']['manifest_sha256'] != row['manifest_sha256']
                 and previous['payload'].get('source_sha256') != source_identity(row)):
             raise CrawlError('Evidence changed since this check. Its saved results and budget are retained.')
@@ -59,7 +69,9 @@ def start(store, payload):
             raise CrawlError('Another operation is queued or running. Retry when it finishes.')
         # A changed capture scope can reuse the same samples, cached grade and
         # budget. Bind the next merge to the newly reviewed scope, never an old one.
-        resumed = {**previous['payload'], 'manifest_sha256': row['manifest_sha256']}
+        resumed = {**previous['payload'], 'manifest_sha256': row['manifest_sha256'], 'grading_criteria': focus}
+        store.db.execute('INSERT INTO events(candidate,action,detail,created) VALUES (?,?,?,?)',
+                         (row['id'], 'grading_requested', json.dumps({'operation': previous['id'], 'grading_criteria': focus}), now()))
         store.db.execute("UPDATE operations SET state='queued',payload=?,error=NULL,updated=? WHERE id=?",
                          (json.dumps(resumed), now(), previous['id']))
         store.db.commit()
@@ -80,7 +92,7 @@ def run(root, operation):
     refresh(root, candidate_id=payload['id'], force=True)
     with connect(root) as main:
         raw, row = current(main, payload)
-        if row['rating'] and row['captures']:
+        if row['rating'] and row['captures'] and row['rating'].get('grading_criteria', '') == payload.get('grading_criteria', ''):
             return {'candidate_id': row['id'], 'phase': 'complete'}
         if not os.environ.get('ARCHIVE_REPO'):
             raise CrawlError('Archive metadata is not configured; evidence recovery cannot continue.')
@@ -102,7 +114,7 @@ def run(root, operation):
                     os.link(Path(root) / capture['path'], destination)
                 retained[path] = capture['path']
                 captures.append({**capture, 'path': path})
-            original.update(captures=json.dumps(captures), rating=None, decision=None)
+            original.update(captures=json.dumps(captures), decision=None)
             keys = list(original)
             run_store.db.execute(f"INSERT OR REPLACE INTO candidates({','.join(keys)}) VALUES ({','.join('?' for _ in keys)})", list(original.values()))
             run_store.set('retained_sources', retained)
@@ -118,6 +130,7 @@ def run(root, operation):
             progress('grading')
             args = options.parse_args(['--work-dir', str(directory), 'grade', '--max-candidates', '1',
                                        '--api-key-file', '/run/secrets/luna_api_key', '--max-usd', str(payload['max_usd'])])
+            args.grading_criteria = payload.get('grading_criteria', '')
             grade(args, run_store)
         checked = record(run_store, run_store.candidates()[0])
         retained = run_store.get('retained_sources', {})

@@ -65,10 +65,10 @@ def test_repeated_and_concurrent_submissions_share_one_budget_and_keep_provenanc
     assert len({response.json()['operation'] for response in responses})==1
     with connect(root) as store:
         op=unpack(store.db.execute('SELECT * FROM operations').fetchone())
-        assert op['payload']=={'max_candidates':1,'max_usd':0.25,'target':{
+        assert op['payload']=={'max_candidates':1,'max_usd':0.25,'grading_criteria':'','target':{
             'url':'http://guild.example/News.html?order=2&order=1','submitted_url':url}}
         store.db.execute("UPDATE operations SET state='interrupted'");store.db.commit()
-    again=call(create_app(root,start_worker=False),'POST','/api/submit-site',{'url':'https://www.guild.example/other','max_usd':2})
+    again=call(create_app(root,start_worker=False),'POST','/api/submit-site',{'url':'https://www.guild.example/other','max_usd':2,'grading_criteria':'Guild sites'})
     assert again.status_code==200 and again.json()['operation']==op['id']
     assert call(app,'POST','/api/resume',{'id':op['id']}).status_code==202
     with connect(root) as store:
@@ -126,7 +126,7 @@ def test_manual_site_gets_normal_coverage_sources_grade_and_review_without_spide
         store.set('discovery_completed',True)
         store.set('sampling_completed',True)
     submitted='https://web.archive.org/web/20050304000000/http://new-guild.example/eq/News.html?x=1'
-    op=call(app,'POST','/api/submit-site',{'url':submitted,'max_usd':0.2}).json()['operation']
+    op=call(app,'POST','/api/submit-site',{'url':submitted,'max_usd':0.2,'grading_criteria':'Guild sites'}).json()['operation']
     response={'status':'completed','output':[{'type':'message','content':[{'type':'output_text','text':json.dumps({
         'grade':3,'category':'guild','confidence':'high','reason':'EQ guild history.',
         'evidence':[{'slot':0,'excerpt':'EverQuest guild history.'}]})}]}],'usage':{'input_tokens':100,'output_tokens':100}}
@@ -142,6 +142,8 @@ def test_manual_site_gets_normal_coverage_sources_grade_and_review_without_spide
             assert listing['total']==1
             row=listing['candidates'][0]
             assert row['state']=='approval_pending' and row['rating']['grade']==3 and row['decision'] is None
+            assert row['rating']['grading_criteria']=='Guild sites'
+            assert json.loads(client.return_value.request.call_args.args[0]['input'])['grading_criteria']=='Guild sites'
             assert row['url']=='http://new-guild.example/eq/News.html?x=1'
             assert row['scope']=='http://new-guild.example/eq/'
             assert row['coverage']['site_check']['status']=='new_site'

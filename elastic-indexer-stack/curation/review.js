@@ -20,6 +20,7 @@ let reviewSnapshot=null;
 let manualResult=null,manualSignature='';
 let activeSwipe=null;
 const drafts = new Map(), positions = new Map(), pageQueries = new Map(), sourceCache = new Map();
+const gradingDrafts = new Map();
 history.scrollRestoration = 'manual';
 function node(tag, text, className) {
   const item=document.createElement(tag);
@@ -99,32 +100,28 @@ function message(text,undo,tone='') {
   $('notice').dataset.tone=tone;
   if (undo) $('notice').append(mutation(undo.label || 'Undo approval',()=>request(undo.path || '/api/undo',undo.payload || undo),undo.confirmation || 'Returned to Candidates.'));
 }
-async function act(label,action,confirmation,{returnToCandidates=false,undo=null}={}) {
+async function act(label,action,confirmation,{returnToCandidates=false,undo=null,quiet=false}={}) {
   if (busy) return;
   const actedId=route.candidate;busy=true;++generation;controller?.abort();$('error').hidden=true;
   for (const item of document.querySelectorAll('[data-mutation]')) item.disabled=true;
   $('status').textContent=label;renderDock(true);renderDiscovery();renderReviewActions();
-  try { const outcome=await action();let approved=null;
+  try { const outcome=await action();
     // Only confirmed actions move the site. Read its durable state before following it.
     if (route.candidate && route.candidate===actedId) {
       const result=await request(`/api/candidate?id=${encodeURIComponent(route.candidate)}`);
       if (route.candidate===actedId) {
         detail=result;
         if (returnToCandidates) {
-          approved=result.candidate;
           route={...route,view:'candidates',candidate:null,panel:'site',page:0,slot:0};
         } else route={...route,view:result.candidate.stage,panel:'site',page:0,slot:0};
         writeRoute(true);
       }
     }
-    message((typeof confirmation==='function' ? confirmation(outcome) : confirmation) || 'Saved.',typeof undo==='function' ? undo(outcome) : undo,outcome?.coverage?.complete===false ? 'attention' : '');workspaceSignature='';dockSignature='';
+    const confirmed=(typeof confirmation==='function' ? confirmation(outcome) : confirmation) || 'Saved.';
+    if (quiet) { $('notice').hidden=true;$('status').textContent=confirmed; }
+    else message(confirmed,typeof undo==='function' ? undo(outcome) : undo,outcome?.coverage?.complete===false ? 'attention' : '');
+    workspaceSignature='';dockSignature='';
     await refresh(true);
-    if (approved) {
-      message(approved.stage==='queued' ? `Queued ${siteName(approved)} for capture. Undo before it starts.` : `${siteName(approved)} is now in ${names[approved.stage]}.`,
-        approved.stage==='queued' ? {id:approved.id,manifest_sha256:approved.manifest_sha256} : null);
-    } else if (detail?.candidate.id===actedId && detail.candidate.stage==='queued') {
-      message('Approved. This site is now in the capture queue. Undo is available below until it starts.');
-    }
   } catch (error) { $('error').textContent=error.message;$('error').hidden=false; }
   finally { busy=false;for (const button of document.querySelectorAll('[data-mutation]')) button.disabled=button.dataset.blocked==='true';renderDock(true);renderDiscovery();renderReviewActions(); }
 }
@@ -200,7 +197,14 @@ function renderList() {
         row.stage==='indexing' ? (row.review_state==='index_failed' ? 'Sources are retained. Open this site to retry.' : 'Publication and AI-enriched indexing are automatic.') :
         row.stage==='saved' ? 'Set aside for a later decision.' : capture ? `${capture.pages} pages · ${capture.files} dated captures` : 'Saved decision and source evidence.';
       item.append(node('p',description));
+      if (row.rating?.grading_criteria) item.append(node('p',`Graded for: ${row.rating.grading_criteria}`,'grading-focus'));
       const bottom=node('div',undefined,'tile-bottom');bottom.append(node('span',row.rating?.category?.replaceAll('_',' ') || 'Website'),node('span','Open site →','open-label'));item.append(bottom);
+      if (row.stage==='queued') {
+        const card=node('article',undefined,'queue-card');
+        const undo=mutation('Undo approval',()=>undoApproval(row),'Returned to Candidates.');
+        undo.setAttribute('aria-label',`Undo approval: ${siteName(row)}`);
+        card.append(item,undo);return card;
+      }
       return row.stage==='candidates' ? candidateCard(row,item) : item;
     });
     if (!items.length) {
@@ -228,6 +232,7 @@ function renderList() {
 }
 function approvalBlock(row) {
   if (getDraft(row).dirty) return 'Open site to save your scope changes.';
+  if (['queued','running'].includes(row.candidate_check?.state)) return 'Wait for this site’s evidence and grading check before approving.';
   if (row.state==='coverage_unverified') return 'Verify archive coverage before approving.';
   if ((!row.rating || !row.captures?.length) && row.candidate_check?.state==='interrupted') return 'Use Retry evidence & grading below before approving.';
   if (!row.captures?.length) return 'No source samples yet. Use Find samples & grade below.';
@@ -246,8 +251,12 @@ function decideCandidate(row,decision) {
   const payload={id:row.id,manifest_sha256:row.manifest_sha256};
   act(decision==='approve' ? 'Approving capture' : 'Dismissing site',
     ()=>request('/api/decisions',[{...payload,decision}]),
-    decision==='approve' ? `Queued ${siteName(row)} for capture. Undo before it starts.` : `Dismissed ${siteName(row)} to History.`,
-    {undo:{payload,path:decision==='approve' ? '/api/undo' : '/api/restore',label:decision==='approve' ? 'Undo approval' : 'Undo dismissal'}});
+    decision==='approve' ? `Queued ${siteName(row)} for capture. Undo is available in Queue until capture starts.` : `Dismissed ${siteName(row)} to History.`,
+    decision==='approve' ? {quiet:true} : {undo:{payload,path:'/api/restore',label:'Undo dismissal'}});
+}
+async function undoApproval(row) {
+  try { return await request('/api/undo',{id:row.id,manifest_sha256:row.manifest_sha256}); }
+  catch (error) { await refresh();throw error; }
 }
 function candidateCard(row,item) {
   const card=node('article',undefined,'candidate-card'),front=node('div',undefined,'candidate-front');
@@ -322,7 +331,8 @@ function recoveryControls(row) {
   const box=node('div',undefined,'candidate-recovery'),check=row.candidate_check;
   const active=check && ['queued','running'].includes(check.state),paused=check?.state==='interrupted';
   const label=active ? statusLabel(row) : paused ? 'Retry evidence & grading' : row.captures?.length ? 'Grade source evidence' : 'Find samples & grade';
-  const button=mutation(label,()=>request('/api/check-candidate',{id:row.id,manifest_sha256:row.manifest_sha256,max_usd:2}),
+  const focus=check?.grading_criteria ?? $('grading-criteria').value.trim();
+  const button=mutation(label,()=>request('/api/check-candidate',{id:row.id,manifest_sha256:row.manifest_sha256,max_usd:2,...(!check && focus ? {grading_criteria:focus} : {})}),
     'Evidence check queued for this site. Progress appears on its card.',true,Boolean(active || hasOperation()));
   button.setAttribute('aria-label',`${label}: ${siteName(row)}`);box.append(button);
   box.append(node('p',active ? 'This site is being checked. Approval becomes available after readable samples receive a grade.' :
@@ -330,7 +340,33 @@ function recoveryControls(row) {
   if (check?.error && check.error!==row.error) box.append(node('p',check.error,'candidate-block'));
   else if (row.state==='identity_unresolved') box.append(node('p','Wayback listed different original URLs. This check preserves the exact page identity; it cannot grade an unrelated redirect.','meta'));
   if (!active && hasOperation()) box.append(node('p','Another task is running. This action becomes available when it finishes.','meta'));
+  box.append(node('p',`Grading focus: ${focus || 'General EverQuest relevance'}`,'meta'));
   return box;
+}
+function gradingOptions(row) {
+  const check=row.candidate_check,saved=row.rating?.grading_criteria ?? check?.grading_criteria ?? $('grading-criteria').value.trim();
+  let draft=gradingDrafts.get(row.id);
+  if (!draft || !draft.dirty && draft.saved!==saved) { draft={value:saved,saved,dirty:false,open:false};gradingDrafts.set(row.id,draft); }
+  const options=node('details',undefined,'grading-options panel');options.open=draft.open;
+  options.append(node('summary','Advanced · Grade this site with Luna'));
+  options.addEventListener('toggle',()=>{draft.open=options.open;});
+  const label=node('label','Additional grading criteria for this site'),input=node('textarea');
+  input.id='site-grading-criteria';label.htmlFor=input.id;input.rows=3;input.maxLength=1000;input.value=draft.value;
+  input.placeholder='For example: Cleric guides or EverQuest guild sites';
+  const active=['queued','running'].includes(check?.state);
+  input.disabled=active;
+  const button=mutation(row.rating ? 'Regrade with these criteria' : 'Grade with these criteria',()=>request('/api/check-candidate',
+    {id:row.id,manifest_sha256:row.manifest_sha256,max_usd:2,grading_criteria:draft.value}),
+    'Grading queued with your saved criteria and the original site budget.');
+  function changed() {
+    const blocked=active || hasOperation() || !canDismiss(row) || Boolean(row.rating && draft.value.trim()===(row.rating.grading_criteria || ''));
+    button.dataset.blocked=String(blocked);button.disabled=busy || blocked;
+  }
+  input.addEventListener('input',()=>{draft.value=input.value;draft.dirty=true;changed();});changed();
+  options.append(label,input,node('p',`Blank uses general EQ relevance. A high grade requires both EQ relevance and a match to your focus. Explicit grading only · ${check ? 'original' : 'one-site'} $${check?.max_usd ?? 2} total cap, including earlier attempts and regrades.`,'meta'));
+  if (check) options.append(node('p',`${active ? 'Current check' : 'Last check'}: ${check.grading_criteria || 'General EverQuest relevance'}. ${active ? 'Criteria are fixed until this check finishes.' : 'Retries keep the saved criteria and budget.'}`,'meta'));
+  options.append(button);
+  return options;
 }
 function panel(title,text,className='') {
   const box=node('section',undefined,`panel ${className}`);box.append(node('h2',title));if (text) box.append(node('p',text));return box;
@@ -415,6 +451,8 @@ function renderCandidate(root,row) {
   if (row.rating) evidence.prepend(badge(`Luna grade ${row.rating.grade}/3 · ${row.rating.category.replaceAll('_',' ')}`));
   for (const excerpt of row.rating?.evidence || []) evidence.append(node('blockquote',excerpt.excerpt,'evidence'));
   if (row.rating) evidence.append(node('p',`${row.rating.confidence} confidence · AI assessment, awaiting your decision`,'meta'));
+  if (row.rating) evidence.append(node('p',`Graded for: ${row.rating.grading_criteria || 'General EverQuest relevance'}`,'grading-focus'));
+  if (['queued','running','interrupted'].includes(row.candidate_check?.state) && row.rating) evidence.append(recoveryControls(row));
   appendEvidenceLink(evidence,row);left.append(evidence);
   const coverage=coveragePanel(row);if (coverage) left.append(coverage);
   if (row.evidence?.length) {
@@ -444,7 +482,7 @@ function renderCandidate(root,row) {
   const secondary=node('div',undefined,'secondary-actions');
   const decidable=canDismiss(row);
   secondary.append(mutation('Save for later',()=>request('/api/decisions',[{id:row.id,manifest_sha256:row.manifest_sha256,decision:'defer'}]),'Moved to Saved for later.',false,!decidable),mutation('Dismiss site',()=>request('/api/decisions',[{id:row.id,manifest_sha256:row.manifest_sha256,decision:'reject'}]),'Moved to History.',false,!decidable));
-  right.append(secondary);columns.append(left,right);root.append(columns);
+  right.append(gradingOptions(row),secondary);columns.append(left,right);root.append(columns);
 }
 function captureSummary(row,review) {
   const captures=review?.manifest.captures || [],count=new Set(review?.page_identities || captures.map(c=>c.url)).size;
@@ -601,7 +639,7 @@ function scrollButtons(target,name) {
 function renderDock(force=false) {
   if (!detail || !route.candidate || detail.candidate.id!==route.candidate) { $('action-dock').hidden=true;measureDock();return; }
   const row=detail.candidate,review=detail.review,draft=getDraft(row),op=detail.capture_operation;
-  const signature=JSON.stringify([row.id,row.state,row.stage,row.manifest_sha256,review?.state,review?.operation?.state,review?.job,op?.id,op?.state,hasOperation(),route.panel,route.page,route.slot,draft.dirty,busy]);
+  const signature=JSON.stringify([row.id,row.state,row.stage,row.manifest_sha256,row.candidate_check,review?.state,review?.operation?.state,review?.job,op?.id,op?.state,hasOperation(),route.panel,route.page,route.slot,draft.dirty,busy]);
   if (!force && signature===dockSignature) return;
   const dock=$('action-dock'),inner=node('div',undefined,'dock-inner'),buttons=node('div',undefined,'dock-buttons');let hint='';
   if (route.panel==='reader') {
@@ -612,11 +650,11 @@ function renderDock(force=false) {
     const pages=control('Pages',()=>backFromSite());pages.setAttribute('aria-label','Back to page list');buttons.append(previous,pages,next);
   } else if (route.panel==='pages') buttons.append(control('Back to site decision',()=>backFromSite(),'primary'));
   else if (row.stage==='candidates') {
-    hint=draft.dirty ? 'Save your scope changes before approving.' : row.state==='coverage_unverified' ? 'Verify archive coverage before approving.' : !row.rating || !row.captures?.length ? 'Source evidence and a Luna grade are needed before capture approval.' : 'Entire chosen scope · 60 seconds to undo before capture';
-    buttons.append(mutation('Approve site for capture',()=>request('/api/decisions',[{id:row.id,manifest_sha256:row.manifest_sha256,decision:'approve'}]),'Approved for capture.',true,Boolean(approvalBlock(row)),{returnToCandidates:true}));
+    hint=approvalBlock(row) || 'Entire chosen scope · Undo in Queue until capture starts';
+    buttons.append(mutation('Approve site for capture',()=>request('/api/decisions',[{id:row.id,manifest_sha256:row.manifest_sha256,decision:'approve'}]),'Approved for capture. Undo is available in Queue until capture starts.',true,Boolean(approvalBlock(row)),{returnToCandidates:true,quiet:true}));
   } else if (row.stage==='queued') {
     hint='Your approval is saved. Capture starts automatically.';
-    buttons.append(mutation('Undo approval',()=>request('/api/undo',{id:row.id,manifest_sha256:row.manifest_sha256}),'Returned to Candidates.',true));
+    buttons.append(mutation('Undo approval',()=>undoApproval(row),'Returned to Candidates.',true));
   } else if (row.stage==='capturing' && op?.state==='interrupted') {
     hint='Resume the interrupted worker batch within its original budget.';
     buttons.append(mutation('Resume capture',()=>request('/api/resume',{id:op.id}),'Capture resumed.',true,hasOperation()));
@@ -650,6 +688,8 @@ function renderDiscovery() {
   const paused=discovery?.state==='interrupted';
   $('discover').textContent=paused ? discovery.payload.target ? 'Resume site check' : 'Resume discovery' : 'Discover & grade';
   $('discover').disabled=!data || busy || Boolean(active);
+  $('run-criteria').hidden=!discovery;
+  $('run-criteria').textContent=discovery ? `Saved run criteria: ${discovery.payload.grading_criteria || 'General EverQuest relevance'}. ${paused ? 'Resume uses these criteria; Advanced edits apply only to new runs.' : 'Advanced edits apply only to new runs.'}` : '';
   $('discovery-limits').textContent=discovery ? discovery.payload.fill_queue ? `Target ${discovery.payload.max_candidates} candidates at Grade ${discovery.payload.min_grade}+ · 1 hour · $${discovery.payload.max_usd} total cap` : `Up to ${discovery.payload.max_candidates} candidates · $${discovery.payload.max_usd} original cap` : `Target 50 candidates at Grade ${route.minGrade}+ · 1 hour · $2 total cap`;
   $('discovery').dataset.state=active || paused ? 'blocked' : 'ready';
   const status=!data ? 'Checking worker availability…' : busy ? 'Submitting your request…' : active ?
@@ -689,7 +729,7 @@ async function submitManualSite(event) {
   const url=$('manual-url').value;
   await act('Adding site',async()=>{
     try {
-      const result=await request('/api/submit-site',{url,max_usd:2});manualResult=result;
+      const result=await request('/api/submit-site',{url,max_usd:2,...newGradingCriteria()});manualResult=result;
       if ($('manual-url').value===url) $('manual-url').value='';
       route.query='';route.offset=0;writeRoute(true);return result;
     } catch (error) { await refresh();throw error; }
@@ -699,7 +739,7 @@ async function startDiscovery() {
   if (!data || busy || hasOperation()) return;
   const discovery=currentDiscovery(),paused=discovery?.state==='interrupted';
   await act(paused ? 'Resuming discovery' : 'Starting discovery',async()=>{
-    try { return await request(paused ? '/api/resume' : '/api/discover',paused ? {id:discovery.id} : {max_candidates:50,max_usd:2,min_grade:route.minGrade}); }
+    try { return await request(paused ? '/api/resume' : '/api/discover',paused ? {id:discovery.id} : {max_candidates:50,max_usd:2,min_grade:route.minGrade,...newGradingCriteria()}); }
     catch (error) { await refresh();throw error; }
   },paused ? 'Discovery resumed within its original budget.' : 'Discovery queued: target 50 new sites at the selected grade, within one hour and $2 total.');
 }
@@ -713,6 +753,7 @@ function renderTools() {
     const log=node('div',undefined,'operation-log');log.append(node('p',`${operationLabel(op)} · ${op.state}`));
     if (op.error) log.append(node('p',op.error));
     if (op.kind==='discover') {log.append(node('p',`${op.payload.max_candidates} candidates · $${op.payload.max_usd} maximum`,'meta'));
+      log.append(node('p',`Grading focus: ${op.payload.grading_criteria || 'General EverQuest relevance'}`,'meta'));
       if (op.state==='interrupted') log.append(mutation('Resume discovery',()=>request('/api/resume',{id:op.id}),'Discovery resumed within its original budget.',false,hasOperation()));}
     return log;
   });
@@ -791,6 +832,14 @@ $('dismiss-confirm').addEventListener('click',()=>{
     {undo:result=>({path:'/api/undo-dismissal',payload:{dismissal:result.dismissal},label:'Undo dismiss all'})});
 });
 $('manual-form').addEventListener('submit',submitManualSite);
+function newGradingCriteria() { const value=$('grading-criteria').value.trim();return value ? {grading_criteria:value} : {}; }
+try { $('grading-criteria').value=localStorage.getItem('candidate-grading-criteria') || ''; } catch (_) {}
+function saveGradingCriteria() {
+  try { localStorage.setItem('candidate-grading-criteria',$('grading-criteria').value); } catch (_) {}
+  listSignature='';workspaceSignature='';if (data) {renderList();renderWorkspace();}
+}
+$('grading-criteria').addEventListener('input',saveGradingCriteria);
+$('grading-default').addEventListener('click',()=>{$('grading-criteria').value='';saveGradingCriteria();});
 $('manual-url').addEventListener('input',renderDiscovery);
 $('previous').addEventListener('click',()=>go({offset:Math.max(0,route.offset-50)}));$('next').addEventListener('click',()=>go({offset:route.offset+50}));
 $('site-search').addEventListener('input',()=>{

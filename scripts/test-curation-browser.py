@@ -120,11 +120,13 @@ async def basic_flow(browser,base,width):
     assert await page.locator('#stage-list').is_visible()
     assert await page.locator('#site-workspace').is_hidden()
     assert not await page.get_by_role('button',name='Open guild.example/research/',exact=True).count()
-    await page.locator('#notice').filter(has_text='guild.example/research/').wait_for()
-    assert await page.locator('#notice').get_by_role('button',name='Undo approval',exact=True).is_visible()
+    assert await page.locator('#notice').is_hidden()
     assert await page.locator('[data-count=queued]').inner_text()=='1'
     assert await page.locator('[data-count=candidates]').inner_text()=='2'
     await safe_layout(page,width)
+    await stage(page,'queued')
+    undo=page.get_by_role('button',name='Undo approval: guild.example/research/',exact=True)
+    assert await undo.is_visible()
     # Undo during an in-flight refresh remains a real action, never a dropped click.
     loading,release=asyncio.Event(),asyncio.Event()
     async def held_listing(route):
@@ -134,10 +136,12 @@ async def basic_flow(browser,base,width):
     await page.route('**/api/queue?**',held_listing)
     await page.locator('#refresh').click()
     await asyncio.wait_for(loading.wait(),timeout=3)
-    await page.get_by_role('button',name='Undo approval',exact=True).click()
+    await undo.click()
     release.set()
-    await page.get_by_role('button',name='Open guild.example/research/',exact=True).wait_for()
+    await page.wait_for_function('()=>!busy && data.stage_counts.queued===0')
     await page.unroute('**/api/queue?**',held_listing)
+    await stage(page,'candidates')
+    await page.get_by_role('button',name='Open guild.example/research/',exact=True).wait_for()
     assert 'view=candidates' in page.url and 'candidate=' not in page.url
     await open_site(page,'guild.example/research/')
     await page.get_by_role('button',name='Save for later',exact=True).click()
@@ -773,11 +777,15 @@ async def capture_approval_navigation(browser,base,width):
     assert await page.locator('[data-count=queued]').inner_text()=='1'
     assert requests[-1]['filter']==['candidates'] and requests[-1]['offset']==['50']
     await safe_layout(page,width)
-    # Undo from the confirmation affects the approved site and stays on this list.
-    await page.locator('#notice').get_by_role('button',name='Undo approval',exact=True).click()
-    await page.locator('#page').filter(has_text='51–67 of 67').wait_for()
+    # There is no approval popup; Undo is directly on the queued entry.
+    assert await page.locator('#notice').is_hidden()
+    await stage(page,'queued')
+    await page.get_by_role('button',name='Undo approval: fixture-50.example',exact=True).click()
+    await page.wait_for_function('()=>!busy && data.stage_counts.queued===0')
     assert posts[-1][0]=='/api/undo' and posts[-1][1]['id']==rows[50]['id']
     assert 'candidate=' not in page.url and await page.locator('#site-workspace').is_hidden()
+    await page.goto(base+'/?view=candidates&offset=50&search=fixture-')
+    await page.locator('#page').filter(has_text='51–67 of 67').wait_for()
     # Reloaded success stays on Candidates; Undo is still available from Queue.
     await open_site(page,'fixture-50.example');await approve.click()
     await page.wait_for_function('()=>!busy && !route.candidate')
@@ -927,10 +935,12 @@ async def candidate_quick_actions(browser,base,width):
     assert len(posts)==count and rows[0]['stage']=='candidates'
     release.set();await page.wait_for_function('()=>!busy && data.stage_counts.queued===1')
     assert not await tile(0).count() and rows[0]['stage']=='queued'
-    undo=page.locator('#notice').get_by_role('button',name='Undo approval',exact=True)
-    assert await undo.is_visible()
+    assert await page.locator('#notice').is_hidden()
     await safe_layout(page,width)
-    await undo.click();await tile(0).wait_for();await settled(page)
+    await stage(page,'queued')
+    await page.get_by_role('button',name='Undo approval: swipe-0.example/eq/',exact=True).click()
+    await page.wait_for_function('()=>!busy && data.stage_counts.queued===0')
+    await stage(page,'candidates');await tile(0).wait_for();await settled(page)
     assert posts[-1][0]=='/api/undo' and posts[-1][1]['id']==rows[0]['id']
     assert rows[0]['stage']=='candidates' and 'candidate=' not in page.url
     if width<1000:
@@ -1256,11 +1266,100 @@ async def ezboard_flow(browser,base,width):
     await context.close()
 
 
+async def advanced_grading_flow(browser,base,width):
+    """Custom focus is explicit, persistent and visible; every paid POST is mocked."""
+    context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
+    page=await context.new_page();posts=[];errors=[];operations=[]
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    snapshot=await (await context.request.get(base+'/api/queue?filter=candidates')).json()
+    row=copy.deepcopy(snapshot['candidates'][0]);row['candidate_check']=None
+    async def fixture(route):
+        path=urlsplit(route.request.url).path
+        if route.request.method=='POST':
+            payload=route.request.post_data_json;posts.append((path,payload))
+            if path=='/api/resume':
+                assert payload=={'id':operations[0]['id']}
+                operations[0]['state']='queued'
+            else:
+                assert path in ('/api/discover','/api/submit-site','/api/check-candidate'),path
+                operation={'id':'b'*32,'state':'queued','kind':'candidate_check' if path=='/api/check-candidate' else 'discover',
+                           'payload':{'max_candidates':1 if path!='/api/discover' else 50,**payload}}
+                if path=='/api/submit-site':operation['payload']['target']={'url':payload['url']}
+                operations.append(operation)
+                if path=='/api/check-candidate':
+                    row['candidate_check']={'id':operation['id'],'state':'queued','max_usd':.25,'grading_criteria':payload['grading_criteria']}
+            await route.fulfill(status=202,json={'operation':'b'*32,**({'url':payload['url']} if path=='/api/submit-site' else {})});return
+        if path=='/api/queue':
+            await route.fulfill(status=200,json={**snapshot,'candidates':[row],'total':1,'operations':operations})
+        elif path=='/api/candidate':
+            await route.fulfill(status=200,json={'candidate':row,'review':None})
+        else:raise AssertionError(path)
+    await page.route('**/api/**',fixture)
+    await page.goto(base+'/?view=candidates');await settled(page)
+    await page.locator('#grading-advanced summary').click()
+    focus=page.get_by_label('Additional grading criteria',exact=True)
+    criteria='Cleric class sites\nHealing guides and contemporary advice'
+    await focus.fill(criteria)
+    await page.evaluate('refresh()')
+    assert await focus.input_value()==criteria and not posts
+    await safe_layout(page,width)
+    await page.reload();await settled(page)
+    await page.locator('#grading-advanced summary').click()
+    assert await focus.input_value()==criteria and not posts
+    await page.locator('#manual-url').fill('http://clerics.example/')
+    await page.locator('#manual-submit').click();await settled(page)
+    assert posts[-1]==('/api/submit-site',{'url':'http://clerics.example/','max_usd':2,'grading_criteria':criteria})
+    operations.clear();await page.evaluate('refresh()')
+    await page.locator('#discover').click();await settled(page)
+    assert posts[-1]==('/api/discover',{'max_candidates':50,'max_usd':2,'min_grade':2,'grading_criteria':criteria})
+    operations[0]['state']='interrupted'
+    await page.evaluate('refresh()')
+    await focus.fill('Guild communities')
+    await expect(page.locator('#run-criteria')).to_contain_text(criteria)
+    await page.get_by_role('button',name='Resume discovery',exact=True).first.click();await settled(page)
+    assert posts[-1]==('/api/resume',{'id':'b'*32}) and operations[0]['payload']['grading_criteria']==criteria
+    operations.clear();await page.evaluate('refresh()')
+    await page.get_by_role('button',name='Use default grading',exact=True).click()
+    assert await focus.input_value()==''
+    await page.locator('#discover').click();await settled(page)
+    assert posts[-1]==('/api/discover',{'max_candidates':50,'max_usd':2,'min_grade':2})
+    operations.clear();await page.evaluate('refresh()')
+    await page.locator('.site-tile').first.click()
+    await page.locator('#site-workspace h1').wait_for();await settled(page)
+    await page.get_by_text('Advanced · Grade this site with Luna',exact=True).click()
+    local=page.get_by_label('Additional grading criteria for this site',exact=True)
+    regrade=page.get_by_role('button',name='Regrade with these criteria',exact=True)
+    assert await local.input_value()=='' and await regrade.is_disabled()
+    await local.press_sequentially('Cleric sites',delay=10)
+    # A changed operation forces a workspace update while preserving the draft.
+    operations.append({'id':'c'*32,'kind':'publish','state':'running','payload':{}})
+    await page.evaluate('refresh()')
+    assert await local.input_value()=='Cleric sites' and await regrade.is_disabled()
+    operations.clear();await page.evaluate('refresh()')
+    assert await regrade.is_enabled()
+    await regrade.click();await settled(page)
+    assert posts[-1][0]=='/api/check-candidate' and posts[-1][1]['grading_criteria']=='Cleric sites'
+    assert await page.get_by_role('button',name='Approve site for capture',exact=True).is_disabled()
+    assert await local.is_disabled()
+    row['rating']={**row['rating'],'grade':2,'grading_criteria':'Cleric sites'}
+    row['manifest_sha256']='f'*64;row['candidate_check']['state']='completed';operations.clear()
+    await page.evaluate('refresh()')
+    await expect(page.locator('#site-workspace .grading-focus')).to_have_text('Graded for: Cleric sites')
+    assert await regrade.is_disabled() and await local.is_enabled()
+    assert await page.get_by_role('button',name='Approve site for capture',exact=True).is_enabled()
+    await expect(page.locator('.grading-options.panel')).to_contain_text('original $0.25 total cap')
+    await safe_layout(page,width)
+    await page.screenshot(path=f'/tmp/curation-grading-criteria-{width}.png',full_page=True)
+    assert not errors,errors
+    await context.close()
+
+
 async def check(base):
     async with async_playwright() as playwright:
         browser=await playwright.chromium.launch()
         try:
             for width in (320,390,430,768,1280):
+                await advanced_grading_flow(browser,base,width)
                 await ezboard_flow(browser,base,width)
                 await review_bulk_actions(browser,base,width)
                 await candidate_grade_controls(browser,base,width)

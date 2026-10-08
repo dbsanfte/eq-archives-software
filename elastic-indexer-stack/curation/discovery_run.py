@@ -89,6 +89,7 @@ def fill(root, operation, store):
                                              '--max-bytes', '134217728', '--max-seconds', '3600'])
     grade_args = options.parse_args(base + ['grade', '--api-key-file', '/run/secrets/luna_api_key',
                                             '--max-candidates', '1', '--max-usd', str(payload['max_usd'])])
+    grade_args.grading_criteria = payload.get('grading_criteria', '')
     downloader = client = None
     snapshot = {}
 

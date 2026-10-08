@@ -87,6 +87,28 @@ def test_fill_continues_past_low_grades_and_publishes_each_result_while_running(
         assert main.db.execute('SELECT state FROM candidates WHERE id=?', (first['id'],)).fetchone()[0] == 'rejected'
 
 
+def test_discovery_criteria_are_saved_for_every_grade_and_locked_on_resume(run_fixture):
+    root, clock, client, downloader, settings, operation, observed, discovered = run_fixture
+    app = create_app(root, start_worker=False)
+    reply = call(app, 'POST', '/api/discover', {'max_candidates': 2, 'max_usd': .25, 'min_grade': 2,
+                                              'grading_criteria': '  Cleric class sites  '})
+    assert reply.status_code == 202
+    with connect(root) as main:
+        op = unpack(main.db.execute('SELECT * FROM operations').fetchone())
+        assert op['payload']['grading_criteria'] == 'Cleric class sites'
+        main.db.execute("UPDATE operations SET state='interrupted'");main.db.commit()
+    assert call(app, 'POST', '/api/resume', {'id': op['id'], 'grading_criteria': 'Guild sites'}).status_code == 409
+    assert call(app, 'POST', '/api/resume', {'id': op['id']}).status_code == 202
+    result = campaign(root, op)['progress']
+    assert result['accepted'] == 2
+    for requested in client.request.call_args_list:
+        assert json.loads(requested.args[0]['input'])['grading_criteria'] == 'Cleric class sites'
+    with connect(root) as main:
+        for row in main.candidates():
+            assert json.loads(row['rating'])['grading_criteria'] == 'Cleric class sites'
+        assert unpack(main.db.execute('SELECT * FROM operations').fetchone())['payload'] == op['payload']
+
+
 def test_fill_stops_at_original_hour_deadline_and_resume_never_resets_it(run_fixture):
     root, clock, client, downloader, settings, operation, observed, discovered = run_fixture
     settings['seconds'] = 3601

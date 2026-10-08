@@ -69,6 +69,30 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(self.store.db.execute("SELECT COUNT(*) FROM attempts").fetchone()[0], 1)
         self.assertGreater(self.store.get("grading_result")["estimated_usd"], 0)
 
+    def test_custom_criteria_bind_grade_cache_and_approval_to_the_operator_request(self):
+        from review import checked_sources
+        self.candidate()
+        args=self.arguments()
+        with patch('grading.Luna') as client:
+            client.return_value.request.return_value=response()
+            grade(args,self.store)
+            default=queue(self.store)[0]
+            args.grading_criteria='Cleric class sites and healing guides'
+            grade(args,self.store)
+            focused=queue(self.store)[0]
+            self.assertEqual(client.return_value.request.call_count,2)
+            self.assertEqual(focused['rating']['grading_criteria'],args.grading_criteria)
+            self.assertNotEqual(default['manifest_sha256'],focused['manifest_sha256'])
+            payload=client.return_value.request.call_args[0][0]
+            self.assertEqual(json.loads(payload['input'])['grading_criteria'],args.grading_criteria)
+            checked_sources(self.store,focused)
+            focused['rating']['grading_criteria']='Guild sites'
+            with self.assertRaises(CrawlError):checked_sources(self.store,focused)
+            args.grading_criteria=''
+            grade(args,self.store)
+            self.assertEqual(client.return_value.request.call_count,2)
+            self.assertEqual(queue(self.store)[0]['rating']['signature'],default['rating']['signature'])
+
     def test_budget_reserved_before_call_and_survives_unknown_failure(self):
         self.candidate()
         self.assertEqual(self.grade(maximum=0.00001), 0)

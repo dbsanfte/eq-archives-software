@@ -1,4 +1,5 @@
 import json
+import pytest
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,6 +13,100 @@ from test_server import call
 from worker import Worker
 
 
+@pytest.mark.parametrize('focus', [None, [], {}, True, 12, 'a' * 1001, 'Cleric\x00sites', 'Guild\x7fsites'])
+def test_invalid_criteria_cannot_start_paid_work(tmp_path, monkeypatch, focus):
+    root, app, row, payload = setup(tmp_path, monkeypatch)
+    for path, data in [('/api/check-candidate', payload),
+                       ('/api/discover', {'max_candidates': 50, 'max_usd': 2}),
+                       ('/api/submit-site', {'url': 'http://new.example/', 'max_usd': 2})]:
+        reply = call(app, 'POST', path, {**data, 'grading_criteria': focus})
+        assert reply.status_code == 409 and 'criteria' in reply.json()['error']
+    with connect(root) as store:
+        assert store.db.execute('SELECT COUNT(*) FROM operations').fetchone()[0] == 0
+
+
+def test_regrading_uses_original_budget_frozen_criteria_and_source_bound_caches(tmp_path, monkeypatch):
+    root, app, row, payload = setup(tmp_path, monkeypatch)
+    worker = Worker(root)
+    try:
+        with patch('grading.Luna') as client, patch('candidate_checks.sample') as download:
+            client.return_value.request.return_value = response()
+            operation = call(app, 'POST', '/api/check-candidate', payload).json()['operation']
+            worker.operation()
+            current = call(app, 'GET', '/api/candidate?id=' + row['id']).json()['candidate']
+            original_hash = current['manifest_sha256']
+            regrade = {**payload, 'manifest_sha256': original_hash, 'max_usd': 2,
+                       'grading_criteria': '  Guild sites\r\nwith raiding stories  '}
+            result = call(app, 'POST', '/api/check-candidate', regrade)
+            assert result.status_code == 202
+            assert result.json()['operation'] == operation and result.json()['max_usd'] == .25
+            changing = call(app, 'POST', '/api/check-candidate', {**regrade, 'grading_criteria': 'Cleric sites'})
+            assert changing.status_code == 409 and 'already running' in changing.json()['error']
+            # A concurrent approval must not use the superseded grade while a check runs.
+            approval = call(app, 'POST', '/api/decisions', [{'id': row['id'], 'manifest_sha256': original_hash, 'decision': 'approve'}])
+            assert approval.status_code == 409 and 'grading check' in approval.json()['error']
+            assert call(app, 'POST', '/api/check-candidate', {**regrade, 'max_usd': 1}).json()['operation'] == operation
+            worker.operation()
+            assert client.return_value.request.call_count == 2
+            assert json.loads(client.return_value.request.call_args.args[0]['input'])['grading_criteria'] == 'Guild sites\nwith raiding stories'
+            current = call(app, 'GET', '/api/candidate?id=' + row['id']).json()['candidate']
+            assert current['rating']['grading_criteria'] == current['candidate_check']['grading_criteria'] == 'Guild sites\nwith raiding stories'
+            assert current['manifest_sha256'] != original_hash and current['candidate_check']['max_usd'] == .25
+            # Returning to an already paid assessment reuses it without another charge.
+            result = call(app, 'POST', '/api/check-candidate', {**regrade, 'manifest_sha256': current['manifest_sha256'], 'grading_criteria': ''})
+            assert result.json()['operation'] == operation
+            worker.operation()
+            assert client.return_value.request.call_count == 2
+            current = call(app, 'GET', '/api/candidate?id=' + row['id']).json()['candidate']
+            assert current['rating']['grading_criteria'] == '' and current['manifest_sha256'] == original_hash
+            download.assert_not_called()
+            with connect(root / 'runs' / operation) as store:
+                assert store.db.execute('SELECT COUNT(*) FROM attempts').fetchone()[0] == 2
+    finally:
+        worker.lease.close()
+
+
+def test_received_invalid_grade_is_cached_and_retry_keeps_criteria(tmp_path, monkeypatch):
+    root, app, row, payload = setup(tmp_path, monkeypatch)
+    operation = call(app, 'POST', '/api/check-candidate', {**payload, 'grading_criteria': 'Cleric sites'}).json()['operation']
+    worker = Worker(root)
+    try:
+        with patch('grading.Luna') as client:
+            client.return_value.request.return_value = {'status': 'incomplete', 'usage': {'input_tokens': 40, 'output_tokens': 40}}
+            worker.operation()
+            current = call(app, 'GET', '/api/candidate?id=' + row['id']).json()['candidate']
+            assert current['state'] == 'grade_error'
+            assert call(app, 'POST', '/api/check-candidate', {**payload, 'manifest_sha256': current['manifest_sha256']}).json()['operation'] == operation
+            worker.operation()
+            assert client.return_value.request.call_count == 1
+            assert json.loads(client.return_value.request.call_args.args[0]['input'])['grading_criteria'] == 'Cleric sites'
+        with connect(root / 'runs' / operation) as store:
+            assert store.db.execute('SELECT COUNT(*) FROM attempts').fetchone()[0] == 1
+            assert store.db.execute('SELECT actual FROM attempts').fetchone()[0] > 0
+    finally:
+        worker.lease.close()
+
+
+def test_legacy_paid_grade_can_be_restored_after_custom_regrade(tmp_path, monkeypatch):
+    root, app, row, payload = setup(tmp_path, monkeypatch, grade=3)
+    # A pre-existing grade was paid in a different discovery ledger.
+    current = call(app, 'GET', '/api/candidate?id=' + row['id']).json()['candidate']
+    worker = Worker(root)
+    try:
+        with patch('grading.Luna') as client:
+            client.return_value.request.return_value = response()
+            assert call(app, 'POST', '/api/check-candidate', {**payload, 'manifest_sha256': current['manifest_sha256'], 'grading_criteria': 'Guild sites'}).status_code == 202
+            worker.operation()
+            current = call(app, 'GET', '/api/candidate?id=' + row['id']).json()['candidate']
+            assert call(app, 'POST', '/api/check-candidate', {**payload, 'manifest_sha256': current['manifest_sha256'], 'grading_criteria': ''}).status_code == 202
+            worker.operation()
+            assert client.return_value.request.call_count == 1
+            current = call(app, 'GET', '/api/candidate?id=' + row['id']).json()['candidate']
+            assert not current['rating'].get('grading_criteria') and current['rating']['grade'] == 3
+    finally:
+        worker.lease.close()
+
+
 def response():
     return {'status': 'completed', 'usage': {'input_tokens': 100, 'output_tokens': 100},
             'output': [{'type': 'message', 'content': [{'type': 'output_text', 'text': json.dumps({
@@ -19,9 +114,9 @@ def response():
                 'evidence': [{'slot': 0, 'excerpt': 'EverQuest guild history.'}]})}]}]}
 
 
-def setup(tmp_path, monkeypatch, samples=True):
+def setup(tmp_path, monkeypatch, samples=True, grade=None):
     root = tmp_path / 'state'
-    row = add_candidate(root, grade=None)
+    row = add_candidate(root, grade=grade)
     if not samples:
         with connect(root) as store:
             store.db.execute("UPDATE candidates SET captures='[]',state='unavailable',error='No exact HTML captures found'")
