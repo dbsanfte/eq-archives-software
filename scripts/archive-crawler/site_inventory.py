@@ -80,6 +80,10 @@ class SiteInventory:
     def check(self, url, force=False, timestamps=()):
         self.probes = 0
         url = original_url(url)
+        from sitepowerup import address
+        if address(url):
+            from sitepowerup_inventory import check_board
+            return check_board(self, url, timestamps)
         from ezboard import board_url
         if board_url(url):
             from ezboard_inventory import check_board

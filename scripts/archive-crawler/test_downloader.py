@@ -178,6 +178,28 @@ class DownloaderTests(unittest.TestCase):
         self.server.catalog.append(['20070101000000', self.url, 'text/html', '200', 'LATE', '123'])
         self.assertFalse(self.call(job)['ok'])
 
+    def test_sitepowerup_prefix_catalog_keeps_dates_queries_and_single_connection(self):
+        prefix = 'http://www.sitepowerup.com/mb/view.asp?Action=Reply&BoardID=102010'
+        message = prefix + '&Reply=12155'
+        job = {**self.job('sitepowerup_list'), 'url':prefix, 'to':'20061231235959'}
+        self.server.catalog = [self.server.catalog[0],
+            ['19990101000000', message, 'text/html','200','SAME','123'],
+            ['20061231235959', message+'&Page=2', 'text/html','200','SAME','123'],[],['key%2Bnext']]
+        result = self.call(job)
+        self.assertTrue(result['ok'],result)
+        self.assertEqual(len(result['result']['captures']),2)
+        self.server.catalog = [self.server.catalog[0]]
+        self.assertTrue(self.call({**job,'resume_key':'key%2Bnext'})['ok'])
+        params=parse_qs(urlsplit(self.server.requests[-1][0]).query)
+        self.assertEqual(params['resumeKey'],['key+next'])
+        self.assertEqual(params['matchType'],['prefix'])
+        self.assertNotIn('collapse',params)
+        self.assertEqual(self.server.connections,1)
+        before=len(self.server.requests)
+        for url in ('http://www.sitepowerup.com/mb/',prefix.replace('Reply','Post'),prefix+'&BoardID=2',prefix.replace('102010','*'),prefix.replace('.com','.com.evil.example')):
+            self.assertFalse(self.call({**job,'url':url})['ok'])
+        self.assertEqual(len(self.server.requests),before)
+
     def test_empty_listing_is_known_unavailable_but_malformed_is_unresolved(self):
         self.server.catalog = []
         result = self.call(self.job("list"))

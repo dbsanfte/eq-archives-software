@@ -231,6 +231,23 @@ class BoundedDownloader < WaybackMachineDownloader
     result
   end
 
+  def sitepowerup_catalog
+    uri = URI(@base_url)
+    fields = URI.decode_www_form(uri.query || '')
+    prefix = fields.length == 1 || (fields.length == 2 && fields[0][0] == 'Action' && ['Display', 'Reply'].include?(fields[0][1]))
+    unless ['http', 'https'].include?(uri.scheme) && !uri.userinfo && !uri.fragment &&
+           ['sitepowerup.com', 'www.sitepowerup.com'].include?(uri.host&.downcase) &&
+           uri.port == (uri.scheme == 'https' ? 443 : 80) && uri.path == '/mb/view.asp' && prefix &&
+           fields.last[0] == 'BoardID' && fields.last[1].match?(/\A[1-9][0-9]{0,17}\z/)
+      raise CaptureFailure, 'SitePowerUp listing requires an explicit numeric BoardID and a read-only view prefix'
+    end
+    # CDX canonicalizes query order. Preserve every original spelling/date;
+    # the capture engine checks BoardID exactly (102010 is not 1020100).
+    paginated_catalog('prefix')
+  rescue URI::InvalidURIError, ArgumentError
+    raise CaptureFailure, 'Invalid SitePowerUp listing URL'
+  end
+
   def paginated_catalog(match)
     params = [['url', @base_url], ['matchType', match], ['output', 'json'],
               ['fl', 'timestamp,original,mimetype,statuscode,digest,length'],
@@ -320,6 +337,7 @@ if $PROGRAM_NAME == __FILE__
                                     'available_rows' => downloader.available_rows, 'identity_variants' => downloader.identity_variants }
                  when 'capture' then downloader.capture
                  when 'ezboard_list' then downloader.ezboard_catalog
+                 when 'sitepowerup_list' then downloader.sitepowerup_catalog
                  when 'capture_list' then downloader.capture_catalog
                  else raise CaptureFailure, 'Unknown downloader operation'
                  end

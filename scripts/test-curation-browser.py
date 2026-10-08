@@ -1266,6 +1266,83 @@ async def ezboard_flow(browser,base,width):
     await context.close()
 
 
+async def sitepowerup_flow(browser,base,width):
+    context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
+    page=await context.new_page();errors=[];posts=[]
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    snapshot=await (await context.request.get(base+'/api/queue?filter=candidates')).json()
+    row=copy.deepcopy(snapshot['candidates'][0])
+    url='http://www.sitepowerup.com/mb/view.asp?Action=Display&BoardID=102010'
+    row.update(url=url,scope=url,scope_mode='sitepowerup',sitepowerup='102010',ezboard=None,
+               stage='candidates',state='approval_pending')
+    row['coverage']={'site_check':{'status':'new_site','complete':True}}
+    review=None
+    async def fixture(route):
+        parsed=urlsplit(route.request.url)
+        if route.request.method=='POST':
+            submitted=route.request.post_data_json
+            payload=submitted[0] if parsed.path=='/api/decisions' else submitted
+            posts.append((parsed.path,payload))
+            assert payload['id']==row['id']
+            if parsed.path=='/api/scope':
+                assert payload['mode']=='sitepowerup'
+                # Saving the original scope does not change the server hash.
+                body={'scope':url}
+            elif parsed.path=='/api/decisions':
+                assert payload['decision']=='approve'
+                row.update(stage='queued',state='approved_waiting_batch',decision={'capture_after':'2030-01-01T00:00:00Z'})
+                body={'status':'approved'}
+            else:raise AssertionError(parsed.path)
+            await route.fulfill(status=200,json=body);return
+        if parsed.path=='/api/queue':
+            body={**snapshot,'operations':[],'candidates':[row],'total':1,
+                  'stage_counts':{name:int(name==row['stage']) for name in ('candidates','queued','capturing','review','indexing','saved','history')}}
+        elif parsed.path=='/api/candidate':body={'candidate':row,'review':review}
+        elif parsed.path=='/api/source':body={**review['manifest']['captures'][0],
+                                           'complete_extracted_text':'Archived Enchanter message. Exact reply identity retained.'}
+        else:raise AssertionError(parsed.path)
+        await route.fulfill(status=200,json=body)
+    await page.route('**/api/**',fixture)
+    await page.goto(base+'/?view=candidates&candidate='+row['id']);await settled(page)
+    await page.get_by_role('heading',name='SitePowerUp · Board 102010',exact=True).wait_for()
+    scope=page.get_by_label('Download scope',exact=True)
+    assert await scope.input_value()=='sitepowerup'
+    assert await scope.locator('option').count()==2
+    await page.get_by_text('BoardID: 102010.',exact=False).wait_for()
+    await scope.select_option('page');await scope.select_option('sitepowerup')
+    await page.get_by_role('button',name='Save capture scope',exact=True).click();await settled(page)
+    await page.get_by_role('button',name='Approve site for capture',exact=True).click();await settled(page)
+    assert [path for path,_ in posts]==['/api/scope','/api/decisions']
+    assert parse_qs(urlsplit(page.url).query)['view']==['candidates']
+    assert await page.locator('#notice').is_hidden()
+    await stage(page,'queued')
+    await page.get_by_role('button',name='Undo approval: SitePowerUp · Board 102010',exact=True).wait_for()
+    await safe_layout(page,width)
+    source=copy.deepcopy(row['captures'][0])
+    source.update(url='http://www.sitepowerup.com/mb/view.asp?Action=Reply&BoardID=102010&Reply=12155',
+                  timestamp='20000109050003',title='Enchanter message',candidate_id=row['id'])
+    row.update(stage='review',state='captured_awaiting_review',review_state='awaiting_review')
+    review={'id':'c'*32,'state':'awaiting_review','manifest_sha256':'e'*64,
+            'page_identities':[source['url']],'source_slots':[0],
+            'manifest':{'sites':[row],'captures':[source],'notes':[],
+                        'capture_window':{'from':'19990101000000','to':'20061231235959','versions':'all_available'},
+                        'sitepowerup':{'board':'102010','coverage':{'state':'bounded','catalogs_remaining':3,
+                          'reason':'Capture file limit reached; pending captures are retained','counts':{'captured':1}}}}}
+    await page.goto(base+'/?view=review&candidate='+row['id']);await settled(page)
+    await page.get_by_text('SitePowerUp BoardID 102010 · 3 catalog queries remaining',exact=False).wait_for()
+    await page.get_by_text('Requested window:',exact=False).filter(has_text='2006').wait_for()
+    await page.screenshot(path=f'/tmp/curation-sitepowerup-{width}.png',full_page=True)
+    await page.get_by_role('button',name='Browse 1 captured page',exact=True).click()
+    await page.get_by_role('button',name='Read Enchanter message',exact=True).click()
+    await page.locator('.document-text').filter(has_text='Exact reply identity retained.').wait_for()
+    links=await page.locator('a[href*="web.archive.org/web/20000109050003/"]').all()
+    hrefs=[await link.get_attribute('href') for link in links]
+    assert hrefs and any(source['url'] in href for href in hrefs)
+    await safe_layout(page,width)
+    assert not errors,errors
+    await context.close()
+
+
 async def advanced_grading_flow(browser,base,width):
     """Custom focus is explicit, persistent and visible; every paid POST is mocked."""
     context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
@@ -1359,6 +1436,7 @@ async def check(base):
         browser=await playwright.chromium.launch()
         try:
             for width in (320,390,430,768,1280):
+                await sitepowerup_flow(browser,base,width)
                 await advanced_grading_flow(browser,base,width)
                 await ezboard_flow(browser,base,width)
                 await review_bulk_actions(browser,base,width)

@@ -38,7 +38,7 @@ function external(url, text=url) {
 }
 function badge(text,tone='') { const item=node('span',text,'badge');item.dataset.tone=tone;return item; }
 function tone(row) { return row.review_state==='index_failed' || row.state==='coverage_unverified' ? 'attention' : (row.review_state || row.state)==='indexed' ? 'complete' : ['queued','capturing','indexing'].includes(row.stage) ? 'active' : ''; }
-function siteName(row) { const url=new URL(row.scope);return url.host+(url.pathname==='/' ? '' : url.pathname); }
+function siteName(row) { if (row.sitepowerup) return `SitePowerUp · Board ${row.sitepowerup}`;const url=new URL(row.scope);return url.host+(url.pathname==='/' ? '' : url.pathname); }
 function statusLabel(row) {
   const check=row.candidate_check;
   if (row.stage==='candidates' && check && ['queued','running'].includes(check.state)) return {coverage:'Checking coverage',sampling:'Finding Wayback samples',grading:'Grading with Luna'}[check.phase] || 'Evidence check queued';
@@ -371,7 +371,7 @@ function gradingOptions(row) {
 function panel(title,text,className='') {
   const box=node('section',undefined,`panel ${className}`);box.append(node('h2',title));if (text) box.append(node('p',text));return box;
 }
-function scopeDescription(row) { return row.scope_mode==='ezboard' ? 'Whole Ezboard · forums and threads across servers' : row.scope_mode==='page' ? 'Exact linked page only' : row.scope_mode==='site' ? 'Whole site / shared account' : row.scope_mode==='custom' ? 'Custom folder and descendants' : 'Linked directory and descendants'; }
+function scopeDescription(row) { return row.scope_mode==='sitepowerup' ? 'Whole SitePowerUp board · dated indexes and messages' : row.scope_mode==='ezboard' ? 'Whole Ezboard · forums and threads across servers' : row.scope_mode==='page' ? 'Exact linked page only' : row.scope_mode==='site' ? 'Whole site / shared account' : row.scope_mode==='custom' ? 'Custom folder and descendants' : 'Linked directory and descendants'; }
 function getDraft(row) {
   let draft=drafts.get(row.id);
   if (!draft || draft.hash!==row.manifest_sha256) {
@@ -466,7 +466,8 @@ function renderCandidate(root,row) {
   const settings=panel('Choose capture scope');settings.append(node('p','Approve this scope once. The download starts automatically after the Undo grace period.','meta'));
   settings.append(node('p','Capture window: 1 January 1999–31 December 2006. Download all available dated versions within this scope. Sites with 1999–2001 captures have discovery priority.','meta'));
   const draft=getDraft(row),fields=node('div',undefined,'fields'),scopeLabel=node('label','Download scope'),select=node('select');select.id='capture-scope';select.setAttribute('aria-label','Download scope');
-  const scopeOptions=row.ezboard ? [['ezboard','Whole Ezboard · all forums and threads'],['page','Board index page only'],...(['directory','site','custom'].includes(row.scope_mode) ? [[row.scope_mode,'Keep saved scope']] : [])] : [['directory','Linked directory and below'],['page','Linked page only'],['site','Whole site / shared account'],['custom','Custom folder and below']];
+  const scopeOptions=row.sitepowerup ? [['sitepowerup','Whole SitePowerUp board · all messages'],['page','Exact linked page only'],...(['directory','site','custom'].includes(row.scope_mode) ? [[row.scope_mode,'Keep saved scope']] : [])] : row.ezboard ? [['ezboard','Whole Ezboard · all forums and threads'],['page','Board index page only'],...(['directory','site','custom'].includes(row.scope_mode) ? [[row.scope_mode,'Keep saved scope']] : [])] : [['directory','Linked directory and below'],['page','Linked page only'],['site','Whole site / shared account'],['custom','Custom folder and below']];
+  if (row.sitepowerup) settings.append(node('p',`BoardID: ${row.sitepowerup}. Capture includes this board’s indexes, messages and pagination across 1999–2006. Other boards and posting forms are excluded. Limited to 2,000 downloaded captures, 256 MiB and one hour; incomplete coverage is shown for review.`,'meta'));
   if (row.ezboard) settings.append(node('p',`Board identity: ${row.ezboard}. Whole-board capture checks historical servers and dated forum/message listings across the full 1999–2006 window. Limited to 2,000 downloaded captures, 256 MiB and one hour; incomplete coverage is shown for review.`,'meta'));
   for (const [value,label] of scopeOptions) {
     const option=node('option',label);option.value=value;select.append(option);
@@ -474,7 +475,14 @@ function renderCandidate(root,row) {
   select.value=draft.mode;scopeLabel.append(select);fields.append(scopeLabel);
   const custom=node('div'),pathLabel=node('label','Custom capture folder path'),path=node('input');path.type='text';path.placeholder='/eq/research/';path.value=draft.path;pathLabel.append(path);custom.append(pathLabel,node('p','An absolute URL path inside this site or shared account.','field-help'));custom.hidden=draft.mode!=='custom';fields.append(custom);
   const saved=node('p',row.scope,'scope-value'),dirty=node('p','Scope edited. Save it before approving capture.','scope-draft');dirty.hidden=!draft.dirty;
-  const save=mutation('Save capture scope',()=>request('/api/scope',{id:row.id,manifest_sha256:row.manifest_sha256,mode:draft.mode,...(draft.mode==='custom' ? {path:draft.path} : {})}),'Capture scope saved.');save.hidden=!draft.dirty;
+  const save=mutation('Save capture scope',async()=>{
+    const mode=draft.mode,path=draft.path;
+    const result=await request('/api/scope',{id:row.id,manifest_sha256:row.manifest_sha256,mode,...(mode==='custom' ? {path} : {})});
+    // Saving the original scope can leave its manifest hash unchanged. Clear
+    // only this confirmed draft; retain any edits made while saving it.
+    if (drafts.get(row.id)===draft && draft.mode===mode && draft.path===path) drafts.delete(row.id);
+    return result;
+  },'Capture scope saved.');save.hidden=!draft.dirty;
   function edit() { draft.mode=select.value;draft.path=path.value;draft.dirty=true;custom.hidden=draft.mode!=='custom';dirty.hidden=false;save.hidden=false;renderDock(true); }
   select.addEventListener('change',edit);path.addEventListener('input',edit);
   const editable=row.state==='approval_pending';select.disabled=!editable;path.disabled=!editable;save.dataset.blocked=String(!editable);save.disabled=!editable || busy;
@@ -495,6 +503,10 @@ function captureSummary(row,review) {
   if (window) box.append(node('p',`Requested window: ${captureDate(window.from).slice(0,10)} to ${captureDate(window.to).slice(0,10)} · all available dated versions`,'meta'));
   if (coverage) box.append(node('p',coverage.reason,coverage.state==='complete' ? 'meta' : 'candidate-block'));
   box.append(node('p','This is a bounded capture of the chosen scope. It may contain only part of the original site.','meta'));
+  if (review?.manifest.sitepowerup) {
+    const board=review.manifest.sitepowerup;
+    box.append(node('p',`SitePowerUp BoardID ${board.board} · ${board.coverage.catalogs_remaining} catalog queries remaining · ${board.coverage.reason}`,'meta'));
+  }
   if (review?.manifest.ezboard) {
     const coverage=review.manifest.ezboard.coverage;
     box.append(node('p',`${coverage.hosts} Ezboard servers checked or queued · ${coverage.forums} forums identified · ${coverage.catalogs_remaining} catalog queries remaining`,'meta'));
@@ -544,7 +556,7 @@ function renderLive() {
     if (op?.error) box.append(node('p',op.error));
     if (progress) {
       const phases={preparing:'Preparing sources',checking_wayback:'Checking Wayback captures',downloading:'Downloading a capture',ready_for_review:'Preparing site reviews'};
-      box.append(node('p',phases[progress.phase] || 'Working through the approved scope','progress-title'),node('p',`${progress.files} HTML files staged · ${(progress.bytes/1048576).toFixed(2)} MiB · ${progress.urls_checked} ${progress.ezboard ? 'capture records' : 'URLs'} checked`));
+      box.append(node('p',phases[progress.phase] || 'Working through the approved scope','progress-title'),node('p',`${progress.files} HTML files staged · ${(progress.bytes/1048576).toFixed(2)} MiB · ${progress.urls_checked} ${progress.ezboard || progress.sitepowerup ? 'capture records' : 'URLs'} checked`));
       if (progress.site_url) box.append(node('p',`Current site: ${progress.site_url}`,'meta'));
       if (progress.current_url) box.append(external(progress.current_url));
       box.append(node('p',`Worker batch progress · ${progress.sites_total} approved ${progress.sites_total===1 ? 'site' : 'sites'}. Each completed site receives its own review.`,'meta'));

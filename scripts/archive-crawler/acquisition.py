@@ -68,9 +68,14 @@ def sample(args, store, *, candidates=None, downloader=None):
                 continue
             attempts += 1
             captures, listings = [], []
+            board = json.loads(candidate['coverage'] or '{}').get('scope_mode') == 'sitepowerup'
             try:
                 for level, (start, end) in TIERS.items():
-                    listing = downloader.call({"op": "list", "url": candidate["url"], "from": start, "to": end})
+                    if board:
+                        from sitepowerup import sample_listing
+                        listing = sample_listing(downloader, candidate['url'], start, end)
+                    else:
+                        listing = downloader.call({"op": "list", "url": candidate["url"], "from": start, "to": end})
                     listings.append({"tier": level, "matched": len(listing["captures"]), "limited": listing["listing_limited"],
                                      "available_rows": listing["available_rows"], "identity_variants": listing["identity_variants"]})
                     if not listing["captures"]:
@@ -82,17 +87,24 @@ def sample(args, store, *, candidates=None, downloader=None):
                     for record in selected:
                         folder = store.root / "captures" / candidate["id"]
                         folder.mkdir(parents=True, exist_ok=True, mode=0o700)
-                        destination = folder / (record["timestamp"] + ".html")
+                        suffix = '-' + digest(record['url'])[:16] if board else ''
+                        destination = folder / (record["timestamp"] + suffix + ".html")
                         result = downloader.call({"op": "capture", "url": record["url"], "timestamp": record["timestamp"],
                                                   "from": start, "to": end, "destination": str(destination)})
-                        if original_url(result["url"]) != candidate["url"] or tier(result["timestamp"]) != level:
+                        if original_url(result['url']) != original_url(record['url']) or tier(result['timestamp']) != level or (not board and original_url(result['url']) != candidate['url']):
                             raise CrawlError("Returned capture failed exact identity/date validation")
                         data = destination.read_bytes()
                         if digest(data) != result["sha256"]:
                             raise CrawlError("Capture hash mismatch")
                         text, encoding = decode(data, result.get("content_type") or "")
-                        page = Page(result["url"])
-                        page.feed(text)
+                        if board:
+                            from sitepowerup import board_name, belongs, source_page
+                            page, encoding = source_page(data, result['url'], result.get('content_type') or '')
+                            if not belongs(page, result['url'], board_name(candidate['url'])):
+                                raise CrawlError('SitePowerUp source does not verify the requested board; no grade requested')
+                        else:
+                            page = Page(result["url"])
+                            page.feed(text)
                         if not " ".join(page.text).strip():
                             raise CrawlError("Capture contains no readable source text")
                         result.update({"path": str(destination.relative_to(store.root)), "tier": level,

@@ -461,3 +461,24 @@ limits and missing pages are visible during review. Existing approved scopes
 and indexing Jobs are preserved. See the [Ezboard guide](../../scripts/archive-crawler/EZBOARD.md)
 for the verified URL forms, operator commands, limits, migration and source
 validation.
+
+## SitePowerUp capture
+
+SitePowerUp candidates represent one numeric `BoardID`, including links to
+individual `Action=Reply` messages. Discovery and manual submissions reuse that
+board identity across `www`/bare hosts and parameter order/case, while preserving
+the exact source URL and submitted provenance. Coverage recognizes both current
+query filenames and the archive's older `_and_` filenames using bounded, shared
+Git metadata. Unapproved legacy message suggestions consolidate without copying
+sources; indexed/approved boards and active checks retain their records.
+
+The **Whole SitePowerUp board** scope captures available dated indexes, messages
+and pagination from 1999–2006 through serial, paginated CDX requests. It retains
+query strings in `websites/<host>/<timestamp>/<decoded path>` destinations and
+verifies the BoardID against each source. Other boards, posting/admin actions and
+binary assets are excluded. Each board has its own 2,000-capture/256-MiB/one-hour
+budget and review, with incomplete coverage shown explicitly. Existing exact-page
+approvals do not widen. Publication and default AI-enriched indexing still require
+the usual whole-site review approval. See the
+[SitePowerUp guide](../../scripts/archive-crawler/SITEPOWERUP.md) for format
+evidence, operator commands, supported views and limitations.

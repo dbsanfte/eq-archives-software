@@ -368,6 +368,18 @@ and active work unchanged when consolidating unapproved legacy suggestions.
 Operator captures never publish/index automatically. Run the crawler tests,
 curation image tests and real browser checks when changing this flow.
 
+SitePowerUp uses the [BoardID capture engine](scripts/archive-crawler/SITEPOWERUP.md).
+Group candidates by numeric BoardID across host aliases and query order/case;
+retain exact original source URLs, queries and dates. `Action=Reply` is a readable
+message view despite its name. Whole-board capture includes indexes, messages and
+pagination, excludes other BoardIDs and posting/admin actions, and verifies saved
+source ownership. Legacy `_and_` filenames inform board coverage only; never
+reconstruct exact source identity from them. Share bounded, resumable Git metadata
+across boards without page/blob reads or implicit fetches. Consolidate unapproved
+legacy suggestions without copying sources or altering approved scopes/active
+checks. Keep separate board reviews, cumulative transport limits and explicit
+partial-coverage reporting. Run both crawler and curation/browser regressions.
+
 ### Public MCP service
 
 The service in `elastic-indexer-stack/mcp` uses Python 3.13 in production and

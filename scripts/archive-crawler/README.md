@@ -23,6 +23,13 @@ The [Ezboard guide](EZBOARD.md) documents the archive research, custom
 resumable CDX pagination and exact archive filenames. Ezboard discovery creates
 board candidates; forum and message links must resolve to a verified parent.
 
+## SitePowerUp boards
+
+The [SitePowerUp guide](SITEPOWERUP.md) covers boards addressed by ASP query
+parameters. Candidates group by numeric `BoardID`; the custom
+`sitepowerup_capture.py` command captures dated indexes and message views without
+crossing into other boards. The portal offers an explicit whole-board scope.
+
 ## Bounded pilot
 
 Keep state outside both repositories. Use an existing archive checkout whose

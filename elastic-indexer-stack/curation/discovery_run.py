@@ -60,14 +60,14 @@ def retain_graph(root, store):
         if not store.get('archive_sha') or store.get('archive_sha') != main.get('archive_sha'):
             return
         main.db.execute('ATTACH DATABASE ? AS discovery', (str(store.root / 'crawl.sqlite3'),))
-        for table in ('hosts', 'tree_state', 'files', 'scans', 'links', 'ezboard_aliases', 'ezboard_archive_boards', 'ezboard_archive_forums'):
+        for table in ('hosts', 'tree_state', 'files', 'scans', 'links', 'ezboard_aliases', 'ezboard_archive_boards', 'ezboard_archive_forums', 'sitepowerup_archive_boards'):
             main.db.execute(f'INSERT OR IGNORE INTO {table} SELECT * FROM discovery.{table}')
         retain_ezboard_progress(main, store)
         main.db.commit()
 
 
 def retain_ezboard_progress(main, store):
-    for row in store.db.execute("SELECT key,value FROM meta WHERE key LIKE 'ezboard_archive_inventory:v1:%'"):
+    for row in store.db.execute("SELECT key,value FROM meta WHERE key LIKE 'ezboard_archive_inventory:v1:%' OR key LIKE 'sitepowerup_archive_inventory:v1:%'"):
         incoming = json.loads(row['value'])
         previous = main.get(row['key']) or {}
         if incoming.get('checked', 0) >= previous.get('checked', 0):
@@ -154,7 +154,7 @@ def fill(root, operation, store):
                         progress('checking_coverage')
                         if all(item['result'].get('retryable') for item in coverage_pending):
                             continue
-                        raise CrawlError('Ezboard archive coverage is unverified; saved metadata progress is retained. Recheck coverage before grading.')
+                        raise CrawlError('Board archive coverage is unverified; saved metadata progress is retained. Recheck coverage before grading.')
                     return finish('time_limit' if time.time() >= checkpoint['deadline'] else 'links_exhausted')
             row = pending[0]
             progress('checking_coverage')
