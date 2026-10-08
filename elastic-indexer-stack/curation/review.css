@@ -46,6 +46,24 @@ p { font-size:15px; line-height:1.6; overflow-wrap:anywhere; margin-bottom:12px;
 .discovery-controls { display:grid; gap:10px; align-content:start; }
 .discovery-controls p { font-size:13px; font-weight:600; }
 .discovery-controls button { width:100%; }
+.grade-controls { grid-column:1/-1; border-top:1px solid #bfceb7; padding-top:16px; }
+.grade-controls label { display:flex; justify-content:space-between; align-items:center; font-size:14px; font-weight:650; }
+#minimum-grade-value { display:inline-grid; place-items:center; background:var(--forest); color:white; border-radius:7px; min-width:32px; min-height:32px; }
+#minimum-grade { width:100%; padding:0; min-height:44px; accent-color:var(--forest); touch-action:pan-y; }
+.grade-ticks { display:flex; justify-content:space-between; font-size:10px; color:var(--muted); }
+#grade-help { font-size:12px; margin:12px 0; }
+.grade-views { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
+.grade-views button { flex:1; font-size:12px; padding:10px 8px; }
+.grade-views button[aria-pressed=true] { border:2px solid var(--forest); background:var(--paper); font-weight:700; }
+#dismiss-all { width:100%; margin-top:6px; color:#823629; border-color:#bf9a8f; background:transparent; }
+.candidate-recovery { padding:0 16px 16px; }
+.candidate-recovery button { width:100%; }
+.candidate-recovery p { font-size:12px; margin:8px 0 0; }
+#dismiss-dialog { color:var(--ink); background:var(--paper); border:1px solid var(--line); border-radius:14px; padding:22px; width:calc(100% - 24px); max-width:420px; }
+#dismiss-dialog::backdrop { background:#102c23a0; }
+.dialog-actions { display:flex; gap:10px; margin-top:20px; }
+.dialog-actions button { flex:1; }
+#dismiss-confirm { color:white; background:#823629; border-color:#823629; }
 #discovery-status { grid-column:1/-1; border-top:1px solid #bfceb7; padding-top:12px; font-size:13px; }
 .discovery-panel[data-state=blocked] #discovery-status { color:#755117; }
 #manual-form label { display:block; font-size:13px; font-weight:600; margin-bottom:8px; }

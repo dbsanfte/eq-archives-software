@@ -27,6 +27,14 @@
         <div><h2 id="discovery-title">Discover more sites</h2><p>Find candidates from known EQ sites with Luna.</p></div>
         <div class="discovery-controls"><p id="discovery-limits">Up to 50 candidates · $2 cap per run</p><button id="discover" type="button" class="primary" aria-describedby="discovery-limits discovery-status" disabled>Discover & grade</button></div>
         <p id="discovery-status" role="status" aria-live="polite">Checking worker availability…</p>
+        <div class="grade-controls">
+          <label for="minimum-grade">Minimum Luna grade <output id="minimum-grade-value" for="minimum-grade">2</output></label>
+          <input id="minimum-grade" type="range" min="0" max="3" step="1" value="2" aria-describedby="grade-help">
+          <div class="grade-ticks" aria-hidden="true"><span>0 · Any</span><span>1</span><span>2</span><span>3 · Dedicated EQ</span></div>
+          <p id="grade-help">Show Grade 2 and above, highest first.</p>
+          <div class="grade-views"><button id="graded-view" type="button" aria-pressed="true">Graded sites</button><button id="ungraded-view" type="button" aria-pressed="false">Needs grading</button></div>
+          <button id="dismiss-all" type="button" disabled>Dismiss all candidates</button>
+        </div>
       </section>
       <section id="manual-site" class="panel" aria-labelledby="manual-title" hidden>
         <h2 id="manual-title">Add a site</h2>
@@ -48,6 +56,7 @@
     <footer><span>Private intranet · no scheduled paid runs</span><span id="version"></span></footer>
   </main>
   <div id="action-dock" hidden></div>
+  <dialog id="dismiss-dialog" aria-labelledby="dismiss-title"><h2 id="dismiss-title">Dismiss all candidates?</h2><p id="dismiss-description"></p><div class="dialog-actions"><button id="dismiss-cancel" type="button">Cancel</button><button id="dismiss-confirm" type="button">Dismiss all</button></div></dialog>
   <dialog id="tools" aria-labelledby="tools-title"><div class="dialog-heading"><h2 id="tools-title">Tools & history</h2><button id="tools-close" aria-label="Close tools">Close</button></div>
     <div class="tool-links"><button data-view="saved">Saved for later</button><button data-view="history">History</button></div>
     <details><summary>Capture limits & dates</summary><p>One connection, a 3-second delay and 128 KiB/s. The queue has no count limit. Each worker batch has at most 5 sites, 20 new URLs per site, 100 HTML files and 64 MiB. Captures prefer 1999–2001, then 2002–2007. Downloads are bounded subsets, not complete mirrors.</p></details>

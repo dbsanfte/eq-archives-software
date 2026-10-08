@@ -5,7 +5,7 @@ import copy
 import json
 from urllib.parse import parse_qs,urlsplit
 
-from playwright.async_api import async_playwright
+from playwright.async_api import async_playwright, expect
 
 
 async def settled(page):
@@ -46,6 +46,9 @@ async def basic_flow(browser,base,width):
     page.on('pageerror',lambda error:errors.append(str(error)))
     page.on('request',lambda request:external.append(request.url) if not request.url.startswith(base) else None)
     await page.goto(base)
+    await page.locator('.site-tile').nth(1).wait_for()
+    assert await page.locator('.site-tile').count()==2  # The real API hides the grade-1 fixture by default.
+    await page.get_by_role('slider',name='Minimum Luna grade').press('Home')
     await page.locator('.site-tile').nth(2).wait_for()
     assert await page.locator('#stages button').count()==5
     assert await page.locator('#site-workspace').is_hidden()
@@ -939,11 +942,165 @@ async def candidate_quick_actions(browser,base,width):
     await context.close()
 
 
+async def candidate_grade_controls(browser,base,width):
+    """Filter races, evidence recovery and bulk decisions with all APIs intercepted."""
+    context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
+    page=await context.new_page();errors=[];posts=[]
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    snapshot=await (await context.request.get(base+'/api/queue?filter=candidates')).json()
+    template=snapshot['candidates'][0]
+    rows=[]
+    for index,grade in enumerate([0,1,2,3]+[3]*51+[None,None,None]):
+        row=copy.deepcopy(template)
+        address=f'http://grade-{grade if grade is not None else "ungraded"}-{index}.example/'
+        row.update(id=f'{index:024x}',url=address,scope=address,
+                   stage='candidates',state='approval_pending' if grade is not None else 'unavailable',review_state=None,candidate_check=None)
+        if grade is not None:row['rating']['grade']=grade
+        else:row.update(rating=None,captures=[],error='No exact HTML captures found within the two tiers')
+        rows.append(row)
+    missing,saved,retry=rows[-3:]
+    saved.update(captures=copy.deepcopy(template['captures']),state='approval_pending',error=None)
+    retry.update(state='grade_error',captures=copy.deepcopy(template['captures']),error='Luna response incomplete; no judgment saved',
+                 candidate_check={'id':'a'*32,'state':'interrupted','error':'Luna response incomplete; no judgment saved','phase':'grading','max_usd':.25})
+    queued=copy.deepcopy(template);queued.update(id='f'*24,stage='queued',state='approved_waiting_batch',review_state=None)
+    rows.append(queued)
+    operations=[];dismissed=[];stale=True;revision=0
+    async def fixture(route):
+        nonlocal stale,revision
+        request=route.request;parsed=urlsplit(request.url);query=parse_qs(parsed.query)
+        if request.method=='POST':
+            payload=request.post_data_json;posts.append((parsed.path,payload))
+            if parsed.path=='/api/check-candidate':
+                row=next(row for row in rows if row['id']==payload['id'])
+                assert payload=={'id':row['id'],'manifest_sha256':row['manifest_sha256'],'max_usd':2}
+                prior=row['candidate_check'];identifier=prior['id'] if prior else 'b'*32
+                row['candidate_check']={'id':identifier,'state':'queued','phase':None,'error':None,'max_usd':prior['max_usd'] if prior else 2}
+                operations[:]=[{'id':identifier,'kind':'candidate_check','state':'queued','payload':payload,'result':None,'error':None}]
+                await route.fulfill(status=202,json={'operation':identifier,'max_usd':row['candidate_check']['max_usd']});return
+            if parsed.path=='/api/dismiss-candidates':
+                assert payload=={'token':str(revision)}
+                if stale:
+                    stale=False;revision+=1
+                    await route.fulfill(status=409,json={'error':'Candidates changed. Review the new count and try Dismiss all again.'});return
+                dismissed[:]=[row for row in rows if row['stage']=='candidates']
+                for row in dismissed:row.update(stage='history',state='rejected')
+                revision+=1
+                await route.fulfill(status=200,json={'dismissed':len(dismissed),'dismissal':'d'*32});return
+            if parsed.path=='/api/undo-dismissal':
+                assert payload=={'dismissal':'d'*32}
+                for row in dismissed:row.update(stage='candidates',state='approval_pending')
+                revision+=1
+                await route.fulfill(status=200,json={'restored':len(dismissed)});return
+            if parsed.path=='/api/scope':
+                assert payload=={'id':saved['id'],'manifest_sha256':saved['manifest_sha256'],'mode':'custom','path':'/research/'}
+                saved.update(scope=saved['url']+'research/',scope_mode='custom',manifest_sha256='c'*64)
+                await route.fulfill(status=200,json={'saved':True});return
+            raise AssertionError(parsed.path)  # No paid or production mutations can escape.
+        if parsed.path=='/api/candidate':
+            await route.fulfill(status=200,json={'candidate':next(row for row in rows if row['id']==query['id'][0]),'review':None});return
+        assert parsed.path=='/api/queue'
+        view=query['filter'][0];minimum=int(query.get('min_grade',['0'])[0]);ungraded=query.get('needs_grade')==['1']
+        candidates=[row for row in rows if row['stage']=='candidates']
+        selected=[row for row in rows if row['stage']==view]
+        if view=='candidates':
+            selected=[row for row in selected if not row['rating']] if ungraded else [row for row in selected if row['rating'] and row['rating']['grade']>=minimum]
+            selected.sort(key=lambda row:(-(row['rating'] or {}).get('grade',-1),row['url']))
+        selected=[row for row in selected if query.get('search',[''])[0] in row['url']]
+        offset=int(query.get('offset',['0'])[0])
+        body={**snapshot,'candidates':selected[offset:offset+50],'total':len(selected),'operations':copy.deepcopy(operations),
+              'stage_counts':{name:sum(row['stage']==name for row in rows) for name in snapshot['stage_counts']},
+              'candidate_grades':{str(grade):sum((row['rating'] or {}).get('grade',-1)==grade for row in candidates) for grade in range(-1,4)},
+              'dismissal':{'count':len(candidates),'token':str(revision)}}
+        if minimum==1:await asyncio.sleep(.65)
+        try:await route.fulfill(status=200,json=body)
+        except Exception:pass  # Obsolete responses are intentionally aborted.
+    await page.route('**/api/**',fixture)
+    await page.goto(base+'/?view=candidates');await settled(page)
+    slider=page.get_by_role('slider',name='Minimum Luna grade')
+    assert await slider.input_value()=='2'
+    await expect(page.locator('.site-tile')).to_have_count(50)
+    assert (await page.locator('.site-tile h2').first.inner_text()).startswith('grade-3-')
+    await page.locator('#next').click();await settled(page)
+    await expect(page.locator('.site-tile')).to_have_count(3)
+    await slider.press('Home');await page.locator('#minimum-grade-value').filter(has_text='0').wait_for()
+    await page.get_by_label('Find a site',exact=True).fill('grade-0-')
+    await page.locator('.site-tile h2').filter(has_text='grade-0-0.example').wait_for()
+    assert 'offset=' not in page.url
+    await page.get_by_label('Find a site',exact=True).fill('');await page.wait_for_timeout(250)
+    await slider.press('ArrowRight');await page.wait_for_timeout(250)
+    await slider.press('End')
+    await page.locator('#view-total').filter(has_text='52 sites').wait_for();await page.wait_for_timeout(750)
+    assert all(name.startswith('grade-3-') for name in await page.locator('.site-tile h2').all_text_contents())
+    await page.reload();await settled(page)
+    assert await slider.input_value()=='3' and 'min_grade=3' in page.url
+    await page.goto(base);await settled(page)
+    assert await slider.input_value()=='3'  # Preference survives a fresh portal visit.
+    await page.locator('#ungraded-view').click();await settled(page)
+    await expect(page.locator('.candidate-card')).to_have_count(3)
+    await page.go_back();await settled(page)
+    assert await page.locator('#graded-view').get_attribute('aria-pressed')=='true'
+    await page.locator('#ungraded-view').click();await settled(page)
+    find=page.get_by_role('button',name='Find samples & grade: '+urlsplit(missing['scope']).netloc,exact=True)
+    await expect(find).to_be_enabled()
+    await expect(page.get_by_role('button',name='Approve capture: '+urlsplit(missing['scope']).netloc,exact=True)).to_be_disabled()
+    await expect(page.get_by_role('button',name='Grade source evidence: '+urlsplit(saved['scope']).netloc,exact=True)).to_be_enabled()
+    retry_button=page.get_by_role('button',name='Retry evidence & grading: '+urlsplit(retry['scope']).netloc,exact=True)
+    await retry_button.click();await settled(page)
+    assert len(posts)==1 and operations[0]['id']=='a'*32
+    await expect(find).to_be_disabled()
+    retry['candidate_check'].update(state='running',phase='grading');operations[0]['state']='running'
+    await page.locator('#refresh').click();await settled(page)
+    await page.get_by_role('button',name='Grading with Luna: '+urlsplit(retry['scope']).netloc,exact=True).wait_for()
+    retry['candidate_check'].update(state='interrupted',error='Luna response incomplete; no judgment saved')
+    operations[0].update(state='interrupted',error='Luna response incomplete; no judgment saved')
+    await page.locator('#refresh').click();await settled(page)
+    await expect(retry_button).to_be_enabled()
+    assert 'Original $0.25 cap' in await retry_button.locator('..').inner_text()
+    await open_site(page,urlsplit(saved['scope']).netloc)
+    await page.get_by_label('Download scope',exact=True).select_option('custom')
+    await page.get_by_label('Custom capture folder path',exact=True).fill('/research/')
+    await page.get_by_role('button',name='Grade source evidence: '+urlsplit(saved['scope']).netloc,exact=True).click();await settled(page)
+    saved.update(rating=copy.deepcopy(template['rating']),state='approval_pending',manifest_sha256='e'*64);saved['rating']['grade']=3
+    saved['candidate_check']['state']='completed';operations.clear()
+    await page.locator('#refresh').click();await settled(page)
+    await expect(page.get_by_text('Luna grade 3/3 · guild',exact=True)).to_be_visible()
+    await expect(page.get_by_label('Custom capture folder path',exact=True)).to_have_value('/research/')
+    await expect(page.get_by_role('button',name='Approve site for capture',exact=True)).to_be_disabled()
+    await page.get_by_role('button',name='Save capture scope',exact=True).click();await settled(page)
+    await expect(page.get_by_role('button',name='Approve site for capture',exact=True)).to_be_enabled()
+    await stage(page,'candidates');await page.locator('#graded-view').click();await settled(page)
+    await page.get_by_label('Find a site',exact=True).fill('grade-3-3.')
+    await page.locator('#view-total').filter(has_text='1 site').wait_for()
+    await page.locator('#dismiss-all').click()
+    assert 'all 58 remaining candidates' in await page.locator('#dismiss-description').inner_text()
+    assert 'hidden by grade or search filters and other pages' in await page.locator('#dismiss-description').inner_text()
+    await safe_layout(page,width)
+    await page.locator('#dismiss-cancel').click()
+    assert len(posts)==3
+    await page.locator('#dismiss-all').click();await page.locator('#dismiss-confirm').click();await settled(page)
+    await page.locator('#error').filter(has_text='Candidates changed').wait_for()
+    assert await page.locator('[data-count=candidates]').inner_text()=='58'
+    await page.locator('#refresh').click();await settled(page)
+    await page.locator('#dismiss-all').click();await page.locator('#dismiss-confirm').click();await settled(page)
+    assert await page.locator('[data-count=candidates]').inner_text()=='0'
+    assert await page.locator('[data-count=queued]').inner_text()=='1'
+    await page.get_by_role('button',name='Undo dismiss all',exact=True).click();await settled(page)
+    assert await page.locator('[data-count=candidates]').inner_text()=='58'
+    await page.get_by_label('Find a site',exact=True).fill('');await settled(page)
+    await page.locator('#ungraded-view').click();await settled(page)
+    await expect(page.locator('.candidate-card')).to_have_count(2)
+    await page.screenshot(path=f'/tmp/curation-candidate-grades-{width}.png',full_page=True)
+    await safe_layout(page,width)
+    assert not errors,errors
+    await context.close()
+
+
 async def check(base):
     async with async_playwright() as playwright:
         browser=await playwright.chromium.launch()
         try:
             for width in (320,390,430,768,1280):
+                await candidate_grade_controls(browser,base,width)
                 await candidate_quick_actions(browser,base,width)
                 await capture_approval_navigation(browser,base,width)
                 await discovery_flow(browser,base,width)

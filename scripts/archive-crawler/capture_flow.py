@@ -40,8 +40,8 @@ REVIEWABLE = frozenset(('approval_pending', 'approved_waiting_batch', 'deferred'
 TRANSITIONS = {
     Action.RESTORE: ({CandidateState.DEFERRED, CandidateState.REJECTED}, CandidateState.SUGGESTED),
     Action.APPROVE: (REVIEWABLE, CandidateState.AWAITING_CAPTURE),
-    Action.REJECT: (REVIEWABLE, CandidateState.REJECTED),
-    Action.DEFER: (REVIEWABLE, CandidateState.DEFERRED),
+    Action.REJECT: (REVIEWABLE | {'grade_error', 'coverage_unverified'}, CandidateState.REJECTED),
+    Action.DEFER: (REVIEWABLE | {'grade_error', 'coverage_unverified'}, CandidateState.DEFERRED),
     Action.UNDO: ({CandidateState.AWAITING_CAPTURE}, CandidateState.SUGGESTED),
     Action.START: ({CandidateState.AWAITING_CAPTURE}, CandidateState.CAPTURING),
     Action.COMPLETE: ({CandidateState.CAPTURING}, CandidateState.CAPTURED),
