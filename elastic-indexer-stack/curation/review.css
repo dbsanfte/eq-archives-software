@@ -161,6 +161,15 @@ details p { font-size:13px; }
 .wide { width:100%; }
 .progress-title { font-size:21px!important; font-family:Georgia,serif; }
 progress { width:100%; display:block; margin:18px 0; accent-color:var(--forest); }
+.capture-meter { margin:16px 0; padding:16px; border:1px solid var(--line); border-radius:12px; background:#f0f4e9; }
+.capture-meter .capture-remaining { margin:0 0 8px; font-size:1.35rem; font-weight:750; color:var(--forest); }
+.capture-meter .capture-fraction { margin:0; font-size:.9rem; font-variant-numeric:tabular-nums; }
+.capture-meter progress { height:16px; margin:12px 0; }
+.capture-meter .capture-eta { margin:0; font-weight:650; font-variant-numeric:tabular-nums; }
+.capture-meter .meta { margin-bottom:0; }
+.capture-meter[data-paused=true] { background:#f6f1e5; }
+.capture-meter[data-paused=true] progress { accent-color:#9b813c; }
+.site-tile .capture-meter { margin:12px 0; padding:12px; width:100%; }
 .attention { background:#fff4e9; border-color:#d8ae88; }
 .attention .panel-label { color:#875321; }
 .pipeline { list-style:none; padding:0!important; margin:20px 0; }

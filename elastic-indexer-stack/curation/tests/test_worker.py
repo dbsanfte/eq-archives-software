@@ -124,13 +124,17 @@ def test_capture_progress_is_visible_during_work_and_survives_interruption(candi
     def capture(root,batch,sites,progress):
         progress(snapshot)
         current=call(app,'GET','/api/queue').json()['operations'][0]
-        assert current['state']=='running' and current['result']['progress']==snapshot
+        saved = current['result']['progress']
+        assert current['state']=='running' and all(saved[k] == v for k,v in snapshot.items())
+        assert saved['completion']['remaining'] is None
         raise CrawlError('Wayback HTTP 422; bounded retries exhausted')
     monkeypatch.setattr('worker.capture_sites',capture)
     worker=Worker(root)
     try:
         worker.operation()
         current=call(create_app(root,start_worker=False),'GET','/api/queue').json()['operations'][0]
-        assert current['state']=='interrupted' and current['result']['progress']==snapshot
+        saved = current['result']['progress']
+        assert current['state']=='interrupted' and all(saved[k] == v for k,v in snapshot.items())
+        assert saved['completion']['remaining'] is None and saved['completion']['updated_at']
         assert current['result']['batch_id']==batch_id
     finally:worker.lease.close()

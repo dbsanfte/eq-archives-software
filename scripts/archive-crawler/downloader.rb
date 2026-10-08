@@ -372,21 +372,23 @@ class BoundedDownloader < WaybackMachineDownloader
     response = @transport.get(replay, destination: streamed ? destination + '.part' : nil,
                               max_bytes: @job['max_file_bytes'])
     actual, basis, url = replay_identity(response)
-    raise CaptureFailure, 'Replay returned a different original URL' unless url == @base_url
+    raise CaptureFailure, 'Replay returned a different original URL' unless same_original?(url, @base_url)
+    # Wayback may add/remove the scheme's default port on replay. Keep the
+    # exact CDX spelling as the source identity and retain the replay spelling
+    # as provenance; paths, queries, schemes and non-default ports stay distinct.
+    identity = { 'url' => @base_url, 'requested_timestamp' => info.fetch(:timestamp), 'timestamp' => actual,
+                 'timestamp_basis' => basis, 'content_type' => response['content_type'] }
+    identity['replay_original_url'] = url if url != @base_url
     if streamed
       raise CaptureFailure, 'Replay returned a different dated version; requested version remains unavailable' unless actual == info.fetch(:timestamp)
       File.rename(destination + '.part', destination)
-      return { 'url' => url, 'requested_timestamp' => info.fetch(:timestamp), 'timestamp' => actual,
-               'timestamp_basis' => basis, 'content_type' => response['content_type'],
-               'sha256' => response['sha256'], 'bytes' => response['bytes'] }
+      return identity.merge('sha256' => response['sha256'], 'bytes' => response['bytes'])
     end
     body = response.fetch('body')
     raise CaptureFailure, 'Empty source body' if body.empty?
     File.open(destination + '.part', 'wb', 0600) { |file| file.write(body) }
     File.rename(destination + '.part', destination)
-    { 'url' => @base_url, 'requested_timestamp' => info.fetch(:timestamp), 'timestamp' => actual,
-      'timestamp_basis' => basis, 'content_type' => response['content_type'],
-      'sha256' => Digest::SHA256.hexdigest(body), 'bytes' => body.bytesize }
+    identity.merge('sha256' => Digest::SHA256.hexdigest(body), 'bytes' => body.bytesize)
   ensure
     File.delete(destination + '.part') if destination && File.exist?(destination + '.part')
   end

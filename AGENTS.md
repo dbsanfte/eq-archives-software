@@ -373,6 +373,14 @@ list/capture its destination, and retain actual URL/date plus entry provenance.
 A changed scope on explicit retry must update the run's eligibility checks without
 resetting its operation, sources or budgets; reject approval of a page scope that
 excludes its graded redirect source.
+Replay comparisons must accept adding/removing the scheme's default port (HTTP
+80, HTTPS 443), retain the CDX spelling and differing replay-original URL as
+provenance, and continue rejecting other ports, source changes and exact-date
+substitution. Capture cards and workspaces show known processed/remaining totals,
+determinate progress and a recent-throughput ETA. Inventory totals may grow;
+unknown totals and stalled estimates must remain explicit. Persist progress across
+reloads, retain counts on pause, and recalculate ETA on resume without counting
+paused time or reused sources. Polling cannot start or resume capture.
 
 Ezboard uses the [custom capture engine](scripts/archive-crawler/EZBOARD.md).
 Candidates represent a source-verified top-level board across numbered Ezboard

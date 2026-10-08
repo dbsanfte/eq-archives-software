@@ -16,6 +16,7 @@ from acquisition import Downloader, sample
 from grading import grade
 from graph import staged_links
 from captures import capture_sites
+from capture_progress import CaptureProgress
 from jobs import Kubernetes, blockers, import_attempt, import_job, import_name
 from publisher import publish
 from state import connect, unpack, worker_lease
@@ -214,12 +215,13 @@ class Worker:
                         require_new(store, site['url'])
                 batch_id = operation["payload"]["batch_id"]
                 latest = None
+                tracker = CaptureProgress()
                 def progress(snapshot):
                     nonlocal latest
-                    latest = snapshot
+                    latest = tracker.update(snapshot)
                     with connect(self.root) as store:
                         store.db.execute("UPDATE operations SET result=?,updated=? WHERE id=? AND state='running'",
-                                         (json.dumps({'batch_id': batch_id, 'progress': snapshot}), now(), operation['id']))
+                                         (json.dumps({'batch_id': batch_id, 'progress': latest}), now(), operation['id']))
                         store.db.commit()
                 manifest = capture_sites(self.root, batch_id, operation["payload"]["sites"], progress=progress)
                 with connect(self.root) as store:

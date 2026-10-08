@@ -66,11 +66,14 @@ def test_full_capture_pause_keeps_checkpoint_and_never_returns_partial_review(ca
             Path(job['destination']).write_bytes(b'png')
             return {'url': job['url'], 'timestamp': job['timestamp'], 'sha256': digest(b'png'), 'bytes': 3, 'content_type': 'image/png'}
         def close(self): pass
+    reports=[]
     with pytest.raises(CrawlError, match='budget'):
-        capture_sites(root, 'b' * 32, [site], Downloader)
+        capture_sites(root, 'b' * 32, [site], Downloader,progress=reports.append)
+    assert (reports[-1]['files'],reports[-1]['versions_found'],reports[-1]['versions_pending'])==(2,3,1)
     assert not (root / 'batches' / ('b' * 32) / 'manifest.json').exists()
     failing = False
-    result = capture_sites(root, 'b' * 32, [site], Downloader)
+    result = capture_sites(root, 'b' * 32, [site], Downloader,progress=reports.append)
+    assert (reports[-1]['files'],reports[-1]['versions_found'],reports[-1]['versions_pending'])==(3,3,0)
     assert len(result['captures']) == 3
     assert calls.count('scope_list') == 1
     assert calls.count('capture_file') == 3  # one success, one failed request, one resumed success

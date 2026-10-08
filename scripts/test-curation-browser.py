@@ -3,6 +3,7 @@ import argparse
 import asyncio
 import copy
 import json
+from datetime import datetime, timezone
 from urllib.parse import parse_qs,urlsplit
 
 from playwright.async_api import async_playwright, expect
@@ -523,6 +524,70 @@ async def capture_flow(browser,base):
     assert await page.locator('[data-count=capturing]').inner_text()=='0'
     assert await page.locator('[data-count=review]').inner_text()=='1'
     assert await page.get_by_role('button',name='Approve site & index',exact=True).is_enabled()
+    await context.close()
+
+
+async def capture_progress_flow(browser,base,width):
+    context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
+    page=await context.new_page();errors=[]
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    snapshot=await (await context.request.get(base+'/api/queue?filter=candidates')).json()
+    row=copy.deepcopy(snapshot['candidates'][0]);row.update(stage='capturing',state='capturing')
+    progress={'phase':'preparing','files':64,'bytes':1809952,'urls_checked':0,'sites_total':1,
+              'site_url':row['scope'],'current_url':row['url']}
+    op={'id':'f'*32,'kind':'capture','state':'running','payload':{'sites':[{'id':row['id']}]},'result':{'progress':progress}}
+    detail={'candidate':row,'review':None,'capture_operation':op,'queue_blocker':None}
+    async def fixture(route):
+        assert route.request.method=='GET', 'Progress polling must never start or resume work'
+        parsed=urlsplit(route.request.url)
+        if parsed.path=='/api/candidate': body=detail
+        elif parsed.path=='/api/queue':
+            body={**snapshot,'candidates':[row],'total':1,'operations':[op],
+                  'stage_counts':{name:int(name=='capturing') for name in ('candidates','queued','capturing','review','indexing','saved','history')}}
+        else: await route.continue_();return
+        await route.fulfill(status=200,json=body)
+    await page.route('**/api/**',fixture)
+    await page.goto(base+'/?view=capturing');await settled(page)
+    await page.get_by_text('Counting remaining captures…',exact=True).wait_for()
+    assert await page.get_by_role('progressbar').get_attribute('value') is None
+    progress.update(phase='downloading',versions_found=100,versions_pending=36,unavailable=0,catalogs_pending=0,
+        completion={'total':100,'completed':64,'remaining':36,'eta_seconds':3600,'updated_at':datetime.now(timezone.utc).isoformat()})
+    # An unchanged candidate row still gets updated card progress on polling.
+    await page.evaluate('refresh()');await settled(page)
+    await page.get_by_text('36 captures left',exact=True).wait_for()
+    await expect(page.get_by_role('progressbar')).to_have_attribute('value','64')
+    await expect(page.get_by_role('progressbar')).to_have_attribute('max','100')
+    await expect(page.locator('.capture-eta')).to_contain_text('ETA: about')
+    await page.get_by_role('button',name='Open '+await page.locator('.site-tile h2').inner_text(),exact=True).click()
+    await settled(page)
+    meter=page.locator('#stage-live .capture-meter')
+    await expect(meter).to_contain_text('36 captures left')
+    await expect(meter).to_contain_text('Counts cover the files listed so far')
+    progress.update(files=5000,versions_found=20000,versions_pending=15000,catalogs_pending=2,
+        completion={'total':20000,'completed':5000,'remaining':15000,'eta_seconds':5400,'updated_at':datetime.now(timezone.utc).isoformat()})
+    await page.evaluate('refresh()');await settled(page)
+    await expect(meter).to_contain_text('15,000 captures left')
+    await expect(meter).to_contain_text('5,000 of 20,000 listed captures processed · 25%')
+    await expect(meter.get_by_role('progressbar')).to_have_attribute('max','20000')
+    await expect(meter).to_contain_text('2 archive listings still being checked.')
+    await page.reload();await settled(page)
+    await expect(meter).to_contain_text('15,000 captures left')
+    await expect(meter.locator('.capture-eta')).to_contain_text('ETA: about')
+    # A stalled replay cannot make the countdown claim that work finished.
+    await meter.locator('.capture-eta').evaluate('(node)=>node.dataset.finish=String(Date.now()-1)')
+    await expect(meter.locator('.capture-eta')).to_have_text('ETA updating: waiting for the next capture.',timeout=2500)
+    op['state']='interrupted';op['error']='Wayback request budget reached'
+    await page.evaluate('refresh()');await settled(page)
+    await expect(meter.locator('.capture-eta')).to_have_text('ETA paused. Recalculates after resume.')
+    await expect(meter.get_by_role('progressbar')).to_have_attribute('value','5000')
+    op['state']='running';op.pop('error');progress['completion']['eta_seconds']=None
+    await page.evaluate('refresh()');await settled(page)
+    await expect(meter.locator('.capture-eta')).to_have_text('ETA calculating after the next captures…')
+    progress['completion'].update(eta_seconds=5400,updated_at=datetime.now(timezone.utc).isoformat())
+    await page.evaluate('refresh()');await settled(page)
+    await safe_layout(page,width)
+    await page.screenshot(path=f'/tmp/curation-capture-progress-{width}.png',full_page=True)
+    assert not errors,errors
     await context.close()
 
 
@@ -1554,6 +1619,7 @@ async def check(base):
         browser=await playwright.chromium.launch()
         try:
             for width in (320,390,430,768,1280):
+                await capture_progress_flow(browser,base,width)
                 await complete_file_review(browser,base,width)
                 await candidate_failure_feedback(browser,base,width)
                 await sitepowerup_flow(browser,base,width)

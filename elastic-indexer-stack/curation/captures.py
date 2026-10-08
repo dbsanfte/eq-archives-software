@@ -253,11 +253,15 @@ def capture_sites(root, batch_id, sites, downloader_factory=Downloader, progress
     site_index, site_url = 0, None
     def report(phase, current_url=None):
         if progress:
+            checked = sum(c.get('checked', c['offset']) for c in catalogs.values())
+            pending = sum(len(c['records']) - c['offset'] for c in catalogs.values())
             progress({"phase": phase, "files": len(draft["captures"]),
                       "bytes": sum(c["bytes"] for c in draft["captures"]), "urls_checked": len(visited),
                       "sites_done": site_index if phase == 'ready_for_review' else max(0, site_index - 1),
                       "sites_total": len(sites), "site_url": site_url, "current_url": current_url,
-                      "capture_window": draft['capture_window']})
+                      "capture_window": draft['capture_window'],
+                      "versions_found": checked + pending, "versions_pending": pending,
+                      "catalogs_pending": sum(not c['end'] for c in catalogs.values())})
     report('preparing')
     args = SimpleNamespace(delay=3, bytes_per_second=131072, max_requests=LIMITS["requests"],
                            max_page_bytes=LIMITS["page_bytes"], max_bytes=LIMITS["bytes"], max_seconds=LIMITS["seconds"])
@@ -303,6 +307,9 @@ def capture_sites(root, batch_id, sites, downloader_factory=Downloader, progress
                         raise CaptureBound('URL traversal limit reached; full date coverage remains incomplete')
                     catalogs[key] = {'site': site['id'], 'url': url, 'records': [], 'offset': 0, 'resume_key': None, 'end': False}
                 catalog = catalogs[key]
+                # Old paused captures already have an offset into their saved
+                # page. Carry checked counts across subsequent CDX pages.
+                catalog.setdefault('checked', catalog['offset'])
                 while True:
                     if catalog['offset'] >= len(catalog['records']):
                         if catalog['end']:
@@ -360,6 +367,7 @@ def capture_sites(root, batch_id, sites, downloader_factory=Downloader, progress
                             else:
                                 note(url, 'No readable source text')
                     catalog['offset'] += 1
+                    catalog['checked'] += 1
                     catalog.pop('receipt', None)
                     save(draft_path, draft)
                 visited.add((site["id"], url))

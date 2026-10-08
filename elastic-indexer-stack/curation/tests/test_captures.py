@@ -207,11 +207,21 @@ def test_full_date_capture_resumes_saved_catalog_without_replaying_previous_vers
         def close(self): pass
     with pytest.raises(CrawlError,match='connection failed'):
         capture_sites(root,'a'*32,[site],Interrupted)
+    # A pre-progress deployment checkpoint has an offset but no cumulative
+    # checked field. Its completed page must survive resume and pagination.
+    draft_path=root/'batches'/('a'*32)/'draft.json'
+    draft=json.loads(draft_path.read_text())
+    for catalog in draft['catalogs'].values(): catalog.pop('checked',None)
+    draft_path.write_text(json.dumps(draft))
     failing=False
-    manifest=capture_sites(root,'a'*32,[site],Interrupted)
+    reports=[]
+    manifest=capture_sites(root,'a'*32,[site],Interrupted,progress=reports.append)
     assert {c['timestamp'] for c in manifest['captures']}=={'20000101000000','20011231235959','20061231235959'}
     assert len([job for job in calls if job['op']=='capture' and job['timestamp']=='20011231235959'])==1
     assert len([job for job in calls if job['op']=='capture_list' and not job.get('resume_key')])==1
+    assert reports[0]['versions_found']==1 and reports[0]['versions_pending']==0
+    assert reports[-1]['versions_found']==2 and reports[-1]['versions_pending']==0
+    assert any(r['versions_found']==2 and r['versions_pending']==1 for r in reports)
 
 
 def test_full_date_capture_limits_are_visible_and_later_records_remain_checkpointed(candidate,monkeypatch):
@@ -376,13 +386,17 @@ def test_approved_page_captures_full_1999_2006_window_with_pagination_and_sample
             Path(job['destination']).write_bytes(raw)
             return {'url':job['url'],'timestamp':job['timestamp'],'sha256':digest(raw),'bytes':len(raw)}
         def close(self): pass
-    manifest=capture_sites(root,'a'*32,[site],Versions)
+    reports=[]
+    manifest=capture_sites(root,'a'*32,[site],Versions,progress=reports.append)
     assert {c['timestamp'] for c in manifest['captures']}=={'19990101000000','20000101000000','20061231235959'}
     assert all(job['from']=='19990101000000' and job['to']=='20061231235959' for job in calls)
     assert len([job for job in calls if job['op']=='capture_list'])==2
     assert not any(job['op']=='capture' and job['timestamp']=='20000101000000' for job in calls)
     assert manifest['capture_window']=={'from':'19990101000000','to':'20061231235959','versions':'all_available'}
     assert manifest['capture_coverage'][site['id']]['state']=='complete'
+    assert reports[-1]['versions_found']==3 and reports[-1]['versions_pending']==0
+    assert any(r['versions_found']==2 and r['versions_pending']==2 for r in reports)
+    assert any(r['versions_found']==3 and r['versions_pending']==1 for r in reports)
     previous=len(calls)
     assert capture_sites(root,'a'*32,[site],Versions)['captures']==manifest['captures']
     assert len(calls)==previous
