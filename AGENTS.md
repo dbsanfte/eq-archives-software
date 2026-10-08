@@ -256,7 +256,16 @@ Keep publication status and explicit retry on the affected site. Preserve the
 selected view/site across reloads and the open source page during status updates.
 Design for phones first: bottom stage navigation, compact site lists, focused site
 workspaces and a reachable action bar. Confirmed approvals follow the site into
-its next stage; failures cannot advance it. Whole-site approval lives outside the
+its next stage; failures cannot advance it. Discover & grade is a primary action
+on Candidates, with its explicit 50-candidate/$2 cap and a visible shared-worker
+blocker. Polling may enable it but must never start a paid run. Paused discovery
+resumes there within its original bounds. Manual URL submissions also live on
+Candidates: unwrap Wayback links, preserve original page identity and submitted
+provenance, run only that site's normal coverage/sampling/Luna workflow with an
+explicit one-site/$2 maximum, and reuse existing website/account candidates or
+pending operations without changing decisions or resetting budgets. Unverified
+coverage pauses before spending; archived sites retire without sampling/grading.
+Whole-site approval lives outside the
 document reader. Use separate mobile page-list/reader screens with normal scrolling
 and URL-backed page/version navigation. Desktop may show both labeled panels with
 independent keyboard/button scrolling. Preserve Back navigation, page filters,

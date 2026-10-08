@@ -60,7 +60,7 @@ def enqueue(store, kind, payload, commit=True):
     if commit:
         store.db.execute("BEGIN IMMEDIATE")
     if kind != 'publish' and store.db.execute("SELECT 1 FROM operations WHERE state IN ('queued','running')").fetchone():
-        raise CrawlError("A capture or discovery operation is already queued or running")
+        raise CrawlError("Capture, discovery or archive publication is already queued or running; wait for it to finish")
     operation = identifier()
     store.db.execute("INSERT INTO operations VALUES (?,?,?, ?,NULL,NULL,?,?)",
                      (operation, kind, "queued", json.dumps(payload), now(), now()))

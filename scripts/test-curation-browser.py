@@ -511,11 +511,191 @@ async def capture_flow(browser,base):
     await context.close()
 
 
+async def discovery_flow(browser,base,width):
+    """Every paid action is intercepted; this test cannot run a discovery worker."""
+    context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
+    page=await context.new_page()
+    errors=[];posts=[]
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    operations=[{'id':'a'*32,'kind':'publish','state':'running','payload':{}}]
+    loading,release_listing=asyncio.Event(),asyncio.Event()
+    submitted,release_action=asyncio.Event(),asyncio.Event()
+    reject=False
+    async def fixture(route):
+        nonlocal operations
+        path=urlsplit(route.request.url).path
+        if route.request.method=='POST':
+            posts.append((path,route.request.post_data_json))
+            assert path in ('/api/discover','/api/resume'),path
+            if reject:
+                operations=[{'id':'c'*32,'kind':'publish','state':'running','payload':{}}]
+                await route.fulfill(status=409,json={'error':'Archive publication has already started.'});return
+            submitted.set();await release_action.wait()
+            if path=='/api/discover':
+                assert route.request.post_data_json=={'max_candidates':50,'max_usd':2}
+                operations=[{'id':'b'*32,'kind':'discover','state':'queued','payload':route.request.post_data_json}]
+            else:
+                assert route.request.post_data_json=={'id':'b'*32}
+                operations[0]['state']='queued'
+            await route.fulfill(status=202,json={'operation':'b'*32});return
+        assert path=='/api/queue',path
+        loading.set();await release_listing.wait()
+        await route.fulfill(status=200,json={'candidates':[],'total':0,'offset':0,'operations':operations,
+            'stage_counts':{name:0 for name in ('candidates','queued','capturing','review','indexing','saved','history')},
+            'capture_queue_error':None,'version':'discovery-fixture'})
+    await page.route('**/api/**',fixture)
+    await page.goto(base+'/?view=candidates')
+    await asyncio.wait_for(loading.wait(),timeout=3)
+    button=page.locator('#discover');status=page.locator('#discovery-status')
+    assert await page.locator('#stage-list #discover').is_visible(),'Discovery must be on Candidates, outside More'
+    assert await button.is_disabled(),'Availability must be checked before enabling a paid action'
+    release_listing.set();await settled(page)
+    await status.filter(has_text='Archive publication is running.').wait_for()
+    assert await button.is_disabled() and not posts
+    await page.locator('#manual-url').fill('http://typed-while-busy.example/')
+    assert await page.locator('#manual-submit').is_disabled()
+    assert 'discovery-status' in await button.get_attribute('aria-describedby')
+    assert '50 candidates' in await page.locator('#discovery-limits').inner_text()
+    assert '$2' in await page.locator('#discovery-limits').inner_text()
+    await safe_layout(page,width)
+    bounds=await button.bounding_box()
+    assert bounds['height']>=48 and bounds['width']>=44
+    assert bounds['y']>=0 and bounds['y']+bounds['height']<min(760,await page.evaluate('innerHeight'))
+    await page.screenshot(path=f'/tmp/curation-discovery-blocked-{width}.png',full_page=True)
+    await page.get_by_role('button',name='Open tools and history').click()
+    assert not await page.locator('#tools #discover').count()
+    await page.get_by_role('button',name='Close tools',exact=True).click()
+    for name in ('capturing','queued','review','indexing'):
+        await stage(page,name)
+        assert await button.is_hidden(),name
+    await stage(page,'candidates')
+    assert await button.is_visible()
+    # Each worker type explains the block, including queued publication.
+    for kind,state,text in (('publish','queued','Archive publication is queued.'),('capture','running','Capture is running.'),('discover','running','Discovery is running.')):
+        operations=[{'id':'a'*32,'kind':kind,'state':state,'payload':{'max_candidates':50,'max_usd':2}}]
+        await page.locator('#refresh').click()
+        await status.filter(has_text=text).wait_for()
+        assert await button.is_disabled()
+    operations=[]
+    # The ordinary poll releases the button; it must never start a paid run itself.
+    await page.wait_for_function('()=>!document.getElementById("discover").disabled',timeout=8000)
+    assert not posts
+    assert await page.locator('#manual-url').input_value()=='http://typed-while-busy.example/'
+    await page.screenshot(path=f'/tmp/curation-discovery-ready-{width}.png',full_page=True)
+    await button.click();await asyncio.wait_for(submitted.wait(),timeout=3)
+    assert await button.is_disabled()
+    await status.filter(has_text='Submitting your request').wait_for()
+    bounds=await button.bounding_box()
+    await page.mouse.click(bounds['x']+bounds['width']/2,bounds['y']+bounds['height']/2)
+    assert len(posts)==1,'Rapid repeat taps must not submit a second paid run'
+    release_action.set()
+    await status.filter(has_text='Discovery is queued.').wait_for();await settled(page)
+    assert await button.is_disabled()
+    await page.reload();await settled(page)
+    assert await button.is_disabled() and len(posts)==1
+    # Resume is also on Candidates and retains the existing run's smaller budget.
+    operations[0].update(state='interrupted',payload={'max_candidates':12,'max_usd':0.4})
+    await page.locator('#refresh').click()
+    await page.get_by_role('button',name='Resume discovery',exact=True).filter(visible=True).wait_for()
+    assert await button.inner_text()=='Resume discovery'
+    assert '12 candidates' in await page.locator('#discovery-limits').inner_text()
+    assert '$0.4' in await page.locator('#discovery-limits').inner_text()
+    await status.filter(has_text='original limits').wait_for()
+    await button.click()
+    await status.filter(has_text='Discovery is queued.').wait_for();await settled(page)
+    assert posts[-1]==('/api/resume',{'id':'b'*32})
+    assert operations[0]['payload']=={'max_candidates':12,'max_usd':0.4}
+    operations=[];reject=True
+    await page.reload();await settled(page)
+    assert await button.is_enabled()
+    await button.click()
+    await page.locator('#error').filter(has_text='Archive publication has already started.').wait_for()
+    # A worker claim between polling and clicking refreshes the visible blocker.
+    await status.filter(has_text='Archive publication is running.').wait_for()
+    assert await button.is_disabled() and await page.locator('#notice').is_hidden()
+    assert len(posts)==3 and not errors,(posts,errors)
+    await context.close()
+
+
+async def manual_site_flow(browser,base,width):
+    context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
+    page=await context.new_page()
+    snapshot=await (await context.request.get(base+'/api/queue?filter=candidates')).json()
+    row=copy.deepcopy(snapshot['candidates'][0])
+    submitted='https://web.archive.org/web/20000101000000/'+row['url']
+    row['evidence']=[{'kind':'manual_submission','source_url':submitted,'original_url':row['url']}]
+    operations=[];rows=[];posts=[];errors=[]
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    received,release=asyncio.Event(),asyncio.Event()
+    async def fixture(route):
+        nonlocal operations
+        path=urlsplit(route.request.url).path
+        if route.request.method=='POST':
+            assert path=='/api/submit-site'
+            payload=route.request.post_data_json;posts.append(payload)
+            assert payload['max_usd']==2
+            received.set();await release.wait()
+            if len(posts)==1:
+                operations=[{'id':'d'*32,'kind':'discover','state':'queued','payload':{'max_candidates':1,'max_usd':2,
+                    'target':{'url':row['url'],'submitted_url':payload['url']}}}]
+                await route.fulfill(status=202,json={'operation':'d'*32,'url':row['url']})
+            elif len(posts)==2:
+                await route.fulfill(status=200,json={'candidate_id':row['id'],'url':row['url'],'existing':True})
+            else:await route.fulfill(status=409,json={'error':'Enter a public HTTP(S) website URL or a Wayback link to its original page'})
+            return
+        if path=='/api/queue':
+            await route.fulfill(status=200,json={**snapshot,'operations':operations,'candidates':rows,'total':len(rows),
+                'stage_counts':{**snapshot['stage_counts'],'candidates':len(rows)}})
+        elif path=='/api/candidate':await route.fulfill(status=200,json={'candidate':row,'review':None})
+        else:await route.continue_()
+    await page.route('**/api/**',fixture)
+    await page.goto(base+'/?view=candidates');await settled(page)
+    field=page.get_by_role('textbox',name='Website or Wayback URL',exact=True)
+    button=page.get_by_role('button',name='Add & grade site',exact=True)
+    assert await button.is_disabled()
+    await field.fill(submitted)
+    assert await button.is_enabled()
+    await page.locator('#refresh').click();await settled(page)
+    assert await field.input_value()==submitted and not posts
+    await field.scroll_into_view_if_needed()
+    await safe_layout(page,width)
+    await page.screenshot(path=f'/tmp/curation-manual-site-{width}.png',full_page=True)
+    await field.press('Enter');await asyncio.wait_for(received.wait(),timeout=3)
+    assert await button.is_disabled() and await page.locator('#discover').is_disabled()
+    # An edit typed while the first submission is in flight is never erased.
+    await field.fill('http://next.example/')
+    release.set()
+    await page.locator('#discovery-status').filter(has_text='Site check is queued.').wait_for();await settled(page)
+    assert await field.input_value()=='http://next.example/'
+    assert posts==[{'url':submitted,'max_usd':2}]
+    await page.locator('#manual-result').filter(has_text=row['url']).wait_for()
+    operations[0].update(state='completed',result={'candidate_id':row['id'],'candidates':1})
+    rows.append(row)
+    await page.locator('#manual-result').get_by_role('link',name='Open site',exact=True).wait_for(timeout=8000)
+    assert await page.locator('#candidates .site-tile').count()==1
+    await page.locator('#manual-result').get_by_role('link',name='Open site',exact=True).click()
+    await page.get_by_text('Luna grade 3/3 · guild',exact=True).wait_for()
+    assert await page.locator('#manual-site').is_hidden()
+    await page.get_by_text('1 discovery references',exact=True).click()
+    assert await page.get_by_role('link',name=submitted,exact=True).get_attribute('href')==submitted
+    await stage(page,'candidates')
+    await field.fill(row['url']);await button.click()
+    await page.locator('#manual-result').filter(has_text='already in the portal').wait_for();await settled(page)
+    assert await page.locator('#candidates .site-tile').count()==1
+    await field.fill('javascript:alert(1)');await button.click()
+    await page.locator('#error').filter(has_text='Enter a public HTTP(S)').wait_for()
+    assert await field.input_value()=='javascript:alert(1)'
+    assert len(posts)==3 and not errors,(posts,errors)
+    await context.close()
+
+
 async def check(base):
     async with async_playwright() as playwright:
         browser=await playwright.chromium.launch()
         try:
             for width in (320,390,430,768,1280):
+                await discovery_flow(browser,base,width)
+                await manual_site_flow(browser,base,width)
                 await basic_flow(browser,base,width)
                 await long_reader(browser,base,width)
                 await coverage_feedback(browser,base,width)

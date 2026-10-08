@@ -93,8 +93,31 @@ with an explicit Resume; queued sites explain why they wait. Indexing separates
 publication, waiting for existing Jobs, and AI enrichment/import, with no invented
 percentage. Publication and indexing failures remain in Indexing with a contextual
 Retry action. Technical Job details expand separately and remain open across polls.
-Recent operations and explicit bounded discovery live in More. There are no
-scheduled paid runs.
+Discover & grade is a primary action at the top of Candidates, with the explicit
+50-candidate/$2 limit beside it. A visible explanation names any capture, discovery
+or publication occupying the shared worker; polling makes the button available
+when that work finishes, without starting a run. Paused discovery can be resumed
+there within its original limits and budget. More contains recent operations,
+capture limits and secondary history views. There are no scheduled paid runs.
+
+Add a site, also in Candidates, accepts an original HTTP(S) URL or a Wayback
+replay/calendar link. Bare addresses use HTTP; original protocol, path case,
+escaping and query order are preserved. Wayback links identify the original page,
+with the submitted link retained as provenance; sampling still prefers 1999–2001,
+then 2002–2007. Submitting explicitly permits checking **one site, up to $2**.
+The single worker checks archive/account coverage, takes the usual bounded samples
+and runs the normal Luna grader. It does not spider out to other sites. Results
+join Candidates with the ordinary evidence, sources, grade and capture-scope
+review. Missing sources or invalid grades remain unapproved.
+
+`POST /api/submit-site` requires `{"url":"https://example.org/eq/","max_usd":2}`.
+It returns an operation ID, or the existing candidate ID for that website/account.
+Repeated pending submissions reuse the same operation and its original budget;
+existing decisions and captured sources are preserved. Already archived sites
+retire to History without sampling or paid grading. Unverified coverage pauses
+the operation before acquisition or spending, with explicit Resume site check in
+Candidates. The form preserves edits while polling or submitting; completed checks
+link to their site. The action never approves capture, publication or indexing.
 
 Typed candidate transitions remain centralized in
 `scripts/archive-crawler/capture_flow.py`; queue claiming and Undo use the same
