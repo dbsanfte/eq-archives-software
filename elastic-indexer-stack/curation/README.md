@@ -79,6 +79,30 @@ the site or return to the list. Background updates refresh counts
 without navigating away from another selected site. Next site and the stage list
 support reviewing multiple sites. Scope edits require Save before approval.
 
+Candidates also support decisions directly in the list: swipe right on a phone to
+approve the saved capture scope, or left to dismiss to History. The direction and
+release threshold are shown while dragging. Vertical scrolling, short/reversed
+swipes and cancelled touches make no decision. Each card shows its saved scope and
+has equivalent Approve capture/Dismiss buttons for keyboard and pointer use.
+Coverage, grading, source identity and unsaved-scope checks still apply. Confirmed
+decisions remove the card while keeping Candidates open; the visible confirmation
+offers Undo (until capture starts for approvals). Tapping the card still opens its
+evidence and scope workspace. Polling cancels an outdated gesture before it can
+submit a stale decision.
+
+The upper-right Luna counter shows estimated USD spend today and this month using
+UTC calendar boundaries. Expand it for the scope of accounting and unresolved
+request reservations. Totals include the seeded pilot, every initialized discovery
+or manual grading run, and all site enrichment attempts, including rejected and
+corrected responses. Received usage counts once; cached responses and Job retries
+add no cost unless they make a new paid request. Requests with no recorded usage
+retain their conservative reservation separately, rather than being reported as
+known spend. These are this portal's usage estimates, not an account billing total.
+The display refreshes with status polling, with up to ten seconds of accounting
+cache. Only shallow staging ledger directories and read-only SQLite metadata are
+read; archive Git and source files are untouched. An unreadable ledger or a bounded
+read timeout displays incomplete totals instead of a misleading zero.
+
 The captured-page browser and complete document reader are separate mobile screens
 with normal vertical scrolling. The searchable page list preserves its position
 when returning from a document. The reader has dated Wayback links, capture-version

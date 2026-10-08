@@ -23,6 +23,7 @@ from site_reviews import get as get_site_review, migrate
 from jobs import import_attempt, import_name
 from portal import Stage, decorate, counts, search_matches
 from manual import existing_site, site_url
+from spending import Spending
 
 NETWORK = ipaddress.ip_network("192.168.0.0/16")
 STATIC = Path(__file__).parent
@@ -82,6 +83,7 @@ def create_app(root=None, origin=None, start_worker=True):
     with connect(root):
         pass
     migrate(root)
+    spending = Spending(root)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -144,6 +146,7 @@ def create_app(root=None, origin=None, start_worker=True):
             page_rows = rows[offset:offset + 50]
             return JSONResponse({"candidates": page_rows, "total": len(rows), "offset": offset,
                                  "stage_counts": counts(all_rows),
+                                 "luna_spend": spending.snapshot(),
                                  "all_count": len(all_rows), "approved": sum(row["state"] == "approved_waiting_batch" for row in all_rows),
                                  "recommended": sum(row['state'] in ('approval_pending','deferred') and (row['rating'] or {}).get('grade',-1)>=2 for row in all_rows),
                                  "operations": operations, "batches": batches, "limits": LIMITS, "undo_seconds": UNDO_SECONDS,

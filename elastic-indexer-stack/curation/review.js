@@ -17,6 +17,7 @@ let route = readRoute(), data = null, detail = null, busy = false, generation = 
 let listSignature = '', workspaceSignature = '', dockSignature = '', liveSignature = '', sourceGeneration = 0;
 let searchTimer;
 let manualResult=null,manualSignature='';
+let activeSwipe=null;
 const drafts = new Map(), positions = new Map(), pageQueries = new Map(), sourceCache = new Map();
 history.scrollRestoration = 'manual';
 function node(tag, text, className) {
@@ -65,8 +66,13 @@ function restorePosition() {
   });
 }
 function go(change,{replace=false}={}) {
+  activeSwipe?.cancel();
   remember();const parent={...route};route={...route,...change};writeRoute(replace,parent);$('tools').close();$('error').hidden=true;$('notice').hidden=true;
-  if (!route.candidate && parent.view!==route.view) { $('candidates').replaceChildren(node('p','Loading sites…','description'));listSignature=''; }
+  if (!route.candidate) {
+    if (parent.view!==route.view || parent.query!==route.query || parent.offset!==route.offset) {
+      $('candidates').replaceChildren(node('p','Loading sites…','description'));listSignature='';
+    } else if (data) renderList(); // Apply retained scope drafts before the next response.
+  }
   const cached=detail?.candidate.id===route.candidate;
   renderShell();if (cached) {renderWorkspace();renderDock();restorePosition();} refresh(!cached);
 }
@@ -80,9 +86,9 @@ async function request(path,value,signal) {
 function message(text,undo,tone='') {
   $('notice').replaceChildren(node('span',text));$('notice').hidden=false;
   $('notice').dataset.tone=tone;
-  if (undo) $('notice').append(control('Undo approval',()=>act('Undoing approval',()=>request('/api/undo',undo),'Returned to Candidates.')));
+  if (undo) $('notice').append(mutation(undo.label || 'Undo approval',()=>request(undo.path || '/api/undo',undo.payload || undo),'Returned to Candidates.'));
 }
-async function act(label,action,confirmation,{returnToCandidates=false}={}) {
+async function act(label,action,confirmation,{returnToCandidates=false,undo=null}={}) {
   if (busy) return;
   const actedId=route.candidate;busy=true;++generation;controller?.abort();$('error').hidden=true;
   for (const item of document.querySelectorAll('[data-mutation]')) item.disabled=true;
@@ -100,7 +106,7 @@ async function act(label,action,confirmation,{returnToCandidates=false}={}) {
         writeRoute(true);
       }
     }
-    message((typeof confirmation==='function' ? confirmation(outcome) : confirmation) || 'Saved.',null,outcome?.coverage?.complete===false ? 'attention' : '');workspaceSignature='';dockSignature='';
+    message((typeof confirmation==='function' ? confirmation(outcome) : confirmation) || 'Saved.',undo,outcome?.coverage?.complete===false ? 'attention' : '');workspaceSignature='';dockSignature='';
     await refresh(true);
     if (approved) {
       message(approved.stage==='queued' ? `Queued ${siteName(approved)} for capture. Undo before it starts.` : `${siteName(approved)} is now in ${names[approved.stage]}.`,
@@ -147,6 +153,8 @@ async function refresh(navigated=false) {
 }
 function renderShell() {
   renderDiscovery();
+  renderSpending();
+  $('swipe-help').hidden=Boolean(route.candidate) || route.view!=='candidates';
   document.body.dataset.panel=route.panel;
   $('stage-list').hidden=Boolean(route.candidate);$('site-workspace').hidden=!route.candidate;
   if (!route.candidate) { $('action-dock').hidden=true;measureDock(); }
@@ -165,8 +173,9 @@ function renderShell() {
 function renderList() {
   $('view-total').textContent=`${data.total} ${data.total===1 ? 'site' : 'sites'}`;
   if (route.candidate) return;
-  const signature=JSON.stringify([route.view,route.offset,route.query,data.candidates]);
+  const signature=JSON.stringify([route.view,route.offset,route.query,data.candidates,data.candidates.map(row=>Boolean(drafts.get(row.id)?.dirty))]);
   if (signature!==listSignature) {
+    activeSwipe?.cancel();
     const items=data.candidates.map(row=>{
       const item=control('',()=>openSite(row.id),'site-tile');item.dataset.candidate=row.id;
       item.setAttribute('aria-label',`Open ${siteName(row)}`);
@@ -179,7 +188,8 @@ function renderList() {
         row.stage==='indexing' ? (row.review_state==='index_failed' ? 'Sources are retained. Open this site to retry.' : 'Publication and AI-enriched indexing are automatic.') :
         row.stage==='saved' ? 'Set aside for a later decision.' : capture ? `${capture.pages} pages · ${capture.files} dated captures` : 'Saved decision and source evidence.';
       item.append(node('p',description));
-      const bottom=node('div',undefined,'tile-bottom');bottom.append(node('span',row.rating?.category?.replaceAll('_',' ') || 'Website'),node('span','Open site →','open-label'));item.append(bottom);return item;
+      const bottom=node('div',undefined,'tile-bottom');bottom.append(node('span',row.rating?.category?.replaceAll('_',' ') || 'Website'),node('span','Open site →','open-label'));item.append(bottom);
+      return row.stage==='candidates' ? candidateCard(row,item) : item;
     });
     if (!items.length) {
       const empty=node('div',undefined,'empty');empty.append(node('h2',route.query ? 'No matching sites' : `Nothing in ${names[route.view].toLowerCase()}`),node('p',route.query ? 'Try another name or address.' : ({candidates:'Use Discover & grade above to find candidates, or review captures already waiting for a decision.',queued:'Approve a candidate and it will wait here until capture starts.',capturing:'Downloads appear here as soon as the worker starts.',review:'Completed downloads arrive here for your indexing decision.',indexing:'Approved captures appear here until indexing is complete.',saved:'Sites you save for later will appear here.',history:'Completed, declined, and dismissed sites will appear here.'})[route.view]));
@@ -199,6 +209,93 @@ function renderList() {
     if (data.capture_queue_error) box.append(node('p',data.capture_queue_error));
     if (paused) box.append(control('Open paused captures',()=>openStage('capturing')));$('stage-activity').replaceChildren(box);
   }
+}
+function approvalBlock(row) {
+  if (getDraft(row).dirty) return 'Open site to save your scope changes.';
+  if (row.state==='coverage_unverified') return 'Verify archive coverage before approving.';
+  if (row.state!=='approval_pending' || !row.rating || !row.captures?.length) return 'Graded source evidence is required to approve.';
+  return '';
+}
+function canDismiss(row) { return ['approval_pending','discovered','sampled','sample_error','unavailable','identity_unresolved'].includes(row.state); }
+function decideCandidate(row,decision) {
+  if (busy || route.candidate || route.view!=='candidates') return;
+  const current=data.candidates.find(item=>item.id===row.id);
+  if (!current || current.manifest_sha256!==row.manifest_sha256) return;
+  const blocked=decision==='approve' ? approvalBlock(current) : !canDismiss(current);
+  if (blocked) return;
+  remember();
+  const payload={id:row.id,manifest_sha256:row.manifest_sha256};
+  act(decision==='approve' ? 'Approving capture' : 'Dismissing site',
+    ()=>request('/api/decisions',[{...payload,decision}]),
+    decision==='approve' ? `Queued ${siteName(row)} for capture. Undo before it starts.` : `Dismissed ${siteName(row)} to History.`,
+    {undo:{payload,path:decision==='approve' ? '/api/undo' : '/api/restore',label:decision==='approve' ? 'Undo approval' : 'Undo dismissal'}});
+}
+function candidateCard(row,item) {
+  const card=node('article',undefined,'candidate-card'),front=node('div',undefined,'candidate-front');
+  const approveCue=node('span','Approve capture →','swipe-cue approve-cue'),rejectCue=node('span','← Dismiss site','swipe-cue reject-cue');
+  const backdrop=node('div',undefined,'swipe-backdrop');backdrop.setAttribute('aria-hidden','true');backdrop.append(approveCue,rejectCue);
+  const blocked=approvalBlock(row),dismissible=canDismiss(row);
+  item.append(node('p',`${scopeDescription(row)} · ${row.scope}`,'candidate-scope'));
+  if (blocked) item.append(node('p',blocked,'candidate-block'));
+  const actions=node('div',undefined,'candidate-actions');
+  for (const [decision,label,disabled] of [['reject','Dismiss',!dismissible],['approve','Approve capture',Boolean(blocked)]]) {
+    const button=control(label,()=>decideCandidate(row,decision),decision==='approve' ? 'primary' : '');
+    button.setAttribute('aria-label',`${label}: ${siteName(row)}`);button.dataset.mutation='';button.dataset.blocked=String(disabled);button.disabled=disabled || busy;actions.append(button);
+  }
+  front.append(item,actions);card.append(backdrop,front);
+  let gesture=null,suppressUntil=0;
+  const reset=()=>{
+    if (gesture?.horizontal) suppressUntil=performance.now()+500;
+    gesture=null;front.style.transform='';card.removeAttribute('data-direction');card.classList.remove('dragging','swipe-ready');
+    if (activeSwipe?.card===card) activeSwipe=null;
+  };
+  item.addEventListener('click',event=>{if (performance.now()<suppressUntil) {event.preventDefault();event.stopImmediatePropagation();}},true);
+  item.addEventListener('pointerdown',event=>{
+    if (!event.isPrimary) {activeSwipe?.cancel();return;}
+    if (busy || event.pointerType==='mouse' || !matchMedia('(max-width:999px)').matches) return;
+    activeSwipe?.cancel();
+    suppressUntil=0;
+    gesture={id:event.pointerId,x:event.clientX,y:event.clientY,dx:0,horizontal:false,threshold:Math.max(80,Math.min(120,card.clientWidth*.3))};
+    activeSwipe={card,cancel:reset};
+  });
+  item.addEventListener('pointermove',event=>{
+    if (!gesture || gesture.id!==event.pointerId) return;
+    const dx=event.clientX-gesture.x,dy=event.clientY-gesture.y;
+    if (!gesture.horizontal) {
+      if (Math.abs(dy)>12 && Math.abs(dy)>=Math.abs(dx)) {reset();return;}
+      if (Math.abs(dx)<12 || Math.abs(dx)<Math.abs(dy)*1.5) return;
+      gesture.horizontal=true;item.setPointerCapture(event.pointerId);card.classList.add('dragging');
+    }
+    event.preventDefault();gesture.dx=dx;
+    const allowed=dx>0 ? !blocked : dismissible;
+    card.dataset.direction=dx>0 ? 'approve' : 'reject';
+    card.classList.toggle('swipe-ready',allowed && Math.abs(dx)>=gesture.threshold);
+    front.style.transform=`translateX(${Math.sign(dx)*Math.min(Math.abs(dx),allowed ? card.clientWidth*.6 : 35)}px)`;
+    approveCue.textContent=blocked ? 'Approval blocked' : dx>=gesture.threshold ? 'Release to approve' : 'Approve capture →';
+    rejectCue.textContent=!dismissible ? 'Dismissal blocked' : -dx>=gesture.threshold ? 'Release to dismiss' : '← Dismiss site';
+  });
+  item.addEventListener('pointerup',event=>{
+    if (!gesture || gesture.id!==event.pointerId) return;
+    const tapped=!gesture.horizontal && Math.hypot(event.clientX-gesture.x,event.clientY-gesture.y)<12;
+    const dx=event.clientX-gesture.x;
+    const decision=gesture.horizontal && Math.abs(dx)>=gesture.threshold ? (dx>0 ? 'approve' : 'reject') : null;
+    reset();
+    if (tapped) {suppressUntil=performance.now()+500;openSite(row.id);}
+    else if (decision) decideCandidate(row,decision);
+  });
+  item.addEventListener('pointercancel',reset);
+  // Taking capture from a touched heading/paragraph emits a bubbling loss on
+  // that child. Only losing the button's own capture cancels this gesture.
+  item.addEventListener('lostpointercapture',event=>{if (event.target===item) reset();});
+  return card;
+}
+function usd(value) { return new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',minimumFractionDigits:3,maximumFractionDigits:3}).format(value); }
+function renderSpending() {
+  const spend=data?.luna_spend,valid=spend?.complete===true;
+  $('spend-today').textContent=valid ? usd(spend.today.estimated_usd) : '—';
+  $('spend-month').textContent=valid ? usd(spend.month.estimated_usd) : '—';
+  $('spend-status').textContent=!spend ? 'Loading spend…' : !valid ? 'Spend is temporarily incomplete. Retrying automatically.' :
+    `Includes discovery, manual grading and indexing enrichment in this portal. UTC calendar days and months. Usage-based estimates, not an account bill. Unresolved reservations: today ${usd(spend.today.unresolved_usd)}, this month ${usd(spend.month.unresolved_usd)}.`;
 }
 function panel(title,text,className='') {
   const box=node('section',undefined,`panel ${className}`);box.append(node('h2',title));if (text) box.append(node('p',text));return box;
@@ -300,7 +397,7 @@ function renderCandidate(root,row) {
   const editable=row.state==='approval_pending';select.disabled=!editable;path.disabled=!editable;save.dataset.blocked=String(!editable);save.disabled=!editable || busy;
   settings.append(fields,saved,dirty,save);right.append(settings);
   const secondary=node('div',undefined,'secondary-actions');
-  const decidable=['approval_pending','discovered','sampled','sample_error','unavailable','identity_unresolved'].includes(row.state);
+  const decidable=canDismiss(row);
   secondary.append(mutation('Save for later',()=>request('/api/decisions',[{id:row.id,manifest_sha256:row.manifest_sha256,decision:'defer'}]),'Moved to Saved for later.',false,!decidable),mutation('Dismiss site',()=>request('/api/decisions',[{id:row.id,manifest_sha256:row.manifest_sha256,decision:'reject'}]),'Moved to History.',false,!decidable));
   right.append(secondary);columns.append(left,right);root.append(columns);
 }
@@ -461,7 +558,7 @@ function renderDock(force=false) {
   } else if (route.panel==='pages') buttons.append(control('Back to site decision',()=>backFromSite(),'primary'));
   else if (row.stage==='candidates') {
     hint=draft.dirty ? 'Save your scope changes before approving.' : row.state==='coverage_unverified' ? 'Verify archive coverage before approving.' : !row.rating || !row.captures?.length ? 'Source evidence and a Luna grade are needed before capture approval.' : 'Entire chosen scope · 60 seconds to undo before capture';
-    buttons.append(mutation('Approve site for capture',()=>request('/api/decisions',[{id:row.id,manifest_sha256:row.manifest_sha256,decision:'approve'}]),'Approved for capture.',true,draft.dirty || !row.rating || !row.captures?.length || row.state!=='approval_pending',{returnToCandidates:true}));
+    buttons.append(mutation('Approve site for capture',()=>request('/api/decisions',[{id:row.id,manifest_sha256:row.manifest_sha256,decision:'approve'}]),'Approved for capture.',true,Boolean(approvalBlock(row)),{returnToCandidates:true}));
   } else if (row.stage==='queued') {
     hint='Your approval is saved. Capture starts automatically.';
     buttons.append(mutation('Undo approval',()=>request('/api/undo',{id:row.id,manifest_sha256:row.manifest_sha256}),'Returned to Candidates.',true));
@@ -562,8 +659,9 @@ $('site-search').addEventListener('input',()=>{
   clearTimeout(searchTimer);route.query=$('site-search').value;route.offset=0;writeRoute(true);
   ++generation;controller?.abort();searchTimer=setTimeout(()=>refresh(),200);
 });
-window.addEventListener('popstate',()=>{remember();route=readRoute();renderShell();refresh(true);});
-window.addEventListener('resize',()=>{measureDock();if (detail && route.panel==='pages' && matchMedia('(min-width:1000px)').matches) {workspaceSignature='';renderWorkspace();restorePosition();}});
+window.addEventListener('popstate',()=>{activeSwipe?.cancel();remember();route=readRoute();renderShell();refresh(true);});
+window.addEventListener('resize',()=>{activeSwipe?.cancel();measureDock();if (detail && route.panel==='pages' && matchMedia('(min-width:1000px)').matches) {workspaceSignature='';renderWorkspace();restorePosition();}});
+window.addEventListener('pointerdown',event=>{if (!event.isPrimary) activeSwipe?.cancel();},true);
 new ResizeObserver(measureDock).observe($('action-dock'));
 renderShell();writeRoute(true);refresh(true);
 setInterval(()=>{if (!busy && !document.hidden) refresh();},5000);
