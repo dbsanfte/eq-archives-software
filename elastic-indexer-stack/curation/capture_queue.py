@@ -18,6 +18,10 @@ def claim(store, ids):
         site = record(store, row)
         if not site['decision'] or site['decision']['manifest_sha256'] != site['manifest_sha256']:
             raise CrawlError('Site approval is stale')
+        if site['coverage'].get('capture', {}).get('continuation'):
+            from capture_continuation import queued_site
+            sites.append(queued_site(store, site))
+            continue
         checked_sources(store, site)
         snapshots = [item for item in site['captures'] if site['scope_mode'] in ('ezboard', 'sitepowerup') or
                      (original_url(item['url']) == original_url(site['url']) if site['scope_mode'] == 'page'
@@ -28,6 +32,8 @@ def claim(store, ids):
                       'captures': snapshots, 'reviewed_captures': site['captures'], 'capture_policy': POLICY})
     if not 1 <= len(sites) <= LIMITS['sites']:
         raise CrawlError('Capture batches require 1–5 sites')
+    if len(sites) != 1 and any(site.get('continued_from') for site in sites):
+        raise CrawlError('Regenerate each site independently; the automatic queue starts one site at a time')
     if len(sites) != 1 and any(site['scope_mode'] in ('ezboard', 'sitepowerup') for site in sites):
         raise CrawlError('Capture each whole board separately from other sites')
     batch_id = identifier()

@@ -1,0 +1,260 @@
+import json
+from pathlib import Path
+from unittest.mock import patch
+
+import pytest
+
+from common import CAPTURE_WINDOW, CrawlError, digest
+from captures import archive_path, capture_sites, check_manifest
+from conftest import add_candidate, manifest_for
+from full_capture import POLICY
+from review import apply_decisions
+from server import create_app
+from state import connect, unpack
+from test_capture_queue import make_due
+from test_server import call
+from worker import Worker
+
+
+def legacy(root, count=2, identifier='a' * 32, url='http://guild.example/', coverage='bounded'):
+    row = add_candidate(root, url=url)
+    with connect(root) as store:
+        apply_decisions(store, [{'id': row['id'], 'manifest_sha256': row['manifest_sha256'], 'decision': 'approve'}])
+        grant = json.loads(store.db.execute('SELECT decision FROM candidates WHERE id=?', (row['id'],)).fetchone()[0])
+    manifest = manifest_for(row, identifier)
+    manifest['sites'][0]['decision'] = grant
+    manifest.update(limits={'files': 100}, capture_window=dict(CAPTURE_WINDOW),
+                    capture_coverage={row['id']: {'state': coverage, 'reason': 'Legacy traversal'}},
+                    transport={'requests': 105, 'bytes': 1665097, 'seconds': 355.5, 'connections': 1})
+    for index in range(1, count):
+        capture = {**manifest['captures'][0], 'url': url + f'page{index}.html'}
+        capture['archive_path'] = archive_path(capture)
+        manifest['captures'].append(capture)
+    with connect(root) as store:
+        store.db.execute("INSERT INTO batches VALUES (?,'awaiting_review',?,?,NULL,NULL,NULL,?,?)",
+                         (identifier, json.dumps(manifest), digest(manifest), '2026-01-01', '2026-01-01'))
+        store.db.execute("UPDATE candidates SET state='captured_awaiting_review',coverage=? WHERE id=?",
+                         (json.dumps({'status': 'absent_host', 'capture': {'batch_id': identifier}}), row['id']))
+        store.db.commit()
+    return row, manifest
+
+
+def regenerate(app, manifest):
+    return call(app, 'POST', '/api/continue-capture', {'id': manifest['batch_id'], 'manifest_sha256': digest(manifest)})
+
+
+def detail(app, row):
+    return call(app, 'GET', '/api/candidate?id=' + row['id']).json()
+
+
+def test_regeneration_reuses_100_sources_but_inventories_all_files_and_carries_usage(tmp_path, monkeypatch):
+    root = tmp_path / 'state'
+    row, original = legacy(root, count=100)
+    app = create_app(root, start_worker=False)
+    assert regenerate(app, original).status_code == 202
+    assert detail(app, row)['candidate']['stage'] == 'queued'
+    assert detail(app, row)['capture_operation'] is None
+    assert regenerate(app, original).status_code == 409
+    downloads = []
+    class Downloader:
+        def __init__(self, store, args):
+            assert store.get('wayback_transport') == original['transport']
+            assert args.max_requests > 500
+        def call(self, job):
+            if job['op'] == 'scope_list':
+                assert job['url'] == row['scope'] and job['match'] == 'prefix'
+                assert (job['from'], job['to']) == ('19990101000000', '20061231235959')
+                return {'captures': original['captures'] + [
+                    {'url': row['scope'] + 'orphan.zip', 'timestamp': '20061231235959', 'mimetype': 'application/zip'}]}
+            downloads.append(job)
+            Path(job['destination']).write_bytes(b'ZIP')
+            return {'url': job['url'], 'timestamp': job['timestamp'], 'bytes': 3,
+                    'sha256': digest(b'ZIP'), 'content_type': 'application/zip'}
+        def close(self): pass
+    monkeypatch.setattr('worker.capture_sites', lambda root, batch, sites, progress: capture_sites(root, batch, sites, Downloader, progress))
+    worker = Worker(root)
+    try:
+        worker.capture_queue()
+        assert detail(app, row)['candidate']['stage'] == 'queued'
+        make_due(root)
+        worker.capture_queue()
+        active = detail(app, row)
+        assert active['candidate']['stage'] == 'capturing' and active['review'] is None
+        assert active['capture_operation']['payload']['sites'][0]['capture_policy'] == POLICY
+        assert call(app, 'POST', '/api/undo', {'id': row['id'], 'manifest_sha256': row['manifest_sha256']}).status_code == 409
+        worker.operation()
+    finally:
+        worker.lease.close()
+    current = detail(app, row)
+    assert current['capture_operation']['state'] == 'completed', current['capture_operation'].get('error')
+    assert current['candidate']['stage'] == 'review'
+    manifest = current['review']['manifest']
+    assert manifest['capture_policy'] == POLICY and len(manifest['captures']) == 101
+    assert manifest['transport'] == original['transport']
+    assert len(downloads) == 1 and downloads[0]['url'].endswith('orphan.zip')
+    fields = ('url', 'timestamp', 'path', 'sha256')
+    assert [[c[k] for k in fields] for c in manifest['captures'][:100]] == [[c[k] for k in fields] for c in original['captures']]
+    with connect(root) as store:
+        old = unpack(store.db.execute('SELECT * FROM batches WHERE id=?', (original['batch_id'],)).fetchone())
+        assert old['state'] == 'capture_continued' and old['manifest'] == original and old['manifest_sha256'] == digest(original)
+        assert not store.db.execute("SELECT 1 FROM operations WHERE kind='publish'").fetchone()
+
+
+def test_small_legacy_complete_capture_can_be_regenerated_and_undone_after_grace(tmp_path):
+    root = tmp_path / 'state'
+    row, manifest = legacy(root, coverage='complete')
+    app = create_app(root, start_worker=False)
+    before = detail(app, row)
+    assert regenerate(app, manifest).status_code == 202
+    assert detail(app, row)['candidate']['stage'] == 'queued'
+    payload = {'id': row['id'], 'manifest_sha256': row['manifest_sha256']}
+    assert call(app, 'POST', '/api/scope', {**payload, 'mode': 'site'}).status_code == 409
+    assert call(app, 'POST', '/api/decisions', [{**payload, 'decision': 'defer'}]).status_code == 409
+    make_due(root)
+    assert call(app, 'POST', '/api/undo', payload).status_code == 200
+    restored = detail(create_app(root, start_worker=False), row)
+    assert restored['candidate']['stage'] == 'review'
+    assert restored['candidate']['decision'] == before['candidate']['decision']
+    assert restored['review']['manifest'] == before['review']['manifest']
+    assert regenerate(app, manifest).status_code == 202
+
+
+def test_regeneration_queue_exceeds_ten_and_waits_behind_paused_capture(tmp_path):
+    root = tmp_path / 'state'
+    rows = [legacy(root, identifier=f'{index:032x}', url=f'http://guild{index}.example/') for index in range(12)]
+    app = create_app(root, start_worker=False)
+    with connect(root) as store:
+        store.db.execute("INSERT INTO operations VALUES (?,'capture','interrupted','{}',NULL,'Wayback unavailable','now','now')", ('f' * 32,))
+        store.db.commit()
+    for row, manifest in rows:
+        assert regenerate(app, manifest).status_code == 202
+    listing = call(app, 'GET', '/api/queue?filter=queued').json()
+    assert listing['total'] == 12 and len(listing['operations']) == 1
+    assert call(app, 'POST', '/api/capture', {'ids': [row['id'] for row, _ in rows[:2]]}).status_code == 409
+    worker = Worker(root)
+    try:
+        make_due(root)
+        worker.capture_queue()
+        assert call(app, 'GET', '/api/queue?filter=queued').json()['total'] == 12
+        with connect(root) as store:
+            store.db.execute("UPDATE operations SET state='completed' WHERE id=?", ('f' * 32,))
+            store.db.commit()
+        worker.capture_queue()
+        assert call(app, 'GET', '/api/queue?filter=queued').json()['total'] == 11
+        assert call(app, 'GET', '/api/queue?filter=capturing').json()['total'] == 1
+    finally:
+        worker.lease.close()
+
+
+def test_incomplete_capture_blocks_single_bulk_and_legacy_publication(tmp_path):
+    root = tmp_path / 'state'
+    row, manifest = legacy(root)
+    app = create_app(root, start_worker=False)
+    payload = {'id': manifest['batch_id'], 'manifest_sha256': digest(manifest)}
+    assert call(app, 'POST', '/api/site-decision', {**payload, 'decision': 'approve'}).status_code == 409
+    assert call(app, 'POST', '/api/publish', payload).status_code == 409
+    preview = call(app, 'GET', '/api/queue?filter=review').json()['review_actions']
+    assert preview['incomplete_count'] == 1
+    assert call(app, 'POST', '/api/review-decisions', {'token': preview['token'], 'decision': 'approve'}).status_code == 409
+    assert regenerate(app, manifest).status_code == 202
+    assert call(app, 'POST', '/api/review-decisions', {'token': preview['token'], 'decision': 'decline'}).status_code == 409
+
+
+@pytest.mark.parametrize('change', ['hash', 'source', 'scope', 'approved', 'published', 'indexed', 'full', 'missing_approval'])
+def test_stale_or_already_approved_regeneration_is_rejected_without_work(tmp_path, change):
+    root = tmp_path / 'state'
+    row, manifest = legacy(root)
+    app = create_app(root, start_worker=False)
+    with connect(root) as store:
+        if change == 'hash': manifest['notes'] = ['changed']
+        if change == 'source': (root / manifest['captures'][0]['path']).write_bytes(b'tampered')
+        if change == 'scope': store.db.execute("UPDATE candidates SET scope='http://guild.example/other/' WHERE id=?", (row['id'],))
+        if change in ('approved', 'published', 'indexed'):
+            state = {'approved': 'publication_requested', 'published': 'published_waiting_index', 'indexed': 'indexed'}[change]
+            store.db.execute('UPDATE batches SET state=? WHERE id=?', (state, manifest['batch_id']))
+        if change == 'full':
+            manifest['capture_policy'] = POLICY
+            store.db.execute('UPDATE batches SET manifest=?,manifest_sha256=? WHERE id=?', (json.dumps(manifest), digest(manifest), manifest['batch_id']))
+        if change == 'missing_approval': store.db.execute('UPDATE candidates SET decision=NULL WHERE id=?', (row['id'],))
+        store.db.commit()
+    assert regenerate(app, manifest).status_code == 409
+    with connect(root) as store:
+        assert not store.db.execute('SELECT 1 FROM operations').fetchone()
+        assert not store.db.execute("SELECT 1 FROM events WHERE action='continue_capture'").fetchone()
+
+
+def test_regeneration_rechecks_after_source_preflight_and_rejects_retained_changes(tmp_path):
+    from capture_continuation import retained_manifest
+    root = tmp_path / 'state'
+    row, manifest = legacy(root)
+    app = create_app(root, start_worker=False)
+    def intervening_decision(root, source):
+        check_manifest(root, source)
+        with connect(root) as store:
+            store.db.execute("UPDATE batches SET state='indexing_declined' WHERE id=?", (manifest['batch_id'],))
+            store.db.commit()
+    with patch('capture_continuation.check_manifest', intervening_decision):
+        assert regenerate(app, manifest).status_code == 409
+    with connect(root) as store:
+        store.db.execute("UPDATE batches SET state='awaiting_review' WHERE id=?", (manifest['batch_id'],))
+        store.db.commit()
+    assert regenerate(app, manifest).status_code == 202
+    site = {**manifest['sites'][0], 'capture_policy': POLICY,
+            'continued_from': {'review_id': manifest['batch_id'], 'manifest_sha256': digest(manifest)}}
+    assert retained_manifest(root, site) == manifest
+    with pytest.raises(CrawlError, match='changed'):
+        retained_manifest(root, {**site, 'scope': 'http://elsewhere.example/'})
+
+
+def test_old_mixed_batch_regeneration_keeps_other_site_review_and_parent_immutable(tmp_path):
+    root = tmp_path / 'state'
+    first, a = legacy(root)
+    second, b = legacy(root, identifier='b' * 32, url='http://second.example/')
+    parent = {**a, 'sites': a['sites'] + b['sites'], 'captures': a['captures'] + b['captures']}
+    with connect(root) as store:
+        store.db.execute('DELETE FROM batches WHERE id=?', (b['batch_id'],))
+        store.db.execute('UPDATE batches SET manifest=?,manifest_sha256=? WHERE id=?', (json.dumps(parent), digest(parent), a['batch_id']))
+        store.db.commit()
+    app = create_app(root, start_worker=False)
+    before = detail(app, second)
+    first_review = detail(app, first)['review']
+    assert regenerate(app, first_review['manifest']).status_code == 202
+    assert detail(app, first)['candidate']['stage'] == 'queued'
+    after = detail(create_app(root, start_worker=False), second)
+    assert after['candidate']['stage'] == 'review' and after['review']['manifest'] == before['review']['manifest']
+    assert after['candidate']['coverage']['capture']['batch_id'] == parent['batch_id']
+    with connect(root) as store:
+        saved = unpack(store.db.execute('SELECT * FROM batches WHERE id=?', (parent['batch_id'],)).fetchone())
+        assert saved['state'] == 'capture_group' and saved['manifest'] == parent
+
+
+def test_regeneration_undo_and_claim_have_one_atomic_winner(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+    root = tmp_path / 'state'
+    row, manifest = legacy(root)
+    app = create_app(root, start_worker=False)
+    assert regenerate(app, manifest).status_code == 202
+    make_due(root)
+    worker = Worker(root)
+    barrier = Barrier(2)
+    def undo():
+        barrier.wait()
+        return call(app, 'POST', '/api/undo', {'id': row['id'], 'manifest_sha256': row['manifest_sha256']}).status_code
+    def claim():
+        barrier.wait()
+        worker.capture_queue()
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            undone, claimed = pool.submit(undo), pool.submit(claim)
+            code = undone.result()
+            claimed.result()
+        current = detail(app, row)
+        assert (code, current['candidate']['stage']) in [(200, 'review'), (409, 'capturing')]
+    finally:
+        worker.lease.close()
+
+
+@pytest.mark.parametrize('payload', [{}, [], {'id': 'bad', 'manifest_sha256': 'stale'}, {'id': 1, 'manifest_sha256': 'stale'}])
+def test_regeneration_rejects_invalid_requests(tmp_path, payload):
+    assert call(create_app(tmp_path / 'state', start_worker=False), 'POST', '/api/continue-capture', payload).status_code == 409

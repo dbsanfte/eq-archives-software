@@ -27,6 +27,8 @@ class Action(str, Enum):
     UNDO = 'undo'
     START = 'start_capture'
     COMPLETE = 'capture_complete'
+    CONTINUE = 'continue_capture'
+    UNDO_CONTINUE = 'undo_capture_continuation'
     APPROVE_INDEX = 'approve_indexing'
     DECLINE_INDEX = 'decline_indexing'
     RECONSIDER_INDEX = 'reconsider_indexing'
@@ -45,6 +47,8 @@ TRANSITIONS = {
     Action.UNDO: ({CandidateState.AWAITING_CAPTURE}, CandidateState.SUGGESTED),
     Action.START: ({CandidateState.AWAITING_CAPTURE}, CandidateState.CAPTURING),
     Action.COMPLETE: ({CandidateState.CAPTURING}, CandidateState.CAPTURED),
+    Action.CONTINUE: ({CandidateState.CAPTURED}, CandidateState.AWAITING_CAPTURE),
+    Action.UNDO_CONTINUE: ({CandidateState.AWAITING_CAPTURE}, CandidateState.CAPTURED),
     Action.APPROVE_INDEX: ({CandidateState.CAPTURED}, CandidateState.INDEX_APPROVED),
     Action.DECLINE_INDEX: ({CandidateState.CAPTURED}, CandidateState.INDEX_DECLINED),
     Action.RECONSIDER_INDEX: ({CandidateState.INDEX_DECLINED}, CandidateState.CAPTURED),

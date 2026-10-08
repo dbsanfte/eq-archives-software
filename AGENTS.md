@@ -363,7 +363,15 @@ new work paused in Capturing; only exhausted catalogs and pending records reach
 Review, with missing/substituted replays explicitly listed as gaps. Explicit resume
 may extend exhausted capture transport allowances without resetting cumulative
 usage, paid limits or discovery deadlines. Retain all already claimed legacy work,
-reviewed/published manifests and saved operator policies. Mobile review separates
+reviewed/published manifests and saved operator policies. Unapproved ordinary-site
+legacy reviews offer explicit Regenerate full capture, returning to the unlimited
+queue with the original scope, source reuse and cumulative transport usage. Retain
+the old immutable manifest and create a separate full inventory on claim; a retained
+source set never replaces the CDX scope inventory. Undo regeneration restores the
+original review until claim, using the same atomic lock. Block individual, bulk and
+legacy-API publication of these legacy subsets until regeneration completes. Never
+automatically regenerate on deployment/polling or replay already approved work.
+Mobile review separates
 readable pages from supporting files with safe attachment downloads, 100-URL list
 pagination, compact status polling and manifest-hash reuse. Publish all files in
 one site commit; index readable HTML/plain text, retaining assets without Luna calls.
