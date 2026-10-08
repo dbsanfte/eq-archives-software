@@ -20,6 +20,7 @@ from worker import Worker
 from coverage_check import refresh, require_new
 from capture_flow import Action, UNDO_SECONDS, transition
 from capture_queue import claim
+from capture_continuation import start as continue_capture, require_complete
 from site_reviews import get as get_site_review, migrate
 from jobs import import_attempt, import_name
 from portal import Stage, decorate, counts, search_matches, candidate_filter, dismissal_preview, grade_value
@@ -294,6 +295,16 @@ def create_app(root=None, origin=None, start_worker=True):
         result = await run_in_threadpool(decide_all_reviews, root, payload['token'], payload['decision'])
         return JSONResponse(result, status_code=202 if payload['decision'] == 'approve' else 200)
 
+    async def capture_continuation(request):
+        payload = await body(request)
+        if (not isinstance(payload, dict) or set(payload) != {'id', 'manifest_sha256'}
+                or not all(isinstance(value, str) for value in payload.values())):
+            raise CrawlError('Continue capture requires the review ID and manifest hash')
+        def continue_review():
+            refresh(root)
+            return continue_capture(root, payload['id'], payload['manifest_sha256'])
+        return JSONResponse(await run_in_threadpool(continue_review), status_code=202)
+
     async def undo_review_decisions(request):
         payload = await body(request)
         if not isinstance(payload, dict) or set(payload) != {'dismissal'}:
@@ -374,6 +385,12 @@ def create_app(root=None, origin=None, start_worker=True):
             row = store.db.execute('SELECT * FROM candidates WHERE id=?', (payload['id'],)).fetchone()
             if not row or record(store,row)['manifest_sha256'] != payload['manifest_sha256']:
                 raise CrawlError('Candidate changed since review')
+            current = record(store, row)
+            if current['coverage'].get('capture', {}).get('continuation'):
+                from capture_continuation import undo as undo_continuation
+                state = undo_continuation(store, current)
+                store.db.commit()
+                return JSONResponse({'state': state})
             state = transition(row['state'], Action.UNDO)
             store.db.execute('UPDATE candidates SET state=?,decision=NULL WHERE id=?', (state,row['id']))
             store.db.execute('INSERT INTO events(candidate,action,detail,created) VALUES (?,?,?,?)',
@@ -392,6 +409,8 @@ def create_app(root=None, origin=None, start_worker=True):
         with connect(root) as store:
             store.db.execute("BEGIN IMMEDIATE")
             row = store.db.execute("SELECT * FROM candidates WHERE id=?", (payload["id"],)).fetchone()
+            if row and json.loads(row['coverage'] or '{}').get('capture', {}).get('continuation'):
+                raise CrawlError('Undo queued regeneration before changing its approved capture scope')
             if not row or row["state"] not in ("approval_pending", "approved_waiting_batch", "deferred", "rejected",
                                                'sample_error','unavailable','identity_unresolved','sampled','grade_error','discovered'):
                 raise CrawlError("Candidate cannot change scope in its current state")
@@ -489,6 +508,7 @@ def create_app(root=None, origin=None, start_worker=True):
             if batch["state"] != "awaiting_review" or batch["manifest_sha256"] != payload["manifest_sha256"]:
                 raise CrawlError("Batch changed since review or is already approved")
             manifest = batch["manifest"]
+            require_complete(manifest)
             if len(manifest['sites']) != 1:
                 raise CrawlError('Review and approve one captured site at a time')
             slots = payload.get("slots", list(range(len(manifest["captures"]))))
@@ -530,6 +550,7 @@ def create_app(root=None, origin=None, start_worker=True):
                             Route("/api/queue", listing), Route("/api/source", source),
                             Route('/api/candidate',candidate_detail), Route('/api/restore',restore_candidate,methods=['POST']),
                             Route('/api/site',site_review), Route('/api/site-decision',site_decision,methods=['POST']),
+                            Route('/api/continue-capture',capture_continuation,methods=['POST']),
                             Route('/api/review-decisions',review_decisions,methods=['POST']),
                             Route('/api/undo-review-dismissal',undo_review_decisions,methods=['POST']),
                             Route('/api/index-retry',index_retry,methods=['POST']),

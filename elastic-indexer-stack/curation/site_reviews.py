@@ -4,6 +4,7 @@ import json
 from common import CrawlError, digest, original_url, within_scope
 from state import connect, unpack, valid_id
 from captures import readable
+from capture_continuation import incomplete
 
 
 def materialize(store, parent):
@@ -31,8 +32,10 @@ def materialize(store, parent):
         if row:
             coverage = json.loads(row['coverage'] or '{}')
             capture = coverage.get('capture',{})
-            if capture.get('review_id') != review_id:
-                coverage['capture'] = {**capture,'batch_id':parent['id'],'review_id':review_id,
+            needs_regeneration = incomplete({**manifest, 'sites': [site]})
+            if capture.get('review_id') != review_id or capture.get('needs_regeneration') != needs_regeneration:
+                coverage['capture'] = {**capture,'batch_id':manifest.get('capture_batch_id', parent['id']),'review_id':review_id,
+                    'needs_regeneration': needs_regeneration,
                     'completed_at':capture.get('completed_at',parent['updated']), 'files':len(captures),
                     'pages':len({original_url(item['url']) for item in captures if readable(item) and not item.get('supporting_source')}),
                     'bytes':sum(item['bytes'] for item in captures)}

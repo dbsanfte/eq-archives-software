@@ -59,6 +59,12 @@ def allowed(url, site):
 
 def capture(root, batch_id, sites, downloader_factory, progress=None, base_manifest=None):
     from captures import check_manifest, describe_source, verified_path
+    retained = None
+    if any(site.get('continued_from') for site in sites):
+        from capture_continuation import retained_manifest
+        if len(sites) != 1 or base_manifest:
+            raise CrawlError('Continue each incomplete ordinary site independently')
+        retained = retained_manifest(root, sites[0])
     root = Path(root)
     directory = root / 'batches' / batch_id / 'complete'
     store = Store(directory)
@@ -83,8 +89,11 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
             raise CrawlError('Approved capture scope or evidence changed after acquisition started')
         if not config:
             config = {'signature': signature, 'created_at': now(), 'limits': dict(ALLOWANCE)}
-            if base_manifest:
-                store.set('wayback_transport', base_manifest.get('transport', {}))
+            if base_manifest or retained:
+                # Commit usage with the initial plan, without a separate commit
+                # that could reset later usage following interrupted setup.
+                db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)',
+                           ('wayback_transport', json.dumps((base_manifest or retained).get('transport', {}))))
             for site in ([] if base_manifest else sites):
                 scope = urlsplit(site['scope'])
                 match = 'exact' if site['scope_mode'] == 'page' or scope.query or not scope.path.endswith('/') else 'prefix'
@@ -127,7 +136,8 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
                        (json.dumps(capture), path, record_id))
             db.commit()
         for site in sites:
-            sources = [c for c in base_manifest['captures'] if c['candidate_id'] == site['id']] if base_manifest else site['captures']
+            seeds = base_manifest or retained
+            sources = [c for c in seeds['captures'] if c['candidate_id'] == site['id']] if seeds else site['captures']
             for source in sources:
                 if not in_capture_window(source['timestamp']) or not (base_manifest or allowed(source['url'], site)):
                     continue

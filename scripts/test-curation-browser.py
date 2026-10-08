@@ -591,6 +591,65 @@ async def capture_progress_flow(browser,base,width):
     await context.close()
 
 
+async def regenerate_capture_flow(browser,base,width):
+    context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
+    page=await context.new_page();posts=[];errors=[]
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    snapshot=await (await context.request.get(base+'/api/queue?filter=candidates')).json()
+    row=copy.deepcopy(snapshot['candidates'][0]);row.update(stage='review',state='captured_awaiting_review')
+    row['coverage']['capture']={'needs_regeneration':True,'pages':1,'files':2}
+    manifest={'sites':[row],'captures':row['captures'],'limits':{'files':100},
+              'capture_coverage':{row['id']:{'state':'bounded','reason':'Legacy batch file limit reached'}}}
+    reviewed={'id':'e'*32,'manifest_sha256':'f'*64,'state':'awaiting_review','manifest':manifest}
+    reject=True
+    async def fixture(route):
+        path=urlsplit(route.request.url).path
+        if route.request.method=='POST':
+            posts.append((path,route.request.post_data_json))
+            if path=='/api/continue-capture':
+                assert route.request.post_data_json=={'id':reviewed['id'],'manifest_sha256':reviewed['manifest_sha256']}
+                if reject:
+                    await route.fulfill(status=409,json={'error':'Captured site changed; refresh before regeneration.'});return
+                row.update(stage='queued',state='approved_waiting_batch')
+                row['coverage']['capture']['continuation']={'review_id':reviewed['id']}
+                reviewed['state']='capture_continued'
+            elif path=='/api/undo':
+                row.update(stage='review',state='captured_awaiting_review')
+                row['coverage']['capture'].pop('continuation')
+                reviewed['state']='awaiting_review'
+            else:raise AssertionError(path)
+            await route.fulfill(status=202,json={'state':row['state']});return
+        if path=='/api/candidate':body={'candidate':row,'review':reviewed,'capture_operation':None}
+        elif path=='/api/queue':
+            view=parse_qs(urlsplit(route.request.url).query)['filter'][0]
+            body={**snapshot,'candidates':[row] if view==row['stage'] else [],'total':int(view==row['stage']),'operations':[],
+                  'review_actions':{'count':1,'incomplete_count':1},
+                  'stage_counts':{name:int(name==row['stage']) for name in ('candidates','queued','capturing','review','indexing','saved','history')}}
+        else:await route.continue_();return
+        await route.fulfill(status=200,json=body)
+    await page.route('**/api/**',fixture)
+    await page.goto(base+'/?view=review');await settled(page)
+    await expect(page.locator('#review-approve-all')).to_be_disabled()
+    await expect(page.locator('#review-actions-summary')).to_contain_text('1 older captures need regeneration')
+    await page.locator('.site-tile').click();await settled(page)
+    await page.get_by_role('heading',name='Full capture needed',exact=True).wait_for()
+    assert await page.get_by_role('button',name='Approve site & index',exact=True).count()==0
+    await page.get_by_role('button',name='Regenerate full capture',exact=True).click();await settled(page)
+    await expect(page.locator('#error')).to_contain_text('Captured site changed')
+    assert 'view=review' in page.url
+    reject=False
+    await page.get_by_role('button',name='Regenerate full capture',exact=True).click();await settled(page)
+    assert 'view=queued' in page.url
+    await page.reload();await settled(page)
+    await page.get_by_role('button',name='Undo regeneration',exact=True).click();await settled(page)
+    assert 'view=review' in page.url
+    await expect(page.get_by_role('button',name='Regenerate full capture',exact=True)).to_be_enabled()
+    await safe_layout(page,width)
+    await page.screenshot(path=f'/tmp/curation-regeneration-{width}.png',full_page=True)
+    assert len(posts)==3 and not errors,(posts,errors)
+    await context.close()
+
+
 async def discovery_flow(browser,base,width):
     """Every paid action is intercepted; this test cannot run a discovery worker."""
     context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
@@ -1619,6 +1678,7 @@ async def check(base):
         browser=await playwright.chromium.launch()
         try:
             for width in (320,390,430,768,1280):
+                await regenerate_capture_flow(browser,base,width)
                 await capture_progress_flow(browser,base,width)
                 await complete_file_review(browser,base,width)
                 await candidate_failure_feedback(browser,base,width)

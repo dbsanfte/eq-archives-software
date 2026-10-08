@@ -275,8 +275,22 @@ manifest by hash. Publication preserves the complete file set in one site commit
 HTML/plain-text pages (up to 32 MiB with nonempty text) receive default AI enrichment
 and indexing, while supporting/binary files remain preserved without Luna calls.
 
-Existing claimed captures, reviewed sources and publication/indexing manifests
-retain their saved legacy policy. Legacy HTML traversal keeps its old 20-URL,
+Existing claimed captures and publication/indexing manifests retain their saved
+policy. Unapproved ordinary-site legacy reviews offer **Regenerate full capture**:
+they return to the unlimited capture queue with the same approved scope and a
+60-second grace period. **Undo regeneration** returns the original review until
+the worker actually claims it. Each site gets an independent `complete-files-v1`
+acquisition, reusing source-verified files and carrying the original cumulative
+transport usage. The original manifest remains immutable; no sources are copied,
+and a fresh full-scope CDX inventory is required even when the legacy traversal
+claimed completion. This also repairs two-sample sites from older mixed batches,
+whose earlier sites could consume the shared 100-file allowance. Individual,
+bulk and legacy-API indexing approvals reject these incomplete legacy captures.
+Publication/indexing approval is required after full acquisition completes.
+The source/hash-bound `POST /api/continue-capture` takes the review `id` and
+`manifest_sha256`; polling and deployment never queue regeneration automatically.
+
+Already claimed legacy HTML traversal keeps its old 20-URL,
 100-file, 1-MiB response, 64-MiB/500-request/30-minute bounds and explicit subset
 notes. Discovery sampling is still small and prefers 1999–2001 evidence; this
 preference never truncates a newly approved site's date range.

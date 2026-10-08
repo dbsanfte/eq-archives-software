@@ -200,7 +200,7 @@ function renderList() {
       const description=row.stage==='candidates' ? row.rating?.reason || (issue ? '' : 'Source review is needed.') :
         row.stage==='queued' ? 'Approved scope saved. Undo before capture starts.' : row.stage==='capturing' ? 'Capture progress updates automatically.' :
         row.stage==='indexing' ? (row.review_state==='index_failed' ? 'Sources are retained. Open this site to retry.' : 'Publication and AI-enriched indexing are automatic.') :
-        row.stage==='saved' ? 'Set aside for a later decision.' : capture ? `${capture.pages} pages · ${capture.files} dated captures` : 'Saved decision and source evidence.';
+        row.stage==='saved' ? 'Set aside for a later decision.' : capture ? `${capture.pages} pages · ${capture.files} dated captures${row.stage==='review' && capture.needs_regeneration ? ' · Full capture needed' : ''}` : 'Saved decision and source evidence.';
       if (description) item.append(node('p',description));
       if (row.stage==='capturing') {
         const op=data.operations.find(op=>op.kind==='capture' && op.payload.sites?.some(site=>site.id===row.id));
@@ -211,8 +211,9 @@ function renderList() {
       const bottom=node('div',undefined,'tile-bottom');bottom.append(node('span',row.rating?.category?.replaceAll('_',' ') || 'Website'),node('span','Open site →','open-label'));item.append(bottom);
       if (row.stage==='queued') {
         const card=node('article',undefined,'queue-card');
-        const undo=mutation('Undo approval',()=>undoApproval(row),'Returned to Candidates.');
-        undo.setAttribute('aria-label',`Undo approval: ${siteName(row)}`);
+        const continuing=Boolean(capture?.continuation);
+        const undo=mutation(continuing ? 'Undo regeneration' : 'Undo approval',()=>undoApproval(row),continuing ? 'Regeneration cancelled. Original capture returned to Review.' : 'Returned to Candidates.');
+        undo.setAttribute('aria-label',`${continuing ? 'Undo regeneration' : 'Undo approval'}: ${siteName(row)}`);
         card.append(item,undo);return card;
       }
       return row.stage==='candidates' ? candidateCard(row,item) : item;
@@ -575,15 +576,23 @@ function captureSummary(row,review) {
   if (files) box.append(control(`Browse ${files} supporting ${files===1 ? 'file' : 'files'}`,()=>go({panel:'pages',page:0,slot:0,filetype:'files'}),'wide'));
   return box;
 }
+function needsRegeneration(review) {
+  const manifest=review?.manifest,site=manifest?.sites?.[0];
+  return Boolean(manifest && manifest.capture_policy!=='complete-files-v1' && manifest.sites.length===1 &&
+    ['page','directory','site','custom'].includes(site.scope_mode) && (manifest.limits || manifest.capture_coverage));
+}
 function renderCaptureReview(root,row,review) {
   if (!review) {root.append(panel('Capture details unavailable','Refresh to reload the saved review.'));return;}
   root.append(captureSummary(row,review));
+  if (needsRegeneration(review)) {
+    root.append(panel('Full capture needed','This older download used an HTML-only, 100-file batch limit. It has not checked the complete site inventory. Regenerate this approved scope to collect all available pages, images and files from 1999–2006. Verified downloads will be reused; the original review is retained.','attention'));
+  }
   if (review.manifest.notes?.length) {
-    const notes=panel('Capture coverage',`${review.manifest.notes.length} coverage notes. Check these before approving the captured subset.`,'attention');
+    const notes=panel('Capture coverage',`${review.manifest.notes.length} coverage notes. Check these before approving indexing.`,'attention');
     const list=node('details');list.append(node('summary','Read coverage notes'));
     for (const note of review.manifest.notes) list.append(node('p',`${note.url}${note.timestamp || note.stamp ? ` (${captureDate(note.timestamp || note.stamp)})` : ''}: ${note.note || note.reason}`));notes.append(list);root.append(notes);
   }
-  const decision=panel('Decide for the whole site',`Approval publishes all ${review.manifest.captures.length} captured files. Readable HTML and text pages receive AI-enriched indexing; supporting files remain preserved in the archive. Maximum enrichment spend: $${review.manifest.indexing?.max_enrichment_usd ?? 2} for this site.`);
+  const decision=panel('Decide for the whole site',needsRegeneration(review) ? 'Regeneration returns this site to the capture queue. Undo remains available until it starts. You will review the completed capture before any publication or indexing.' : `Approval publishes all ${review.manifest.captures.length} captured files. Readable HTML and text pages receive AI-enriched indexing; supporting files remain preserved in the archive. Maximum enrichment spend: $${review.manifest.indexing?.max_enrichment_usd ?? 2} for this site.`);
   decision.append(node('p','Declining retains these sources in History. You can reconsider later.','meta'),mutation('Decline indexing',()=>siteDecision('decline'),'Indexing declined. Sources retained in History.'));root.append(decision);
 }
 function renderHistory(root,row,review) {
@@ -793,13 +802,19 @@ function renderDock(force=false) {
     buttons.append(mutation('Approve site for capture',()=>request('/api/decisions',[{id:row.id,manifest_sha256:row.manifest_sha256,decision:'approve'}]),'Approved for capture. Undo is available in Queue until capture starts.',true,Boolean(approvalBlock(row)),{returnToCandidates:true,quiet:true}));
   } else if (row.stage==='queued') {
     hint='Your approval is saved. Capture starts automatically.';
-    buttons.append(mutation('Undo approval',()=>undoApproval(row),'Returned to Candidates.',true));
+    const continuing=Boolean(row.coverage?.capture?.continuation);
+    buttons.append(mutation(continuing ? 'Undo regeneration' : 'Undo approval',()=>undoApproval(row),continuing ? 'Regeneration cancelled. Original capture returned to Review.' : 'Returned to Candidates.',true));
   } else if (row.stage==='capturing' && op?.state==='interrupted') {
     hint=op?.result?.progress?.capture_policy==='complete-files-v1' ? 'Continue pending files; extend an exhausted transport allowance.' : 'Resume the interrupted worker batch within its original budget.';
     buttons.append(mutation('Resume capture',()=>request('/api/resume',{id:op.id}),'Capture resumed.',true,hasOperation()));
   } else if (row.stage==='review' && review) {
-    hint=`Whole captured site · AI enrichment included · $${review.manifest.indexing?.max_enrichment_usd ?? 2} maximum`;
-    buttons.append(mutation('Approve site & index',()=>siteDecision('approve'),'Approved. Publication and indexing are queued.',true,!review.manifest.captures.length));
+    if (needsRegeneration(review)) {
+      hint='All files · 1999–2006 · reuse saved captures';
+      buttons.append(mutation('Regenerate full capture',()=>request('/api/continue-capture',{id:review.id,manifest_sha256:review.manifest_sha256}),'Full capture queued. Undo is available until it starts.',true));
+    } else {
+      hint=`Whole captured site · AI enrichment included · $${review.manifest.indexing?.max_enrichment_usd ?? 2} maximum`;
+      buttons.append(mutation('Approve site & index',()=>siteDecision('approve'),'Approved. Publication and indexing are queued.',true,!review.manifest.captures.length));
+    }
   } else if (row.stage==='indexing' && review?.state==='publication_requested' && review.operation?.state==='interrupted') {
     hint='Approval retained · no recapture needed';buttons.append(mutation('Retry publication',()=>request('/api/resume',{id:review.operation.id}),'Publication queued again.',true,hasOperation()));
   } else if (row.stage==='indexing' && review?.state==='index_failed' && review.job?.name) {
@@ -905,6 +920,10 @@ function renderReviewActions() {
   $('review-actions').hidden=route.view!=='review' || Boolean(route.candidate);
   $('review-actions-summary').textContent=`${snapshot?.count ?? 0} captured sites awaiting review · actions include all pages and search-hidden sites.`;
   for (const id of ['review-approve-all','review-dismiss-all']) $(id).disabled=busy || !snapshot?.count;
+  if (snapshot?.incomplete_count) {
+    $('review-actions-summary').textContent+=` ${snapshot.incomplete_count} older captures need regeneration before Approve all. Open each site to queue its full capture.`;
+    $('review-approve-all').disabled=true;
+  }
 }
 function confirmReview(decision) {
   if (busy || route.view!=='review' || route.candidate || !data?.review_actions?.count) return;

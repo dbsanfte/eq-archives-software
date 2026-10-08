@@ -2,6 +2,7 @@
 import json
 
 from capture_flow import Action, transition
+from capture_continuation import require_complete
 from captures import check_manifest
 from common import CrawlError, digest, now
 from coverage_check import require_new
@@ -25,8 +26,10 @@ def preview(store, rows=None):
         batch = batches.get(review_id, {})
         sites.append({'id': row['id'], 'scope': row['scope'], 'state': row['state'],
                       'candidate_hash': row['manifest_sha256'], 'review_id': review_id,
+                      'needs_regeneration': capture.get('needs_regeneration', False),
                       'manifest_sha256': batch.get('manifest_sha256'), 'files': batch.get('files', 0)})
     return {'count': len(sites), 'token': digest(sites), 'sites': sites,
+            'incomplete_count': sum(site['needs_regeneration'] for site in sites),
             'files': sum(site['files'] or 0 for site in sites),
             'max_enrichment_usd': len(sites) * DEFAULT_POLICY['max_enrichment_usd']}
 
@@ -35,6 +38,8 @@ def validate_decision(store, reviewed, decision):
     expected = 'indexing_declined' if decision == 'reconsider' else 'awaiting_review'
     if reviewed['state'] != expected:
         raise CrawlError('Site decision is no longer available')
+    if decision == 'approve':
+        require_complete(reviewed['manifest'])
     candidate = reviewed['manifest']['sites'][0]['id']
     row = store.db.execute('SELECT state FROM candidates WHERE id=?', (candidate,)).fetchone()
     if not row:
