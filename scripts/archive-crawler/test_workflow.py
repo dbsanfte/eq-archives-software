@@ -7,11 +7,11 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from common import CrawlError, Store, digest
 from acquisition import Downloader, sample
-from grading import SIGNATURE, grade, reserve, sources, validate
+from grading import SIGNATURE, Luna, grade, reserve, sources, validate
 from review import batch, decisions, queue, review
 
 
@@ -204,6 +204,49 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(current["state"], "sampled")
         self.assertEqual(self.store.get("sampling_result")["staged"], 1)
         self.assertEqual(len([job for job in calls if job["op"] == "list"]), 1)
+
+    def test_incremental_sampling_and_grading_reuse_caller_owned_clients(self):
+        first = self.candidate()
+        second = self.candidate("second")
+        self.store.db.execute("UPDATE candidates SET captures='[]' WHERE id='second'")
+        self.store.db.commit()
+        downloader = Mock()
+        downloader.call.return_value = {"captures": [], "listing_limited": False, "available_rows": 0, "identity_variants": []}
+        args = SimpleNamespace(max_candidates=50, samples_per_candidate=2, retry_unresolved=False)
+        sample(args, self.store, candidates=[self.store.db.execute("SELECT * FROM candidates WHERE id='second'").fetchone()], downloader=downloader)
+        self.assertTrue(all(call.args[0]['url'] == second['url'] for call in downloader.call.call_args_list))
+        downloader.close.assert_not_called()
+        client = Mock()
+        client.request.return_value = response()
+        grade(self.arguments(), self.store, candidates=[first], client=client)
+        self.assertEqual(client.request.call_count, 1)
+        client.close.assert_not_called()
+        self.assertEqual(self.store.db.execute("SELECT state FROM candidates WHERE id='second'").fetchone()[0], 'unavailable')
+
+    def test_luna_deadline_bounds_request_and_each_response_read(self):
+        key = self.root / 'dummy-key'
+        key.write_text('fixture-only')
+        clock = [100.0]
+        with patch('grading.http.client.HTTPSConnection') as factory, patch('grading.time.time', side_effect=lambda: clock[0]):
+            client = Luna(key, deadline=105)
+            connection = factory.return_value
+            result = connection.getresponse.return_value
+            result.status = 200
+            result.read1.side_effect = [b'{"ok":true}', b'']
+            self.assertEqual(client.request({}), {'ok': True})
+            self.assertEqual(connection.timeout, 5)
+            self.assertEqual(connection.sock.settimeout.call_args.args, (5,))
+            def slow_read(size):
+                clock[0] = 106
+                return b'{'
+            result.read1.side_effect = slow_read
+            with self.assertRaisesRegex(CrawlError, 'time budget'):
+                client.request({})
+            requests = connection.request.call_count
+            with self.assertRaisesRegex(CrawlError, 'time budget'):
+                client.request({})
+            self.assertEqual(connection.request.call_count, requests)
+            client.close()
 
     def test_cdx_identity_variants_are_unresolved_and_never_relabelled_absent(self):
         self.candidate()

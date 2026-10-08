@@ -3,6 +3,7 @@
 import http.client
 import json
 import math
+import time
 from pathlib import Path
 
 from common import CATEGORIES, CrawlError, Page, decode, digest, now
@@ -98,7 +99,8 @@ def validate(response, documents):
 
 
 class Luna:
-    def __init__(self, key_file):
+    def __init__(self, key_file, deadline=None):
+        self.deadline = deadline
         try:
             self.key = Path(key_file).read_text().strip()
         except OSError:
@@ -107,12 +109,31 @@ class Luna:
             raise CrawlError("OpenAI key file must contain a single key")
         self.connection = http.client.HTTPSConnection("api.openai.com", timeout=90)
 
+    def time_left(self):
+        remaining = 90 if self.deadline is None else min(90, self.deadline - time.time())
+        if remaining <= 0:
+            raise CrawlError("Discovery time budget reached; spend reservation retained")
+        self.connection.timeout = remaining
+        if self.connection.sock:
+            self.connection.sock.settimeout(remaining)
+
     def request(self, payload):
         try:
+            self.time_left()
             self.connection.request("POST", "/v1/responses", json.dumps(payload, ensure_ascii=False).encode(),
                                     {"Authorization": "Bearer " + self.key, "Content-Type": "application/json"})
+            self.time_left()
             response = self.connection.getresponse()
-            data = response.read(1048577)
+            if self.deadline is None:
+                data = response.read(1048577)
+            else:
+                data = b""
+                while len(data) <= 1048576:
+                    self.time_left()
+                    block = response.read1(min(65536, 1048577 - len(data)))
+                    if not block:
+                        break
+                    data += block
             if len(data) > 1048576:
                 raise CrawlError("Luna response exceeds the response limit")
             if response.status != 200:
@@ -145,13 +166,14 @@ def reserve(store, candidate, signature, payload, maximum):
     return cursor.lastrowid
 
 
-def grade(args, store):
-    client = Luna(args.api_key_file)
+def grade(args, store, *, candidates=None, client=None):
+    owned = client is None
+    client = client or Luna(args.api_key_file)
     store.set("luna_pricing", PRICING)
     store.set("luna_budget_usd", args.max_usd)
     count = 0
     try:
-        for candidate in store.candidates()[:args.max_candidates]:
+        for candidate in (store.candidates()[:args.max_candidates] if candidates is None else candidates):
             if not json.loads(candidate["captures"]):
                 continue
             try:
@@ -192,7 +214,8 @@ def grade(args, store):
                 if "HTTP 401" in str(error) or "HTTP 403" in str(error):
                     break
     finally:
-        client.close()
+        if owned:
+            client.close()
     store.set("grading_result", {"new_judgments": count,
               "estimated_usd": store.db.execute("SELECT COALESCE(SUM(actual),0) FROM attempts").fetchone()[0],
               "reserved_usd": store.db.execute("SELECT COALESCE(SUM(reserved),0) FROM attempts").fetchone()[0]})

@@ -529,7 +529,9 @@ async def discovery_flow(browser,base,width):
     operations=[{'id':'a'*32,'kind':'publish','state':'running','payload':{}}]
     loading,release_listing=asyncio.Event(),asyncio.Event()
     submitted,release_action=asyncio.Event(),asyncio.Event()
-    reject=False
+    reject=False;arrivals=[]
+    original=await (await context.request.get(base+'/api/queue?filter=candidates')).json()
+    template=original['candidates'][0]
     async def fixture(route):
         nonlocal operations
         path=urlsplit(route.request.url).path
@@ -541,7 +543,7 @@ async def discovery_flow(browser,base,width):
                 await route.fulfill(status=409,json={'error':'Archive publication has already started.'});return
             submitted.set();await release_action.wait()
             if path=='/api/discover':
-                assert route.request.post_data_json=={'max_candidates':50,'max_usd':2}
+                assert route.request.post_data_json=={'max_candidates':50,'max_usd':2,'min_grade':2}
                 operations=[{'id':'b'*32,'kind':'discover','state':'queued','payload':route.request.post_data_json}]
             else:
                 assert route.request.post_data_json=={'id':'b'*32}
@@ -549,7 +551,7 @@ async def discovery_flow(browser,base,width):
             await route.fulfill(status=202,json={'operation':'b'*32});return
         assert path=='/api/queue',path
         loading.set();await release_listing.wait()
-        await route.fulfill(status=200,json={'candidates':[],'total':0,'offset':0,'operations':operations,
+        await route.fulfill(status=200,json={'candidates':arrivals,'total':len(arrivals),'offset':0,'operations':operations,
             'stage_counts':{name:0 for name in ('candidates','queued','capturing','review','indexing','saved','history')},
             'capture_queue_error':None,'version':'discovery-fixture'})
     await page.route('**/api/**',fixture)
@@ -602,6 +604,18 @@ async def discovery_flow(browser,base,width):
     assert await button.is_disabled()
     await page.reload();await settled(page)
     assert await button.is_disabled() and len(posts)==1
+    # Results and progress arrive through the normal poll while the worker is busy.
+    operations[0].update(state='running',payload={'max_candidates':50,'max_usd':2,'min_grade':2,'fill_queue':True},
+        result={'progress':{'phase':'grading','accepted':1,'checked':4,'target':50,'min_grade':2,'deadline':9999999999,
+                            'estimated_usd':.01,'reserved_usd':.02,'max_usd':2}})
+    arrivals.append(copy.deepcopy(template))
+    await expect(page.locator('#discovery-progress-text')).to_contain_text('1/50 new Grade 2+ sites',timeout=8000)
+    await expect(page.locator('#candidates .site-tile')).to_have_count(1)
+    assert await page.locator('#discovery-meter').get_attribute('value')=='1'
+    assert len(posts)==1 and await button.is_disabled()
+    await page.reload();await settled(page)
+    await expect(page.locator('#discovery-progress-text')).to_contain_text('4 checked')
+    await safe_layout(page,width)
     # Resume is also on Candidates and retains the existing run's smaller budget.
     operations[0].update(state='interrupted',payload={'max_candidates':12,'max_usd':0.4})
     await page.locator('#refresh').click()
@@ -1095,11 +1109,94 @@ async def candidate_grade_controls(browser,base,width):
     await context.close()
 
 
+async def review_bulk_actions(browser,base,width):
+    context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
+    page=await context.new_page();posts=[];errors=[]
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    original=await (await context.request.get(base+'/api/queue?filter=review')).json()
+    template=original['candidates'][0]
+    rows=[]
+    for index in range(58):
+        row=copy.deepcopy(template)
+        row.update(id=f'{index:024x}',url=f'http://review-{index}.example/eq/',scope=f'http://review-{index}.example/eq/',stage='review')
+        rows.append(row)
+    version=0;fail=True;submitted=asyncio.Event();release=asyncio.Event()
+    async def fixture(route):
+        nonlocal version,fail
+        path=urlsplit(route.request.url).path
+        if route.request.method=='POST':
+            payload=route.request.post_data_json;posts.append((path,payload))
+            if path=='/api/undo-review-dismissal':
+                assert payload=={'dismissal':'d'*32}
+                for row in rows: row.update(stage='review',state='captured_awaiting_review',review_state='awaiting_review')
+                version+=1;await route.fulfill(status=200,json={'restored':58});return
+            assert path=='/api/review-decisions'
+            assert payload['token']==str(version)
+            if fail:
+                fail=False;version+=1
+                await route.fulfill(status=409,json={'error':'Review sites changed. Refresh and confirm the new list.'});return
+            if payload['decision']=='approve':
+                submitted.set();await release.wait()
+                for row in rows: row.update(stage='indexing',state='publication_requested',review_state='publication_requested')
+            else:
+                for row in rows: row.update(stage='history',state='indexing_declined',review_state='indexing_declined')
+            version+=1;await route.fulfill(status=202 if payload['decision']=='approve' else 200,json={'count':58,'decision':payload['decision'],'dismissal':'d'*32});return
+        assert path=='/api/queue'
+        query=parse_qs(urlsplit(route.request.url).query);view=query.get('filter',['review'])[0];offset=int(query.get('offset',['0'])[0]);search=query.get('search',[''])[0]
+        selected=[row for row in rows if row['stage']==view and search in row['url']]
+        reviewed=[row for row in rows if row['stage']=='review']
+        await route.fulfill(status=200,json={**original,'candidates':selected[offset:offset+50],'total':len(selected),'offset':offset,'operations':[],
+            'stage_counts':{name:sum(row['stage']==name for row in rows) for name in ('candidates','queued','capturing','review','indexing','saved','history')},
+            'review_actions':{'count':len(reviewed),'files':len(reviewed)*2,'max_enrichment_usd':len(reviewed)*2,'token':str(version),
+                              'sites':[{'id':row['id'],'scope':row['scope'],'files':2} for row in reviewed]}})
+    await page.route('**/api/**',fixture)
+    await page.goto(base+'/?view=review');await settled(page)
+    await expect(page.locator('#candidates .site-tile')).to_have_count(50)
+    await page.locator('#next').click();await expect(page.locator('#candidates .site-tile')).to_have_count(8)
+    await page.get_by_label('Find a site',exact=True).fill('review-57.')
+    await expect(page.locator('#candidates .site-tile')).to_have_count(1)
+    await page.locator('#review-approve-all').click()
+    await expect(page.locator('#review-dialog-title')).to_have_text('Approve all 58 sites?')
+    await expect(page.locator('#review-dialog-budget')).to_contain_text('$116 total ($2 per site)')
+    await expect(page.locator('#review-dialog-description')).to_contain_text('116 captures')
+    await safe_layout(page,width)
+    await page.locator('#review-dialog details summary').click()
+    assert await page.locator('#review-dialog-sites a').count()==58
+    confirm_bounds=await page.locator('#review-dialog-confirm').bounding_box()
+    assert confirm_bounds['y']>=0 and confirm_bounds['y']+confirm_bounds['height']<=844
+    await page.screenshot(path=f'/tmp/curation-review-bulk-{width}.png',full_page=True)
+    await page.locator('#review-dialog-cancel').click();assert not posts
+    await page.locator('#review-dismiss-all').click()
+    await expect(page.locator('#review-dialog-budget')).to_be_hidden()
+    await page.locator('#review-dialog-confirm').click();await settled(page)
+    await expect(page.locator('#error')).to_contain_text('Review sites changed')
+    assert 'view=review' in page.url
+    await page.locator('#refresh').click()
+    await page.wait_for_function('()=>data.review_actions.token==="1"')
+    await page.locator('#review-dismiss-all').click();await page.locator('#review-dialog-confirm').click();await settled(page)
+    await expect(page.locator('[data-count=review]')).to_have_text('0')
+    await expect(page.locator('#notice')).to_contain_text('58 sites moved to History')
+    await expect(page.locator('#review-approve-all')).to_be_disabled()
+    await page.get_by_role('button',name='Undo dismiss all',exact=True).click();await settled(page)
+    await expect(page.locator('[data-count=review]')).to_have_text('58')
+    await page.locator('#review-approve-all').click();await page.locator('#review-dialog-confirm').click()
+    await asyncio.wait_for(submitted.wait(),timeout=3)
+    assert 'view=review' in page.url and await page.locator('#review-approve-all').is_disabled()
+    release.set()
+    await page.wait_for_url('**/?view=indexing*');await settled(page)
+    await expect(page.locator('[data-count=indexing]')).to_have_text('58')
+    await expect(page.locator('#review-actions')).to_be_hidden()
+    await stage(page,'candidates');await expect(page.locator('#review-actions')).to_be_hidden()
+    assert len(posts)==4 and not errors,(posts,errors)
+    await context.close()
+
+
 async def check(base):
     async with async_playwright() as playwright:
         browser=await playwright.chromium.launch()
         try:
             for width in (320,390,430,768,1280):
+                await review_bulk_actions(browser,base,width)
                 await candidate_grade_controls(browser,base,width)
                 await candidate_quick_actions(browser,base,width)
                 await capture_approval_navigation(browser,base,width)

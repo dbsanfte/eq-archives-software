@@ -74,6 +74,15 @@ without readable samples or a validated grade. Stage searches, grade filters and
 The operator API remains unfiltered unless `min_grade=0..3` or `needs_grade=1` is
 supplied to `GET /api/queue?filter=candidates`.
 
+**Review capture** has **Approve all** and **Dismiss all** controls outside the
+reader. Their confirmation includes every awaiting-review site, even when search
+or pagination hides it, and an expandable site list. Approval validates all
+sources/manifests/coverage before atomically queuing independent whole-site
+publications and moving to Indexing; the dialog shows the combined AI enrichment
+maximum ($2 per site). A stale or invalid site blocks the entire approval.
+Dismissal declines indexing, retains sources in History, and offers atomic Undo
+unless a later decision changed a site. No other stage is affected.
+
 **Dismiss all candidates** confirms the full remaining count, including sites hidden
 by grade/search filters and other pages, then moves those sites to History. It
 does not affect any other stage or start work. The confirmation offers **Undo
@@ -131,10 +140,14 @@ publication, waiting for existing Jobs, and AI enrichment/import, with no invent
 percentage. Publication and indexing failures remain in Indexing with a contextual
 Retry action. Technical Job details expand separately and remain open across polls.
 Discover & grade is a primary action at the top of Candidates, with the explicit
-50-candidate/$2 limit beside it. A visible explanation names any capture, discovery
-or publication occupying the shared worker; polling makes the button available
+50-site target, one-hour deadline and $2 total run limit beside it. A visible
+explanation names any capture, discovery or publication occupying the shared worker; polling makes the button available
 when that work finishes, without starting a run. Paused discovery can be resumed
-there within its original limits and budget. More contains recent operations,
+there within its original limits, deadline and budget. Candidates polls every five
+seconds while visible: completed site checks appear immediately, with a progress
+bar, qualified/checked counts, current phase, remaining time, estimated usage and
+reserved spending. Changing the grade slider filters the view; it does not change
+the saved grade target of an active run. More contains recent operations,
 capture limits and secondary history views. There are no scheduled paid runs.
 
 Add a site, also in Candidates, accepts an original HTTP(S) URL or a Wayback
@@ -226,7 +239,20 @@ manifest instead of guessing protocol/path/query identity from filenames.
 
 The initial pilot seeds 50 candidates, 35 judgments and 64 listed captures once,
 preserving raw bytes and grading signatures. No decisions are automatically
-approved. **Discover & grade · 50 sites · $2 cap** explicitly starts another run.
+approved. **Discover & grade** explicitly starts another run, targeting 50 **new
+sites at or above the selected minimum grade** (default 2). Low grades, unavailable
+samples and duplicates do not consume target slots. The worker replenishes its
+shortlist from cached links and newly graded sources until it reaches the target,
+one hour from its first claim, or the **$2 total run cap**. Reservations can stop
+the next request before actual estimated charges reach $2. Exhausted links are a
+visible completion reason; transport/authentication failures pause explicitly.
+Original deadlines survive restarts and resume, including downtime. Sites already
+found count toward the target even if reviewed while discovery continues. Old
+operations without the fill policy keep their fixed original shortlist.
+Wayback keeps one serial persistent downloader, a three-second delay, 128 KiB/s,
+1 MiB responses, and cumulative ceilings of 1,200 requests/128 MiB within the
+remaining hour. Seed/staging source reads retain their existing 66-read/16 MiB
+limits, with cached local inventories and links reused across runs.
 Each requested run owns its own durable cap; there are no scheduled paid runs
 or grading calls on deployment. Reservations precede calls and survive ambiguous
 failures. Valid unchanged judgments are reused on resume; unverifiable or

@@ -24,6 +24,7 @@ from site_reviews import materialize, migrate
 from import_status import read_error
 from manual import existing_site, prepare as prepare_manual
 from candidate_checks import run as check_candidate
+from discovery_run import fill
 
 
 def campaign(root, operation):
@@ -53,6 +54,8 @@ def campaign(root, operation):
     run = Store(directory)
     try:
         payload = operation["payload"]
+        if payload.get("fill_queue"):
+            return fill(root, operation, run)
         options = parser()
         acquire = prepare_manual(run, operation) if target else True
         if not target and not run.get("discovery_completed"):

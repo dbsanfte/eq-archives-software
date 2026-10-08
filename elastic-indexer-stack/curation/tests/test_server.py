@@ -186,7 +186,7 @@ def test_paid_discovery_only_enqueues_one_explicit_operation_and_resume_retains_
     assert call(app,"POST","/api/resume",{"id":identifier}).status_code == 202
     with connect(root) as store:
         op=store.db.execute("SELECT payload,state FROM operations").fetchone()
-        assert json.loads(op[0]) == {"max_candidates":50,"max_usd":2}
+        assert json.loads(op[0]) == {"max_candidates":50,"max_usd":2,"min_grade":2,"fill_queue":True}
         assert op[1] == "queued"
 
 
