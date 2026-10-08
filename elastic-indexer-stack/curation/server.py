@@ -14,7 +14,7 @@ from starlette.routing import Route
 
 from common import CrawlError, capture_scope, digest, now, site_identity
 from review import apply_decisions, checked_sources, queue, record
-from captures import LIMITS, check_manifest, document
+from captures import LIMITS, TEXT_LIMIT, check_manifest, document, readable, verified_path
 from state import connect, enqueue, unpack, valid_id
 from worker import Worker
 from coverage_check import refresh, require_new
@@ -153,7 +153,8 @@ def create_app(root=None, origin=None, start_worker=True):
             if search:
                 rows = [row for row in rows if search_matches(row, search)]
             operations = [unpack(row) for row in store.db.execute("SELECT * FROM operations ORDER BY CASE state WHEN 'running' THEN 0 WHEN 'queued' THEN 1 WHEN 'interrupted' THEN 2 ELSE 3 END,created DESC LIMIT 20")]
-            batches = [unpack(row) for row in store.db.execute("SELECT * FROM batches WHERE state!='capture_group' ORDER BY created DESC LIMIT 100")]
+            fields = 'id,state,manifest_sha256,publication,job,error,created,updated' if request.query_params.get('compact') == '1' else '*'
+            batches = [unpack(row) for row in store.db.execute(f"SELECT {fields} FROM batches WHERE state!='capture_group' ORDER BY created DESC LIMIT 100")]
             page_rows = rows[offset:offset + 50]
             return JSONResponse({"candidates": page_rows, "total": len(rows), "offset": offset,
                                  "stage_counts": counts(all_rows),
@@ -179,7 +180,7 @@ def create_app(root=None, origin=None, start_worker=True):
             candidate = attach_checks(store, decorate(store, [record(store, row)]))[0]
             capture = (candidate.get('coverage') or {}).get('capture') or {}
             review_id = capture.get('review_id') or capture.get('batch_id')
-            review = get_site_review(store, review_id, candidate['id']) if review_id and candidate['stage'] != Stage.CAPTURING else None
+            review = get_site_review(store, review_id, candidate['id'], request.query_params.get('known_manifest')) if review_id and candidate['stage'] != Stage.CAPTURING else None
             operation = store.db.execute("""SELECT * FROM operations WHERE kind='capture' AND EXISTS
                 (SELECT 1 FROM json_each(operations.payload,'$.sites') WHERE json_extract(value,'$.id')=?)
                 ORDER BY created DESC,rowid DESC LIMIT 1""", (candidate['id'],)).fetchone()
@@ -232,8 +233,16 @@ def create_app(root=None, origin=None, start_worker=True):
                 if slot >= len(captures):
                     raise CrawlError("Unknown source slot")
                 capture = captures[slot]
-                page, _ = document(root, capture)
-                result = {"complete_extracted_text": "\n".join(page.text), **capture}
+                if request.query_params.get('download') == '1':
+                    return FileResponse(verified_path(root, capture), media_type='application/octet-stream',
+                                        filename=Path(capture['archive_path']).name)
+                if readable(capture) and capture['bytes'] <= TEXT_LIMIT:
+                    page, _ = document(root, capture)
+                    result = {"complete_extracted_text": "\n".join(page.text), **capture}
+                else:
+                    verified_path(root, capture)
+                    result = {**capture, 'complete_extracted_text': None,
+                              'file_message': 'Original file preserved. Download it or open its dated Wayback capture.'}
             else:
                 row = store.db.execute("SELECT * FROM candidates WHERE id=?", (request.query_params.get("candidate"),)).fetchone()
                 if not row:
@@ -254,22 +263,27 @@ def create_app(root=None, origin=None, start_worker=True):
                 or not all(isinstance(value,str) for value in payload.values())
                 or payload['decision'] not in ('approve','decline','reconsider')):
             raise CrawlError('Site decision requires the review ID, manifest hash and approve/decline/reconsider')
-        if payload['decision'] == 'approve':
-            refresh(root)
-            with connect(root) as store:
-                current = get_site_review(store,payload['id'])
-                require_new(store,current['manifest']['sites'][0]['url'])
-        with connect(root) as store:
-            store.db.execute('BEGIN IMMEDIATE')
-            reviewed = get_site_review(store,payload['id'])
-            if reviewed['manifest_sha256'] != payload['manifest_sha256']:
-                raise CrawlError('Captured site changed since review')
-            validate_site_decision(store, reviewed, payload['decision'])
+        def decide():
             if payload['decision'] == 'approve':
-                # Hash and validate the complete site, never a mixed batch or subset.
-                check_manifest(root,reviewed['manifest'])
-            result = apply_site_decision(store, reviewed, payload['decision'])
-            store.db.commit()
+                refresh(root)
+            with connect(root) as store:
+                reviewed = get_site_review(store,payload['id'])
+                if reviewed['manifest_sha256'] != payload['manifest_sha256']:
+                    raise CrawlError('Captured site changed since review')
+                validate_site_decision(store, reviewed, payload['decision'])
+                if payload['decision'] == 'approve':
+                    require_new(store,reviewed['manifest']['sites'][0]['url'])
+                    # Large source reads stay outside the event loop and write
+                    # lock, so status polling and worker progress can continue.
+                    check_manifest(root,reviewed['manifest'])
+                store.db.execute('BEGIN IMMEDIATE')
+                current = get_site_review(store,payload['id'])
+                if current['manifest_sha256'] != payload['manifest_sha256']:
+                    raise CrawlError('Captured site changed while sources were verified')
+                result = apply_site_decision(store, current, payload['decision'])
+                store.db.commit()
+                return result
+        result = await run_in_threadpool(decide)
         return JSONResponse({key: result[key] for key in ('state', 'operation')},status_code=202 if result['operation'] else 200)
 
     async def review_decisions(request):
@@ -378,7 +392,8 @@ def create_app(root=None, origin=None, start_worker=True):
         with connect(root) as store:
             store.db.execute("BEGIN IMMEDIATE")
             row = store.db.execute("SELECT * FROM candidates WHERE id=?", (payload["id"],)).fetchone()
-            if not row or row["state"] not in ("approval_pending", "approved_waiting_batch", "deferred", "rejected"):
+            if not row or row["state"] not in ("approval_pending", "approved_waiting_batch", "deferred", "rejected",
+                                               'sample_error','unavailable','identity_unresolved','sampled','grade_error','discovered'):
                 raise CrawlError("Candidate cannot change scope in its current state")
             current = record(store, row)
             if current["manifest_sha256"] != payload["manifest_sha256"]:
@@ -481,6 +496,8 @@ def create_app(root=None, origin=None, start_worker=True):
                     or len(set(slots)) != len(slots)):
                 raise CrawlError("Select at least one capture from the reviewed file set")
             if len(slots) != len(manifest["captures"]):
+                if manifest.get('capture_policy') == 'complete-files-v1':
+                    raise CrawlError('Complete file captures require whole-site approval; choose every captured file')
                 manifest = {**manifest, "captures": [capture for index, capture in enumerate(manifest["captures"]) if index in slots],
                             "reviewed_manifest_sha256": batch["manifest_sha256"]}
             check_manifest(root, manifest)

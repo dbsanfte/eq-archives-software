@@ -125,6 +125,11 @@ def run(root, operation):
             run_store.db.execute(f"INSERT OR REPLACE INTO candidates({','.join(keys)}) VALUES ({','.join('?' for _ in keys)})", list(original.values()))
             run_store.set('retained_sources', retained)
             (directory / 'initialized').touch(mode=0o600)
+        # A saved scope edit affects redirect eligibility on retry. Retain the
+        # same operation, sources, cached responses and cumulative budgets.
+        run_store.db.execute('UPDATE candidates SET scope=?,coverage=? WHERE id=?',
+                             (row['scope'], json.dumps(row['coverage']), row['id']))
+        run_store.db.commit()
         options = parser()
         candidate = run_store.candidates()[0]
         if not json.loads(candidate['captures']):

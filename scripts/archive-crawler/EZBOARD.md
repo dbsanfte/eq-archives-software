@@ -140,10 +140,13 @@ blocks approval.
 
 New board candidates default to the explicit **Whole Ezboard** scope. Each
 approved board receives its own capture budget and whole-site review; the worker
-preserves queue order and the Undo grace period. The portal uses the defaults
-above and also seeds its historical host list from the archive's root metadata.
-A bounded result can be reviewed as a partial capture. A transport failure stays
-paused in Capturing and requires an explicit resume. Source membership and exact
+preserves queue order and the Undo grace period. Newly claimed portal work uses
+[complete-files-v1](../../elastic-indexer-stack/curation/README.md): larger cumulative
+transport allowances, exact dated replays and source-verified supporting-file
+acquisition after the board catalogs finish. It seeds historical hosts from the
+archive's root metadata. Limits keep new work paused in Capturing until explicitly
+resumed; no bounded subset is reported as complete. Existing claimed portal work
+and standalone operator plans retain their saved discussion-only bounds above. Source membership and exact
 archive destinations are verified again before publication. Existing page,
 directory and custom-folder approvals retain their original scope. Indexing
 still requires separate whole-site approval and uses the existing $2/site

@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import subprocess
 
-from common import CrawlError, Page, TIERS, decode, digest, now, original_url, tier
+from common import CrawlError, Page, TIERS, decode, digest, in_capture_window, now, original_url, site_scope, tier, within_capture_scope
 
 
 class Downloader:
@@ -53,6 +53,53 @@ class Downloader:
         self.process.stderr.close()
 
 
+def redirected_listing(store, candidate, listing, downloader, start, end):
+    """Use a verified archived entry point, without changing candidate identity."""
+    records = sorted(listing.get('redirects', []), key=lambda row: row['timestamp'])
+    selected = records[:1] + (records[-1:] if len(records) > 1 else [])
+    mode = json.loads(candidate['coverage'] or '{}').get('scope_mode', 'directory')
+    original = original_url(candidate['url'])
+    for record in selected:
+        if original_url(record['url']) != original or not in_capture_window(record['timestamp'], {'from':start, 'to':end}):
+            raise CrawlError('Archived redirect changed original URL or date')
+        key = 'entry_redirect:' + digest([record['url'], record['timestamp'], record['digest']])
+        resolution = store.get(key)
+        if not resolution:
+            try:
+                resolution = downloader.call({'op':'resolve', 'url':record['url'], 'timestamp':record['timestamp'], 'from':start, 'to':end})
+            except CrawlError as error:
+                if str(error) in ('Wayback HTTP 404', 'Wayback HTTP 410'):
+                    continue
+                raise
+        target = original_url(resolution.get('url'))
+        if (original_url(resolution.get('requested_url')) != original or resolution.get('requested_timestamp') != record['timestamp']
+                or not target or not in_capture_window(resolution.get('timestamp'), {'from':start, 'to':end})):
+            raise CrawlError('Archived redirect failed exact URL/date validation')
+        chain = resolution.get('redirects', [])
+        previous = original
+        if not 1 <= len(chain) <= 5:
+            raise CrawlError('Archived redirect chain could not be verified')
+        for hop in chain:
+            def replay_url(value):
+                return original_url('https://web.archive.org' + value) if isinstance(value, str) and value.startswith('/web/') else None
+            source, destination = replay_url(hop.get('from')), replay_url(hop.get('to'))
+            if source != previous or not destination or hop.get('status') not in (301, 302, 303, 307, 308):
+                raise CrawlError('Archived redirect chain could not be verified')
+            allowed = destination == original if mode == 'page' else (within_capture_scope(destination, candidate['scope']) and within_capture_scope(destination, site_scope(original)))
+            if not allowed:
+                raise CrawlError('Archived redirect is outside the saved capture scope: ' + destination + '. Choose a scope containing the destination or submit it separately.')
+            previous = destination
+        if previous != target or target == original:
+            raise CrawlError('Archived redirect chain does not match its destination')
+        store.set(key, resolution)
+        result = downloader.call({'op':'list', 'url':resolution['url'], 'from':start, 'to':end})
+        if result['captures']:
+            return result, resolution
+        if result.get('listing_limited'):
+            raise CrawlError('Wayback listing limit reached; archived destination availability remains unresolved')
+    return listing, None
+
+
 def sample(args, store, *, candidates=None, downloader=None):
     owned = downloader is None
     downloader = downloader or Downloader(store, args)
@@ -68,7 +115,8 @@ def sample(args, store, *, candidates=None, downloader=None):
                 continue
             attempts += 1
             captures, listings = [], []
-            board = json.loads(candidate['coverage'] or '{}').get('scope_mode') == 'sitepowerup'
+            mode = json.loads(candidate['coverage'] or '{}').get('scope_mode', 'directory')
+            board = mode == 'sitepowerup'
             try:
                 for level, (start, end) in TIERS.items():
                     if board:
@@ -77,8 +125,14 @@ def sample(args, store, *, candidates=None, downloader=None):
                     else:
                         listing = downloader.call({"op": "list", "url": candidate["url"], "from": start, "to": end})
                     listings.append({"tier": level, "matched": len(listing["captures"]), "limited": listing["listing_limited"],
-                                     "available_rows": listing["available_rows"], "identity_variants": listing["identity_variants"]})
+                                     "available_rows": listing["available_rows"], "identity_variants": listing["identity_variants"],
+                                     'response_types': listing.get('response_types', [])})
+                    entry_redirect = None
+                    if not listing['captures'] and mode not in ('ezboard', 'sitepowerup') and listing.get('redirects'):
+                        listing, entry_redirect = redirected_listing(store, candidate, listing, downloader, start, end)
                     if not listing["captures"]:
+                        if listing.get('listing_limited'):
+                            raise CrawlError('Wayback listing limit reached; capture availability remains unresolved')
                         continue
                     records = sorted(listing["captures"], key=lambda r: r["timestamp"])
                     selected = [records[0]]
@@ -87,11 +141,12 @@ def sample(args, store, *, candidates=None, downloader=None):
                     for record in selected:
                         folder = store.root / "captures" / candidate["id"]
                         folder.mkdir(parents=True, exist_ok=True, mode=0o700)
-                        suffix = '-' + digest(record['url'])[:16] if board else ''
+                        suffix = '-' + digest(record['url'])[:16] if board or entry_redirect else ''
                         destination = folder / (record["timestamp"] + suffix + ".html")
                         result = downloader.call({"op": "capture", "url": record["url"], "timestamp": record["timestamp"],
                                                   "from": start, "to": end, "destination": str(destination)})
-                        if original_url(result['url']) != original_url(record['url']) or tier(result['timestamp']) != level or (not board and original_url(result['url']) != candidate['url']):
+                        source_url = entry_redirect['url'] if entry_redirect else candidate['url']
+                        if original_url(result['url']) != original_url(record['url']) or not in_capture_window(result['timestamp'], {'from':start, 'to':end}) or (not board and original_url(result['url']) != original_url(source_url)):
                             raise CrawlError("Returned capture failed exact identity/date validation")
                         data = destination.read_bytes()
                         if digest(data) != result["sha256"]:
@@ -111,6 +166,8 @@ def sample(args, store, *, candidates=None, downloader=None):
                                        "cdx_digest": record["digest"], "cdx_length": record["length"],
                                        "retrieved_at": now(), "encoding": encoding, "title": " ".join(page.title),
                                        "source": "wayback", "site_coverage": "bounded_samples"})
+                        if entry_redirect:
+                            result['entry_redirect'] = entry_redirect
                         captures.append(result)
                         # Persist each completed artifact before the next request.
                         store.db.execute("UPDATE candidates SET captures=?,state='sampled',error=NULL WHERE id=?",
@@ -121,6 +178,9 @@ def sample(args, store, *, candidates=None, downloader=None):
                 state = "sampled" if captures else "identity_unresolved" if variants else "unavailable"
                 error = (None if captures else "CDX lists different original URLs; exact source identity remains unresolved"
                          if variants else "No exact HTML captures found within the two tiers")
+                responses = sorted({code for listing in listings for code, _ in listing['response_types']})
+                if not captures and not variants and responses:
+                    error = 'Wayback has archived responses for this URL, but no usable HTML source was recovered (HTTP ' + ', '.join(responses) + ').'
                 store.db.execute("UPDATE candidates SET state=?,error=? WHERE id=?",
                                  (state, error, candidate["id"]))
                 store.event(candidate["id"], "sample", {"listings": listings, "captures": len(captures)})

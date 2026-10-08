@@ -1,7 +1,7 @@
 # Website candidate crawler
 
 The [production intranet service](../../elastic-indexer-stack/curation/README.md)
-adds persistent review, explicit scopes, bounded site capture, a second batch
+adds persistent review, explicit scopes, resumable complete-file site capture, a second site
 publication approval and targeted indexing through standard CI/CD.
 
 This operator tool spiders outward from selected local website captures, checks
@@ -78,14 +78,21 @@ Inclusive UTC ranges are **1999-01-01 through 2001-12-31** first, then
 **2002-01-01 through 2006-12-31** if no exact tier-1 HTML capture is listed. The
 tool samples the earliest and latest of at most 80 digest-collapsed CDX rows.
 Limited listings are labelled and are not complete capture histories. Network
-failures do not establish absence. Replay redirects must retain the exact
-original URL and stay inside the selected tier. Date provenance records Memento
-headers when available, otherwise the replay URL.
+failures do not establish absence. When no successful HTML record exists,
+sampling checks a bounded catalog of archived redirects/errors. Verified redirects
+inside the saved scope/account can supply a destination for independent CDX
+listing and sampling. Sources retain the destination's exact original URL/date
+plus the entry URL and redirect chain; they are never relabelled as the entry
+page. Out-of-scope redirects pause for a scope edit or separate candidate. Actual
+capture replay must retain its listed source identity and selected date window.
+Date provenance records Memento headers when available, otherwise the replay URL.
 
 These tiers select **discovery evidence**, not the approved capture date range.
 The production portal captures all available dated versions from 1999-01-01
 through 2006-12-31 within the approved scope, using paginated, uncollapsed CDX
-listings and explicit cumulative bounds. Earlier saved evidence and decisions
+scope inventories for every file type, streamed downloads and SQLite checkpoints.
+HTML/CSS references can add exact supporting-file URLs. Resource limits pause new
+captures rather than marking a partial dump complete. Earlier saved evidence and decisions
 remain valid. See the [curation guide](../../elastic-indexer-stack/curation/README.md).
 
 Re-running resumes cached work. Discovery refreshes the shortlist before

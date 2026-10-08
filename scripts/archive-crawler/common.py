@@ -150,6 +150,19 @@ def within_scope(url, scope):
     return page.path == boundary.path.rstrip("/") or page.path.startswith(boundary.path)
 
 
+def within_capture_scope(url, scope):
+    """New captures include canonical host/scheme aliases, retaining account paths."""
+    value = original_url(url)
+    if not value:
+        return False
+    source, boundary = urlsplit(value), urlsplit(scope)
+    if (source.hostname.removeprefix('www.') != boundary.hostname.removeprefix('www.')
+            or source.port not in (None, 80 if source.scheme == 'http' else 443)
+            or boundary.port not in (None, 80 if boundary.scheme == 'http' else 443)):
+        return within_scope(value, scope)
+    return within_scope(value, urlunsplit((source.scheme, source.netloc, boundary.path, boundary.query, '')))
+
+
 def site_identity(url, store=None):
     """Discovery identity only; source URL and document identity stay exact."""
     from sitepowerup import address as board_address

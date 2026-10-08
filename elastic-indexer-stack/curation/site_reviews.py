@@ -3,6 +3,7 @@ import json
 
 from common import CrawlError, digest, original_url, within_scope
 from state import connect, unpack, valid_id
+from captures import readable
 
 
 def materialize(store, parent):
@@ -33,7 +34,8 @@ def materialize(store, parent):
             if capture.get('review_id') != review_id:
                 coverage['capture'] = {**capture,'batch_id':parent['id'],'review_id':review_id,
                     'completed_at':capture.get('completed_at',parent['updated']), 'files':len(captures),
-                    'pages':len({original_url(item['url']) for item in captures}), 'bytes':sum(item['bytes'] for item in captures)}
+                    'pages':len({original_url(item['url']) for item in captures if readable(item) and not item.get('supporting_source')}),
+                    'bytes':sum(item['bytes'] for item in captures)}
                 store.db.execute('UPDATE candidates SET coverage=? WHERE id=?',(json.dumps(coverage),site['id']))
     if multiple:
         store.db.execute("UPDATE batches SET state='capture_group' WHERE id=?",(parent['id'],))
@@ -47,7 +49,15 @@ def migrate(root):
         store.db.commit()
 
 
-def get(store, review_id, candidate=None):
+def get(store, review_id, candidate=None, known_hash=None):
+    if known_hash:
+        cached = store.db.execute('SELECT id,state,manifest_sha256,publication,job,error,created,updated FROM batches WHERE id=? AND manifest_sha256=?',
+                                   (valid_id(review_id), known_hash)).fetchone()
+        if cached and cached['state'] not in ('capturing', 'capture_group'):
+            result = unpack(cached)
+            result['manifest_unchanged'] = True
+            result['operation'] = publication_operation(store, review_id)
+            return result
     row = store.db.execute('SELECT * FROM batches WHERE id=?',(valid_id(review_id),)).fetchone()
     if not row or not row['manifest'] or row['state'] in ('capturing','capture_group'):
         raise CrawlError('Captured site is not ready for review')
@@ -66,6 +76,10 @@ def get(store, review_id, candidate=None):
     result['source_slots'] = slots
     result['manifest'] = {**manifest,'sites':sites,'captures':[manifest['captures'][slot] for slot in slots]}
     result['page_identities'] = [original_url(manifest['captures'][slot]['url']) for slot in slots]
-    operation = store.db.execute("SELECT * FROM operations WHERE kind='publish' AND json_extract(payload,'$.batch_id')=? ORDER BY created DESC LIMIT 1", (review_id,)).fetchone()
-    result['operation'] = unpack(operation) if operation else None
+    result['operation'] = publication_operation(store, review_id)
     return result
+
+
+def publication_operation(store, review_id):
+    operation = store.db.execute("SELECT * FROM operations WHERE kind='publish' AND json_extract(payload,'$.batch_id')=? ORDER BY created DESC LIMIT 1", (review_id,)).fetchone()
+    return unpack(operation) if operation else None

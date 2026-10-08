@@ -1,7 +1,8 @@
 """Atomically claim bounded batches from an unbounded approval queue."""
 from capture_flow import Action, transition
-from common import CrawlError, now, original_url, within_scope
+from common import CrawlError, now, original_url, within_capture_scope
 from captures import LIMITS
+from full_capture import POLICY
 from review import checked_sources, record
 from state import enqueue, identifier
 
@@ -20,11 +21,11 @@ def claim(store, ids):
         checked_sources(store, site)
         snapshots = [item for item in site['captures'] if site['scope_mode'] in ('ezboard', 'sitepowerup') or
                      (original_url(item['url']) == original_url(site['url']) if site['scope_mode'] == 'page'
-                      else within_scope(item['url'], site['scope']))]
+                      else within_capture_scope(item['url'], site['scope']))]
         if not snapshots and site['scope_mode'] != 'custom':
             raise CrawlError('Approved scope excludes its reviewed source')
         sites.append({**{key: site[key] for key in ('id','url','scope','scope_mode','manifest_sha256','decision')},
-                      'captures': snapshots, 'reviewed_captures': site['captures']})
+                      'captures': snapshots, 'reviewed_captures': site['captures'], 'capture_policy': POLICY})
     if not 1 <= len(sites) <= LIMITS['sites']:
         raise CrawlError('Capture batches require 1–5 sites')
     if len(sites) != 1 and any(site['scope_mode'] in ('ezboard', 'sitepowerup') for site in sites):

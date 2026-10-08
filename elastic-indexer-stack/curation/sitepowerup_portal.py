@@ -61,14 +61,19 @@ def consolidate(root):
 def capture_board(root, batch_id, site, downloader_factory, progress=None):
     from captures import check_manifest
     from indexer.capture_enrichment import DEFAULT_POLICY
+    from full_capture import POLICY, board_limits, configure_board, capture as capture_files
     directory = Path(root) / 'batches' / batch_id / 'sitepowerup'
     store = Store(directory)
     try:
         runner = Capture(store)
-        if not runner.config:
-            runner.plan(site['scope'], limits=LIMITS)
+        fresh = not runner.config
+        complete = site.get('capture_policy') == POLICY
+        if fresh:
+            runner.plan(site['scope'], limits=board_limits(LIMITS) if complete else LIMITS)
         elif site['scope'] != runner.config['url']:
             raise CrawlError('Approved SitePowerUp board scope changed after capture started')
+        if complete:
+            configure_board(runner, fresh)
         runner.seed(site.get('reviewed_captures', site.get('captures', [])), root)
         def report(status):
             if progress:
@@ -78,7 +83,7 @@ def capture_board(root, batch_id, site, downloader_factory, progress=None):
                           'sites_done': 0, 'sites_total': 1, 'site_url': site['url'],
                           'sitepowerup': status, 'current_url': status.get('current_url')})
         result = runner.run(downloader_factory, report)
-        if result['coverage']['state'] == 'paused':
+        if result['coverage']['state'] == 'paused' or complete and result['coverage']['state'] != 'complete':
             raise CrawlError(result['coverage']['reason'])
         prefix = str(directory.relative_to(root)) + '/'
         captures = [{**capture, 'path': prefix + capture['path'], 'candidate_id': site['id']} for capture in result['captures']]
@@ -88,6 +93,9 @@ def capture_board(root, batch_id, site, downloader_factory, progress=None):
                     'capture_window': result['capture_window'], 'captures': captures, 'limits': LIMITS,
                     'indexing': dict(DEFAULT_POLICY), 'sitepowerup': {'board': result['board'], 'coverage': result['coverage']},
                     'notes': result['notes'] + [{'url': site['url'], 'reason': result['coverage']['reason']}], 'visited': []}
+        if complete:
+            manifest['transport'] = result['coverage']['transport']
+            return capture_files(root, batch_id, [site], downloader_factory, progress, base_manifest=manifest)
         check_manifest(root, manifest)
         if progress:
             progress({'phase': 'ready_for_review', 'files': len(captures), 'bytes': sum(c['bytes'] for c in captures),

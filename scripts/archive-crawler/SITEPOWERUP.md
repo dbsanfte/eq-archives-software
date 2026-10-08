@@ -121,7 +121,11 @@ any paid call.
 
 Each approved board receives an independent capture and review. The portal shows
 the requested date window, pending catalogs and incomplete-coverage reason.
-Bounded results may be reviewed as partial captures; transport failures pause
-until explicitly resumed. Publication revalidates source membership, paths and
+Newly claimed portal work uses
+[complete-files-v1](../../elastic-indexer-stack/curation/README.md) with larger
+cumulative allowances and source-verified supporting-file downloads. An unfinished
+catalog or download remains paused in Capturing until explicitly resumed. Existing
+claimed work and standalone operator plans retain their saved discussion-only
+bounds, including explicitly labelled partial results. Publication revalidates source membership, paths and
 hashes. Separate whole-site review approval is still required before publication
 and the standard AI-enriched indexing flow.

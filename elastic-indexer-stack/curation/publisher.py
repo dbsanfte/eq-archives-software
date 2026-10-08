@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 
 from common import CrawlError, digest
-from captures import check_manifest, verified_source
+from captures import check_manifest, verified_path
 
 REMOTE = "git@github.com:dbsanfte/eq-archives.git"
 
@@ -170,9 +170,12 @@ class Publisher:
                   "sites": [{key: site[key] for key in ("id", "url", "scope", "manifest_sha256")} for site in manifest["sites"]],
                   "captures": [{key: capture[key] for key in ("url", "timestamp", "sha256", "bytes", "archive_path", "source")}
                                for capture in manifest["captures"]]}
-        files = {capture["archive_path"]: verified_source(self.root, capture) for capture in manifest["captures"]}
-        files[marker_path] = (json.dumps(marker, ensure_ascii=False, sort_keys=True, indent=2) + "\n").encode()
-        changes = {path: self.git("hash-object", "-w", "--stdin", data=data).decode().strip() for path, data in files.items()}
+        # Git streams one source at a time. Never materialize a whole site's
+        # images/downloads in RAM, and keep the single site-level commit/push.
+        changes = {capture['archive_path']: self.git('hash-object', '-w', '--',
+                   str(verified_path(self.root, capture))).decode().strip() for capture in manifest['captures']}
+        changes[marker_path] = self.git('hash-object', '-w', '--stdin',
+            data=(json.dumps(marker, ensure_ascii=False, sort_keys=True, indent=2) + '\n').encode()).decode().strip()
         for attempt in range(3):
             parent = self.fetch()
             tree = self.object("commit", parent).split(b"\n", 1)[0].removeprefix(b"tree ").decode()
