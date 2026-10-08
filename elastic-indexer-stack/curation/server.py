@@ -11,7 +11,7 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, PlainTextResponse
 from starlette.routing import Route
 
-from common import CrawlError, capture_scope, digest, now
+from common import CrawlError, capture_scope, digest, now, site_identity
 from review import apply_decisions, checked_sources, queue, record
 from captures import LIMITS, check_manifest, document
 from state import connect, enqueue, unpack, valid_id
@@ -22,6 +22,7 @@ from capture_queue import claim
 from site_reviews import get as get_site_review, migrate
 from jobs import import_attempt, import_name
 from portal import Stage, decorate, counts, search_matches
+from manual import existing_site, site_url
 
 NETWORK = ipaddress.ip_network("192.168.0.0/16")
 STATIC = Path(__file__).parent
@@ -369,6 +370,27 @@ def create_app(root=None, origin=None, start_worker=True):
             operation = enqueue(store, "discover", payload)
         return JSONResponse({"operation": operation}, status_code=202)
 
+    async def submit_site(request):
+        payload = await body(request)
+        if (not isinstance(payload, dict) or set(payload) != {'url', 'max_usd'}
+                or type(payload['max_usd']) not in (int, float) or not 0 < payload['max_usd'] <= 2):
+            raise CrawlError('A site submission requires a URL and an explicit budget of up to $2')
+        url = site_url(payload['url'])
+        with connect(root) as store:
+            store.db.execute('BEGIN IMMEDIATE')
+            existing = existing_site(store, url)
+            if existing is not None:
+                return JSONResponse({'candidate_id': existing['id'], 'url': existing['url'], 'existing': True})
+            for row in store.db.execute("SELECT * FROM operations WHERE kind='discover' AND state IN ('queued','running','interrupted') ORDER BY created"):
+                operation = unpack(row)
+                target = operation['payload'].get('target')
+                if target and site_identity(target['url']) == site_identity(url):
+                    return JSONResponse({'operation': operation['id'], 'url': target['url'], 'existing': True})
+            operation = enqueue(store, 'discover', {'max_candidates': 1, 'max_usd': payload['max_usd'],
+                'target': {'url': url, 'submitted_url': payload['url'].strip()}}, commit=False)
+            store.db.commit()
+        return JSONResponse({'operation': operation, 'url': url}, status_code=202)
+
     async def capture(request):
         payload = await body(request)
         ids = payload.get("ids") if isinstance(payload, dict) and set(payload) == {"ids"} else None
@@ -441,6 +463,7 @@ def create_app(root=None, origin=None, start_worker=True):
                             Route('/api/index-retry',index_retry,methods=['POST']),
                             Route("/api/decisions", decide, methods=["POST"]),
                             Route("/api/undo", undo, methods=["POST"]), Route("/api/scope", scope_change, methods=["POST"]), Route('/api/coverage', coverage_check, methods=['POST']), Route("/api/discover", discovery, methods=["POST"]),
+                            Route('/api/submit-site', submit_site, methods=['POST']),
                             Route("/api/capture", capture, methods=["POST"]), Route("/api/publish", publication, methods=["POST"]),
                             Route("/api/resume", resume, methods=["POST"])], lifespan=lifespan,
                     exception_handlers={CrawlError: problem})

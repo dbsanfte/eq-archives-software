@@ -22,9 +22,16 @@ from state import connect, unpack, worker_lease
 from coverage_check import refresh, require_new
 from site_reviews import materialize, migrate
 from import_status import read_error
+from manual import existing_site, prepare as prepare_manual
 
 
 def campaign(root, operation):
+    target = operation['payload'].get('target')
+    if target:
+        with connect(root) as main:
+            existing = existing_site(main, target['url'])
+            if existing is not None:
+                return {'candidate_id': existing['id'], 'existing': True, 'candidates': 0}
     directory = Path(root) / "runs" / operation["id"]
     if not (directory / "initialized").exists():
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -37,7 +44,7 @@ def campaign(root, operation):
         try:
             for table in ("candidates", "attempts", "events", "operations", "batches"):
                 run.db.execute(f"DELETE FROM {table}")
-            run.db.execute("DELETE FROM meta WHERE key IN ('acquisition_started','wayback_transport','luna_budget_usd','grading_result')")
+            run.db.execute("DELETE FROM meta WHERE key IN ('acquisition_started','wayback_transport','luna_budget_usd','grading_result', 'discovery_completed','sampling_completed','discovery_result','sampling_result','staged_graph_result')")
             run.set("excluded_scopes", excluded)
         finally:
             run.close()
@@ -46,20 +53,22 @@ def campaign(root, operation):
     try:
         payload = operation["payload"]
         options = parser()
-        if not run.get("discovery_completed"):
+        acquire = prepare_manual(run, operation) if target else True
+        if not target and not run.get("discovery_completed"):
             run.set("staged_graph_result", staged_links(root, run))
             args = options.parse_args(["--work-dir", str(directory), "discover", "--archive-repo", os.environ.get("ARCHIVE_REPO", "/archive"),
                                        "--max-candidates", str(payload["max_candidates"])])
             discover(args, run)
             run.set("discovery_completed", True)
-        if not run.get("sampling_completed"):
+        if acquire and not run.get("sampling_completed"):
             args = options.parse_args(["--work-dir", str(directory), "sample", "--max-candidates", str(payload["max_candidates"]),
                                        "--max-seconds", "1800", "--retry-unresolved"])
             sample(args, run)
             run.set("sampling_completed", True)
         args = options.parse_args(["--work-dir", str(directory), "grade", "--api-key-file", "/run/secrets/luna_api_key",
                                    "--max-candidates", str(payload["max_candidates"]), "--max-usd", str(payload["max_usd"])])
-        grade(args, run)
+        if acquire:
+            grade(args, run)
         with connect(root) as main:
             main.db.execute("ATTACH DATABASE ? AS campaign", (str(directory / "crawl.sqlite3"),))
             for table in ("hosts", "tree_state", "files", "scans", "links"):
@@ -77,7 +86,8 @@ def campaign(root, operation):
             main.db.commit()
             main.set("last_campaign", {"id": operation["id"], "discovery": run.get("discovery_result"),
                                        "sampling": run.get("sampling_result"), "grading": run.get("grading_result")})
-        return {"candidates": len(run.candidates()), "grading": run.get("grading_result"), "staged_graph": run.get("staged_graph_result")}
+        return {"candidates": len(run.candidates()), "grading": run.get("grading_result"), "staged_graph": run.get("staged_graph_result"),
+                **({'candidate_id': digest(target['url'])[:24]} if target else {})}
     finally:
         run.close()
 

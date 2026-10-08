@@ -21,6 +21,21 @@
     <section id="stage-list" aria-labelledby="view-title">
       <div class="view-heading"><div><p class="eyebrow" id="view-step"></p><h1 id="view-title">Candidates</h1></div><span id="view-total" class="total"></span></div>
       <p id="view-description" class="description"></p>
+      <section id="discovery" class="discovery-panel" aria-labelledby="discovery-title" hidden>
+        <div><h2 id="discovery-title">Discover more sites</h2><p>Find candidates from known EQ sites with Luna.</p></div>
+        <div class="discovery-controls"><p id="discovery-limits">Up to 50 candidates · $2 cap per run</p><button id="discover" type="button" class="primary" aria-describedby="discovery-limits discovery-status" disabled>Discover & grade</button></div>
+        <p id="discovery-status" role="status" aria-live="polite">Checking worker availability…</p>
+      </section>
+      <section id="manual-site" class="panel" aria-labelledby="manual-title" hidden>
+        <h2 id="manual-title">Add a site</h2>
+        <form id="manual-form">
+          <label for="manual-url">Website or Wayback URL</label>
+          <div class="manual-fields"><input id="manual-url" type="text" inputmode="url" autocomplete="url" autocapitalize="none" spellcheck="false" placeholder="https://…" maxlength="4096" required aria-describedby="manual-help manual-budget"><button id="manual-submit" type="submit" disabled aria-describedby="manual-budget discovery-status">Add & grade site</button></div>
+          <p id="manual-budget" class="meta">One site · $2 maximum for Luna grading.</p>
+          <p id="manual-help" class="meta">Wayback links use the original page. Coverage is checked first; samples prefer 1999–2001, then 2002–2007.</p>
+        </form>
+        <div id="manual-result" role="status" aria-live="polite" hidden></div>
+      </section>
       <div id="stage-activity" hidden></div>
       <label class="search-label" for="site-search">Find a site</label><input id="site-search" type="search" placeholder="Site name or address" maxlength="200" autocomplete="off">
       <div id="candidates" class="site-list"></div>
@@ -32,7 +47,6 @@
   <div id="action-dock" hidden></div>
   <dialog id="tools" aria-labelledby="tools-title"><div class="dialog-heading"><h2 id="tools-title">Tools & history</h2><button id="tools-close" aria-label="Close tools">Close</button></div>
     <div class="tool-links"><button data-view="saved">Saved for later</button><button data-view="history">History</button></div>
-    <section class="tool-section"><h3>Discover more sites</h3><p>Search outward from known EQ sites and grade new candidates with Luna.</p><button id="discover">Discover & grade · 50 sites · $2 cap</button><p class="meta">Each run is explicit. Model grades support your decision; they never approve a capture.</p><div id="discovery-status"></div></section>
     <details><summary>Capture limits & dates</summary><p>One connection, a 3-second delay and 128 KiB/s. The queue has no count limit. Each worker batch has at most 5 sites, 20 new URLs per site, 100 HTML files and 64 MiB. Captures prefer 1999–2001, then 2002–2007. Downloads are bounded subsets, not complete mirrors.</p></details>
     <details><summary>Recent activity</summary><div id="operations"></div></details>
   </dialog>

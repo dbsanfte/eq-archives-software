@@ -16,6 +16,7 @@ const labels = {approval_pending:'Needs a capture decision',coverage_unverified:
 let route = readRoute(), data = null, detail = null, busy = false, generation = 0, controller = null;
 let listSignature = '', workspaceSignature = '', dockSignature = '', liveSignature = '', sourceGeneration = 0;
 let searchTimer;
+let manualResult=null,manualSignature='';
 const drafts = new Map(), positions = new Map(), pageQueries = new Map(), sourceCache = new Map();
 history.scrollRestoration = 'manual';
 function node(tag, text, className) {
@@ -85,7 +86,7 @@ async function act(label,action,confirmation) {
   if (busy) return;
   const actedId=route.candidate;busy=true;++generation;controller?.abort();$('error').hidden=true;
   for (const item of document.querySelectorAll('[data-mutation]')) item.disabled=true;
-  $('status').textContent=label;renderDock(true);
+  $('status').textContent=label;renderDock(true);renderDiscovery();
   try { const outcome=await action();
     // Only confirmed actions move the site. Read its durable state before following it.
     if (route.candidate && route.candidate===actedId) {
@@ -98,7 +99,7 @@ async function act(label,action,confirmation) {
       message('Approved. This site is now in the capture queue. Undo is available below until it starts.');
     }
   } catch (error) { $('error').textContent=error.message;$('error').hidden=false; }
-  finally { busy=false;for (const button of document.querySelectorAll('[data-mutation]')) button.disabled=button.dataset.blocked==='true';renderDock(true);$('discover').disabled=hasOperation(); }
+  finally { busy=false;for (const button of document.querySelectorAll('[data-mutation]')) button.disabled=button.dataset.blocked==='true';renderDock(true);renderDiscovery(); }
 }
 function mutation(text,action,confirmation,primary=false,disabled=false) {
   const button=control(text,()=>act(text,action,confirmation),primary ? 'primary' : '');
@@ -135,6 +136,7 @@ async function refresh(navigated=false) {
   }
 }
 function renderShell() {
+  renderDiscovery();
   document.body.dataset.panel=route.panel;
   $('stage-list').hidden=Boolean(route.candidate);$('site-workspace').hidden=!route.candidate;
   if (!route.candidate) { $('action-dock').hidden=true;measureDock(); }
@@ -170,7 +172,7 @@ function renderList() {
       const bottom=node('div',undefined,'tile-bottom');bottom.append(node('span',row.rating?.category?.replaceAll('_',' ') || 'Website'),node('span','Open site →','open-label'));item.append(bottom);return item;
     });
     if (!items.length) {
-      const empty=node('div',undefined,'empty');empty.append(node('h2',route.query ? 'No matching sites' : `Nothing in ${names[route.view].toLowerCase()}`),node('p',route.query ? 'Try another name or address.' : ({candidates:'Discover more sites from More, or review captures already waiting for a decision.',queued:'Approve a candidate and it will wait here until capture starts.',capturing:'Downloads appear here as soon as the worker starts.',review:'Completed downloads arrive here for your indexing decision.',indexing:'Approved captures appear here until indexing is complete.',saved:'Sites you save for later will appear here.',history:'Completed, declined, and dismissed sites will appear here.'})[route.view]));
+      const empty=node('div',undefined,'empty');empty.append(node('h2',route.query ? 'No matching sites' : `Nothing in ${names[route.view].toLowerCase()}`),node('p',route.query ? 'Try another name or address.' : ({candidates:'Use Discover & grade above to find candidates, or review captures already waiting for a decision.',queued:'Approve a candidate and it will wait here until capture starts.',capturing:'Downloads appear here as soon as the worker starts.',review:'Completed downloads arrive here for your indexing decision.',indexing:'Approved captures appear here until indexing is complete.',saved:'Sites you save for later will appear here.',history:'Completed, declined, and dismissed sites will appear here.'})[route.view]));
       if (route.query) empty.append(control('Clear search',()=>go({query:'',offset:0},{replace:true})));
       else if (route.view==='candidates' && data.stage_counts.review) empty.append(control('Review captured sites',()=>openStage('review')));
       items.push(empty);
@@ -268,7 +270,10 @@ function renderCandidate(root,row) {
   const coverage=coveragePanel(row);if (coverage) left.append(coverage);
   if (row.evidence?.length) {
     const origin=panel('How it was found');const details=node('details');details.append(node('summary',`${row.evidence.length} discovery references`));
-    for (const entry of row.evidence) details.append(node('p',typeof entry==='string' ? entry : entry.source_url || entry.source || entry.path || JSON.stringify(entry),'meta'));
+    for (const entry of row.evidence) {
+      if (entry.kind==='manual_submission') {const source=node('p','Submitted by you: ','meta');source.append(external(entry.source_url));details.append(source);}
+      else details.append(node('p',typeof entry==='string' ? entry : entry.source_url || entry.source || entry.path || JSON.stringify(entry),'meta'));
+    }
     origin.append(details);left.append(origin);
   }
   const settings=panel('Choose capture scope');settings.append(node('p','Approve this scope once. The download starts automatically after the Undo grace period.','meta'));
@@ -468,30 +473,80 @@ function renderDock(force=false) {
 }
 function measureDock() { document.documentElement.style.setProperty('--dock',`${$('action-dock').hidden ? 0 : $('action-dock').getBoundingClientRect().height}px`); }
 function hasOperation() { return data?.operations.some(op=>['queued','running'].includes(op.state)); }
+function currentDiscovery() { return data?.operations.find(op=>op.kind==='discover' && ['queued','running','interrupted'].includes(op.state)); }
+function operationLabel(op) { return op.kind==='discover' && op.payload.target ? 'Site check' : {publish:'Archive publication',capture:'Capture',discover:'Discovery'}[op.kind] || 'Another task'; }
+function renderDiscovery() {
+  $('discovery').hidden=route.view!=='candidates' || Boolean(route.candidate);
+  $('manual-site').hidden=$('discovery').hidden;
+  const active=data?.operations.find(op=>['queued','running'].includes(op.state)),discovery=currentDiscovery();
+  const paused=discovery?.state==='interrupted';
+  $('discover').textContent=paused ? discovery.payload.target ? 'Resume site check' : 'Resume discovery' : 'Discover & grade';
+  $('discover').disabled=!data || busy || Boolean(active);
+  $('discovery-limits').textContent=discovery ? `Up to ${discovery.payload.max_candidates} candidates · $${discovery.payload.max_usd} original cap` : 'Up to 50 candidates · $2 cap per run';
+  $('discovery').dataset.state=active || paused ? 'blocked' : 'ready';
+  const status=!data ? 'Checking worker availability…' : busy ? 'Submitting your request…' : active ?
+    `${operationLabel(active)} is ${active.state}. ${active.kind==='discover' ? 'Results will appear here for your capture approval.' : 'Discovery becomes available when current work finishes.'}` : paused ?
+    `${operationLabel(discovery)} paused. Resume within the original limits; previous spending still counts.${discovery.error ? ' '+discovery.error : ''}` :
+    'Ready. Results still need your capture approval.';
+  if ($('discovery-status').textContent!==status) $('discovery-status').textContent=status;
+  $('manual-submit').disabled=!data || busy || Boolean(active) || !$('manual-url').value.trim();
+  renderManualResult();
+}
+function renderManualResult() {
+  const operation=manualResult?.operation ? data?.operations.find(op=>op.id===manualResult.operation) : data?.operations.find(op=>op.kind==='discover' && op.payload.target);
+  const result=manualResult?.candidate_id ? manualResult : operation?.result;
+  const url=manualResult?.url || operation?.payload.target.url;
+  const signature=JSON.stringify([url,result?.candidate_id,result?.existing,operation?.state,operation?.error]);
+  if (signature===manualSignature) return;
+  const box=$('manual-result');box.replaceChildren();box.hidden=!url;manualSignature=signature;
+  if (!url) return;
+  box.append(node('p',url,'address'));
+  box.append(node('p',result?.candidate_id ? result.existing ? 'This site is already in the portal. Its existing evidence and decision are preserved.' : 'Site check complete. Open the site to review its evidence and archive coverage.' : operation?.state==='interrupted' ? 'Site check paused. Use Resume site check above to continue within the original budget.' : 'Site check queued or running: checking archive coverage, sampling Wayback captures and grading with Luna.'));
+  if (result?.candidate_id) {const link=node('a','Open site');link.href=`/?view=candidates&candidate=${encodeURIComponent(result.candidate_id)}`;link.addEventListener('click',event=>{event.preventDefault();openSite(result.candidate_id);});box.append(link);}
+}
+async function submitManualSite(event) {
+  event.preventDefault();
+  if (!data || busy || hasOperation() || !$('manual-url').value.trim()) return;
+  const url=$('manual-url').value;
+  await act('Adding site',async()=>{
+    try {
+      const result=await request('/api/submit-site',{url,max_usd:2});manualResult=result;
+      if ($('manual-url').value===url) $('manual-url').value='';
+      route.query='';route.offset=0;writeRoute(true);return result;
+    } catch (error) { await refresh();throw error; }
+  },result=>result.candidate_id ? 'Site already found. Open its existing entry below.' : result.existing ? 'This site check already exists. Its original budget is retained.' : 'Site check queued: one site, up to $2.');
+}
+async function startDiscovery() {
+  if (!data || busy || hasOperation()) return;
+  const discovery=currentDiscovery(),paused=discovery?.state==='interrupted';
+  await act(paused ? 'Resuming discovery' : 'Starting discovery',async()=>{
+    try { return await request(paused ? '/api/resume' : '/api/discover',paused ? {id:discovery.id} : {max_candidates:50,max_usd:2}); }
+    catch (error) { await refresh();throw error; }
+  },paused ? 'Discovery resumed within its original budget.' : 'Discovery queued: at most 50 candidates and $2.');
+}
 function updateCountdown() {
   const item=document.querySelector('.grace-period');if (!item) return;
   const seconds=Math.ceil((Date.parse(item.dataset.until)-Date.now())/1000);
   item.textContent=seconds>0 ? `Eligible to start in ${seconds} seconds. Undo is available.` : 'Ready for the worker. You can still undo until capture starts.';
 }
 function renderTools() {
-  $('discover').disabled=busy || hasOperation();
   const operations=data.operations.map(op=>{
-    const log=node('div',undefined,'operation-log');log.append(node('p',`${op.kind==='publish' ? 'Publication' : op.kind==='capture' ? 'Capture' : 'Discovery'} · ${op.state}`));
+    const log=node('div',undefined,'operation-log');log.append(node('p',`${operationLabel(op)} · ${op.state}`));
     if (op.error) log.append(node('p',op.error));
     if (op.kind==='discover') {log.append(node('p',`${op.payload.max_candidates} candidates · $${op.payload.max_usd} maximum`,'meta'));
       if (op.state==='interrupted') log.append(mutation('Resume discovery',()=>request('/api/resume',{id:op.id}),'Discovery resumed within its original budget.',false,hasOperation()));}
     return log;
   });
   $('operations').replaceChildren(...operations);
-  const active=data.operations.find(op=>op.kind==='discover' && ['queued','running','interrupted'].includes(op.state));
-  $('discovery-status').textContent=active ? `Discovery ${active.state}. Capture resumes when the worker is available.` : '';
 }
 $('home').addEventListener('click',event=>{event.preventDefault();openStage('candidates');});
 for (const item of document.querySelectorAll('[data-view]')) item.addEventListener('click',()=>openStage(item.dataset.view));
 $('tools-open').addEventListener('click',()=>$('tools').showModal());$('tools-close').addEventListener('click',()=>$('tools').close());
 $('tools').addEventListener('click',event=>{if (event.target===$('tools') && (event.clientX<$('tools').getBoundingClientRect().left || event.clientX>$('tools').getBoundingClientRect().right)) $('tools').close();});
 $('refresh').addEventListener('click',()=>{if (!busy) refresh();});
-$('discover').addEventListener('click',()=>act('Starting discovery',()=>request('/api/discover',{max_candidates:50,max_usd:2}),'Discovery queued: at most 50 candidates and $2.'));
+$('discover').addEventListener('click',startDiscovery);
+$('manual-form').addEventListener('submit',submitManualSite);
+$('manual-url').addEventListener('input',renderDiscovery);
 $('previous').addEventListener('click',()=>go({offset:Math.max(0,route.offset-50)}));$('next').addEventListener('click',()=>go({offset:route.offset+50}));
 $('site-search').addEventListener('input',()=>{
   clearTimeout(searchTimer);route.query=$('site-search').value;route.offset=0;writeRoute(true);
