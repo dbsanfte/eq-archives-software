@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import time
 from urllib.parse import urlsplit
 
 from common import CrawlError, Page, decode, digest, original_url, site_identity, site_scope, tier
@@ -133,11 +134,13 @@ class Archive:
         return self.git("cat-file", "blob", oid)
 
 
-def discover(args, store):
+def discover(args, store, *, cached_only=False, deadline=None):
     archive = Archive(args.archive_repo, store, args.max_tree_entries, args.max_inventory_entries)
     seeds = json.loads(Path(args.seeds).read_text())
     work = []
-    for seed in seeds:
+    for seed in ([] if cached_only else seeds):
+        if deadline is not None and time.time() >= deadline:
+            break
         rows, complete = archive.files(seed["host"])
         for row in rows:
             timestamp, _, path = row["path"].partition("/")
@@ -161,6 +164,8 @@ def discover(args, store):
     selected.sort(key=lambda entry: (entry[1][0], entry[0], entry[1][2]))
     reads, read_bytes, failures, probes, by_host = 0, 0, 0, 0, {}
     for _, (level, rank, host, timestamp, path, blob, category) in selected:
+        if deadline is not None and time.time() >= deadline:
+            break
         if by_host.get(host, 0) >= args.max_per_seed:
             continue
         source = f"websites/{host}/{timestamp}/{path}"
@@ -225,7 +230,7 @@ def discover(args, store):
     scopes.update(site_identity(url) for url in store.get("excluded_scopes", []))
     added = len(existing)
     for priority, url, evidence in ranked:
-        if added >= args.max_candidates:
+        if added >= args.max_candidates or deadline is not None and time.time() >= deadline:
             break
         scope = site_scope(url)
         identity = site_identity(url)

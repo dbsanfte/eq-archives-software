@@ -220,8 +220,13 @@ browser/TCP checks for changes. Preserve the exact Linux
 identity/content collisions. Bind only the LAN IP, allow actual peers in
 `192.168.0.0/16`, ignore forwarded headers and require literal Host/same-origin
 JSON actions. There is no public route or authentication. Do not run paid discovery
-on deployment or schedule it without a request. Each explicit run is bounded to
-50 candidates/$2 with durable reservations and explicit resume.
+on deployment or schedule it without a request. Each explicit Discover run targets
+50 new sites meeting its saved minimum grade (default 2), continuing past low grades and unavailable samples, until the target,
+one-hour deadline or $2 total Luna reservation cap is reached. Stop visibly when
+links are exhausted; pause on transport/authentication failures. Keep serial
+Wayback transport and cumulative limits, incremental source-bound results,
+durable reservations and the original deadline on explicit resume. Old fixed
+shortlists and one-site manual checks retain their original bounds.
 
 Exclude already archived website/account scopes independently of capped page
 inventories. Keep shared-host accounts distinct, preserve source URL identity,
@@ -252,6 +257,11 @@ captured pages within one site's chosen scope at a time, with dated Wayback link
 and complete sources. Preserve independent approve/decline/reconsider decisions,
 manifest-bound approvals and metadata-only migration of unapproved mixed capture
 groups; never copy sources or replay already approved publication/import work.
+Review's Approve all and Dismiss all confirm every Review-stage site, including
+filtered and paginated rows. Preflight all manifests, coverage and sources before
+atomically queuing separate whole-site publications; display the combined $2/site
+enrichment cap. Never partially approve a stale snapshot. Dismiss all retains
+sources in History with atomic Undo that rejects intervening decisions.
 Keep publication status and explicit retry on the affected site. Preserve the
 selected view/site across reloads and the open source page during status updates.
 Design for phones first: bottom stage navigation, compact site lists, focused site
@@ -279,8 +289,10 @@ and correction attempts without double-counting cached responses or retries.
 Use bounded, cached, read-only metadata queries; never walk sources or archive Git.
 Incomplete accounting must be visible rather than displayed as zero.
 Failures cannot advance it or return to the list. Discover & grade is a primary action
-on Candidates, with its explicit 50-candidate/$2 cap and a visible shared-worker
-blocker. Polling may enable it but must never start a paid run. Paused discovery
+on Candidates, with its explicit 50-site target, one-hour/$2-total limits and a
+visible shared-worker blocker. Persist each completed candidate as it arrives and poll every five seconds
+while visible, displaying qualified/checked counts, phase, time, spend and stop
+reason. Polling may enable it but must never start a paid run. Paused discovery
 resumes there within its original bounds. Manual URL submissions also live on
 Candidates: unwrap Wayback links, preserve original page identity and submitted
 provenance, run only that site's normal coverage/sampling/Luna workflow with an

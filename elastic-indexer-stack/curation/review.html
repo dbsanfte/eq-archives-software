@@ -25,8 +25,9 @@
       <p id="view-description" class="description"></p>
       <section id="discovery" class="discovery-panel" aria-labelledby="discovery-title" hidden>
         <div><h2 id="discovery-title">Discover more sites</h2><p>Find candidates from known EQ sites with Luna.</p></div>
-        <div class="discovery-controls"><p id="discovery-limits">Up to 50 candidates · $2 cap per run</p><button id="discover" type="button" class="primary" aria-describedby="discovery-limits discovery-status" disabled>Discover & grade</button></div>
+        <div class="discovery-controls"><p id="discovery-limits">Target 50 new candidates · 1 hour · $2 total cap</p><button id="discover" type="button" class="primary" aria-describedby="discovery-limits discovery-status" disabled>Discover & grade</button></div>
         <p id="discovery-status" role="status" aria-live="polite">Checking worker availability…</p>
+        <div id="discovery-progress" hidden><progress id="discovery-meter" max="50" value="0" aria-label="New sites meeting the minimum grade"></progress><p id="discovery-progress-text" role="status" aria-live="polite"></p></div>
         <div class="grade-controls">
           <label for="minimum-grade">Minimum Luna grade <output id="minimum-grade-value" for="minimum-grade">2</output></label>
           <input id="minimum-grade" type="range" min="0" max="3" step="1" value="2" aria-describedby="grade-help">
@@ -47,6 +48,10 @@
         <div id="manual-result" role="status" aria-live="polite" hidden></div>
       </section>
       <div id="stage-activity" hidden></div>
+      <section id="review-actions" class="review-actions" aria-label="Review all captured sites" hidden>
+        <p id="review-actions-summary" class="meta"></p>
+        <div class="review-action-buttons"><button id="review-approve-all" type="button" class="primary" disabled>Approve all</button><button id="review-dismiss-all" type="button" disabled>Dismiss all</button></div>
+      </section>
       <label class="search-label" for="site-search">Find a site</label><input id="site-search" type="search" placeholder="Site name or address" maxlength="200" autocomplete="off">
       <p id="swipe-help" class="meta" hidden>Swipe right to approve capture · left to dismiss. Tap a site for details or to change its scope.</p>
       <div id="candidates" class="site-list"></div>
@@ -57,6 +62,7 @@
   </main>
   <div id="action-dock" hidden></div>
   <dialog id="dismiss-dialog" aria-labelledby="dismiss-title"><h2 id="dismiss-title">Dismiss all candidates?</h2><p id="dismiss-description"></p><div class="dialog-actions"><button id="dismiss-cancel" type="button">Cancel</button><button id="dismiss-confirm" type="button">Dismiss all</button></div></dialog>
+  <dialog id="review-dialog" aria-labelledby="review-dialog-title"><h2 id="review-dialog-title"></h2><div class="review-dialog-body"><p id="review-dialog-description"></p><p id="review-dialog-budget"></p><details><summary>Sites included</summary><ul id="review-dialog-sites"></ul></details></div><div class="dialog-actions"><button id="review-dialog-cancel" type="button">Cancel</button><button id="review-dialog-confirm" type="button"></button></div></dialog>
   <dialog id="tools" aria-labelledby="tools-title"><div class="dialog-heading"><h2 id="tools-title">Tools & history</h2><button id="tools-close" aria-label="Close tools">Close</button></div>
     <div class="tool-links"><button data-view="saved">Saved for later</button><button data-view="history">History</button></div>
     <details><summary>Capture limits & dates</summary><p>One connection, a 3-second delay and 128 KiB/s. The queue has no count limit. Each worker batch has at most 5 sites, 20 new URLs per site, 100 HTML files and 64 MiB. Captures prefer 1999–2001, then 2002–2007. Downloads are bounded subsets, not complete mirrors.</p></details>

@@ -10,28 +10,28 @@ from review import checked_sources, record
 from state import connect
 
 
-def staged_links(root, run):
+def staged_links(root, run, *, max_reads=66, max_bytes=16 * 1024 * 1024):
     reads = size = 0
     with connect(root) as main:
         for row in main.candidates():
             item = record(main, row)
             if (item["rating"] or {}).get("grade", -1) < 2:
                 continue
-            if reads >= 66 or size >= 16 * 1024 * 1024:
+            if reads >= max_reads or size >= max_bytes:
                 break
             fresh = [capture for capture in item["captures"]
                      if not run.db.execute("SELECT 1 FROM scans WHERE blob=? AND source=?",
                           (capture["sha256"], "staging/" + capture["path"])).fetchone()]
             if not fresh:
                 continue
-            if sum(capture["bytes"] for capture in item["captures"]) + size > 16 * 1024 * 1024:
+            if sum(capture["bytes"] for capture in item["captures"]) + size > max_bytes:
                 continue
             try:
                 checked_sources(main, item)
             except CrawlError:
                 continue
             for capture in fresh:
-                if reads >= 66:
+                if reads >= max_reads:
                     break
                 raw = verified_source(main.root, capture)
                 reads += 1

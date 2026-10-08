@@ -53,12 +53,13 @@ class Downloader:
         self.process.stderr.close()
 
 
-def sample(args, store):
-    downloader = Downloader(store, args)
+def sample(args, store, *, candidates=None, downloader=None):
+    owned = downloader is None
+    downloader = downloader or Downloader(store, args)
     store.set("acquisition_started", now())
     successes = attempts = 0
     try:
-        candidates = store.candidates()[:args.max_candidates]
+        candidates = list(store.candidates()[:args.max_candidates] if candidates is None else candidates)
         candidates.sort(key=lambda candidate: candidate["state"] == "unavailable")
         for candidate in candidates:
             if json.loads(candidate["captures"]):
@@ -123,5 +124,6 @@ def sample(args, store):
                     break
             print(f"Checked {attempts}: {successes} newly staged candidates", flush=True)
     finally:
-        downloader.close()
+        if owned:
+            downloader.close()
     store.set("sampling_result", {"attempted": attempts, "staged": successes})

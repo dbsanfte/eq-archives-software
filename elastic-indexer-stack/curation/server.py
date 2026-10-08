@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 
 from starlette.applications import Starlette
+from starlette.concurrency import run_in_threadpool
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse, PlainTextResponse
 from starlette.routing import Route
@@ -26,6 +27,9 @@ from manual import existing_site, site_url
 from spending import Spending
 from candidate_actions import dismiss_all, undo_dismissal
 from candidate_checks import attach_checks, start as start_candidate_check
+from review_actions import (preview as review_preview, decide_all as decide_all_reviews,
+                            apply_decision as apply_site_decision, validate_decision as validate_site_decision,
+                            undo_dismissal as undo_review_dismissal)
 
 NETWORK = ipaddress.ip_network("192.168.0.0/16")
 STATIC = Path(__file__).parent
@@ -154,6 +158,7 @@ def create_app(root=None, origin=None, start_worker=True):
                                  "stage_counts": counts(all_rows),
                                  "candidate_grades": {str(grade): sum(row['stage'] == Stage.CANDIDATES and grade_value(row) == grade for row in all_rows) for grade in range(-1, 4)},
                                  "dismissal": dismissal_preview(all_rows),
+                                 "review_actions": review_preview(store, all_rows) if selected == 'review' else None,
                                  "luna_spend": spending.snapshot(),
                                  "all_count": len(all_rows), "approved": sum(row["state"] == "approved_waiting_batch" for row in all_rows),
                                  "recommended": sum(row['state'] in ('approval_pending','deferred') and (row['rating'] or {}).get('grade',-1)>=2 for row in all_rows),
@@ -253,30 +258,28 @@ def create_app(root=None, origin=None, start_worker=True):
             reviewed = get_site_review(store,payload['id'])
             if reviewed['manifest_sha256'] != payload['manifest_sha256']:
                 raise CrawlError('Captured site changed since review')
-            expected_state = 'indexing_declined' if payload['decision'] == 'reconsider' else 'awaiting_review'
-            if reviewed['state'] != expected_state:
-                raise CrawlError('Site decision is no longer available')
-            manifest = reviewed['manifest']
-            candidate_id = manifest['sites'][0]['id']
-            row = store.db.execute('SELECT state FROM candidates WHERE id=?',(candidate_id,)).fetchone()
-            if not row:
-                raise CrawlError('Captured site candidate is unavailable')
-            action = {'approve':Action.APPROVE_INDEX,'decline':Action.DECLINE_INDEX,'reconsider':Action.RECONSIDER_INDEX}[payload['decision']]
-            state = transition(row['state'],action)
-            operation = None
+            validate_site_decision(store, reviewed, payload['decision'])
             if payload['decision'] == 'approve':
                 # Hash and validate the complete site, never a mixed batch or subset.
-                check_manifest(root,manifest)
-                operation = enqueue(store,'publish',{'batch_id':reviewed['id'],'manifest_sha256':reviewed['manifest_sha256']},commit=False)
-                batch_state = 'publication_requested'
-            else:
-                batch_state = 'indexing_declined' if payload['decision'] == 'decline' else 'awaiting_review'
-            store.db.execute('UPDATE batches SET state=?,updated=? WHERE id=?',(batch_state,now(),reviewed['id']))
-            store.db.execute('UPDATE candidates SET state=? WHERE id=?',(state,candidate_id))
-            store.db.execute('INSERT INTO events(candidate,action,detail,created) VALUES (?,?,?,?)',
-                             (candidate_id,'site_indexing_'+payload['decision'],json.dumps(payload),now()))
+                check_manifest(root,reviewed['manifest'])
+            result = apply_site_decision(store, reviewed, payload['decision'])
             store.db.commit()
-        return JSONResponse({'state':state,'operation':operation},status_code=202 if operation else 200)
+        return JSONResponse({key: result[key] for key in ('state', 'operation')},status_code=202 if result['operation'] else 200)
+
+    async def review_decisions(request):
+        payload = await body(request)
+        if (not isinstance(payload, dict) or set(payload) != {'token', 'decision'}
+                or not isinstance(payload['token'], str) or payload['decision'] not in ('approve', 'decline')):
+            raise CrawlError('Bulk review requires the confirmed snapshot and approve/decline decision.')
+        result = await run_in_threadpool(decide_all_reviews, root, payload['token'], payload['decision'])
+        return JSONResponse(result, status_code=202 if payload['decision'] == 'approve' else 200)
+
+    async def undo_review_decisions(request):
+        payload = await body(request)
+        if not isinstance(payload, dict) or set(payload) != {'dismissal'}:
+            raise CrawlError('Undo requires a review dismissal ID.')
+        result = await run_in_threadpool(undo_review_dismissal, root, valid_id(payload['dismissal']))
+        return JSONResponse(result)
 
     async def decide(request):
         incoming = await body(request)
@@ -400,12 +403,13 @@ def create_app(root=None, origin=None, start_worker=True):
 
     async def discovery(request):
         payload = await body(request)
-        if (not isinstance(payload, dict) or set(payload) != {"max_candidates", "max_usd"}
+        if (not isinstance(payload, dict) or set(payload) not in ({"max_candidates", "max_usd"}, {"max_candidates", "max_usd", "min_grade"})
                 or type(payload["max_candidates"]) is not int or not 1 <= payload["max_candidates"] <= 50
-                or type(payload["max_usd"]) not in (int, float) or not 0 < payload["max_usd"] <= 2):
+                or type(payload["max_usd"]) not in (int, float) or not 0 < payload["max_usd"] <= 2
+                or type(payload.get("min_grade", 2)) is not int or payload.get("min_grade", 2) not in range(4)):
             raise CrawlError("Discovery requires explicit bounds: 1–50 candidates and up to $2")
         with connect(root) as store:
-            operation = enqueue(store, "discover", payload)
+            operation = enqueue(store, "discover", {**payload, "min_grade": payload.get("min_grade", 2), "fill_queue": True})
         return JSONResponse({"operation": operation}, status_code=202)
 
     async def submit_site(request):
@@ -498,6 +502,8 @@ def create_app(root=None, origin=None, start_worker=True):
                             Route("/api/queue", listing), Route("/api/source", source),
                             Route('/api/candidate',candidate_detail), Route('/api/restore',restore_candidate,methods=['POST']),
                             Route('/api/site',site_review), Route('/api/site-decision',site_decision,methods=['POST']),
+                            Route('/api/review-decisions',review_decisions,methods=['POST']),
+                            Route('/api/undo-review-dismissal',undo_review_decisions,methods=['POST']),
                             Route('/api/index-retry',index_retry,methods=['POST']),
                             Route("/api/decisions", decide, methods=["POST"]),
                             Route('/api/dismiss-candidates', dismiss_candidates, methods=['POST']),

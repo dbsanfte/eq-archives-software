@@ -16,6 +16,7 @@ const labels = {approval_pending:'Needs a capture decision',coverage_unverified:
 let route = readRoute(), data = null, detail = null, busy = false, generation = 0, controller = null;
 let listSignature = '', workspaceSignature = '', dockSignature = '', liveSignature = '', sourceGeneration = 0;
 let searchTimer,gradeTimer,dismissSnapshot=null;
+let reviewSnapshot=null;
 let manualResult=null,manualSignature='';
 let activeSwipe=null;
 const drafts = new Map(), positions = new Map(), pageQueries = new Map(), sourceCache = new Map();
@@ -96,13 +97,13 @@ async function request(path,value,signal) {
 function message(text,undo,tone='') {
   $('notice').replaceChildren(node('span',text));$('notice').hidden=false;
   $('notice').dataset.tone=tone;
-  if (undo) $('notice').append(mutation(undo.label || 'Undo approval',()=>request(undo.path || '/api/undo',undo.payload || undo),'Returned to Candidates.'));
+  if (undo) $('notice').append(mutation(undo.label || 'Undo approval',()=>request(undo.path || '/api/undo',undo.payload || undo),undo.confirmation || 'Returned to Candidates.'));
 }
 async function act(label,action,confirmation,{returnToCandidates=false,undo=null}={}) {
   if (busy) return;
   const actedId=route.candidate;busy=true;++generation;controller?.abort();$('error').hidden=true;
   for (const item of document.querySelectorAll('[data-mutation]')) item.disabled=true;
-  $('status').textContent=label;renderDock(true);renderDiscovery();
+  $('status').textContent=label;renderDock(true);renderDiscovery();renderReviewActions();
   try { const outcome=await action();let approved=null;
     // Only confirmed actions move the site. Read its durable state before following it.
     if (route.candidate && route.candidate===actedId) {
@@ -125,7 +126,7 @@ async function act(label,action,confirmation,{returnToCandidates=false,undo=null
       message('Approved. This site is now in the capture queue. Undo is available below until it starts.');
     }
   } catch (error) { $('error').textContent=error.message;$('error').hidden=false; }
-  finally { busy=false;for (const button of document.querySelectorAll('[data-mutation]')) button.disabled=button.dataset.blocked==='true';renderDock(true);renderDiscovery(); }
+  finally { busy=false;for (const button of document.querySelectorAll('[data-mutation]')) button.disabled=button.dataset.blocked==='true';renderDock(true);renderDiscovery();renderReviewActions(); }
 }
 function mutation(text,action,confirmation,primary=false,disabled=false,options={}) {
   const button=control(text,()=>act(text,action,confirmation,options),primary ? 'primary' : '');
@@ -163,6 +164,7 @@ async function refresh(navigated=false) {
 }
 function renderShell() {
   renderDiscovery();
+  renderReviewActions();
   renderSpending();
   $('swipe-help').hidden=Boolean(route.candidate) || route.view!=='candidates';
   document.body.dataset.panel=route.panel;
@@ -634,7 +636,7 @@ function renderDiscovery() {
   const paused=discovery?.state==='interrupted';
   $('discover').textContent=paused ? discovery.payload.target ? 'Resume site check' : 'Resume discovery' : 'Discover & grade';
   $('discover').disabled=!data || busy || Boolean(active);
-  $('discovery-limits').textContent=discovery ? `Up to ${discovery.payload.max_candidates} candidates · $${discovery.payload.max_usd} original cap` : 'Up to 50 candidates · $2 cap per run';
+  $('discovery-limits').textContent=discovery ? discovery.payload.fill_queue ? `Target ${discovery.payload.max_candidates} candidates at Grade ${discovery.payload.min_grade}+ · 1 hour · $${discovery.payload.max_usd} total cap` : `Up to ${discovery.payload.max_candidates} candidates · $${discovery.payload.max_usd} original cap` : `Target 50 candidates at Grade ${route.minGrade}+ · 1 hour · $2 total cap`;
   $('discovery').dataset.state=active || paused ? 'blocked' : 'ready';
   const status=!data ? 'Checking worker availability…' : busy ? 'Submitting your request…' : active ?
     `${operationLabel(active)} is ${active.state}. ${active.kind==='discover' ? 'Results will appear here for your capture approval.' : 'Discovery becomes available when current work finishes.'}` : paused ?
@@ -642,7 +644,18 @@ function renderDiscovery() {
     'Ready. Results still need your capture approval.';
   if ($('discovery-status').textContent!==status) $('discovery-status').textContent=status;
   $('manual-submit').disabled=!data || busy || Boolean(active) || !$('manual-url').value.trim();
-  renderManualResult();
+  renderDiscoveryProgress();renderManualResult();
+}
+function renderDiscoveryProgress() {
+  const operation=data?.operations.find(op=>op.kind==='discover' && op.payload.fill_queue);
+  const progress=operation?.result?.progress,box=$('discovery-progress');box.hidden=!progress;
+  if (!progress) return;
+  $('discovery-meter').max=progress.target;$('discovery-meter').value=progress.accepted;
+  const phases={finding_links:'Finding linked sites',checking_coverage:'Checking archive coverage',sampling:'Reading Wayback samples',grading:'Grading with Luna',paused:'Paused'};
+  const reasons={target_reached:'Target reached',time_limit:'One-hour limit reached',spend_limit:'Luna budget reached',links_exhausted:'No more new sites in the available link graph'};
+  const remaining=Math.max(0,Math.ceil((progress.deadline-Date.now()/1000)/60));
+  const state=operation.state==='interrupted' ? 'Paused — resume within the original limits' : reasons[progress.stop_reason] || phases[progress.phase] || 'Waiting for the worker';
+  $('discovery-progress-text').textContent=`${progress.accepted}/${progress.target} new Grade ${progress.min_grade}+ sites · ${progress.checked} checked. ${state}. ${operation.state==='running' ? `${remaining} min left. ` : ''}Luna: ${usd(progress.estimated_usd)} estimated; ${usd(progress.reserved_usd)} reserved of $${progress.max_usd}. Results refresh every 5 seconds while this page is open.`;
 }
 function renderManualResult() {
   const operation=manualResult?.operation ? data?.operations.find(op=>op.id===manualResult.operation) : data?.operations.find(op=>op.kind==='discover' && op.payload.target);
@@ -672,9 +685,9 @@ async function startDiscovery() {
   if (!data || busy || hasOperation()) return;
   const discovery=currentDiscovery(),paused=discovery?.state==='interrupted';
   await act(paused ? 'Resuming discovery' : 'Starting discovery',async()=>{
-    try { return await request(paused ? '/api/resume' : '/api/discover',paused ? {id:discovery.id} : {max_candidates:50,max_usd:2}); }
+    try { return await request(paused ? '/api/resume' : '/api/discover',paused ? {id:discovery.id} : {max_candidates:50,max_usd:2,min_grade:route.minGrade}); }
     catch (error) { await refresh();throw error; }
-  },paused ? 'Discovery resumed within its original budget.' : 'Discovery queued: at most 50 candidates and $2.');
+  },paused ? 'Discovery resumed within its original budget.' : 'Discovery queued: target 50 new sites at the selected grade, within one hour and $2 total.');
 }
 function updateCountdown() {
   const item=document.querySelector('.grace-period');if (!item) return;
@@ -691,6 +704,49 @@ function renderTools() {
   });
   $('operations').replaceChildren(...operations);
 }
+function renderReviewActions() {
+  const snapshot=data?.review_actions;
+  $('review-actions').hidden=route.view!=='review' || Boolean(route.candidate);
+  $('review-actions-summary').textContent=`${snapshot?.count ?? 0} captured sites awaiting review · actions include all pages and search-hidden sites.`;
+  for (const id of ['review-approve-all','review-dismiss-all']) $(id).disabled=busy || !snapshot?.count;
+}
+function confirmReview(decision) {
+  if (busy || route.view!=='review' || route.candidate || !data?.review_actions?.count) return;
+  reviewSnapshot={...data.review_actions,decision};
+  const approve=decision==='approve',snapshot=reviewSnapshot;
+  $('review-dialog-title').textContent=`${approve ? 'Approve' : 'Dismiss'} all ${snapshot.count} sites?`;
+  $('review-dialog-description').textContent=approve ?
+    `Publish and index all ${snapshot.files} captures across these ${snapshot.count} sites, including sites hidden by search and other pages. Each complete site keeps its own approval and progress. Publication can start immediately.` :
+    `Decline indexing for all ${snapshot.count} sites awaiting review, including search-hidden sites and other pages. They move to History with their captured sources retained. Undo will be available.`;
+  $('review-dialog-budget').hidden=!approve;
+  $('review-dialog-budget').textContent=`AI enrichment included: up to $${snapshot.max_enrichment_usd} total ($2 per site).`;
+  $('review-dialog-sites').replaceChildren(...snapshot.sites.map(site=>{
+    const item=node('li');const link=node('a',`${new URL(site.scope).host}${new URL(site.scope).pathname} · ${site.files} captures`);
+    link.href=`/?view=review&candidate=${encodeURIComponent(site.id)}`;item.append(link);return item;
+  }));
+  $('review-dialog-confirm').textContent=approve ? 'Approve all & index' : 'Dismiss all';
+  $('review-dialog-confirm').className=approve ? 'primary' : '';
+  $('review-dialog-confirm').dataset.decision=decision;
+  $('review-dialog').querySelector('details').open=false;
+  $('review-dialog').showModal();
+}
+$('review-approve-all').addEventListener('click',()=>confirmReview('approve'));
+$('review-dismiss-all').addEventListener('click',()=>confirmReview('decline'));
+$('review-dialog-cancel').addEventListener('click',()=>$('review-dialog').close());
+$('review-dialog-confirm').addEventListener('click',()=>{
+  if (busy || !reviewSnapshot) return;
+  const snapshot=reviewSnapshot;reviewSnapshot=null;$('review-dialog').close();remember();
+  act(snapshot.decision==='approve' ? 'Approving captured sites' : 'Dismissing captured sites',
+    async()=>{
+      const result=await request('/api/review-decisions',{token:snapshot.token,decision:snapshot.decision});
+      if (snapshot.decision==='approve' && route.view==='review' && !route.candidate) {
+        route={...route,view:'indexing',offset:0,query:''};writeRoute(true);
+      }
+      return result;
+    },
+    result=>snapshot.decision==='approve' ? `${result.count} sites approved. Follow publication and indexing in Indexing.` : `${result.count} sites moved to History. Captured sources are retained.`,
+    snapshot.decision==='decline' ? {undo:result=>({path:'/api/undo-review-dismissal',payload:{dismissal:result.dismissal},label:'Undo dismiss all',confirmation:'Sites returned to Review capture.'})} : {});
+});
 $('home').addEventListener('click',event=>{event.preventDefault();openStage('candidates');});
 for (const item of document.querySelectorAll('[data-view]')) item.addEventListener('click',()=>openStage(item.dataset.view));
 $('tools-open').addEventListener('click',()=>$('tools').showModal());$('tools-close').addEventListener('click',()=>$('tools').close());
