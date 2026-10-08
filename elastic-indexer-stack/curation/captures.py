@@ -2,6 +2,7 @@
 
 from collections import deque
 import json
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlsplit
@@ -20,26 +21,66 @@ class CaptureBound(CrawlError):
     pass
 
 
-def verified_source(root, capture):
-    path = (Path(root) / capture["path"]).resolve()
-    if Path(root).resolve() not in path.parents or path.is_symlink():
+def verified_path(root, capture):
+    relative = Path(capture['path'])
+    base = Path(root).resolve()
+    path = base / relative
+    if relative.is_absolute() or any(part == '..' for part in relative.parts) or any(
+            item.is_symlink() for item in (path, *path.parents) if item != base and base in item.parents):
+        raise CrawlError("Source path escaped staging")
+    path = path.resolve()
+    if base not in path.parents:
         raise CrawlError("Source path escaped staging")
     try:
-        if path.stat().st_size != capture["bytes"] or capture["bytes"] > LIMITS["page_bytes"]:
+        if path.stat().st_size != capture["bytes"] or capture['bytes'] < 0:
             raise CrawlError("Staged source size changed or exceeds the page limit")
-        data = path.read_bytes()
+        checksum = hashlib.sha256()
+        with path.open('rb') as source:
+            while chunk := source.read(1024 * 1024):
+                checksum.update(chunk)
     except OSError:
         raise CrawlError("Staged source is unavailable") from None
-    if digest(data) != capture["sha256"] or not original_url(capture["url"]) or not tier(capture["timestamp"]):
+    if checksum.hexdigest() != capture["sha256"] or not original_url(capture["url"]) or not tier(capture["timestamp"]):
         raise CrawlError("Staged capture failed source integrity checks")
-    return data
+    return path
+
+
+TEXT_LIMIT = 32 * 1024 * 1024
+
+
+def verified_source(root, capture):
+    path = verified_path(root, capture)
+    if capture['bytes'] > TEXT_LIMIT:
+        raise CrawlError('This file is too large for the text reader; download the complete original file instead')
+    return path.read_bytes()
+
+
+def readable(capture):
+    return (capture.get('content_type') or capture.get('mimetype') or 'text/html').split(';')[0].strip().lower() in (
+        'text/html', 'application/xhtml+xml', 'text/plain')
+
+
+def indexable(capture):
+    return (not capture.get('supporting_source') and readable(capture)
+            and 0 < capture['bytes'] <= TEXT_LIMIT and capture.get('has_text', True))
+
+
+def describe_source(root, capture):
+    result = {'kind': 'page' if readable(capture) else 'file'}
+    if readable(capture) and capture['bytes'] <= TEXT_LIMIT:
+        page, encoding = document(root, capture)
+        result.update(title=' '.join(page.title), encoding=encoding, has_text=bool(' '.join(page.text).strip()))
+    return result
 
 
 def document(root, capture):
     raw = verified_source(root, capture)
     text, encoding = decode(raw, capture.get("content_type") or "")
     page = Page(capture["url"])
-    page.feed(text)
+    if (capture.get('content_type') or capture.get('mimetype') or '').split(';')[0] == 'text/plain':
+        page.text = [text]
+    else:
+        page.feed(text)
     return page, encoding
 
 
@@ -52,6 +93,13 @@ def check_manifest(root, manifest):
     ezboard = any(site.get('scope_mode') == 'ezboard' for site in sites.values())
     sitepowerup = any(site.get('scope_mode') == 'sitepowerup' for site in sites.values())
     limits = LIMITS
+    from full_capture import POLICY, allowed as scope_allowed
+    complete = manifest.get('capture_policy') == POLICY
+    if complete:
+        limits = {**LIMITS, 'files': float('inf'), 'bytes': float('inf')}
+        if manifest.get('capture_window') != CAPTURE_WINDOW or any(
+                manifest.get('capture_coverage', {}).get(site, {}).get('state') not in ('complete', 'complete_with_gaps') for site in sites):
+            raise CrawlError('Complete file capture has unfinished inventory or downloads')
     board, forums = None, set()
     if sitepowerup:
         import sitepowerup as platform
@@ -62,7 +110,8 @@ def check_manifest(root, manifest):
         board = platform.board_name(site['scope'])
         if platform.board_name(site['url']) != board or platform.board_url(site['scope']) != site['scope']:
             raise CrawlError('SitePowerUp capture scope changed')
-        limits = {**LIMITS, 'files': BOARD_LIMITS['max_captures'], 'bytes': BOARD_LIMITS['max_bytes']}
+        if not complete:
+            limits = {**LIMITS, 'files': BOARD_LIMITS['max_captures'], 'bytes': BOARD_LIMITS['max_bytes']}
     if ezboard:
         from ezboard_portal import PORTAL_LIMITS
         from ezboard import board_name, board_url, belongs, candidate, forum_links
@@ -72,13 +121,16 @@ def check_manifest(root, manifest):
         board = board_name(site['scope'])
         if board_name(site['url']) != board or board_url(site['scope']) != site['scope']:
             raise CrawlError('Ezboard capture scope changed')
-        limits = {**LIMITS, 'files': PORTAL_LIMITS['max_captures'], 'bytes': PORTAL_LIMITS['max_bytes']}
+        if not complete:
+            limits = {**LIMITS, 'files': PORTAL_LIMITS['max_captures'], 'bytes': PORTAL_LIMITS['max_bytes']}
     if manifest.get("schema") != 1 or not 1 <= len(manifest.get("captures", [])) <= limits["files"]:
         raise CrawlError("Invalid capture batch")
     if not 1 <= len(sites) <= LIMITS["sites"]:
         raise CrawlError("Invalid approved site set")
     if ezboard:
         for capture in manifest['captures']:
+            if capture.get('supporting_source'):
+                continue
             parsed = candidate(capture['url'], board)
             if parsed and parsed['kind'] in ('board', 'forum'):
                 page, _ = document(root, capture)
@@ -87,26 +139,59 @@ def check_manifest(root, manifest):
                     if parsed['kind'] == 'forum':
                         forums.add(parsed['token'])
     seen, size = set(), 0
+    identities = {(c['url'], c['timestamp'], c['sha256']): c for c in manifest['captures']}
+    verified = set()
+    deferred = []
     for capture in manifest["captures"]:
-        verified_source(root, capture)
+        verified_path(root, capture)
+        if not complete and capture['bytes'] > LIMITS['page_bytes']:
+            raise CrawlError('Staged source size changed or exceeds the page limit')
         if manifest.get('capture_window') and not in_capture_window(capture['timestamp'], manifest['capture_window']):
             raise CrawlError('Capture is outside the saved date window')
         site = sites.get(capture.get("candidate_id"))
-        if ezboard:
+        if complete and capture.get('supporting_source'):
+            # Check this graph after validating every primary page. Cycles,
+            # invented parents and cross-candidate references cannot grant scope.
+            deferred.append(capture)
+            permitted = site is not None
+        elif ezboard:
             page, _ = document(root, capture)
-            allowed = site is not None and belongs(page, capture['url'], board, forums)
+            permitted = site is not None and belongs(page, capture['url'], board, forums)
         elif sitepowerup:
             page, _ = platform.source_page(verified_source(root, capture), capture['url'], capture.get('content_type') or '')
-            allowed = site is not None and platform.belongs(page, capture['url'], board)
+            permitted = site is not None and platform.belongs(page, capture['url'], board)
+        elif complete:
+            permitted = site is not None and scope_allowed(capture['url'], site)
         else:
-            allowed = (original_url(capture["url"]) == original_url(site["url"]) if site and site.get("scope_mode") == "page"
+            permitted = (original_url(capture["url"]) == original_url(site["url"]) if site and site.get("scope_mode") == "page"
                        else within_scope(capture["url"], site["scope"]) if site else False)
-        if not allowed:
+        if not permitted:
             raise CrawlError("Capture is outside the approved site scope")
         if capture.get("archive_path") != archive_path(capture) or capture["archive_path"] in seen:
             raise CrawlError("Invalid or duplicate archive destination")
         seen.add(capture["archive_path"])
+        if not capture.get('supporting_source'):
+            verified.add((capture['url'], capture['timestamp'], capture['sha256']))
         size += capture["bytes"]
+    reference_cache = {}
+    while deferred:
+        pending = []
+        for capture in deferred:
+            source = capture['supporting_source']
+            key = tuple(source.get(field) for field in ('url', 'timestamp', 'sha256'))
+            if key not in verified:
+                pending.append(capture)
+                continue
+            parent = identities[key]
+            if key not in reference_cache:
+                from source_assets import references
+                reference_cache[key] = references(root, parent)
+            if parent['candidate_id'] != capture['candidate_id'] or original_url(capture['url']) not in reference_cache[key]:
+                raise CrawlError('Supporting file is not referenced by its verified source')
+            verified.add((capture['url'], capture['timestamp'], capture['sha256']))
+        if len(pending) == len(deferred):
+            raise CrawlError('Supporting file has no verified source within the approved capture')
+        deferred = pending
     if size > limits["bytes"]:
         raise CrawlError("Batch exceeds the source byte limit")
 
@@ -122,6 +207,9 @@ def capture_sites(root, batch_id, sites, downloader_factory=Downloader, progress
             raise CrawlError('Capture each whole Ezboard independently')
         from ezboard_portal import capture_board
         return capture_board(root, batch_id, sites[0], downloader_factory, progress)
+    from full_capture import POLICY, capture
+    if sites and all(site.get('capture_policy') == POLICY for site in sites):
+        return capture(root, batch_id, sites, downloader_factory, progress)
     directory = Path(root) / "batches" / batch_id
     directory.mkdir(parents=True, exist_ok=True, mode=0o700)
     draft_path = directory / "draft.json"
@@ -195,6 +283,7 @@ def capture_sites(root, batch_id, sites, downloader_factory=Downloader, progress
                 frontier.extend(link['url'] for link in page.links)
             for capture in draft["captures"]:
                 if capture["candidate_id"] == site["id"]:
+                    frontier.append(capture['url'])
                     page, _ = document(root, capture)
                     frontier.extend(link["url"] for link in page.links)
             checked = set()

@@ -332,3 +332,42 @@ def test_changed_scope_can_retry_cached_grade_with_original_budget(tmp_path, mon
         assert current['candidate_check']['state'] == 'completed'
     finally:
         worker.lease.close()
+
+
+def test_evidence_retry_uses_current_scope_and_keeps_transport_ledger(tmp_path, monkeypatch):
+    root, app, row, payload = setup(tmp_path, monkeypatch, samples=False)
+    operation = call(app, 'POST', '/api/check-candidate', payload).json()['operation']
+    seen = []
+    def sample(args, store):
+        candidate = store.candidates()[0]
+        seen.append((candidate['scope'], json.loads(candidate['coverage']).get('scope_mode', 'directory'), store.get('wayback_transport')))
+        store.set('wayback_transport', {'requests': 17})
+        store.db.execute("UPDATE candidates SET state='sample_error',error='Archived redirect is outside the saved capture scope'")
+        store.db.commit()
+    worker = Worker(root)
+    try:
+        with patch('candidate_checks.sample', side_effect=sample), patch('grading.Luna') as luna:
+            worker.operation()
+            current = call(app, 'GET', '/api/candidate?id='+row['id']).json()['candidate']
+            assert call(app, 'POST', '/api/scope', {'id': row['id'], 'manifest_sha256': current['manifest_sha256'], 'mode': 'site'}).status_code == 200
+            current = call(app, 'GET', '/api/candidate?id='+row['id']).json()['candidate']
+            assert call(app, 'POST', '/api/check-candidate', {**payload, 'manifest_sha256': current['manifest_sha256']}).json()['operation'] == operation
+            worker.operation()
+            luna.assert_not_called()
+        assert seen == [('http://guild.example/eq/', 'directory', None), ('http://guild.example/', 'site', {'requests': 17})]
+    finally:
+        worker.lease.close()
+
+
+def test_page_only_approval_cannot_exclude_verified_redirect_source(candidate):
+    from review import record
+    root, row = candidate
+    with connect(root) as store:
+        store.db.execute('UPDATE candidates SET url=?,scope=?,coverage=? WHERE id=?',
+                         ('http://guild.example/', 'http://guild.example/', json.dumps({'status':'absent_host','scope_mode':'page'}), row['id']))
+        store.db.commit()
+        current = record(store, store.candidates()[0])
+    app = create_app(root, start_worker=False)
+    assert current['scope_has_source'] is False
+    result = call(app, 'POST', '/api/decisions', [{'id': row['id'], 'manifest_sha256': current['manifest_sha256'], 'decision':'approve'}])
+    assert result.status_code == 409 and 'excludes its graded source' in result.json()['error']

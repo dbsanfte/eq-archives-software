@@ -90,7 +90,7 @@ class Capture:
                 raise CrawlError('Capture limits must be positive integers')
         if limits['delay'] < 3 or limits['bytes_per_second'] > 131072:
             raise CrawlError('Keep at least three seconds between requests and at most 128 KiB/s')
-        if limits['max_page_bytes'] > 1024 * 1024 or limits['max_hosts'] > 512:
+        if limits['max_page_bytes'] > 32 * 1024 * 1024 or limits['max_hosts'] > 512:
             raise CrawlError('Page/host limits exceed the supported bounds')
 
     def extend(self, changes):
@@ -223,11 +223,14 @@ class Capture:
                 raise BoundReached('Capture file limit reached; pending captures are retained')
             start, end = self.date_tiers()[row['tier']]
             try:
-                result = downloader.call({'op': 'capture', 'url': row['url'], 'timestamp': row['stamp'],
+                result = downloader.call({'op': 'capture_file' if self.config.get('complete_files') else 'capture', 'url': row['url'], 'timestamp': row['stamp'],
                                           'from': start, 'to': end, 'destination': str(temporary)})
             except CrawlError as error:
+                if self.config.get('complete_files') and 'byte limit' in str(error):
+                    raise  # an oversized page is not a completed board
                 if str(error) not in ('Wayback HTTP 404', 'Wayback HTTP 410', 'Replay returned a different original URL',
-                                     'Wayback returned a capture outside the requested tier') and 'Response exceeds byte limit' not in str(error):
+                                     'Wayback returned a capture outside the requested tier',
+                                     'Replay returned a different dated version; requested version remains unavailable') and 'Response exceeds byte limit' not in str(error):
                     raise
                 self.db.execute("UPDATE ez_records SET state='unavailable',reason=? WHERE id=?", (str(error), row['id']))
                 self.db.commit()

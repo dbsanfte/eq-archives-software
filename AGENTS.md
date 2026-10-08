@@ -350,11 +350,29 @@ expose model output or let a previous attempt's status override the current Job.
 New approved captures cover all available dated versions from inclusive UTC
 1999-01-01 through 2006-12-31. The 1999–2001 preference ranks discovery evidence
 and equally graded candidates; it must not truncate an approved site's date
-coverage. Ordinary page/directory/site captures use paginated, uncollapsed exact
-CDX listings, including URLs with saved grading samples. Keep per-version and
-catalog checkpoints, shared serial transport and cumulative limits. Display the
-requested window and incomplete coverage when limits stop capture. Preserve
-already reviewed/published manifests and saved legacy operator date policies.
+coverage. Newly claimed ordinary page/directory/site captures use the versioned
+`complete-files-v1` engine: paginated, uncollapsed HTTP-200 CDX scope inventories
+for every file type, including orphan URLs and saved grading samples. Preserve
+exact URL/date identity across HTTP/HTTPS/www aliases within the approved account
+path. Stream binary files and Git hashes; keep catalog/file checkpoints in SQLite
+without growing per-file JSON rewrites or archive walks. Source-verified HTML/CSS
+references can add exact supporting-file URLs, including external assets, without
+crawling their hosts. Whole-board engines retain ownership checks and collect
+verified supporting files afterward. A transport/storage/ownership bound keeps
+new work paused in Capturing; only exhausted catalogs and pending records reach
+Review, with missing/substituted replays explicitly listed as gaps. Explicit resume
+may extend exhausted capture transport allowances without resetting cumulative
+usage, paid limits or discovery deadlines. Retain all already claimed legacy work,
+reviewed/published manifests and saved operator policies. Mobile review separates
+readable pages from supporting files with safe attachment downloads, 100-URL list
+pagination, compact status polling and manifest-hash reuse. Publish all files in
+one site commit; index readable HTML/plain text, retaining assets without Luna calls.
+Sampling must distinguish archived redirects/errors from an empty calendar.
+Verify an entry redirect's chain within the current scope/account, independently
+list/capture its destination, and retain actual URL/date plus entry provenance.
+A changed scope on explicit retry must update the run's eligibility checks without
+resetting its operation, sources or budgets; reject approval of a page scope that
+excludes its graded redirect source.
 
 Ezboard uses the [custom capture engine](scripts/archive-crawler/EZBOARD.md).
 Candidates represent a source-verified top-level board across numbered Ezboard

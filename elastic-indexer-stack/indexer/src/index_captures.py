@@ -18,7 +18,7 @@ from urllib.parse import quote, urlsplit
 import httpx
 
 from common import CrawlError, decode, digest, now
-from captures import check_manifest, verified_source
+from captures import check_manifest, indexable, verified_source
 from indexer.chunking import CHUNKING_VERSION, DOCUMENT_PREFIX, chunk_source
 from indexer.html_extraction import WEBSITE_EXTRACTION_VERSION, website_markdown
 from indexer.capture_enrichment import Enricher, policy
@@ -31,7 +31,7 @@ def read_batch(root, relative, expected):
     if root not in path.parents:
         raise CrawlError("Invalid or oversized approved manifest path")
     try:
-        if path.stat().st_size > 2 * 1024 * 1024:
+        if path.stat().st_size > 64 * 1024 * 1024:
             raise CrawlError("Invalid or oversized approved manifest path")
         batch = json.loads(path.read_text())
         manifest = batch["manifest"]
@@ -48,7 +48,8 @@ def text_document(root, capture):
     text, _ = decode(verified_source(root, capture), capture.get("content_type") or "")
     replay = f"https://web.archive.org/web/{capture['timestamp']}/{capture['url']}"
     header = f"<b>Page URL:</b> {html.escape(replay)}<br/><hr/>"
-    content = website_markdown(header + text)
+    content = (website_markdown(header) + '\n\n' + text if capture.get('content_type', '').split(';')[0] == 'text/plain'
+               else website_markdown(header + text))
     if not content.strip():
         raise CrawlError("Capture has no readable source text")
     return replay, content
@@ -120,8 +121,11 @@ def index_batch(root, batch, services, chunker=chunk_source):
     manifest = batch["manifest"]
     check_manifest(root, manifest)
     policy(manifest)
-    created = skipped = 0
+    created = skipped = preserved = 0
     for capture in manifest["captures"]:
+        if not indexable(capture):
+            preserved += 1
+            continue
         record_id = capture["archive_path"]
         if services.exists(record_id):
             skipped += 1
@@ -130,7 +134,7 @@ def index_batch(root, batch, services, chunker=chunk_source):
         # Model date extraction sees the original body, not our synthetic
         # provenance header or the capture timestamp embedded in its URL.
         source, _ = decode(verified_source(root, capture), capture.get("content_type") or "")
-        metadata = services.enrich(capture, website_markdown(source))
+        metadata = services.enrich(capture, source if capture.get('content_type', '').split(';')[0] == 'text/plain' else website_markdown(source))
         chunks = [{"text_chunk": chunk.text, "vector": services.embedding(chunk.text)} for chunk in chunker(content)]
         if not chunks:
             raise CrawlError("Capture has no source chunks")
@@ -145,7 +149,7 @@ def index_batch(root, batch, services, chunker=chunk_source):
         timestamp = datetime.strptime(capture["timestamp"], "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc).isoformat()
         document = {"id": record_id, "title": capture.get("title") or urlsplit(capture["url"]).path or "Archived page",
                     "domain_name": urlsplit(capture["url"]).netloc, "capture_date": timestamp, "last_indexed": now(),
-                    "url": replay, "mime_type": "text/html", "file_type": "text", "thumbnail": "thumbnails/website.webp",
+                    "url": replay, "mime_type": (capture.get('content_type') or 'text/html').split(';')[0], "file_type": "text", "thumbnail": "thumbnails/website.webp",
                     "text_full": content, "text": chunks, "text_extraction_version": WEBSITE_EXTRACTION_VERSION,
                     "text_chunking_version": CHUNKING_VERSION, "archive_source_sha256": capture["sha256"],
                     "archive_source_manifest": batch["manifest_sha256"], "archive_commit": batch["publication"]["commit"],
@@ -154,7 +158,8 @@ def index_batch(root, batch, services, chunker=chunk_source):
             created += 1
         else:
             skipped += 1
-    return {"created": created, "existing": skipped, "captures": len(manifest["captures"])}
+    return {"created": created, "existing": skipped, "captures": len(manifest["captures"]),
+            **({'preserved_files': preserved} if preserved else {})}
 
 
 def main():

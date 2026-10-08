@@ -186,6 +186,10 @@ progress { width:100%; display:block; margin:18px 0; accent-color:var(--forest);
 .page-browser { background:#e5eee0; border:1px solid #b1c5a8; border-radius:12px; padding:18px; }
 .page-browser h2 { font-size:24px; }
 .page-browser input { background:#fffef8; margin:8px 0 14px; }
+.page-browser label { display:grid; gap:6px; font-size:13px; font-weight:600; margin:12px 0; }
+.page-browser select { width:100%; background:#fffef8; }
+.page-navigation { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+.page-navigation button { flex:1; }
 .site-pages { list-style:none; padding:0; margin:0; }
 .site-page { border-bottom:1px solid #bdcdb5; padding:10px 0; }
 .site-page:last-child { border-bottom:0; }

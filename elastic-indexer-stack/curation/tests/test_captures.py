@@ -75,6 +75,33 @@ def test_page_only_root_captures_dont_widen_into_host(candidate):
     assert len(manifest['captures']) == 1
 
 
+def test_redirected_sample_seeds_all_dated_versions_of_its_actual_page(tmp_path):
+    from conftest import add_candidate
+    root=tmp_path/'state'
+    row=add_candidate(root,url='http://www.solusekro.com/',body=b'<p>EverQuest server news.</p>')
+    site=manifest_for(row)['sites'][0]
+    site.update(scope='http://www.solusekro.com/',scope_mode='directory')
+    target=site['url']+'eq/'
+    site['captures'][0]['url']=target
+    site['captures'][0]['entry_redirect']={'requested_url':site['url'],'url':target}
+    calls=[]
+    class Downloader:
+        def __init__(self,*args):pass
+        def call(self,job):
+            calls.append(job)
+            if job['op']=='capture_list':
+                return {'captures':[{'url':target,'timestamp':'20061231235959','digest':'D','length':'40'}] if job['url']==target else []}
+            raw=b'<p>EverQuest server news in 2006.</p>'
+            Path(job['destination']).write_bytes(raw)
+            return {'url':job['url'],'timestamp':job['timestamp'],'sha256':digest(raw),'bytes':len(raw)}
+        def close(self):pass
+    manifest=capture_sites(root,'a'*32,[site],Downloader)
+    assert {capture['timestamp'] for capture in manifest['captures']}=={'20000101000000','20061231235959'}
+    assert all(capture['url']==target and capture['archive_path'].endswith('/eq/index.html') for capture in manifest['captures'])
+    assert any(job['op']=='capture_list' and job['url']==target for job in calls)
+    check_manifest(root,manifest)
+
+
 def test_custom_folder_uses_reviewed_links_without_publishing_outside_source(tmp_path):
     from conftest import add_candidate
     root=tmp_path/'state'

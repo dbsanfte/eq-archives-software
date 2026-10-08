@@ -42,9 +42,11 @@ Legacy finder/worker/broad reindex Jobs retain their separate lifecycles.
    Existing approvals receive a one-time grace period on migration;
    restarting does not reset it. A paused capture holds the queue until explicitly
    resumed, retaining its budgets. Items move into **Capturing** when claimed.
-   The worker
-   spiders HTML links within the scope, including its entry directory, through
-   the pinned public Wayback Machine Downloader and serial persistent client.
+   The worker inventories the entire approved scope through paginated Wayback
+   CDX listings, then downloads every listed successful file version. It includes
+   orphan pages, images, CSS, scripts and downloads, using the pinned downloader
+   with a serial persistent client. Supporting files referenced by HTML/CSS are
+   checked at their exact URLs, including on external asset hosts.
 4. Completed items move into **Review capture**, newest first. Open a site to browse
    its captured pages and dated Wayback links, including
    complete extracted source and multiple versions of the same page.
@@ -231,24 +233,58 @@ Previously approved publication/import records retain their original identities.
 The legacy file-subset API remains available for single-site operator requests;
 the review screen and site-decision API always approve the complete captured site.
 
-[Capture limits](captures.py): five sites, 20 URL attempts per site,
-100 files, 1 MiB per response, 64 MiB source/transport budget, 500 HTTP requests
-including retries and 1,800 seconds per batch. Requests are serial, at least
-three seconds apart, throttled to 128 KiB/s, with bounded 422/429/server-error
-backoff. Approved capture requests **every available dated version from
-1999-01-01 through 2006-12-31 inclusive UTC**, including later versions of the
-sampled page. Exact-page CDX listings use 200-row pages and saved resume keys,
-without digest collapsing; equal-content versions on different dates remain
-distinct captures. Each completed version and catalog position is checkpointed
-before the next request. Links from recovered versions extend the chosen scope's
-frontier. The requested date window and per-site completion/limit reason are saved
-in the review manifest. Discovery alone uses 1999–2001 as its preferred sampling
-tier; equally graded candidates with early captures sort before later-only sites.
-Existing captured reviews and published manifests keep their original sources
-and dates, including legacy 2007 evidence. These are HTML subsets, excluding
-images/assets and current live pages; they are not complete mirrors. Reaching a batch budget
-stages its valid subset for review with an explicit coverage note. Other
-interrupted operations need an explicit resume within their original budgets.
+Newly claimed captures use [complete-files-v1](full_capture.py). Ordinary site,
+account and directory scopes use 200-row, uncollapsed CDX **prefix** inventories;
+exact-page scopes use exact listings. Every successful (HTTP 200) file type is
+eligible, including files with no surviving HTML link. HTTP/HTTPS and www/bare
+aliases retain their exact source identities while sharing the approved path or
+account boundary. External supporting files require verified HTML/CSS references;
+their exact URLs are inventoried without crawling the surrounding external site.
+The custom board engines verify discussion ownership before collecting linked
+supporting files. All available dated versions in inclusive UTC **1999-01-01
+through 2006-12-31** are requested, including identical-content versions and
+previously sampled URLs. Actual replays must match the requested URL and date;
+a nearest-date replacement is reported as a coverage gap, never relabelled.
+
+The new ordinary capture path has no page/file-count cutoff. SQLite checkpoints
+each catalog page and file, and binary downloads and publication hashes stream
+from disk. Its cumulative transport allowance is 100,000 requests, 50 GiB and
+seven days of active acquisition, with three-second request spacing, 128 KiB/s
+throttling and bounded 422/429/server backoff. A 256 MiB free-space reserve and
+per-request disk-space checks protect staging. Limits or transport failures keep
+the site paused in **Capturing**, never move a truncated subset into Review.
+Explicit **Resume** extends an exhausted transport allowance while retaining
+all consumed requests/bytes/time and completed checkpoints. It cannot renew a
+Luna/discovery budget. Board catalog/file safety ceilings are 10 million/1 million
+records for new portal work and can extend on explicit resume; board source
+ownership parsing is bounded to 32 MiB per HTML page.
+
+Review appears only after every catalog and pending version has been checked.
+Missing or substituted replays and supporting URLs with no captures remain
+visible as dated coverage gaps. This describes what Wayback makes available,
+not proof that it archived every original file. Images, CSS, scripts, archives
+and other assets have a separate **Supporting files** browser and an original
+file download; nothing from the archived site executes in the portal. File lists
+paginate at 100 URLs. Polling uses compact batch metadata and reuses the selected
+manifest by hash. Publication preserves the complete file set in one site commit;
+HTML/plain-text pages (up to 32 MiB with nonempty text) receive default AI enrichment
+and indexing, while supporting/binary files remain preserved without Luna calls.
+
+Existing claimed captures, reviewed sources and publication/indexing manifests
+retain their saved legacy policy. Legacy HTML traversal keeps its old 20-URL,
+100-file, 1-MiB response, 64-MiB/500-request/30-minute bounds and explicit subset
+notes. Discovery sampling is still small and prefers 1999–2001 evidence; this
+preference never truncates a newly approved site's date range.
+
+If an entry URL has no successful HTML records, sampling inspects a bounded
+redirect/error catalog. An archived redirect can provide evidence only after
+its same-scope/account destination and redirect chain are verified. The destination
+is independently listed and sampled, retaining its actual URL/date and the
+entry-point provenance. For example, `www.solusekro.com/` redirects to `/eq/`;
+its 2000/2001 destination captures are valid evidence. A Wayback calendar containing
+redirects or HTTP errors is no longer described as having no captures. A redirect
+outside the saved scope has a visible scope-edit/retry action. Retry uses the
+current scope with the original operation, source caches and budgets.
 
 ## Archive convention and source fidelity
 
@@ -475,8 +511,9 @@ Ezboard candidates represent a complete board across historical servers.
 Forum/message submissions resolve their parent before sampling/grading creates
 a candidate; existing boards are reused. New board candidates default to
 **Whole Ezboard**, which uses paginated board/forum capture catalogs and the
-serial downloader, with its own 2,000-capture/256-MiB/one-hour budget. Capture
-limits and missing pages are visible during review. Existing approved scopes
+serial downloader. Newly claimed work uses the complete-file policy above,
+including source-linked images, stylesheets and downloads. Legacy claimed work
+keeps its 2,000-capture/256-MiB/one-hour budget. Existing approved scopes
 and indexing Jobs are preserved. See the [Ezboard guide](../../scripts/archive-crawler/EZBOARD.md)
 for the verified URL forms, operator commands, limits, migration and source
 validation.
@@ -494,9 +531,10 @@ sources; indexed/approved boards and active checks retain their records.
 The **Whole SitePowerUp board** scope captures available dated indexes, messages
 and pagination from 1999–2006 through serial, paginated CDX requests. It retains
 query strings in `websites/<host>/<timestamp>/<decoded path>` destinations and
-verifies the BoardID against each source. Other boards, posting/admin actions and
-binary assets are excluded. Each board has its own 2,000-capture/256-MiB/one-hour
-budget and review, with incomplete coverage shown explicitly. Existing exact-page
+verifies the BoardID against each discussion source. Other boards and posting/admin
+actions are excluded. Newly claimed work adds verified supporting-file references
+and uses the complete-file policy above; existing claimed work retains its
+2,000-capture/256-MiB/one-hour policy. Each board has its own review. Existing exact-page
 approvals do not widen. Publication and default AI-enriched indexing still require
 the usual whole-site review approval. See the
 [SitePowerUp guide](../../scripts/archive-crawler/SITEPOWERUP.md) for format

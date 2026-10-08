@@ -19,7 +19,7 @@ let searchTimer,gradeTimer,dismissSnapshot=null;
 let reviewSnapshot=null;
 let manualResult=null,manualSignature='';
 let activeSwipe=null;
-const drafts = new Map(), positions = new Map(), pageQueries = new Map(), sourceCache = new Map();
+const drafts = new Map(), positions = new Map(), pageQueries = new Map(), sourceCache = new Map(), pageOffsets = new Map();
 const gradingDrafts = new Map();
 history.scrollRestoration = 'manual';
 function node(tag, text, className) {
@@ -54,6 +54,7 @@ function readRoute() {
   return {view:Object.hasOwn(names,view) ? view : 'candidates',candidate:query.get('candidate') || null,
     panel:['pages','reader'].includes(query.get('screen')) ? query.get('screen') : 'site',
     page:Math.max(0,Number(query.get('page')) || 0),slot:Math.max(0,Number(query.get('slot')) || 0),
+    filetype:['files','all'].includes(query.get('filetype')) ? query.get('filetype') : 'pages',
     offset:Math.max(0,Number(query.get('offset')) || 0),query:(query.get('search') || '').slice(0,200),
     minGrade:/^[0-3]$/.test(minimum) ? Number(minimum) : 2,needsGrade:query.get('needs_grade')==='1'};
 }
@@ -63,6 +64,7 @@ function writeRoute(replace=false, parent=null) {
   if (route.view==='candidates' || route.minGrade!==2) url.searchParams.set('min_grade',route.minGrade);
   if (route.view==='candidates' && route.needsGrade) url.searchParams.set('needs_grade','1');
   if (route.candidate) { url.searchParams.set('candidate',route.candidate);
+    if (route.filetype!=='pages') url.searchParams.set('filetype',route.filetype);
     if (route.panel!=='site') { url.searchParams.set('screen',route.panel);url.searchParams.set('page',route.page);url.searchParams.set('slot',route.slot); }
   } else { if (route.offset) url.searchParams.set('offset',route.offset);if (route.query) url.searchParams.set('search',route.query); }
   history[replace ? 'replaceState' : 'pushState'](replace ? history.state : {parent},'',url);
@@ -135,10 +137,11 @@ async function refresh(navigated=false) {
   const signal=controller.signal;
   try {
     const [listing,context]=await Promise.all([
-      request(`/api/queue?filter=${requested.view}&offset=${requested.offset}&search=${encodeURIComponent(requested.query)}${requested.view==='candidates' ? `&min_grade=${requested.minGrade}&needs_grade=${requested.needsGrade ? 1 : 0}` : ''}`,undefined,signal),
-      requested.candidate ? request(`/api/candidate?id=${encodeURIComponent(requested.candidate)}`,undefined,signal) : Promise.resolve(null)
+      request(`/api/queue?compact=1&filter=${requested.view}&offset=${requested.offset}&search=${encodeURIComponent(requested.query)}${requested.view==='candidates' ? `&min_grade=${requested.minGrade}&needs_grade=${requested.needsGrade ? 1 : 0}` : ''}`,undefined,signal),
+      requested.candidate ? request(`/api/candidate?id=${encodeURIComponent(requested.candidate)}${detail?.candidate.id===requested.candidate && detail.review?.manifest ? `&known_manifest=${detail.review.manifest_sha256}` : ''}`,undefined,signal) : Promise.resolve(null)
     ]);
     if (token!==generation || routeKey(requested)!==routeKey()) return;
+    if (context?.review?.manifest_unchanged) context.review={...detail.review,...context.review};
     if (!requested.candidate && route.offset>0 && route.offset>=listing.total) {
       route.offset=Math.max(0,Math.floor((listing.total-1)/50)*50);writeRoute(true);return refresh(navigated);
     }
@@ -240,6 +243,7 @@ function approvalBlock(row) {
   if ((!row.rating || !row.captures?.length) && row.candidate_check?.state==='interrupted') return 'Use Retry evidence & grading below before approving.';
   if (!row.captures?.length) return 'No source samples yet. Use Find samples & grade below.';
   if (!row.rating) return 'Source samples are ready. Use Grade source evidence below.';
+  if (row.scope_has_source===false) return 'The saved scope excludes the graded source. Choose a scope containing it.';
   if (row.state!=='approval_pending') return 'Review this site’s current status before approving.';
   return '';
 }
@@ -338,12 +342,16 @@ function candidateIssue(row) {
   const error=(check?.state==='interrupted' && check.error) || row.error;
   if (!error) return null;
   const next='Retry the evidence check when the problem is resolved. Saved sources are retained.';
+  if (/archived responses.*no usable HTML/i.test(error))
+    return {title:'Archived responses need checking',message:error,next:'The calendar includes redirects and error responses. Check the archived page below or submit its destination URL.',error,wayback:true};
+  if (/redirect.*outside.*scope/i.test(error))
+    return {title:'Redirect leaves the chosen scope',message:error,next:'Choose a scope containing the destination, save it, then retry the evidence check. A different site or account needs its own candidate.',error,wayback:true};
   if (/No (exact HTML captures|usable Wayback capture|readable Wayback samples)/i.test(error))
     return {title:'No archived source found',message:'Wayback returned no matching HTML page for this exact URL in 1999–2006.',
       next:'Check the original URL in Wayback below. Save this suggestion for later or dismiss it; Retry checks the same URL again.',error,wayback:true};
   if (/different original URL|exact source identity/i.test(error))
     return {title:'Archived URL needs checking',message:'Wayback listed a different original URL, so the source could not be verified.',
-      next:'Check the original URL below. Redirects are not substituted for the site you selected.',error,wayback:true};
+      next:'Check the original URL below. A redirect must be verified within the saved scope before it can provide evidence.',error,wayback:true};
   if (/source exceeds grading limit/i.test(error))
     return {title:'Source is too large to grade',message:'The complete saved text exceeds the grading limit. Retrying cannot reduce its size.',
       next:'You can read the saved evidence or save this site for later. An operator must review the source limit before grading can proceed.',error};
@@ -426,11 +434,11 @@ function renderWorkspace() {
   if (!detail || !route.candidate) { workspaceSignature='';return; }
   const row=detail.candidate,review=detail.review;
   if (route.panel!=='site') { const {groups}=pageGroups(row,review);if (groups.length) { route.page=Math.min(route.page,groups.length-1);if (!groups[route.page].slots.includes(route.slot)) route.slot=groups[route.page].slots[0];writeRoute(true); } }
-  const signature=JSON.stringify([row.id,row.stage,row.state,row.manifest_sha256,review?.manifest_sha256,route.panel,route.page,route.slot,route.panel==='site' ? [row.coverage?.site_check,row.coverage?.candidate_exclusion,row.error,row.candidate_check,hasOperation()] : null]);
+  const signature=JSON.stringify([row.id,row.stage,row.state,row.manifest_sha256,review?.manifest_sha256,route.panel,route.page,route.slot,route.filetype,route.panel==='site' ? [row.coverage?.site_check,row.coverage?.candidate_exclusion,row.error,row.candidate_check,hasOperation()] : null]);
   if (signature!==workspaceSignature) {
     const root=$('site-workspace');root.replaceChildren();
     const navigation=node('div',undefined,'workspace-nav');
-    navigation.append(control(route.panel==='reader' ? '← Back to pages' : route.panel==='pages' ? '← Back to site review' : `← ${names[route.view]}`,()=>backFromSite(),'quiet back'));
+    navigation.append(control(route.panel==='reader' ? `← Back to ${review && route.filetype!=='pages' ? 'files' : 'pages'}` : route.panel==='pages' ? '← Back to site review' : `← ${names[route.view]}`,()=>backFromSite(),'quiet back'));
     if (route.panel==='site' && stages.includes(row.stage)) {
       const next=control('Next site →',()=>{
         const rows=data.candidates,index=rows.findIndex(item=>item.id===route.candidate),target=rows[(index+1)%rows.length];
@@ -506,10 +514,12 @@ function renderCandidate(root,row) {
   }
   const settings=panel('Choose capture scope');settings.append(node('p','Approve this scope once. The download starts automatically after the Undo grace period.','meta'));
   settings.append(node('p','Capture window: 1 January 1999–31 December 2006. Download all available dated versions within this scope. Sites with 1999–2001 captures have discovery priority.','meta'));
+  settings.append(node('p','Preserves pages, images, CSS, scripts and downloads, including supporting files referenced by saved sources. Large captures continue beyond thousands of files; resource limits pause the capture for explicit resume.','meta'));
+  if (!row.ezboard && !row.sitepowerup) settings.append(node('p','Whole-site and folder scopes include HTTP/HTTPS and www variants within the same account path. Linked supporting files are checked at their exact URLs.','meta'));
   const draft=getDraft(row),fields=node('div',undefined,'fields'),scopeLabel=node('label','Download scope'),select=node('select');select.id='capture-scope';select.setAttribute('aria-label','Download scope');
   const scopeOptions=row.sitepowerup ? [['sitepowerup','Whole SitePowerUp board · all messages'],['page','Exact linked page only'],...(['directory','site','custom'].includes(row.scope_mode) ? [[row.scope_mode,'Keep saved scope']] : [])] : row.ezboard ? [['ezboard','Whole Ezboard · all forums and threads'],['page','Board index page only'],...(['directory','site','custom'].includes(row.scope_mode) ? [[row.scope_mode,'Keep saved scope']] : [])] : [['directory','Linked directory and below'],['page','Linked page only'],['site','Whole site / shared account'],['custom','Custom folder and below']];
-  if (row.sitepowerup) settings.append(node('p',`BoardID: ${row.sitepowerup}. Capture includes this board’s indexes, messages and pagination across 1999–2006. Other boards and posting forms are excluded. Limited to 2,000 downloaded captures, 256 MiB and one hour; incomplete coverage is shown for review.`,'meta'));
-  if (row.ezboard) settings.append(node('p',`Board identity: ${row.ezboard}. Whole-board capture checks historical servers and dated forum/message listings across the full 1999–2006 window. Limited to 2,000 downloaded captures, 256 MiB and one hour; incomplete coverage is shown for review.`,'meta'));
+  if (row.sitepowerup) settings.append(node('p',`BoardID: ${row.sitepowerup}. Capture includes this board’s indexes, messages, pagination and referenced supporting files across 1999–2006. Other boards and posting forms are excluded. Unfinished captures remain paused until resumed.`,'meta'));
+  if (row.ezboard) settings.append(node('p',`Board identity: ${row.ezboard}. Whole-board capture checks historical servers, dated forums/messages and referenced supporting files across the full 1999–2006 window. Unfinished captures remain paused until resumed.`,'meta'));
   for (const [value,label] of scopeOptions) {
     const option=node('option',label);option.value=value;select.append(option);
   }
@@ -526,7 +536,7 @@ function renderCandidate(root,row) {
   },'Capture scope saved.');save.hidden=!draft.dirty;
   function edit() { draft.mode=select.value;draft.path=path.value;draft.dirty=true;custom.hidden=draft.mode!=='custom';dirty.hidden=false;save.hidden=false;renderDock(true); }
   select.addEventListener('change',edit);path.addEventListener('input',edit);
-  const editable=row.state==='approval_pending';select.disabled=!editable;path.disabled=!editable;save.dataset.blocked=String(!editable);save.disabled=!editable || busy;
+  const editable=canDismiss(row) && row.state!=='coverage_unverified';select.disabled=!editable;path.disabled=!editable;save.dataset.blocked=String(!editable);save.disabled=!editable || busy;
   settings.append(fields,saved,dirty,save);right.append(settings);
   const secondary=node('div',undefined,'secondary-actions');
   const decidable=canDismiss(row);
@@ -534,16 +544,18 @@ function renderCandidate(root,row) {
   right.append(gradingOptions(row),secondary);columns.append(left,right);root.append(columns);
 }
 function captureSummary(row,review) {
-  const captures=review?.manifest.captures || [],count=new Set(review?.page_identities || captures.map(c=>c.url)).size;
+  const captures=review?.manifest.captures || [],count=new Set(captures.filter(isPage).map((c)=>c.url)).size;
+  const files=new Set(captures.filter(c=>!isPage(c)).map(c=>c.url)).size;
   const box=panel('Your captured site');const stats=node('div',undefined,'stat-grid');
   for (const [amount,label] of [[count,'pages'],[captures.length,'dated captures']]) {const stat=node('div',undefined,'stat');stat.append(node('strong',String(amount)),node('span',label));stats.append(stat);}
+  if (files) box.append(node('p',`${files} supporting files · images, stylesheets and downloads are preserved with the pages.`));
   box.append(stats);
   const dates=captures.map(c=>c.timestamp).sort();
   if (dates.length) box.append(node('p',`Capture dates: ${captureDate(dates[0]).slice(0,10)} to ${captureDate(dates.at(-1)).slice(0,10)}`,'meta'));
   const window=review?.manifest.capture_window,coverage=review?.manifest.capture_coverage?.[row.id];
   if (window) box.append(node('p',`Requested window: ${captureDate(window.from).slice(0,10)} to ${captureDate(window.to).slice(0,10)} · all available dated versions`,'meta'));
   if (coverage) box.append(node('p',coverage.reason,coverage.state==='complete' ? 'meta' : 'candidate-block'));
-  box.append(node('p','This is a bounded capture of the chosen scope. It may contain only part of the original site.','meta'));
+  box.append(node('p',review?.manifest.capture_policy==='complete-files-v1' ? 'The complete available file inventory was checked. Missing Wayback replays are listed as coverage gaps.' : 'This is a legacy bounded capture of the chosen scope. It may contain only part of the original site.','meta'));
   if (review?.manifest.sitepowerup) {
     const board=review.manifest.sitepowerup;
     box.append(node('p',`SitePowerUp BoardID ${board.board} · ${board.coverage.catalogs_remaining} catalog queries remaining · ${board.coverage.reason}`,'meta'));
@@ -555,7 +567,8 @@ function captureSummary(row,review) {
     const gaps=(coverage.counts?.excluded || 0)+(coverage.counts?.unavailable || 0);
     if (gaps) box.append(node('p',`${gaps} captures unavailable or excluded, including pages whose board ownership could not be verified. Their evidence is retained.`,'candidate-block'));
   }
-  if (count) box.append(control(`Browse ${count} captured ${count===1 ? 'page' : 'pages'}`,()=>go({panel:'pages',page:0,slot:0}),'wide primary'));
+  if (count) box.append(control(`Browse ${count} captured ${count===1 ? 'page' : 'pages'}`,()=>go({panel:'pages',page:0,slot:0,filetype:'pages'}),'wide primary'));
+  if (files) box.append(control(`Browse ${files} supporting ${files===1 ? 'file' : 'files'}`,()=>go({panel:'pages',page:0,slot:0,filetype:'files'}),'wide'));
   return box;
 }
 function renderCaptureReview(root,row,review) {
@@ -564,9 +577,9 @@ function renderCaptureReview(root,row,review) {
   if (review.manifest.notes?.length) {
     const notes=panel('Capture coverage',`${review.manifest.notes.length} coverage notes. Check these before approving the captured subset.`,'attention');
     const list=node('details');list.append(node('summary','Read coverage notes'));
-    for (const note of review.manifest.notes) list.append(node('p',`${note.url}: ${note.note || note.reason}`));notes.append(list);root.append(notes);
+    for (const note of review.manifest.notes) list.append(node('p',`${note.url}${note.timestamp || note.stamp ? ` (${captureDate(note.timestamp || note.stamp)})` : ''}: ${note.note || note.reason}`));notes.append(list);root.append(notes);
   }
-  const decision=panel('Decide for the whole site',`Approval publishes all ${review.manifest.captures.length} captured files and queues AI-enriched indexing. Maximum enrichment spend: $${review.manifest.indexing?.max_enrichment_usd ?? 2} for this site.`);
+  const decision=panel('Decide for the whole site',`Approval publishes all ${review.manifest.captures.length} captured files. Readable HTML and text pages receive AI-enriched indexing; supporting files remain preserved in the archive. Maximum enrichment spend: $${review.manifest.indexing?.max_enrichment_usd ?? 2} for this site.`);
   decision.append(node('p','Declining retains these sources in History. You can reconsider later.','meta'),mutation('Decline indexing',()=>siteDecision('decline'),'Indexing declined. Sources retained in History.'));root.append(decision);
 }
 function renderHistory(root,row,review) {
@@ -594,11 +607,12 @@ function renderLive() {
     box.append(node('p','You can undo until the worker starts. The queue has no item-count limit.','meta'));host.append(box);updateCountdown();
   } else if (row.stage==='capturing') {
     const paused=op?.state==='interrupted',progress=op?.result?.progress;
-    const box=panel(paused ? 'Capture paused' : 'Capture in progress',paused ? 'Staged files are retained. Resume within the original capture budget.' : 'This screen updates automatically as URLs are checked and downloaded.',paused ? 'attention' : '');
+    const box=panel(paused ? 'Capture paused' : 'Capture in progress',paused ? (progress?.capture_policy==='complete-files-v1' ? 'Saved files and catalog progress are retained. Resume continues pending files and extends an exhausted transport allowance without resetting usage.' : 'Staged files are retained. Resume within the original capture budget.') : 'This screen updates automatically as URLs are checked and downloaded.',paused ? 'attention' : '');
     if (op?.error) box.append(node('p',op.error));
     if (progress) {
       const phases={preparing:'Preparing sources',checking_wayback:'Checking Wayback captures',downloading:'Downloading a capture',ready_for_review:'Preparing site reviews'};
-      box.append(node('p',phases[progress.phase] || 'Working through the approved scope','progress-title'),node('p',`${progress.files} HTML files staged · ${(progress.bytes/1048576).toFixed(2)} MiB · ${progress.urls_checked} ${progress.ezboard || progress.sitepowerup ? 'capture records' : 'URLs'} checked`));
+      box.append(node('p',phases[progress.phase] || 'Working through the approved scope','progress-title'),node('p',`${progress.files} ${progress.capture_policy ? 'files' : 'HTML files'} staged · ${(progress.bytes/1048576).toFixed(2)} MiB · ${progress.urls_checked} ${progress.ezboard || progress.sitepowerup || progress.capture_policy ? 'capture records' : 'URLs'} checked`));
+      if (progress.capture_policy) box.append(node('p',`${progress.versions_found} versions found · ${progress.versions_pending} waiting · ${progress.unavailable} unavailable · ${progress.catalogs_pending} catalogs still being checked`));
       if (progress.site_url) box.append(node('p',`Current site: ${progress.site_url}`,'meta'));
       if (progress.current_url) box.append(external(progress.current_url));
       box.append(node('p',`Worker batch progress · ${progress.sites_total} approved ${progress.sites_total===1 ? 'site' : 'sites'}. Each completed site receives its own review.`,'meta'));
@@ -623,10 +637,11 @@ function renderLive() {
   liveSignature=signature;
 }
 function siteDecision(decision) { const review=detail.review;return request('/api/site-decision',{id:review.id,manifest_sha256:review.manifest_sha256,decision}); }
+function isPage(capture) { return capture.kind!=='file' && !capture.supporting_source; }
 function pageGroups(row,review) {
   const captures=review?.manifest.captures || row.captures || [],groups=new Map();
   captures.forEach((capture,index)=>{const identity=review?.page_identities?.[index] || capture.url;if (!groups.has(identity)) groups.set(identity,[]);groups.get(identity).push(index);});
-  return {captures,groups:[...groups].map(([url,slots])=>({url,slots}))};
+  return {captures,groups:[...groups].map(([url,slots])=>({url,slots})).filter(group=>!review || route.filetype==='all' || (route.filetype==='files' ? !isPage(captures[group.slots[0]]) : isPage(captures[group.slots[0]])))};
 }
 function backFromSite() {
   const destination=route.panel==='reader' ? {...route,panel:'pages'} : route.panel==='pages' ? {...route,panel:'site',page:0,slot:0} : {...route,candidate:null,panel:'site',page:0,slot:0};
@@ -636,37 +651,58 @@ function backFromSite() {
 }
 function renderPages(root,row,review) {
   const {captures,groups}=pageGroups(row,review);
+  const filesMode=Boolean(review && route.filetype!=='pages');
   if (!groups.length) { root.append(panel('No pages captured','Return to the site for its current status.'));return; }
   const chosen=Math.min(route.page,groups.length-1),group=groups[chosen],slot=group.slots.includes(route.slot) ? route.slot : group.slots[0];
   if (chosen!==route.page || slot!==route.slot) {route.page=chosen;route.slot=slot;writeRoute(true);}
   const layout=node('div',undefined,'reading-layout'),browser=node('section',undefined,'page-browser');browser.setAttribute('aria-label',review ? 'Captured pages' : 'Source evidence');
-  browser.append(node('p',review ? 'Captured pages' : 'Source evidence','panel-label'),node('h2',`${groups.length} ${groups.length===1 ? 'page' : 'pages'}`));
-  const filter=node('input');filter.type='search';filter.placeholder='Find a page';filter.setAttribute('aria-label','Find a captured page');filter.value=pageQueries.get(row.id) || '';browser.append(filter);
+  browser.append(node('p',review ? (filesMode ? 'Captured files' : 'Captured pages') : 'Source evidence','panel-label'),node('h2',`${groups.length} ${groups.length===1 ? 'page' : 'pages'}`));
+  if (review && captures.some(c=>!isPage(c))) {
+    const label=node('label','Browse'),kind=node('select');kind.setAttribute('aria-label','Captured content type');
+    for (const [value,title] of [['pages','Readable pages'],['files','Supporting files'],['all','All captured files']]) {const option=node('option',title);option.value=value;kind.append(option);}
+    kind.value=route.filetype;kind.addEventListener('change',()=>go({filetype:kind.value,page:0,slot:0},{replace:true}));label.append(kind);browser.append(label);
+    browser.querySelector('h2').textContent=`${groups.length} ${route.filetype==='pages' ? 'pages' : 'files'}`;
+  }
+  const filter=node('input');filter.type='search';filter.placeholder=filesMode ? 'Find a file' : 'Find a page';filter.setAttribute('aria-label',filesMode ? 'Find a captured file' : 'Find a captured page');filter.value=pageQueries.get(row.id) || '';browser.append(filter);
   const list=node('ul',undefined,'site-pages');list.tabIndex=0;list.setAttribute('aria-label','Page list');
   const matchCount=node('p',undefined,'list-hint');
+  const pager=node('div',undefined,'page-navigation');
   const renderList=()=>{
     const query=filter.value.trim().toLowerCase();pageQueries.set(row.id,filter.value);
+    const key=`${row.id}:${route.filetype}:${query}`;
+    const matches=groups.map((entry,index)=>({entry,index})).filter(({entry})=>!query || ((captures[entry.slots[0]].title || '')+' '+entry.url).toLowerCase().includes(query));
+    const selected=Math.max(0,matches.findIndex(item=>item.index===chosen));
+    const offset=pageOffsets.get(key) ?? Math.floor(selected/100)*100;
     list.replaceChildren();
-    groups.forEach((entry,index)=>{
+    matches.slice(offset,offset+100).forEach(({entry,index})=>{
       const first=captures[entry.slots[0]],title=first.title || new URL(entry.url).pathname;
-      if (query && !(title+' '+entry.url).toLowerCase().includes(query)) return;
       const item=node('li',undefined,'site-page'),choose=control('',()=>go({panel:'reader',page:index,slot:entry.slots[0]}));
       choose.setAttribute('aria-label',`Read ${title}`);choose.dataset.page=index;
       if (index===chosen) choose.setAttribute('aria-current','page');
       choose.append(node('strong',title),node('span',new URL(entry.url).pathname+new URL(entry.url).search,'path'),node('span',`${entry.slots.length} ${entry.slots.length===1 ? 'capture' : 'captures'} · ${captureDate(first.timestamp).slice(0,10)}`,'versions'));
       item.append(choose);
-      for (const captureSlot of entry.slots) {const capture=captures[captureSlot];item.append(external(`https://web.archive.org/web/${capture.timestamp}/${capture.url}`,`${captureDate(capture.timestamp).slice(0,10)} · Wayback`));}
+      for (const captureSlot of entry.slots.slice(0,3)) {const capture=captures[captureSlot];item.append(external(`https://web.archive.org/web/${capture.timestamp}/${capture.url}`,`${captureDate(capture.timestamp).slice(0,10)} · Wayback`));}
+      if (entry.slots.length>3) item.append(node('span','Open to browse every dated version.','meta'));
       list.append(item);
     });
-    matchCount.textContent=`${list.childElementCount} of ${groups.length} pages${query ? ' match' : ' · scroll to browse'}`;
+    matchCount.textContent=`${matches.length ? offset+1 : 0}–${offset+list.childElementCount} of ${matches.length} ${route.filetype==='pages' ? 'pages' : 'files'}${query ? ' match' : ' · scroll to browse'}`;
+    pager.replaceChildren();
+    if (matches.length>100) {
+      for (const [title,next] of [['Previous files',offset-100],['Next files',offset+100]]) {const button=control(title,()=>{pageOffsets.set(key,next);renderList();list.scrollTop=0;});button.disabled=next<0 || next>=matches.length;pager.append(button);}
+    }
   };
-  filter.addEventListener('input',renderList);renderList();browser.append(list,matchCount,scrollButtons(list,'pages'));
+  filter.addEventListener('input',renderList);renderList();browser.append(list,matchCount,pager,scrollButtons(list,'pages'));
   const reader=node('section',undefined,'document-reader');reader.setAttribute('aria-label','Document reader');
-  const header=node('div',undefined,'reader-heading');header.append(node('p',review ? 'Captured document' : 'Source evidence','panel-label'),node('h2',captures[slot].title || new URL(captures[slot].url).pathname));
+  const header=node('div',undefined,'reader-heading');header.append(node('p',review ? (isPage(captures[slot]) ? 'Captured document' : 'Supporting file') : 'Source evidence','panel-label'),node('h2',captures[slot].title || new URL(captures[slot].url).pathname));
   const controls=node('div',undefined,'reader-controls'),label=node('label','Capture date'),version=node('select');version.setAttribute('aria-label','Capture version');
   for (const captureSlot of group.slots) {const option=node('option',captureDate(captures[captureSlot].timestamp));option.value=captureSlot;version.append(option);}version.value=slot;label.append(version);
   version.addEventListener('change',()=>go({slot:Number(version.value)},{replace:true}));
   controls.append(label,external(`https://web.archive.org/web/${captures[slot].timestamp}/${captures[slot].url}`,'Open this capture in Wayback'),node('p',captures[slot].url,'meta'));controls.querySelector('a').className='site-citation';
+  if (review) {
+    const download=node('a','Download original file');download.href=`/api/source?batch=${encodeURIComponent(review.id)}&slot=${review.source_slots[slot]}&download=1`;download.setAttribute('download','');controls.append(download);
+    if (!isPage(captures[slot])) controls.append(node('p',`${captures[slot].content_type || captures[slot].mimetype || 'Supporting file'} · ${captures[slot].bytes.toLocaleString()} bytes · preserved in the archive`,'meta'));
+  }
+  if (captures[slot].entry_redirect) controls.append(node('p',`Verified archived redirect from ${captures[slot].entry_redirect.requested_url} to the source shown above.`,'meta'));
   const text=node('pre','Loading verified source…','document-text');text.tabIndex=0;text.setAttribute('aria-label','Document text');
   reader.append(header,controls,text,scrollButtons(text,'document'));
   layout.append(browser,reader);root.append(layout);
@@ -679,7 +715,7 @@ async function readSource(row,review,slot,target) {
   const cacheKey=`${key}:${review?.manifest_sha256 || row.manifest_sha256}`;
   try {
     let source=sourceCache.get(cacheKey);
-    if (source===undefined) { const result=await request(`/api/source?${key}`);source=result.complete_extracted_text;sourceCache.set(cacheKey,source);if (sourceCache.size>12) sourceCache.delete(sourceCache.keys().next().value); }
+    if (source===undefined) { const result=await request(`/api/source?${key}`);source=result.complete_extracted_text ?? result.file_message;sourceCache.set(cacheKey,source);if (sourceCache.size>12) sourceCache.delete(sourceCache.keys().next().value); }
     if (token!==sourceGeneration || !target.isConnected) return;
     target.textContent=source;
     const saved=positions.get(routeKey());if (saved) {target.scrollTop=saved.text;window.scrollTo(0,saved.window);}
@@ -700,8 +736,9 @@ function renderDock(force=false) {
     const {groups}=pageGroups(row,review);
     const previous=control('← Previous',()=>{const index=route.page-1;go({page:index,slot:groups[index].slots[0]},{replace:true});});previous.setAttribute('aria-label','Previous page');previous.disabled=route.page<=0;
     const next=control('Next →',()=>{const index=route.page+1;go({page:index,slot:groups[index].slots[0]},{replace:true});});next.setAttribute('aria-label','Next page');next.disabled=route.page>=groups.length-1;
-    hint=`Page ${route.page+1} of ${groups.length}`;
-    const pages=control('Pages',()=>backFromSite());pages.setAttribute('aria-label','Back to page list');buttons.append(previous,pages,next);
+    const files=review && route.filetype!=='pages';
+    hint=`${files ? 'File' : 'Page'} ${route.page+1} of ${groups.length}`;
+    const pages=control(files ? 'Files' : 'Pages',()=>backFromSite());pages.setAttribute('aria-label',files ? 'Back to file list' : 'Back to page list');buttons.append(previous,pages,next);
   } else if (route.panel==='pages') buttons.append(control('Back to site decision',()=>backFromSite(),'primary'));
   else if (row.stage==='candidates') {
     hint=approvalBlock(row) || 'Entire chosen scope · Undo in Queue until capture starts';
@@ -710,7 +747,7 @@ function renderDock(force=false) {
     hint='Your approval is saved. Capture starts automatically.';
     buttons.append(mutation('Undo approval',()=>undoApproval(row),'Returned to Candidates.',true));
   } else if (row.stage==='capturing' && op?.state==='interrupted') {
-    hint='Resume the interrupted worker batch within its original budget.';
+    hint=op?.result?.progress?.capture_policy==='complete-files-v1' ? 'Continue pending files; extend an exhausted transport allowance.' : 'Resume the interrupted worker batch within its original budget.';
     buttons.append(mutation('Resume capture',()=>request('/api/resume',{id:op.id}),'Capture resumed.',true,hasOperation()));
   } else if (row.stage==='review' && review) {
     hint=`Whole captured site · AI enrichment included · $${review.manifest.indexing?.max_enrichment_usd ?? 2} maximum`;

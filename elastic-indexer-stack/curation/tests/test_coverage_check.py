@@ -101,7 +101,10 @@ def test_corrected_legacy_board_scope_requires_reapproval_and_retains_prior_deci
         store.db.execute("UPDATE candidates SET scope='http://server3.ezboard.com/' WHERE id=?",(row['id'],))
         store.db.commit()
         row=record(store,store.candidates()[0])
-        apply_decisions(store,[{'id':row['id'],'manifest_sha256':row['manifest_sha256'],'decision':'approve'}])
+        # Simulate a historical approval: current approval correctly rejects this old host-wide scope.
+        grant={'id':row['id'],'manifest_sha256':row['manifest_sha256'],'decision':'approve'}
+        store.db.execute("UPDATE candidates SET state='approved_waiting_batch',decision=? WHERE id=?", (json.dumps(grant),row['id']))
+        store.db.commit()
     repo=archive(tmp_path,['server3.ezboard.com/20000101000000/botherguild/index.html'])
     monkeypatch.setenv('ARCHIVE_REPO',str(repo))
     refresh(root)
@@ -123,7 +126,10 @@ def test_partial_recheck_cannot_restore_approval_invalidated_by_scope_correction
         store.db.execute("UPDATE candidates SET scope='http://pub6.ezboard.com/' WHERE id=?",(row['id'],))
         store.db.commit()
         row=record(store,store.candidates()[0])
-        apply_decisions(store,[{'id':row['id'],'manifest_sha256':row['manifest_sha256'],'decision':'approve'}])
+        # Simulate a historical approval: current approval correctly rejects this old host-wide scope.
+        grant={'id':row['id'],'manifest_sha256':row['manifest_sha256'],'decision':'approve'}
+        store.db.execute("UPDATE candidates SET state='approved_waiting_batch',decision=? WHERE id=?", (json.dumps(grant),row['id']))
+        store.db.commit()
         if previously_unverified:
             coverage=json.loads(store.candidates()[0]['coverage'])
             coverage['previous_state']='approved_waiting_batch'

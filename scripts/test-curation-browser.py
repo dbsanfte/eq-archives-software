@@ -1493,11 +1493,68 @@ async def advanced_grading_flow(browser,base,width):
     await context.close()
 
 
+async def complete_file_review(browser,base,width):
+    context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
+    page=await context.new_page();errors=[];requests=[]
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    snapshot=await (await context.request.get(base+'/api/queue?filter=candidates')).json()
+    row=copy.deepcopy(snapshot['candidates'][0]);row.update(stage='review',state='captured_awaiting_review',review_state='awaiting_review')
+    page_capture={**row['captures'][0],'kind':'page','candidate_id':row['id']}
+    files=[{**page_capture,'url':row['scope']+f'images/sword-{i}.png','kind':'file','title':'',
+            'content_type':'image/png','timestamp':'20061231235959','bytes':1234} for i in range(1100)]
+    captures=[page_capture,*files]
+    review={'id':'d'*32,'state':'awaiting_review','manifest_sha256':'e'*64,
+            'source_slots':list(range(len(captures))),'page_identities':[c['url'] for c in captures],
+            'manifest':{'sites':[row],'captures':captures,'capture_policy':'complete-files-v1',
+                        'capture_window':{'from':'19990101000000','to':'20061231235959'},
+                        'capture_coverage':{row['id']:{'state':'complete','reason':'All listed files checked.'}}}}
+    async def fixture(route):
+        parsed=urlsplit(route.request.url);query=parse_qs(parsed.query);requests.append((parsed.path,query))
+        assert route.request.method=='GET','Polling and reading must not start work'
+        if parsed.path=='/api/queue':
+            assert query.get('compact')==['1']
+            body={**snapshot,'candidates':[row],'total':1,'operations':[],'batches':[],
+                  'stage_counts':{name:int(name==row['stage']) for name in ('candidates','queued','capturing','review','indexing','saved','history')}}
+        elif parsed.path=='/api/candidate':
+            cached={k:v for k,v in review.items() if k not in ('manifest','source_slots','page_identities')}
+            body={'candidate':row,'review':{**cached,'manifest_unchanged':True} if query.get('known_manifest')==['e'*64] else review}
+        elif parsed.path=='/api/source':
+            slot=int(query.get('slot',['0'])[0]);body={**captures[slot],
+                'complete_extracted_text':'EverQuest source page.' if slot==0 else None,
+                'file_message':'Original file preserved. Download it or open its dated Wayback capture.'}
+        else:raise AssertionError(parsed.path)
+        await route.fulfill(status=200,json=body)
+    await page.route('**/api/**',fixture)
+    await page.goto(base+'/?view=review&candidate='+row['id']);await settled(page)
+    await page.get_by_text('1100 supporting files ·',exact=False).wait_for()
+    await page.get_by_role('button',name='Browse 1100 supporting files',exact=True).click();await settled(page)
+    await expect(page.locator('.site-page')).to_have_count(100)
+    await expect(page.get_by_label('Captured content type')).to_have_value('files')
+    await page.get_by_role('button',name='Next files',exact=True).click()
+    await expect(page.locator('.site-page').first).to_contain_text('sword-100.png')
+    await page.locator('.site-page button').first.click();await settled(page)
+    await expect(page.locator('.document-text')).to_contain_text('Original file preserved')
+    assert 'slot=101' in await page.get_by_role('link',name='Download original file',exact=True).get_attribute('href')
+    assert '20061231235959/' in await page.get_by_role('link',name='Open this capture in Wayback',exact=True).get_attribute('href')
+    await page.evaluate('refresh()');await settled(page)
+    await expect(page.locator('.document-text')).to_contain_text('Original file preserved')
+    await page.reload();await settled(page)
+    await expect(page.get_by_label('Captured content type')).to_have_value('files')
+    await expect(page.locator('.site-page').first).to_contain_text('sword-100.png')
+    await expect(page.locator('.document-text')).to_contain_text('Original file preserved')
+    await safe_layout(page,width)
+    await page.screenshot(path=f'/tmp/curation-complete-files-{width}.png',full_page=True)
+    assert any('known_manifest' in query for path,query in requests if path=='/api/candidate')
+    assert not errors,errors
+    await context.close()
+
+
 async def check(base):
     async with async_playwright() as playwright:
         browser=await playwright.chromium.launch()
         try:
             for width in (320,390,430,768,1280):
+                await complete_file_review(browser,base,width)
                 await candidate_failure_feedback(browser,base,width)
                 await sitepowerup_flow(browser,base,width)
                 await advanced_grading_flow(browser,base,width)

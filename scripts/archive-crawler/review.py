@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from capture_flow import Action, transition
-from common import CrawlError, digest, now, save
+from common import CrawlError, digest, now, save, original_url, within_capture_scope
 from grading import judgment_signature, sources
 
 
@@ -23,6 +23,9 @@ def record(store, row):
     for field in ("coverage", "evidence", "captures", "rating", "decision"):
         result[field] = json.loads(result[field]) if result[field] else None
     result["scope_mode"] = (result["coverage"] or {}).get("scope_mode", "directory")
+    result['scope_has_source'] = result['scope_mode'] in ('custom', 'ezboard', 'sitepowerup') or any(
+        original_url(capture['url']) == original_url(result['url']) if result['scope_mode'] == 'page'
+        else within_capture_scope(capture['url'], result['scope']) for capture in result['captures'])
     from ezboard import board_url, board_name
     result['ezboard'] = board_name(result['url']) if board_url(result['url']) else None
     from sitepowerup import address
@@ -98,6 +101,8 @@ def _apply_decisions(store, incoming, capture_delay=0, before_approve=None):
                 before_approve(store, row)
             if not row["rating"] or not row["captures"]:
                 raise CrawlError("Only graded, staged captures can be approved")
+            if not row['scope_has_source']:
+                raise CrawlError('The saved scope excludes its graded source. Choose a scope containing the source before approving.')
             checked_sources(store, row)  # Recheck artifacts and the judgment before approval.
         validated.append((decision, transition(row['state'], Action(decision['decision']))))
     for decision, state in validated:

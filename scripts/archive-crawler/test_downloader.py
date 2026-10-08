@@ -1,6 +1,7 @@
 """Exercise the real Ruby downloader over a persistent HTTP/1.1 fixture."""
 
 import hashlib
+import gzip
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
@@ -23,6 +24,8 @@ class FixtureServer(ThreadingHTTPServer):
                         ["20000101000000", "http://guild.example/Guide%2FOne?a=1&b=2", "text/html", "200", "ABCD", "80"]]
         self.body = b"<title>EQ guild</title><p>EverQuest guild history</p>"
         self.redirect = None
+        self.catalogs = {}
+        self.replays = {}
         self.memento = "Sat, 01 Jan 2000 00:00:00 GMT"
         super().__init__(("127.0.0.1", 0), Handler)
 
@@ -45,12 +48,20 @@ class Handler(BaseHTTPRequestHandler):
         is_catalog = self.path.startswith("/cdx/")
         if server.redirect and not is_catalog:
             status = 302
-        data = json.dumps(server.catalog).encode() if is_catalog else server.body
+        params = parse_qs(urlsplit(self.path).query)
+        catalog = server.catalogs.get((params.get('url', [''])[0], 'statuscode:200' in params.get('filter', [])), server.catalog)
+        replay = server.replays.get(self.path, {})
+        status = replay.get('status', status)
+        data = json.dumps(catalog).encode() if is_catalog else replay.get('body', server.body)
         self.send_response(status)
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Content-Type", "application/json" if is_catalog else "text/html; charset=utf-8")
+        self.send_header("Content-Type", "application/json" if is_catalog else replay.get('content_type', 'text/html; charset=utf-8'))
+        if replay.get('encoding'):
+            self.send_header('Content-Encoding', replay['encoding'])
         if server.redirect and not is_catalog:
             self.send_header("Location", server.redirect)
+        elif replay.get('location'):
+            self.send_header('Location', replay['location'])
         if not is_catalog and server.memento:
             self.send_header("Memento-Datetime", server.memento)
         self.end_headers()
@@ -123,6 +134,102 @@ class DownloaderTests(unittest.TestCase):
         self.assertGreaterEqual(time.monotonic() - start, 5)
         self.assertEqual(self.server.connections, 1)
         self.assertEqual(result["transport"]["requests"], 2)
+
+    def test_empty_html_listing_reports_archived_redirects_and_errors(self):
+        root = 'http://www.solusekro.com/'
+        header = self.server.catalog[0]
+        self.server.catalogs[(root, True)] = []
+        self.server.catalogs[(root, False)] = [header,
+            ['20000118215840', root.replace('.com/', '.com:80/'), 'text/html', '302', 'REDIRECT', '345'],
+            ['20001109055200', root, 'text/html', '500', 'ERROR', '220'],
+            ['20000118215840', root.replace('www.', ''), 'text/html', '302', 'OTHER', '345']]
+        result = self.call({**self.job('list'), 'url': root})
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(result['result']['captures'], [])
+        self.assertEqual([r['timestamp'] for r in result['result']['redirects']], ['20000118215840'])
+        self.assertEqual(result['result']['response_types'], [['302', 'text/html'], ['500', 'text/html']])
+        self.assertEqual(self.server.connections, 1)
+        self.assertEqual(result['transport']['requests'], 2)
+
+    def test_redirect_resolution_retains_chain_and_never_relables_capture_source(self):
+        root = 'http://www.solusekro.com:80/'
+        target = 'http://www.solusekro.com/eq/'
+        start = '/web/20000101000000id_/' + root
+        finish = '/web/20000101000000id_/' + target
+        self.server.replays[start] = {'status':302, 'location':finish, 'body':b'Redirect'}
+        result = self.call({**self.job('resolve'), 'url':root})
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(result['result']['url'], target)
+        self.assertEqual(result['result']['requested_url'], root)
+        self.assertEqual(result['result']['redirects'], [{'from':start, 'to':finish, 'status':302}])
+        self.assertEqual(result['result']['timestamp'], '20000101000000')
+        self.assertFalse(self.destination.exists())
+        # Ordinary capture must still reject substituting the target for the root.
+        capture = self.call({**self.job('capture'), 'url':root})
+        self.assertFalse(capture['ok'])
+        self.assertIn('different original URL', capture['error'])
+        self.assertFalse(self.destination.exists())
+        self.assertEqual(self.server.connections, 1)
+
+    def test_redirect_diagnostics_cannot_turn_a_request_limit_into_absence(self):
+        self.configure(max_requests=1)
+        self.server.catalog=[]
+        result=self.call(self.job('list'))
+        self.assertFalse(result['ok'])
+        self.assertIn('budget', result['error'])
+
+    def test_scope_catalog_preserves_binary_files_and_equal_digest_dates(self):
+        self.server.catalog = [self.server.catalog[0],
+            ['19990101000000', 'http://guild.example/images/a.png', 'image/png', '200', 'SAME', '30'],
+            ['20011231235959', 'http://guild.example/images/a.png', 'image/png', '200', 'SAME', '30'],
+            ['20000101000000', 'http://guild.example/files/a.zip', 'application/zip', '200', 'OTHER', '50']]
+        result = self.call({**self.job('scope_list'), 'url': 'http://guild.example/', 'match': 'prefix'})
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(len(result['result']['captures']), 3)
+        params = parse_qs(urlsplit(self.server.requests[0][0]).query)
+        self.assertEqual(params['filter'], ['statuscode:200'])
+        self.assertNotIn('collapse', params)
+        self.assertEqual(params['matchType'], ['prefix'])
+        invalid = self.call({**self.job('scope_list'), 'url': 'http://guild.example/*', 'match': 'prefix'})
+        self.assertFalse(invalid['ok'])
+
+    def test_large_streamed_binary_and_gzip_keep_exact_bytes_and_connection(self):
+        raw = bytes(range(256)) * 14000  # exceeds the old 1 MiB source limit
+        self.configure(max_response_bytes=8*1024**2, max_total_bytes=12*1024**2, bytes_per_second=100000000)
+        path = '/web/20000101000000id_/' + self.url
+        for body, encoding in [(raw, None), (gzip.compress(raw), 'gzip')]:
+            self.server.replays[path] = {'body': body, 'encoding': encoding, 'content_type': 'application/zip'}
+            result = self.call(self.job('capture_file'))
+            self.assertTrue(result['ok'], result)
+            self.assertEqual(self.destination.read_bytes(), raw)
+            self.assertEqual(result['result']['sha256'], hashlib.sha256(raw).hexdigest())
+            self.assertEqual(result['result']['bytes'], len(raw))
+            self.assertEqual(result['result']['content_type'], 'application/zip')
+        self.assertEqual(self.server.connections, 1)
+        self.assertFalse(self.destination.with_suffix('.html.part').exists())
+
+    def test_streaming_budget_does_not_save_partial_or_substitute_nearest_version(self):
+        self.configure(max_response_bytes=8192, max_total_bytes=128)
+        self.server.body = b'x' * 4096
+        result = self.call(self.job('capture_file'))
+        self.assertFalse(result['ok'])
+        self.assertIn('budget', result['error'])
+        self.assertFalse(self.destination.exists())
+        self.assertFalse(self.destination.with_suffix('.html.part').exists())
+        self.configure()
+        self.server.memento = 'Sun, 02 Jan 2000 00:00:00 GMT'
+        self.server.body = b'body'
+        result = self.call(self.job('capture_file'))
+        self.assertFalse(result['ok'])
+        self.assertIn('different dated version', result['error'])
+        self.assertFalse(self.destination.exists())
+
+    def test_zero_length_archived_file_is_preserved(self):
+        self.server.body = b''
+        result = self.call(self.job('capture_file'))
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(self.destination.read_bytes(), b'')
+        self.assertEqual(result['result']['bytes'], 0)
 
     def test_ezboard_paginated_catalog_keeps_all_versions_and_encoded_resume(self):
         url = 'http://pub4.ezboard.com/feqasylum'
