@@ -450,6 +450,25 @@ forwarded-header spoofs. Deployment checks the live queue/build and hashes
 existing unfinished Job specs before/after; it never saves their credential-
 bearing JSON to disk.
 
+## Candidate failures and exclusions
+
+Candidate failures remain visible on both the list card and a highlighted panel
+above recovery controls in the site workspace. Missing captures, mismatched
+original URLs, oversized grading sources, request throttling and saved-budget
+limits explain what happened and what action can help. Missing-source panels show
+the exact original URL (including its query), link to Wayback's capture history,
+and distinguish retrying that URL from submitting an actual EQ site. Safe original
+diagnostics remain available under **Technical detail**. Polling updates failures
+even if the candidate hash is unchanged, clears old warnings during a new check,
+and never starts work automatically.
+
+The FreeServers `cgi-bin/redirect?id=ezboard-r1` link found in Ezboard footers is a
+hosting signup advertisement. Discovery and manual/evidence checks exclude this
+specific campaign; genuine hosted accounts and other redirect targets remain
+eligible. Unapproved legacy suggestions move to History with the reason and keep
+their evidence. Active checks and approved records are preserved. No human
+dismissal is fabricated and no Luna request is made to classify this known advert.
+
 ## Ezboard capture
 
 Ezboard candidates represent a complete board across historical servers.

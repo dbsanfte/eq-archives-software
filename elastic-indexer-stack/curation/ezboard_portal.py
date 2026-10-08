@@ -20,7 +20,7 @@ def consolidate(root):
         rows = store.candidates()
         reads = size = 0
         for row in rows:
-            if not shard(urlsplit(row['url']).netloc):
+            if not shard(urlsplit(row['url']).hostname or ''):
                 continue
             for capture in json.loads(row['captures'] or '[]'):
                 key = 'ezboard_identity_scan:' + digest([capture['url'], capture['sha256']])
@@ -36,6 +36,11 @@ def consolidate(root):
                     store.set(key, True)
                 except CrawlError:
                     continue
+        # Source reads happen outside the write lock. Re-read human decisions
+        # and active checks atomically before changing any suggestion's stage.
+        store.db.execute('BEGIN IMMEDIATE')
+        rows = store.candidates()
+        protected = {row[0] for row in store.db.execute("SELECT json_extract(payload,'$.id') FROM operations WHERE kind='candidate_check' AND state IN ('queued','running')")}
         owners = {}
         for row in sorted(rows, key=lambda row: row['state'] in EDITABLE):
             if row['state'] == 'duplicate_candidate':
@@ -43,9 +48,8 @@ def consolidate(root):
             resolved = candidate_url(store, row['url'])
             if resolved and board_url(resolved) and (board_url(row['url']) or row['state'] not in EDITABLE):
                 owners.setdefault(site_identity(row['url'], store), row)
-        store.db.execute('BEGIN IMMEDIATE')
         for row in rows:
-            if row['state'] not in EDITABLE or row['decision'] or not shard(urlsplit(row['url']).netloc):
+            if row['state'] not in EDITABLE or row['decision'] or row['id'] in protected or not shard(urlsplit(row['url']).hostname or ''):
                 continue
             parent = candidate_url(store, row['url'])
             if not parent:

@@ -5,7 +5,7 @@ import os
 import re
 from urllib.parse import urlsplit
 
-from common import CrawlError, capture_scope, digest, now, original_url, site_identity
+from common import CrawlError, candidate_exclusion, capture_scope, digest, now, original_url, site_identity
 from discovery import Archive
 from site_inventory import SiteInventory
 
@@ -34,6 +34,8 @@ def site_url(value):
         result = original_url(value)
         if not result or urlsplit(result).hostname == 'web.archive.org':
             raise ValueError()
+        if reason := candidate_exclusion(result):
+            raise CrawlError(reason)
         return result
     except ValueError:
         raise CrawlError('Enter a public HTTP(S) website URL or a Wayback link to its original page') from None
@@ -52,6 +54,8 @@ def prepare(run, operation, downloader=None):
     """Check only this account's Git metadata; no link spider or archive walk."""
     target = operation['payload']['target']
     url = target['url']
+    if reason := candidate_exclusion(url):
+        raise CrawlError(reason)
     from sitepowerup import shard, board_url as sitepowerup_board
     if shard(urlsplit(url).netloc):
         url = sitepowerup_board(url)

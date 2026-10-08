@@ -1,11 +1,29 @@
 """Atomic, reversible dismissal of the complete Candidates stage."""
 import json
 
-from common import CrawlError, now
+from common import CrawlError, candidate_exclusion, now
 from capture_flow import Action, transition
 from portal import Stage, decorate, dismissal_preview
 from review import queue
-from state import identifier
+from state import connect, identifier
+
+
+def retire_excluded(root):
+    """Retire known promotions atomically, without inventing human decisions."""
+    with connect(root) as store:
+        store.db.execute('BEGIN IMMEDIATE')
+        active = {row[0] for row in store.db.execute("SELECT json_extract(payload,'$.id') FROM operations WHERE kind='candidate_check' AND state IN ('queued','running')")}
+        for row in decorate(store, queue(store)):
+            reason = candidate_exclusion(row['url'])
+            if not reason or row['stage'] != Stage.CANDIDATES or row['decision'] or row['id'] in active:
+                continue
+            coverage = {**(row['coverage'] or {}), 'candidate_exclusion': reason}
+            state = transition(row['state'], Action.REJECT)
+            store.db.execute('UPDATE candidates SET state=?,coverage=?,error=? WHERE id=?',
+                             (state, json.dumps(coverage), reason, row['id']))
+            store.db.execute('INSERT INTO events(candidate,action,detail,created) VALUES (?,?,?,?)',
+                             (row['id'], 'candidate_excluded', json.dumps({'reason': reason}), now()))
+        store.db.commit()
 
 
 def dismiss_all(store, token):

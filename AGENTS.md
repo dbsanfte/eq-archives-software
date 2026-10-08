@@ -367,6 +367,18 @@ durable budgets and source-verified publication. Keep existing approved scopes
 and active work unchanged when consolidating unapproved legacy suggestions.
 Operator captures never publish/index automatically. Run the crawler tests,
 curation image tests and real browser checks when changing this flow.
+Recognize Ezboard hostnames independently of historical ports when filtering
+candidates. Profile/form links on port 8080 are not ordinary sites. Reject their
+evidence/grading checks before downloading or paying, and retain approved scopes
+and active checks when moving unapproved legacy rows to Saved for later.
+Exclude the source-verified FreeServers `id=ezboard-r1` signup promotion, while
+keeping hosted accounts and other redirect targets eligible. Retire unapproved
+legacy adverts to History with a reason, without fabricating human decisions,
+starting paid work or changing active/approved records. Candidate failures need
+persistent card and workspace explanations: failure phase, plain-language cause,
+the exact original URL when relevant, and a useful next action. Keep raw safe
+diagnostics available separately; polling must update or clear stale errors
+without starting retries or disturbing an open source reader.
 
 SitePowerUp uses the [BoardID capture engine](scripts/archive-crawler/SITEPOWERUP.md).
 Group candidates by numeric BoardID across host aliases and query order/case;

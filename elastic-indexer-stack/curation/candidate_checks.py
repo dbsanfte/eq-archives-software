@@ -2,11 +2,13 @@
 import json
 import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from acquisition import sample
-from common import CrawlError, Store, digest, now
+from common import CrawlError, Store, candidate_exclusion, digest, now
 from coverage_check import refresh, require_new
 from crawler import parser
+from ezboard import address as ezboard_address, shard as ezboard_shard
 from grading import criteria, grade, sources
 from portal import Stage, decorate
 from review import record
@@ -34,6 +36,10 @@ def current(store, payload):
     if not raw:
         raise CrawlError('Unknown candidate')
     row = decorate(store, [record(store, raw)])[0]
+    if reason := candidate_exclusion(row['url']):
+        raise CrawlError(reason)
+    if ezboard_shard(urlsplit(row['url']).hostname or '') and not ezboard_address(row['url']):
+        raise CrawlError('Ezboard profiles, forms and unsupported server URLs cannot be graded as sites. Submit a top-level board URL.')
     if row['stage'] != Stage.CANDIDATES or row['state'] not in ELIGIBLE or row['manifest_sha256'] != payload['manifest_sha256']:
         raise CrawlError('Candidate changed. Refresh it before requesting evidence and grading.')
     return raw, row

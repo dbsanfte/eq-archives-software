@@ -37,11 +37,12 @@ function external(url, text=url) {
   return item;
 }
 function badge(text,tone='') { const item=node('span',text,'badge');item.dataset.tone=tone;return item; }
-function tone(row) { return row.review_state==='index_failed' || row.state==='coverage_unverified' ? 'attention' : (row.review_state || row.state)==='indexed' ? 'complete' : ['queued','capturing','indexing'].includes(row.stage) ? 'active' : ''; }
+function tone(row) { return candidateIssue(row) || row.review_state==='index_failed' || row.state==='coverage_unverified' ? 'attention' : (row.review_state || row.state)==='indexed' ? 'complete' : ['queued','capturing','indexing'].includes(row.stage) ? 'active' : ''; }
 function siteName(row) { if (row.sitepowerup) return `SitePowerUp · Board ${row.sitepowerup}`;const url=new URL(row.scope);return url.host+(url.pathname==='/' ? '' : url.pathname); }
 function statusLabel(row) {
   const check=row.candidate_check;
   if (row.stage==='candidates' && check && ['queued','running'].includes(check.state)) return {coverage:'Checking coverage',sampling:'Finding Wayback samples',grading:'Grading with Luna'}[check.phase] || 'Evidence check queued';
+  const issue=candidateIssue(row);if (issue) return issue.title;
   if (row.stage==='candidates' && row.state==='approval_pending' && (!row.rating || !row.captures?.length)) return row.captures?.length ? 'Needs a grade' : 'Needs source evidence';
   return labels[row.review_state] || labels[row.state] || {unavailable:'No samples found',sample_error:'Sampling failed',identity_unresolved:'Exact source needed',grade_error:'Grading failed',sampled:'Needs a grade',discovered:'Needs source evidence'}[row.state] || row.state.replaceAll('_',' ');
 }
@@ -192,11 +193,13 @@ function renderList() {
       if (row.stage==='candidates' && row.rating) top.append(node('span',`Grade ${row.rating.grade}/3`,'meta'));
       item.append(top,node('h2',siteName(row)),node('span',row.url,'address'));
       const capture=row.coverage?.capture;
-      const description=row.stage==='candidates' ? row.rating?.reason || row.error || 'Source review is needed.' :
+      const issue=candidateIssue(row);
+      const description=row.stage==='candidates' ? row.rating?.reason || (issue ? '' : 'Source review is needed.') :
         row.stage==='queued' ? 'Approved scope saved. Undo before capture starts.' : row.stage==='capturing' ? 'Download progress is available inside.' :
         row.stage==='indexing' ? (row.review_state==='index_failed' ? 'Sources are retained. Open this site to retry.' : 'Publication and AI-enriched indexing are automatic.') :
         row.stage==='saved' ? 'Set aside for a later decision.' : capture ? `${capture.pages} pages · ${capture.files} dated captures` : 'Saved decision and source evidence.';
-      item.append(node('p',description));
+      if (description) item.append(node('p',description));
+      if (issue) item.append(node('p',issue.message,'candidate-issue-summary'));
       if (row.rating?.grading_criteria) item.append(node('p',`Graded for: ${row.rating.grading_criteria}`,'grading-focus'));
       const bottom=node('div',undefined,'tile-bottom');bottom.append(node('span',row.rating?.category?.replaceAll('_',' ') || 'Website'),node('span','Open site →','open-label'));item.append(bottom);
       if (row.stage==='queued') {
@@ -327,6 +330,45 @@ function renderSpending() {
   $('spend-status').textContent=!spend ? 'Loading spend…' : !valid ? 'Spend is temporarily incomplete. Retrying automatically.' :
     `Includes discovery, manual grading and indexing enrichment in this portal. UTC calendar days and months. Usage-based estimates, not an account bill. Unresolved reservations: today ${usd(spend.today.unresolved_usd)}, this month ${usd(spend.month.unresolved_usd)}.`;
 }
+function candidateIssue(row) {
+  const excluded=row.coverage?.candidate_exclusion;
+  if (excluded) return {title:'Excluded promotion',message:excluded,next:'This suggestion is retained in History. Genuine hosted EQ sites remain eligible.'};
+  const check=row.candidate_check;
+  if (row.stage!=='candidates' || ['queued','running'].includes(check?.state)) return null;
+  const error=(check?.state==='interrupted' && check.error) || row.error;
+  if (!error) return null;
+  const next='Retry the evidence check when the problem is resolved. Saved sources are retained.';
+  if (/No (exact HTML captures|usable Wayback capture|readable Wayback samples)/i.test(error))
+    return {title:'No archived source found',message:'Wayback returned no matching HTML page for this exact URL in 1999–2006.',
+      next:'Check the original URL in Wayback below. Save this suggestion for later or dismiss it; Retry checks the same URL again.',error,wayback:true};
+  if (/different original URL|exact source identity/i.test(error))
+    return {title:'Archived URL needs checking',message:'Wayback listed a different original URL, so the source could not be verified.',
+      next:'Check the original URL below. Redirects are not substituted for the site you selected.',error,wayback:true};
+  if (/source exceeds grading limit/i.test(error))
+    return {title:'Source is too large to grade',message:'The complete saved text exceeds the grading limit. Retrying cannot reduce its size.',
+      next:'You can read the saved evidence or save this site for later. An operator must review the source limit before grading can proceed.',error};
+  if (/budget|limit reached/i.test(error))
+    return {title:'Check reached its saved limit',message:error,
+      next:'Retries keep the original limits and spending. Save this site for later if its budget needs operator attention.',error};
+  if (/Wayback.*429|429 after/i.test(error))
+    return {title:'Wayback is limiting requests',message:'Wayback temporarily refused further requests. Saved sources are retained.',
+      next:'Wait before retrying. The same operation keeps its original request, time and spending limits.',error};
+  const title=check?.phase==='grading' || row.state==='grade_error' ? 'Luna grading failed' : check?.phase==='coverage' ? 'Archive check failed' : 'Source check failed';
+  return {title,message:error,next,error};
+}
+function candidateIssuePanel(row) {
+  const issue=candidateIssue(row);if (!issue) return null;
+  const box=panel(issue.title,issue.message,'attention candidate-issue');box.setAttribute('role','alert');
+  box.append(node('p',issue.next,'issue-next'));
+  if (issue.wayback) {
+    box.append(node('p',`Original URL: ${row.url}`,'scope-value'));
+    box.append(external(`https://web.archive.org/web/*/${row.url}`,'Check this URL in Wayback'));
+  }
+  if (issue.error && issue.error!==issue.message) {
+    const detail=node('details');detail.append(node('summary','Technical detail'),node('p',issue.error));box.append(detail);
+  }
+  return box;
+}
 function recoveryControls(row) {
   const box=node('div',undefined,'candidate-recovery'),check=row.candidate_check;
   const active=check && ['queued','running'].includes(check.state),paused=check?.state==='interrupted';
@@ -337,8 +379,6 @@ function recoveryControls(row) {
   button.setAttribute('aria-label',`${label}: ${siteName(row)}`);box.append(button);
   box.append(node('p',active ? 'This site is being checked. Approval becomes available after readable samples receive a grade.' :
     `${check ? 'Original' : 'One site ·'} $${check?.max_usd ?? 2} cap for Luna. ${row.captures?.length ? 'Uses the saved source samples.' : 'Finds exact Wayback samples from 1999–2006 before grading.'}`,'meta'));
-  if (check?.error && check.error!==row.error) box.append(node('p',check.error,'candidate-block'));
-  else if (row.state==='identity_unresolved') box.append(node('p','Wayback listed different original URLs. This check preserves the exact page identity; it cannot grade an unrelated redirect.','meta'));
   if (!active && hasOperation()) box.append(node('p','Another task is running. This action becomes available when it finishes.','meta'));
   box.append(node('p',`Grading focus: ${focus || 'General EverQuest relevance'}`,'meta'));
   return box;
@@ -386,7 +426,7 @@ function renderWorkspace() {
   if (!detail || !route.candidate) { workspaceSignature='';return; }
   const row=detail.candidate,review=detail.review;
   if (route.panel!=='site') { const {groups}=pageGroups(row,review);if (groups.length) { route.page=Math.min(route.page,groups.length-1);if (!groups[route.page].slots.includes(route.slot)) route.slot=groups[route.page].slots[0];writeRoute(true); } }
-  const signature=JSON.stringify([row.id,row.stage,row.state,row.manifest_sha256,review?.manifest_sha256,route.panel,route.page,route.slot,route.panel==='site' ? [row.coverage?.site_check,row.candidate_check,hasOperation()] : null]);
+  const signature=JSON.stringify([row.id,row.stage,row.state,row.manifest_sha256,review?.manifest_sha256,route.panel,route.page,route.slot,route.panel==='site' ? [row.coverage?.site_check,row.coverage?.candidate_exclusion,row.error,row.candidate_check,hasOperation()] : null]);
   if (signature!==workspaceSignature) {
     const root=$('site-workspace');root.replaceChildren();
     const navigation=node('div',undefined,'workspace-nav');
@@ -445,9 +485,10 @@ function coveragePanel(row) {
   return box;
 }
 function renderCandidate(root,row) {
+  const issue=candidateIssuePanel(row);if (issue) root.append(issue);
   if (!row.rating || !row.captures?.length) root.append(recoveryControls(row));
   const columns=node('div',undefined,'site-columns'),left=node('div'),right=node('div');
-  const evidence=panel('Why capture this site?',row.rating?.reason || row.error || 'This site needs verified source evidence before approval.');
+  const evidence=panel(row.rating ? 'Why capture this site?' : 'Source evidence',row.rating?.reason || 'This site needs verified source evidence before approval.');
   if (row.rating) evidence.prepend(badge(`Luna grade ${row.rating.grade}/3 · ${row.rating.category.replaceAll('_',' ')}`));
   for (const excerpt of row.rating?.evidence || []) evidence.append(node('blockquote',excerpt.excerpt,'evidence'));
   if (row.rating) evidence.append(node('p',`${row.rating.confidence} confidence · AI assessment, awaiting your decision`,'meta'));
@@ -529,8 +570,9 @@ function renderCaptureReview(root,row,review) {
   decision.append(node('p','Declining retains these sources in History. You can reconsider later.','meta'),mutation('Decline indexing',()=>siteDecision('decline'),'Indexing declined. Sources retained in History.'));root.append(decision);
 }
 function renderHistory(root,row,review) {
+  const issue=candidateIssuePanel(row);if (issue) root.append(issue);
   const indexed=(row.review_state || row.state)==='indexed';
-  const box=panel(indexed ? 'Indexed · complete' : statusLabel(row),indexed ? 'This site is published and indexed. It has retired from the active workflow; its sources and completion record remain here.' : 'This site is outside the active workflow. Its decision and source evidence are retained.');
+  const box=panel(indexed ? 'Indexed · complete' : row.coverage?.candidate_exclusion ? 'History record' : statusLabel(row),indexed ? 'This site is published and indexed. It has retired from the active workflow; its sources and completion record remain here.' : 'This site is outside the active workflow. Its decision and source evidence are retained.');
   if (review?.publication?.commit) box.append(external(`https://github.com/dbsanfte/eq-archives/commit/${review.publication.commit}`,'View published files in the archive'));
   root.append(box);
   if (row.state==='already_archived') {const coverage=coveragePanel(row);if (coverage) root.append(coverage);}
@@ -677,6 +719,8 @@ function renderDock(force=false) {
     hint='Approval retained · no recapture needed';buttons.append(mutation('Retry publication',()=>request('/api/resume',{id:review.operation.id}),'Publication queued again.',true,hasOperation()));
   } else if (row.stage==='indexing' && review?.state==='index_failed' && review.job?.name) {
     hint='Reuse saved AI results and the original site budget';buttons.append(mutation('Retry indexing',()=>request('/api/index-retry',{id:review.id,manifest_sha256:review.manifest_sha256,job_name:review.job.name}),'Indexing queued again.',true));
+  } else if (row.coverage?.candidate_exclusion || row.coverage?.ezboard_parent_required) {
+    buttons.append(control('Back to Candidates',()=>openStage('candidates'),'primary'));
   } else if (row.stage==='saved' || row.stage==='history' && row.state==='rejected') {
     buttons.append(mutation('Restore to Candidates',()=>request('/api/restore',{id:row.id,manifest_sha256:row.manifest_sha256}),'Restored to Candidates.',true));
   } else if (row.stage==='history' && review?.state==='indexing_declined') buttons.append(mutation('Reconsider indexing',()=>siteDecision('reconsider'),'Returned to Review capture.',true));

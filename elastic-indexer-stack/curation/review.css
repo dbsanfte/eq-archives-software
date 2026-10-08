@@ -109,6 +109,10 @@ input[type=search],input[type=text] { width:100%; min-width:0; font-size:16px; }
 .candidate-front .site-tile { flex:1; border:0; border-radius:0; box-shadow:none; touch-action:pan-y pinch-zoom; }
 .candidate-card .candidate-scope { padding-top:12px; border-top:1px solid var(--line); font-size:12px; color:var(--muted); }
 .candidate-card .candidate-block { color:#923727; font-size:12px; }
+.site-tile .candidate-issue-summary { background:#fff4e9; color:#7b3929; border-left:3px solid #b56a43; padding:10px; overflow-wrap:anywhere; }
+.candidate-issue { margin-bottom:16px; }
+.candidate-issue .issue-next { font-weight:600; }
+.candidate-issue details { margin-top:12px; }
 .candidate-actions { display:flex; gap:10px; padding:0 16px 16px; }
 .candidate-actions button { flex:1; min-width:0; font-size:12px; padding:10px 8px; }
 .swipe-backdrop { position:absolute; inset:0; display:flex; justify-content:space-between; align-items:center; padding:16px; }

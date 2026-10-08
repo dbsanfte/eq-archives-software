@@ -205,6 +205,9 @@ def create_app(root=None, origin=None, start_worker=True):
                 raise CrawlError('Candidate changed since review')
             if json.loads(row['coverage'] or '{}').get('ezboard_parent_required'):
                 raise CrawlError('Submit the top-level Ezboard URL to resolve its board identity before restoring a candidate.')
+            from common import candidate_exclusion
+            if reason := candidate_exclusion(row['url']):
+                raise CrawlError(reason)
             state = transition(row['state'], Action.RESTORE)
             store.db.execute('UPDATE candidates SET state=?,decision=NULL WHERE id=?',(state,row['id']))
             store.db.execute('INSERT INTO events(candidate,action,detail,created) VALUES (?,?,?,?)',

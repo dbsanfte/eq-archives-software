@@ -123,6 +123,14 @@ server. Coverage must be verified before Luna runs. Unresolvable manual links
 pause with a request for the top-level board URL; discovery retains unresolved
 resolution evidence and continues without creating thread candidates.
 
+Recognize the platform by hostname even when a legacy link uses port `8080`.
+Profile/form URLs on such ports must not fall through as ordinary website
+candidates. Evidence/grading checks reject unsupported platform URLs before any
+download or Luna request. Unapproved legacy suggestions move to Saved for later
+with the existing parent-board explanation; approvals and active checks retain
+their records. This filter does not rewrite source URLs or add unsupported ports
+to the capture engine.
+
 Archive coverage uses a shared, resumable inventory of board identities across
 numbered Ezboard servers, independently of the capped page inventory. It reads
 only bounded Git tree metadata (the existing 4,096-tree/32-MiB/15-second slice),

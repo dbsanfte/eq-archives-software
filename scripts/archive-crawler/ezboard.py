@@ -166,7 +166,9 @@ def candidate_url(store, url):
     """None means an Ezboard deep link still needs source-backed resolution."""
     item = address(url)
     if not item:
-        return None if shard(urlsplit(url).netloc) else url
+        # A historical port does not turn an Ezboard profile/form into a
+        # standalone website. Capture still requires a supported read URL.
+        return None if shard(urlsplit(url).hostname or '') else url
     if item['kind'] == 'board':
         return board_url(url)
     owner = store.db.execute('SELECT url FROM ezboard_aliases WHERE token=?', (item['token'],)).fetchone()
