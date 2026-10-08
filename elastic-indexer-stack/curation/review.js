@@ -82,27 +82,37 @@ function message(text,undo,tone='') {
   $('notice').dataset.tone=tone;
   if (undo) $('notice').append(control('Undo approval',()=>act('Undoing approval',()=>request('/api/undo',undo),'Returned to Candidates.')));
 }
-async function act(label,action,confirmation) {
+async function act(label,action,confirmation,{returnToCandidates=false}={}) {
   if (busy) return;
   const actedId=route.candidate;busy=true;++generation;controller?.abort();$('error').hidden=true;
   for (const item of document.querySelectorAll('[data-mutation]')) item.disabled=true;
   $('status').textContent=label;renderDock(true);renderDiscovery();
-  try { const outcome=await action();
+  try { const outcome=await action();let approved=null;
     // Only confirmed actions move the site. Read its durable state before following it.
     if (route.candidate && route.candidate===actedId) {
       const result=await request(`/api/candidate?id=${encodeURIComponent(route.candidate)}`);
-      if (route.candidate===actedId) { detail=result;route={...route,view:result.candidate.stage,panel:'site',page:0,slot:0};writeRoute(true); }
+      if (route.candidate===actedId) {
+        detail=result;
+        if (returnToCandidates) {
+          approved=result.candidate;
+          route={...route,view:'candidates',candidate:null,panel:'site',page:0,slot:0};
+        } else route={...route,view:result.candidate.stage,panel:'site',page:0,slot:0};
+        writeRoute(true);
+      }
     }
     message((typeof confirmation==='function' ? confirmation(outcome) : confirmation) || 'Saved.',null,outcome?.coverage?.complete===false ? 'attention' : '');workspaceSignature='';dockSignature='';
     await refresh(true);
-    if (detail?.candidate.id===actedId && detail.candidate.stage==='queued') {
+    if (approved) {
+      message(approved.stage==='queued' ? `Queued ${siteName(approved)} for capture. Undo before it starts.` : `${siteName(approved)} is now in ${names[approved.stage]}.`,
+        approved.stage==='queued' ? {id:approved.id,manifest_sha256:approved.manifest_sha256} : null);
+    } else if (detail?.candidate.id===actedId && detail.candidate.stage==='queued') {
       message('Approved. This site is now in the capture queue. Undo is available below until it starts.');
     }
   } catch (error) { $('error').textContent=error.message;$('error').hidden=false; }
   finally { busy=false;for (const button of document.querySelectorAll('[data-mutation]')) button.disabled=button.dataset.blocked==='true';renderDock(true);renderDiscovery(); }
 }
-function mutation(text,action,confirmation,primary=false,disabled=false) {
-  const button=control(text,()=>act(text,action,confirmation),primary ? 'primary' : '');
+function mutation(text,action,confirmation,primary=false,disabled=false,options={}) {
+  const button=control(text,()=>act(text,action,confirmation,options),primary ? 'primary' : '');
   button.dataset.mutation='';button.dataset.blocked=String(disabled);button.disabled=busy || disabled;return button;
 }
 async function refresh(navigated=false) {
@@ -451,7 +461,7 @@ function renderDock(force=false) {
   } else if (route.panel==='pages') buttons.append(control('Back to site decision',()=>backFromSite(),'primary'));
   else if (row.stage==='candidates') {
     hint=draft.dirty ? 'Save your scope changes before approving.' : row.state==='coverage_unverified' ? 'Verify archive coverage before approving.' : !row.rating || !row.captures?.length ? 'Source evidence and a Luna grade are needed before capture approval.' : 'Entire chosen scope · 60 seconds to undo before capture';
-    buttons.append(mutation('Approve site for capture',()=>request('/api/decisions',[{id:row.id,manifest_sha256:row.manifest_sha256,decision:'approve'}]),'Approved for capture.',true,draft.dirty || !row.rating || !row.captures?.length || row.state!=='approval_pending'));
+    buttons.append(mutation('Approve site for capture',()=>request('/api/decisions',[{id:row.id,manifest_sha256:row.manifest_sha256,decision:'approve'}]),'Approved for capture.',true,draft.dirty || !row.rating || !row.captures?.length || row.state!=='approval_pending',{returnToCandidates:true}));
   } else if (row.stage==='queued') {
     hint='Your approval is saved. Capture starts automatically.';
     buttons.append(mutation('Undo approval',()=>request('/api/undo',{id:row.id,manifest_sha256:row.manifest_sha256}),'Returned to Candidates.',true));

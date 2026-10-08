@@ -112,8 +112,13 @@ async def basic_flow(browser,base,width):
     await page.get_by_role('heading',name='Choose capture scope',exact=True).wait_for()
     assert await path.input_value()=='/research/'
     await approve.click()
-    await page.get_by_role('heading',name='Ready for automatic capture',exact=True).wait_for()
-    assert 'view=queued' in page.url
+    await settled(page)
+    assert 'view=candidates' in page.url and 'candidate=' not in page.url
+    assert await page.locator('#stage-list').is_visible()
+    assert await page.locator('#site-workspace').is_hidden()
+    assert not await page.get_by_role('button',name='Open guild.example/research/',exact=True).count()
+    await page.locator('#notice').filter(has_text='guild.example/research/').wait_for()
+    assert await page.locator('#notice').get_by_role('button',name='Undo approval',exact=True).is_visible()
     assert await page.locator('[data-count=queued]').inner_text()=='1'
     assert await page.locator('[data-count=candidates]').inner_text()=='2'
     await safe_layout(page,width)
@@ -128,9 +133,10 @@ async def basic_flow(browser,base,width):
     await asyncio.wait_for(loading.wait(),timeout=3)
     await page.get_by_role('button',name='Undo approval',exact=True).click()
     release.set()
-    await page.get_by_role('heading',name='Choose capture scope',exact=True).wait_for()
+    await page.get_by_role('button',name='Open guild.example/research/',exact=True).wait_for()
     await page.unroute('**/api/queue?**',held_listing)
-    assert 'view=candidates' in page.url
+    assert 'view=candidates' in page.url and 'candidate=' not in page.url
+    await open_site(page,'guild.example/research/')
     await page.get_by_role('button',name='Save for later',exact=True).click()
     await page.get_by_role('button',name='Restore to Candidates',exact=True).wait_for()
     assert 'view=saved' in page.url
@@ -689,11 +695,90 @@ async def manual_site_flow(browser,base,width):
     await context.close()
 
 
+async def capture_approval_navigation(browser,base,width):
+    context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
+    page=await context.new_page()
+    snapshot=await (await context.request.get(base+'/api/queue?filter=candidates')).json()
+    template=snapshot['candidates'][0]
+    rows=[{**copy.deepcopy(template),'id':f'{index+1:024x}','url':f'http://fixture-{index:02}.example/',
+           'scope':f'http://fixture-{index:02}.example/','stage':'candidates','state':'approval_pending'} for index in range(67)]
+    requests=[];posts=[];errors=[]
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    submitted,release=asyncio.Event(),asyncio.Event()
+    async def fixture(route):
+        path=urlsplit(route.request.url).path
+        args=parse_qs(urlsplit(route.request.url).query)
+        if route.request.method=='POST':
+            payload=route.request.post_data_json;posts.append((path,payload))
+            selected=payload[0] if path=='/api/decisions' else payload
+            row=next(row for row in rows if row['id']==selected['id'])
+            assert selected['manifest_sha256']==row['manifest_sha256']
+            if path=='/api/decisions':
+                assert selected['decision']=='approve'
+                if len(posts)==1:
+                    await route.fulfill(status=409,json={'error':'Approval could not be saved. Try again.'});return
+                submitted.set();await release.wait()
+                row.update(stage='queued',state='approved_waiting_batch',decision={'capture_after':'2030-01-01T00:00:00Z'})
+            else:
+                assert path=='/api/undo'
+                row.update(stage='candidates',state='approval_pending',decision=None)
+            await route.fulfill(status=200,json={'saved':1});return
+        if path=='/api/queue':
+            requests.append(args)
+            candidates=[row for row in rows if row['stage']==args['filter'][0] and args.get('search',[''])[0] in row['scope']]
+            offset=int(args['offset'][0])
+            await route.fulfill(status=200,json={**snapshot,'operations':[],'candidates':candidates[offset:offset+50],
+                'total':len(candidates),'offset':offset,'stage_counts':{name:sum(row['stage']==name for row in rows)
+                    for name in ('candidates','queued','capturing','review','indexing','saved','history')}})
+        elif path=='/api/candidate':
+            await route.fulfill(status=200,json={'candidate':next(row for row in rows if row['id']==args['id'][0]),'review':None})
+        else:raise AssertionError(path)
+    await page.route('**/api/**',fixture)
+    await page.goto(base+'/?view=candidates&offset=50&search=fixture-')
+    await page.locator('#page').filter(has_text='51–67 of 67').wait_for()
+    await page.locator('[data-candidate="'+rows[50]['id']+'"]').scroll_into_view_if_needed()
+    position=await page.evaluate('scrollY')
+    await open_site(page,'fixture-50.example')
+    approve=page.get_by_role('button',name='Approve site for capture',exact=True)
+    await approve.click()
+    await page.locator('#error').filter(has_text='Approval could not be saved.').wait_for()
+    assert await page.locator('#site-workspace').is_visible()
+    assert 'candidate='+rows[50]['id'] in page.url and rows[50]['stage']=='candidates'
+    await approve.click();await asyncio.wait_for(submitted.wait(),timeout=3)
+    assert await approve.is_disabled() and 'candidate='+rows[50]['id'] in page.url
+    release.set()
+    await page.wait_for_function('()=>!busy && route.view==="candidates" && !route.candidate')
+    await page.locator('#page').filter(has_text='51–66 of 66').wait_for()
+    assert 'offset=50' in page.url and 'search=fixture-' in page.url
+    assert await page.get_by_label('Find a site',exact=True).input_value()=='fixture-'
+    assert not await page.locator('[data-candidate="'+rows[50]['id']+'"]').count()
+    await page.wait_for_function('(position)=>Math.abs(scrollY-position)<2',arg=position)
+    assert await page.locator('[data-count=queued]').inner_text()=='1'
+    assert requests[-1]['filter']==['candidates'] and requests[-1]['offset']==['50']
+    await safe_layout(page,width)
+    # Undo from the confirmation affects the approved site and stays on this list.
+    await page.locator('#notice').get_by_role('button',name='Undo approval',exact=True).click()
+    await page.locator('#page').filter(has_text='51–67 of 67').wait_for()
+    assert posts[-1][0]=='/api/undo' and posts[-1][1]['id']==rows[50]['id']
+    assert 'candidate=' not in page.url and await page.locator('#site-workspace').is_hidden()
+    # Reloaded success stays on Candidates; Undo is still available from Queue.
+    await open_site(page,'fixture-50.example');await approve.click()
+    await page.wait_for_function('()=>!busy && !route.candidate')
+    await page.reload();await settled(page)
+    assert 'view=candidates' in page.url and 'candidate=' not in page.url
+    await stage(page,'queued');await open_site(page,'fixture-50.example')
+    await page.get_by_role('button',name='Undo approval',exact=True).click()
+    await page.get_by_role('heading',name='Choose capture scope',exact=True).wait_for()
+    assert rows[50]['stage']=='candidates' and not errors,errors
+    await context.close()
+
+
 async def check(base):
     async with async_playwright() as playwright:
         browser=await playwright.chromium.launch()
         try:
             for width in (320,390,430,768,1280):
+                await capture_approval_navigation(browser,base,width)
                 await discovery_flow(browser,base,width)
                 await manual_site_flow(browser,base,width)
                 await basic_flow(browser,base,width)
