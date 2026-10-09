@@ -50,6 +50,24 @@ class SourceChunk:
     text: str
 
 
+def _budget_offsets(text, tokenizer, *, add_special_tokens=False):
+    """Keep source offsets while conservatively counting unknown word spans."""
+    encoding = tokenizer.encode(text, add_special_tokens=add_special_tokens)
+    unknown = tokenizer.token_to_id("[UNK]")
+    offsets = []
+    for token, (start, end) in zip(encoding.ids, encoding.offsets):
+        if token == unknown and end > start:
+            # HF WordPiece collapses words longer than 100 characters to UNK;
+            # llama.cpp can expand them into hundreds/thousands of tokens.
+            # One budget unit per UTF-8 byte bounds those expansions without
+            # changing the source, or quadratic tokenization of huge words.
+            for position in range(start, end):
+                offsets.extend([(position, position + 1)] * len(text[position].encode("utf-8")))
+        else:
+            offsets.append((start, end))
+    return offsets
+
+
 def chunk_source(text, tokenizer=None, max_tokens=480, overlap_tokens=48):
     """Prefer paragraphs/headings, then lines/sentences, then exact token spans.
 
@@ -58,14 +76,13 @@ def chunk_source(text, tokenizer=None, max_tokens=480, overlap_tokens=48):
     without truncating the source or embedding sentences to choose boundaries.
     """
     tokenizer = tokenizer or load_tokenizer()
-    prefix_tokens = len(tokenizer.encode(DOCUMENT_PREFIX).ids)
+    prefix_tokens = len(_budget_offsets(DOCUMENT_PREFIX, tokenizer, add_special_tokens=True))
     budget = max_tokens - prefix_tokens
     if budget < 8 or not 0 <= overlap_tokens < budget // 2:
         raise ValueError("invalid chunk token budget or overlap")
     if not text:
         return []
-    encoding = tokenizer.encode(text, add_special_tokens=False)
-    offsets = encoding.offsets
+    offsets = _budget_offsets(text, tokenizer)
     if not offsets:
         return [SourceChunk(0, len(text), text)]
     starts = [offset[0] for offset in offsets]
@@ -87,7 +104,7 @@ def chunk_source(text, tokenizer=None, max_tokens=480, overlap_tokens=48):
                     break
         # Retokenizing a boundary can change WordPiece segmentation. Always
         # validate the actual request; reduce it rather than relying on estimates.
-        while len(tokenizer.encode(DOCUMENT_PREFIX + text[start:end]).ids) > max_tokens:
+        while len(_budget_offsets(DOCUMENT_PREFIX + text[start:end], tokenizer, add_special_tokens=True)) > max_tokens:
             last = bisect_left(starts, end) - 1
             if last <= first:
                 raise ValueError("cannot fit source token within embedding context")

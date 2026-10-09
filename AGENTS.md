@@ -183,6 +183,11 @@ exact-ID probe and the pinned tokenizer before starting a broad run. Missing
 sources must be counted without claiming extraction repaired. Nomic chunking
 uses at most 480 tokens including document prefix/special tokens and roughly 48
 tokens of overlap; retain complete source coverage and 768-dimensional vectors.
+Budget unknown WordPiece spans conservatively: the local tokenizer's long-word
+shortcut can undercount what the Nomic server processes. Retain completed version
+checkpoints when repairing that counting bug. Resume failed broad runs in a new
+Job after probing the previously failing exact IDs; preserve old Jobs and the
+dedicated source checkout, and do not repeat source preparation.
 
 ### Search relevance evaluation
 

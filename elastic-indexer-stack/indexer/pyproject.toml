@@ -25,6 +25,10 @@ omit = [
     "**/test_*.py",
     "**/main.py",
     "**/setup.py",
+    # These targeted-import modules have their own required 90% coverage gate
+    # in the curation image, which includes their tests and crawler dependencies.
+    "**/index_captures.py",
+    "**/indexer/capture_enrichment.py",
     "**/__init__.py",
     "**/.venv",
     "**/_pycache_",

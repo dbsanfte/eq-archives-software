@@ -3,6 +3,7 @@ import logging
 
 import numpy as np
 import pytest
+from tokenizers import Tokenizer
 
 from indexer.chunking import DOCUMENT_PREFIX, chunk_source, load_tokenizer
 from indexer.openai_manager import OpenAIManager
@@ -40,6 +41,42 @@ def test_paragraph_boundaries_and_overlap_retain_heading_context():
     assert any(chunk.text.endswith("\n\n") for chunk in chunks[:-1])
     assert "# Lord Seru" in "".join(chunk.text for chunk in chunks)
     assert all(chunk.start < chunk.end for chunk in chunks)
+
+
+@pytest.mark.parametrize("word", ["x" * 5000, "qwertyuiopasdfghjklzxcvbnm0123456789" * 100],
+                         ids=["repeated-character", "encoded-string"])
+def test_long_words_fit_server_wordpiece_budget_without_unknown_word_shortcut(word):
+    text = "# Archived message\n\nEncoded source: " + word + "\n\nFinal line."
+    # llama.cpp does not use Hugging Face WordPiece's 100-character word cap.
+    # An independent tokenizer without that shortcut reproduces the server's
+    # expansion of encoded strings that previously caused HTTP 500 responses.
+    server_tokenizer = Tokenizer.from_str(load_tokenizer().to_str())
+    server_tokenizer.model.max_input_chars_per_word = len(text)
+    chunks = chunk_source(text)
+    covered = 0
+    rebuilt = ""
+    for chunk in chunks:
+        assert chunk.start <= covered < chunk.end
+        assert len(server_tokenizer.encode(DOCUMENT_PREFIX + chunk.text).ids) <= 480
+        rebuilt += text[covered:chunk.end]
+        covered = chunk.end
+    assert rebuilt == text
+
+
+def test_unknown_multibyte_words_preserve_every_source_character():
+    text = "unknown\U0001f9ed" * 700
+    chunks = chunk_source(text)
+    assert len(chunks) > 1
+    covered = 0
+    rebuilt = ""
+    for chunk in chunks:
+        assert chunk.start <= covered < chunk.end
+        assert chunk.text == text[chunk.start:chunk.end]
+        # Conservatively bounded unknown spans also bound their UTF-8 bytes.
+        assert len(chunk.text.encode("utf-8")) + len(load_tokenizer().encode(DOCUMENT_PREFIX).ids) <= 480
+        rebuilt += text[covered:chunk.end]
+        covered = chunk.end
+    assert rebuilt == text
 
 
 @pytest.mark.parametrize("max_tokens,overlap", [(8,0), (480,-1), (480,300)])
