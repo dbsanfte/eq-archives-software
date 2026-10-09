@@ -213,7 +213,7 @@ def test_automatic_capture_claim_retains_undo_grace_and_marks_only_owned_work(ca
     finally: worker.close()
 
 
-def test_transient_auto_failures_back_off_and_unknown_failures_require_attention(candidate):
+def test_transient_and_unknown_auto_failures_wait_for_user_while_discovery_continues(candidate):
     root, _ = candidate
     account = enable(root)
     with connect(root) as store:
@@ -224,12 +224,13 @@ def test_transient_auto_failures_back_off_and_unknown_failures_require_attention
         store.db.commit()
     automation.resume_owned(root, Lane.CANDIDATES, account)
     automation.schedule(root, account)
-    assert automation.status(root)['activity']['phase'] == 'retry_wait'
+    assert automation.status(root)['activity']['phase'] == 'discovering'
     with connect(root) as store:
-        store.db.execute("UPDATE operations SET result='{}',error='Source identity changed'")
+        assert store.db.execute('SELECT state FROM operations WHERE id=?', (identifier,)).fetchone()[0] == 'interrupted'
+        store.db.execute("UPDATE operations SET state='interrupted',result='{}',error='Source identity changed'")
         store.db.commit()
     automation.schedule(root, account)
-    assert automation.status(root)['activity']['phase'] == 'attention'
+    assert automation.status(root)['activity']['phase'] == 'discovering'
     assert automation.pause_detail(CrawlError('Source identity changed'), operation) is None
     assert automation.pause_detail(AutomaticStopped()) == {'reason': 'disabled'}
 
@@ -306,9 +307,9 @@ def test_automatic_evidence_check_is_tagged_atomically_and_mixed_policy_batch_ca
 
 
 @pytest.mark.parametrize('message', ['Wayback connection failed after bounded retries', 'Wayback wall-clock budget reached', 'Cumulative Wayback budget reached; staged evidence retained'])
-def test_automatic_network_and_transport_allowance_pauses_are_resumable(message):
+def test_automatic_network_and_transport_failures_require_explicit_resume(message):
     pause = automation.pause_detail(CrawlError(message), {'payload':{'automatic':True}})
-    assert pause['reason'] == 'transient' and pause['retry_at'] > now()
+    assert pause is None
 
 
 def test_equal_grades_promote_1999_2001_captures_before_later_years(tmp_path):

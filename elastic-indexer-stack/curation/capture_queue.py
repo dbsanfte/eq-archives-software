@@ -8,11 +8,24 @@ from review import checked_sources, record
 from state import enqueue, identifier
 
 
+def held(store):
+    return {row['candidate']: row['error'] for row in store.db.execute("""SELECT f.candidate,f.error
+        FROM capture_queue_failures f JOIN candidates c ON c.id=f.candidate
+        WHERE c.state='approved_waiting_batch' AND c.decision=f.decision""")}
+
+
+def attention(store):
+    return {'preflight': len(held(store)), 'interrupted': store.db.execute(
+        "SELECT COUNT(*) FROM operations WHERE kind='capture' AND state='interrupted'").fetchone()[0]}
+
+
 def queue_order(store):
     """Use the worker's eligibility time and insertion-order tie break."""
-    return [row['id'] for row in store.db.execute("""SELECT id FROM candidates
-        WHERE state='approved_waiting_batch'
-        ORDER BY COALESCE(json_extract(decision,'$.capture_after'), json_extract(decision,'$.reviewed_at')),rowid""")]
+    return [row['id'] for row in store.db.execute("""SELECT c.id FROM candidates c
+        LEFT JOIN capture_queue_failures f ON f.candidate=c.id AND f.decision=c.decision
+        WHERE c.state='approved_waiting_batch'
+        ORDER BY (f.candidate IS NOT NULL),
+            COALESCE(json_extract(c.decision,'$.capture_after'), json_extract(c.decision,'$.reviewed_at')),c.rowid""")]
 
 
 def claim(store, ids):
@@ -50,5 +63,6 @@ def claim(store, ids):
     operation = enqueue(store, 'capture', {'batch_id': batch_id, 'sites': sites, **({'automatic': True} if automatic else {})}, commit=False)
     store.db.execute("INSERT INTO batches VALUES (?,'capturing',NULL,NULL,NULL,NULL,NULL,?,?)", (batch_id, now(), now()))
     for site in sites:
+        store.db.execute('DELETE FROM capture_queue_failures WHERE candidate=?', (site['id'],))
         store.db.execute('UPDATE candidates SET state=? WHERE id=?', (transition('approved_waiting_batch', Action.START), site['id']))
     return operation, batch_id

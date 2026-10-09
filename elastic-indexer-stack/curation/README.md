@@ -68,11 +68,12 @@ approvals keep their original $2/site cap as well as any configured daily limit.
 Failed-file retries retain the original site's policy and enrichment budget/cache.
 Turning automatic mode off stops new automatic discovery and approvals; already
 approved captures and imports continue under the configured daily limit. Turning
-it back on resumes retained automatic work. Manual paused work still needs explicit
-resume. Automation-owned interrupted work recovers after restart; known transient
-transport/publication errors retry after five minutes without resetting usage.
-Source, coverage, authentication and validation errors remain visible for operator
-attention. Exhausted discovery links are rechecked after five minutes, without
+it back on resumes retained automatic work. Failed sites remain visible with their
+errors, sources and checkpoints for an explicit operator decision. They never hold
+discovery, capture or publication/indexing queues: other eligible sites continue in
+both manual and automatic mode. Budget waits and automation-owned restart interruptions
+can resume automatically; failed transport/publication requests require explicit retry.
+Exhausted discovery links are rechecked after five minutes, without
 regrading remembered sites or opening additional Wayback connections.
 
 ## Curation flow
@@ -108,9 +109,11 @@ remembers an explicit choice in this browser across visits.
    sites in Queue and available to Undo. The explicit operator batch API still
    accepts up to five sites; existing claimed batches keep their saved work.
    Existing approvals receive a one-time grace period on migration;
-   restarting does not reset it. A paused manual capture holds the queue until explicitly
-   resumed, retaining its budgets. Automatic mode may resume its own interrupted
-   or transiently failed captures under the saved policy. Items move into **Capturing** when claimed.
+   restarting does not reset it. Failed captures remain in **Capturing**, with their
+   error and saved progress, until you choose Resume. The next queued site can start
+   immediately without resuming or discarding the failure. A preflight failure stays
+   in Queue with **Capture needs attention** and Undo; other entries pass it. Undo
+   the failed approval to review and approve it again. Items move into **Capturing** when claimed.
    The worker inventories the entire approved scope through paginated Wayback
    CDX listings, then downloads every listed successful file version. It includes
    orphan pages, images, CSS, scripts and downloads, using the pinned downloader

@@ -139,11 +139,12 @@ def promote(root, account):
                              (row['id'], 'automatic_promoted' if accepted else 'automatic_saved', json.dumps(grant), now()))
             store.db.commit()
             return choice
-        except CrawlError as error:
+        except Exception as error:
             store.db.rollback()
             # An invalid/stale site cannot repeatedly block every other site.
-            hold(store, row['id'], str(error))
-            store.db.execute('UPDATE candidates SET error=? WHERE id=?', (str(error), row['id']))
+            detail = str(error) if isinstance(error, CrawlError) else 'Automatic approval failed for this site; saved evidence is retained.'
+            hold(store, row['id'], detail)
+            store.db.execute('UPDATE candidates SET error=? WHERE id=?', (detail, row['id']))
             store.db.commit()
 
 
@@ -167,13 +168,12 @@ def schedule(root, account):
             AND json_extract(payload,'$.automatic')=1 ORDER BY created DESC,rowid DESC LIMIT 1""").fetchone()
         previous = unpack(previous) if previous else None
         if previous and previous['state'] == 'interrupted':
-            pause = (previous['result'] or {}).get('automatic_pause', {})
+            pause = (previous['result'] or {}).get('automatic_pause') or {}
             if pause.get('reason') == 'daily_budget' and snapshot['remaining_usd'] < pause.get('required_usd', 0):
                 store.set('automatic_activity', {'phase': 'daily_budget', 'retry_at': snapshot['resets_at'], 'required_usd': pause['required_usd']})
                 return
-            store.set('automatic_activity', {'phase': 'retry_wait' if pause.get('reason') == 'transient' else 'attention',
-                       'error': previous['error'], 'operation': previous['id'], 'retry_at': pause.get('retry_at')})
-            return
+            # A site failure waits for an explicit decision. Its saved operation
+            # is not a lane lock; continue checking other sites/discovering.
         # Exhausted link frontiers sleep, instead of creating empty campaigns
         # every ten seconds or resampling remembered low-scoring websites.
         if (activity.get('phase') == 'links_exhausted' and activity.get('retry_at', '') > now()
@@ -186,8 +186,15 @@ def schedule(root, account):
                 continue
             if store.db.execute("SELECT 1 FROM operations WHERE kind='candidate_check' AND json_extract(payload,'$.id')=?", (row['id'],)).fetchone():
                 continue
-            result = start_check(store, {'id': row['id'], 'manifest_sha256': row['manifest_sha256'],
-                                        'max_usd': 2, 'grading_criteria': config['grading_criteria'], 'automatic': True})
+            try:
+                start_check(store, {'id': row['id'], 'manifest_sha256': row['manifest_sha256'],
+                                   'max_usd': 2, 'grading_criteria': config['grading_criteria'], 'automatic': True})
+            except Exception as error:
+                store.db.rollback()
+                detail = str(error) if isinstance(error, CrawlError) else 'Evidence check could not start for this site; saved evidence is retained.'
+                hold(store, row['id'], detail)
+                store.db.execute('UPDATE candidates SET error=? WHERE id=?', (detail, row['id']))
+                store.db.commit()
             return
         operation = enqueue(store, 'discover', {'automatic': True, 'fill_queue': True, 'max_candidates': 50,
             'max_usd': 2, 'min_grade': config['min_grade'], 'grading_criteria': config['grading_criteria']})
@@ -210,13 +217,6 @@ def pause_detail(error, operation=None):
         return {'reason': 'daily_budget', 'required_usd': error.amount, 'retry_at': error.retry_at}
     if isinstance(error, AutomaticStopped):
         return {'reason': 'disabled'}
-    if operation and operation['payload'].get('automatic') and isinstance(error, CrawlError):
-        message = str(error).lower()
-        transient = ('transport', '422 after', '429 after', 'http 429', 'http 500', 'http 502', 'http 503',
-                     'http 504', 'wayback request', 'wayback connection failed', 'archive git operation failed', 'worker stopped',
-                     'request budget', 'byte budget', 'time budget', 'wall-clock budget', 'cumulative wayback budget')
-        if any(part in message for part in transient):
-            return {'reason': 'transient', 'retry_at': (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()}
     return None
 
 
@@ -229,18 +229,17 @@ def resume_owned(root, lane, account):
         store.db.execute('BEGIN IMMEDIATE')
         if active_operation(store, lane):
             return
-        row = store.db.execute(f"""SELECT * FROM operations WHERE state='interrupted'
+        rows = store.db.execute(f"""SELECT * FROM operations WHERE state='interrupted'
             AND json_extract(payload,'$.automatic')=1 AND kind IN ({','.join('?' for _ in kinds)})
-            ORDER BY created,rowid LIMIT 1""", kinds).fetchone()
-        if not row:
-            return
-        operation = unpack(row)
-        pause = (operation['result'] or {}).get('automatic_pause', {})
-        reason = pause.get('reason')
-        allowed = (reason == 'disabled' or
-                   reason == 'daily_budget' and snapshot['remaining_usd'] >= pause.get('required_usd', float('inf')) or
-                   reason == 'transient' and pause.get('retry_at', '') <= now() or
-                   operation['error'] == 'Worker stopped; resume explicitly')
-        if allowed:
-            store.db.execute("UPDATE operations SET state='queued',error=NULL,updated=? WHERE id=?", (now(), operation['id']))
-            store.db.commit()
+            ORDER BY updated,created,rowid""", kinds).fetchall()
+        for row in rows:
+            operation = unpack(row)
+            pause = (operation['result'] or {}).get('automatic_pause') or {}
+            reason = pause.get('reason')
+            allowed = (reason == 'disabled' or
+                       reason == 'daily_budget' and snapshot['remaining_usd'] >= pause.get('required_usd', float('inf')) or
+                       operation['error'] == 'Worker stopped; resume explicitly')
+            if allowed:
+                store.db.execute("UPDATE operations SET state='queued',error=NULL,updated=? WHERE id=?", (now(), operation['id']))
+                store.db.commit()
+                return

@@ -607,6 +607,54 @@ async def capture_flow(browser,base):
     await context.close()
 
 
+async def capture_failure_isolation_flow(browser,base,width):
+    context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
+    page=await context.new_page();errors=[]
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    snapshot=await (await context.request.get(base+'/api/queue?filter=candidates')).json()
+    ready=copy.deepcopy(snapshot['candidates'][0]);ready.update(id='a'*24,url='http://next.example/',scope='http://next.example/',stage='queued',state='approved_waiting_batch')
+    held={**ready,'id':'b'*24,'url':'http://invalid.example/','scope':'http://invalid.example/','capture_queue_error':'Source changed after approval'}
+    failed={**ready,'id':'c'*24,'url':'http://www.guildsay.com/','scope':'http://www.guildsay.com/','stage':'capturing','state':'capturing','capture_state':'interrupted','capture_error':'Wayback connection failed after bounded retries'}
+    operation={'id':'f'*32,'kind':'capture','state':'interrupted','error':failed['capture_error'],'payload':{'sites':[{'id':failed['id']}]},'result':{'progress':{'files':8493,'bytes':104762352,'urls_checked':8507,'sites_total':1,'capture_policy':'complete-files-v1'}}}
+    async def fixture(route):
+        assert route.request.method=='GET','Failure display or polling must not resume work'
+        parsed=urlsplit(route.request.url);query=parse_qs(parsed.query)
+        if parsed.path=='/api/queue':
+            rows=[ready,held] if query.get('filter')==['queued'] else [failed]
+            # Failure metadata must work even when old operations are outside the list cap.
+            body={**snapshot,'candidates':rows,'total':len(rows),'operations':[],
+                  'workers':{'candidates':None,'capture':None,'indexing':None},
+                  'capture_attention':{'interrupted':1,'preflight':1},'capture_queue_error':None}
+        elif parsed.path=='/api/candidate':
+            row=next(row for row in (ready,held,failed) if row['id']==query['id'][0])
+            body={'candidate':row,'review':None,'queue_position':1,'queue_blocker':None,'capture_queue_error':None,
+                  'capture_operation':operation if row is failed else None}
+        else:await route.continue_();return
+        await route.fulfill(status=200,json=body)
+    await page.route('**/api/**',fixture)
+    await page.goto(base+'/?view=queued');await settled(page)
+    await expect(page.locator('#stage-activity')).to_contain_text('Other approved sites continue automatically')
+    assert not await page.get_by_role('heading',name='Queue waiting',exact=True).count()
+    await page.get_by_role('button',name='Open next.example',exact=True).click();await settled(page)
+    await expect(page.locator('#stage-live')).to_contain_text('Ready for automatic capture')
+    assert 'paused capture' not in await page.locator('#stage-live').inner_text()
+    await page.goto(base+'/?view=queued&candidate='+held['id']);await settled(page)
+    await expect(page.locator('#stage-live')).to_contain_text('Other sites continue')
+    await expect(page.locator('#stage-live')).to_contain_text(held['capture_queue_error'])
+    await expect(page.get_by_role('button',name='Undo approval',exact=True)).to_be_enabled()
+    await page.goto(base+'/?view=capturing');await settled(page)
+    await expect(page.get_by_role('button',name='Open www.guildsay.com',exact=True)).to_contain_text('Capture paused')
+    await page.get_by_role('button',name='Open www.guildsay.com',exact=True).click();await settled(page)
+    await expect(page.locator('#stage-live')).to_contain_text('does not block the queue')
+    await expect(page.locator('#stage-live')).to_contain_text('8493 files staged')
+    await expect(page.get_by_role('button',name='Resume capture',exact=True)).to_be_enabled()
+    await page.evaluate('refresh()');await settled(page)
+    assert await page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+    assert not errors,errors
+    await page.screenshot(path=f'/tmp/curation-failure-isolation-{width}.png',full_page=True)
+    await context.close()
+
+
 async def capture_progress_flow(browser,base,width):
     context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
     page=await context.new_page();errors=[]
@@ -1931,6 +1979,7 @@ async def check(base):
                 await advanced_grading_flow(browser,base,width)
                 await ezboard_flow(browser,base,width)
                 await automatic_indexing_flow(browser,base,width)
+                await capture_failure_isolation_flow(browser,base,width)
                 await candidate_grade_controls(browser,base,width)
                 await candidate_quick_actions(browser,base,width)
                 await capture_approval_navigation(browser,base,width)

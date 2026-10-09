@@ -19,7 +19,7 @@ from state import Lane, active_operation, connect, enqueue, operation_lane, unpa
 from worker import Worker
 from coverage_check import refresh, require_new
 from capture_flow import Action, UNDO_SECONDS, transition
-from capture_queue import claim, queue_order
+from capture_queue import claim, queue_order, attention as capture_attention
 from capture_continuation import start as continue_capture, require_complete
 from site_reviews import get as get_site_review, migrate
 from jobs import import_attempt, import_name
@@ -177,6 +177,7 @@ def create_app(root=None, origin=None, start_worker=True):
                                  "captured": sum(row['state'] in CAPTURED_STATES for row in all_rows),
                                  "awaiting_site_review": store.db.execute("SELECT COUNT(*) FROM batches WHERE state='awaiting_review'").fetchone()[0],
                                  "capture_queue_error": store.get('capture_queue_error'),
+                                 "capture_attention": capture_attention(store),
                                  "version": os.environ.get("GIT_SHA", "development"), "last_campaign": store.get("last_campaign"),
                                  "pilot_grading": store.get("grading_result")})
 
@@ -193,7 +194,7 @@ def create_app(root=None, origin=None, start_worker=True):
                 (SELECT 1 FROM json_each(operations.payload,'$.sites') WHERE json_extract(value,'$.id')=?)
                 ORDER BY created DESC,rowid DESC LIMIT 1""", (candidate['id'],)).fetchone()
             ids = queue_order(store)
-            blocker = active_operation(store, paused_capture=True)
+            blocker = active_operation(store)
             return JSONResponse({'candidate': candidate, 'review': review,
                 'capture_operation': unpack(operation) if operation else None,
                 'queue_position': ids.index(candidate['id']) + 1 if candidate['id'] in ids else None,

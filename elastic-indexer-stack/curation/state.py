@@ -62,6 +62,8 @@ def connect(directory):
                 payload TEXT, result TEXT, error TEXT, created TEXT, updated TEXT);
             CREATE TABLE IF NOT EXISTS batches(id TEXT PRIMARY KEY, state TEXT, manifest TEXT,
                 manifest_sha256 TEXT, publication TEXT, job TEXT, error TEXT, created TEXT, updated TEXT);
+            CREATE TABLE IF NOT EXISTS capture_queue_failures(candidate TEXT PRIMARY KEY,
+                decision TEXT NOT NULL, error TEXT NOT NULL, created TEXT NOT NULL);
         """)
         yield store
     finally:

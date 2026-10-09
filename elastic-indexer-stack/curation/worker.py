@@ -35,6 +35,10 @@ import automation
 from daily_budget import automatic_request, require_automatic
 
 
+class ImportQueueUnavailable(CrawlError):
+    """Job creation had an uncertain outcome and cannot safely advance yet."""
+
+
 def campaign(root, operation):
     target = operation['payload'].get('target')
     if target:
@@ -183,16 +187,29 @@ class Worker:
         refresh(self.root)
         with connect(self.root) as store:
             store.db.execute('BEGIN IMMEDIATE')
-            if active_operation(store, paused_capture=True):
+            if active_operation(store):
                 store.db.rollback()
                 return
-            rows = store.db.execute("SELECT id FROM candidates WHERE state='approved_waiting_batch' AND json_extract(decision,'$.capture_after')<=? ORDER BY json_extract(decision,'$.capture_after'),rowid LIMIT 1", (now(),)).fetchall()
+            rows = store.db.execute("""SELECT id,decision FROM candidates c WHERE state='approved_waiting_batch'
+                AND json_extract(decision,'$.capture_after')<=? AND NOT EXISTS
+                    (SELECT 1 FROM capture_queue_failures f WHERE f.candidate=c.id AND f.decision=c.decision)
+                ORDER BY json_extract(decision,'$.capture_after'),rowid LIMIT 1""", (now(),)).fetchall()
             if not rows:
                 store.db.rollback()
                 return
             # Claim only the site about to start. Later approvals remain queued
             # and undoable throughout an earlier site's download.
-            claim(store, [row['id'] for row in rows])
+            store.db.execute('SAVEPOINT capture_claim')
+            try:
+                claim(store, [row['id'] for row in rows])
+            except Exception as error:
+                # Retain the approval and Undo; do not re-read broken sources
+                # every tick or prevent another site from being claimed.
+                store.db.execute('ROLLBACK TO capture_claim')
+                detail = str(error) if isinstance(error, CrawlError) else 'Capture preparation failed; saved approval and sources are retained.'
+                store.db.execute('INSERT OR REPLACE INTO capture_queue_failures VALUES (?,?,?,?)',
+                                 (rows[0]['id'], rows[0]['decision'], detail, now()))
+            store.db.execute('RELEASE capture_claim')
             store.db.commit()
             if store.get('capture_queue_error'):
                 store.set('capture_queue_error', None)
@@ -277,6 +294,7 @@ class Worker:
             with connect(self.root) as store:
                 previous = store.db.execute('SELECT result FROM operations WHERE id=?', (operation['id'],)).fetchone()
                 result = json.loads(previous['result'] or '{}')
+                result.pop('automatic_pause', None)
                 if pause := automation.pause_detail(error, operation):
                     result['automatic_pause'] = pause
                 store.db.execute("UPDATE operations SET state='interrupted',error=?,result=?,updated=? WHERE id=?", (detail, json.dumps(result), now(), operation["id"]))
@@ -302,63 +320,92 @@ class Worker:
         self.kube = self.kube or Kubernetes()
         jobs = self.kube.jobs()
         for batch in batches:
-            import_error = None
-            name = import_name(batch)
-            attempt_detail = {"attempt": import_attempt(batch)}
-            if (batch.get('job') or {}).get('previous_name'):
-                attempt_detail['previous_name'] = batch['job']['previous_name']
-            existing = next((job for job in jobs if job["metadata"]["name"] == name), None)
-            if existing:
-                annotations = existing["metadata"].get("annotations", {})
-                if annotations.get("eqarchives.org/manifest-sha256") != batch["manifest_sha256"]:
-                    raise CrawlError("Import Job does not match the approved manifest")
-                conditions = {c["type"]: c["status"] for c in existing.get("status", {}).get("conditions", [])}
-                state = "indexed" if conditions.get("Complete") == "True" else "index_failed" if conditions.get("Failed") == "True" else "indexing"
-                detail = {**attempt_detail, "name": name, "state": state}
-                daily_job = any(item.get('name') == 'LUNA_DAILY_BUDGET_ROOT' for item in existing.get('spec', {}).get('template', {}).get('spec', {}).get('containers', [{}])[0].get('env', []))
-                if state == 'indexed' and daily_job:
-                    diagnostic = read_status(self.root, batch, name) or {}
-                    pause = read_budget_pause(self.root, batch, name)
-                    if pause:
-                        state, detail = 'index_budget_waiting', {**detail, 'state': 'waiting_budget', **pause}
-                        if self.daily_budget.snapshot()['remaining_usd'] >= pause['required_usd']:
-                            state, detail = 'published_waiting_index', self.continue_import(batch, name)
-                    elif diagnostic.get('state') != 'completed':
-                        state = 'index_failed'
-                        import_error = 'Import completion could not be verified; saved sources and paid results are retained.'
-                if (state == 'index_failed' and daily_job and batch['manifest'].get('indexing', {}).get('daily_budget') == 'portal-utc-v1'
-                        and any(c.get('type') == 'Failed' and c.get('status') == 'True' and c.get('reason') == 'DeadlineExceeded'
-                                for c in existing.get('status', {}).get('conditions', []))):
-                    # Large automatic sites can span the six-hour Job window.
-                    # Continue using caches/create-only IDs, retaining old Jobs.
-                    state, detail = 'published_waiting_index', self.continue_import(batch, name)
-                if state == 'index_failed':
-                    import_error = import_error or read_error(self.root, batch, name)
+            try:
+                self.index_batch(batch, jobs)
+            except ImportQueueUnavailable:
+                raise
+            except Exception as error:
+                detail = str(error) if isinstance(error, CrawlError) else 'Index submission failed for this site; saved sources and paid results are retained.'
+                job = dict(batch.get('job') or {})
+                try:
+                    job.update(name=import_name(batch), attempt=import_attempt(batch), state='submission_failed')
+                except CrawlError:
+                    pass
+                with connect(self.root) as store:
+                    store.db.execute("UPDATE batches SET state='index_failed',job=?,error=?,updated=? WHERE id=?",
+                                     (json.dumps(job), detail, now(), batch['id']))
+                    store.db.commit()
+
+    def index_batch(self, batch, jobs):
+        import_error = None
+        name = import_name(batch)
+        attempt_detail = {"attempt": import_attempt(batch)}
+        if (batch.get('job') or {}).get('previous_name'):
+            attempt_detail['previous_name'] = batch['job']['previous_name']
+        existing = next((job for job in jobs if job["metadata"]["name"] == name), None)
+        if existing:
+            annotations = existing["metadata"].get("annotations", {})
+            if annotations.get("eqarchives.org/manifest-sha256") != batch["manifest_sha256"]:
+                raise CrawlError("Import Job does not match the approved manifest")
+            conditions = {c["type"]: c["status"] for c in existing.get("status", {}).get("conditions", [])}
+            state = "indexed" if conditions.get("Complete") == "True" else "index_failed" if conditions.get("Failed") == "True" else "indexing"
+            detail = {**attempt_detail, "name": name, "state": state}
+            daily_job = any(item.get('name') == 'LUNA_DAILY_BUDGET_ROOT' for item in existing.get('spec', {}).get('template', {}).get('spec', {}).get('containers', [{}])[0].get('env', []))
+            if state == 'indexed' and daily_job:
+                diagnostic = read_status(self.root, batch, name) or {}
+                pause = read_budget_pause(self.root, batch, name)
+                if pause:
+                    state, detail = 'index_budget_waiting', {**detail, 'state': 'waiting_budget', **pause}
+                    if self.daily_budget.snapshot()['remaining_usd'] >= pause['required_usd']:
+                        state, detail = 'published_waiting_index', self.continue_import(batch, name)
+                elif diagnostic.get('state') != 'completed':
+                    state = 'index_failed'
+                    import_error = 'Import completion could not be verified; saved sources and paid results are retained.'
+            if (state == 'index_failed' and daily_job and batch['manifest'].get('indexing', {}).get('daily_budget') == 'portal-utc-v1'
+                    and any(c.get('type') == 'Failed' and c.get('status') == 'True' and c.get('reason') == 'DeadlineExceeded'
+                            for c in existing.get('status', {}).get('conditions', []))):
+                # Large automatic sites can span the six-hour Job window.
+                # Continue using caches/create-only IDs, retaining old Jobs.
+                state, detail = 'published_waiting_index', self.continue_import(batch, name)
+            if state == 'index_failed':
+                import_error = import_error or read_error(self.root, batch, name)
+        else:
+            if batch['state'] == 'index_budget_waiting':
+                raise CrawlError('Budget-paused import Job is unavailable; automatic continuation is paused')
+            waiting = blockers(jobs, name)
+            if waiting:
+                state, detail = "published_waiting_index", {**attempt_detail, "waiting_for": waiting}
             else:
-                if batch['state'] == 'index_budget_waiting':
-                    raise CrawlError('Budget-paused import Job is unavailable; automatic continuation is paused')
-                waiting = blockers(jobs, name)
-                if waiting:
-                    state, detail = "published_waiting_index", {**attempt_detail, "waiting_for": waiting}
-                else:
-                    (self.root / "enrichment").mkdir(exist_ok=True, mode=0o700)
-                    self.kube.create(import_job(batch, os.environ.get("IMPORT_IMAGE", "")))
-                    state, detail = "indexing", {**attempt_detail, "name": name, "state": "submitted"}
-                    # No further submissions until the next list sees this Job.
+                (self.root / "enrichment").mkdir(exist_ok=True, mode=0o700)
+                job = import_job(batch, os.environ.get("IMPORT_IMAGE", ""))
+                try:
+                    self.kube.create(job)
+                except Exception:
+                    # A lost create response may still have started a Job. Re-list
+                    # before advancing; never bypass the unfinished-Job guard.
+                    try:
+                        jobs[:] = self.kube.jobs()
+                    except Exception as error:
+                        raise ImportQueueUnavailable('Index submission outcome is uncertain; waiting for Kubernetes state before continuing.') from error
+                    if not any(item['metadata']['name'] == name for item in jobs):
+                        raise
+                state, detail = "indexing", {**attempt_detail, "name": name, "state": "submitted"}
+                # No further submissions until the next list sees this Job.
+                if not any(item['metadata']['name'] == name for item in jobs):
                     jobs.append({"metadata": {"name": name}, "spec": {}, "status": {}})
-            with connect(self.root) as store:
-                store.db.execute("UPDATE batches SET state=?,job=?,error=?,updated=? WHERE id=?",
-                                 (state, json.dumps(detail), import_error, now(), batch["id"]))
-                if state == "indexed":
-                    for site in batch["manifest"]["sites"]:
-                        row = store.db.execute('SELECT state,coverage FROM candidates WHERE id=?', (site['id'],)).fetchone()
-                        capture = json.loads(row['coverage'] or '{}').get('capture', {})
-                        current = capture.get('review_id') or capture.get('batch_id')
-                        # Finishing an earlier import must not retire a site
-                        # whose missing files are being retried in a new batch.
-                        if row['state'] == 'published' and (not current or current == batch['id']):
-                            store.db.execute('UPDATE candidates SET state=? WHERE id=?', (transition(row['state'], Action.INDEX), site['id']))
-                store.db.commit()
+        with connect(self.root) as store:
+            store.db.execute("UPDATE batches SET state=?,job=?,error=?,updated=? WHERE id=?",
+                             (state, json.dumps(detail), import_error, now(), batch["id"]))
+            if state == "indexed":
+                for site in batch["manifest"]["sites"]:
+                    row = store.db.execute('SELECT state,coverage FROM candidates WHERE id=?', (site['id'],)).fetchone()
+                    capture = json.loads(row['coverage'] or '{}').get('capture', {})
+                    current = capture.get('review_id') or capture.get('batch_id')
+                    # Finishing an earlier import must not retire a site
+                    # whose missing files are being retried in a new batch.
+                    if row['state'] == 'published' and (not current or current == batch['id']):
+                        store.db.execute('UPDATE candidates SET state=? WHERE id=?', (transition(row['state'], Action.INDEX), site['id']))
+            store.db.commit()
 
     def run(self, lane):
         with self.transport.bind(), self.daily_budget.bind():

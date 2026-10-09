@@ -123,5 +123,7 @@ def test_detail_returns_only_the_selected_capture_operation_and_queue_blocker(ca
     details=call(app,'GET',f"/api/candidate?id={row['id']}").json()
     assert details['candidate']['stage']=='capturing'
     assert details['capture_operation']['id']==result['operation']
-    assert details['queue_blocker']['state']=='interrupted'
+    assert details['queue_blocker'] is None
+    assert details['candidate']['capture_state']=='interrupted'
+    assert details['candidate']['capture_error']=='Capture paused'
     assert details['review'] is None
