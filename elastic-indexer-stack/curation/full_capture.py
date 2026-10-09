@@ -332,7 +332,8 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
                     'capture_coverage': coverage, 'notes': notes, 'limits': config['limits'],
                     'capture_retry': {'files': db.execute("SELECT COUNT(*) FROM full_records WHERE state='unavailable'").fetchone()[0],
                                       'lookups': len(failed_queries) + len(missing)},
-                    'transport': store.get('wayback_transport', {}), 'indexing': dict(DEFAULT_POLICY), 'visited': []}
+                    'transport': store.get('wayback_transport', {}),
+                    'indexing': dict((retained or base_manifest or {}).get('indexing', DEFAULT_POLICY)), 'visited': []}
         check_manifest(root, manifest)
         save(result_path, manifest)
         report('ready_for_review')

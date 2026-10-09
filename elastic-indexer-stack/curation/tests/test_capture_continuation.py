@@ -73,6 +73,8 @@ def test_retry_failed_files_retains_review_and_retries_only_gaps(tmp_path, monke
                     'sha256': digest(b'PNG'), 'content_type': 'image/png'}
         def close(self): pass
     original = capture_sites(root, legacy_manifest['batch_id'], [site], Downloader)
+    original['indexing']['max_enrichment_usd'] = .5
+    (root / 'batches' / original['batch_id'] / 'complete' / 'manifest.json').write_text(json.dumps(original))
     assert original['capture_retry'] == {'files': 1, 'lookups': 1}
     assert len(original['captures']) == 2  # The later good file survived the 403.
     with connect(root) as store:
@@ -100,6 +102,7 @@ def test_retry_failed_files_retains_review_and_retries_only_gaps(tmp_path, monke
             retained = {c['url']: c for c in result['captures']}
             assert [retained[c['url']] for c in original['captures']] == original['captures']
             assert result['transport']['requests'] == before['transport']['requests'] + len(calls)
+            assert result['indexing'] == before['indexing']
             assert calls == [('scope_list', 'http://counter.example/i.gif'), ('capture_file', row['scope'] + 'bad.png')] + (
                 [('capture_file', 'http://counter.example/i.gif')] if recovered else [])
             assert result['capture_retry'] == ({'files': 0, 'lookups': 0} if recovered else {'files': 1, 'lookups': 1})
