@@ -316,6 +316,11 @@ must not close another worker’s connection. Keep serial publication with the
 existing unfinished-Job guard for imports.
 Expose worker availability independently of capped operation lists, require all
 workers and the shared transport for health and retain the lease until all stop.
+Keep pipeline activity visible on every stage and site workspace, outside disabled
+manual discovery controls. Show current phases, capture progress from Queue,
+automatic retry/reset countdowns, Job blockers and bounded recent outcomes from
+SQLite metadata independently of list caps. Report stale or failed polling instead
+of implying fresh progress; status reads never start work or lose browser drafts.
 Preserve operations,
 approvals and progress across restart; interrupted manual work needs explicit resume.
 Source reading and scope drafts must not prevent progress polling or lose edits.

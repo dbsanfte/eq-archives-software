@@ -819,16 +819,17 @@ async def capture_progress_flow(browser,base,width):
         await route.fulfill(status=200,json=body)
     await page.route('**/api/**',fixture)
     await page.goto(base+'/?view=capturing');await settled(page)
-    await page.get_by_text('Counting remaining captures…',exact=True).wait_for()
-    assert await page.get_by_role('progressbar').get_attribute('value') is None
+    meter=page.locator('#candidates .capture-meter')
+    await meter.get_by_text('Counting remaining captures…',exact=True).wait_for()
+    assert await meter.get_by_role('progressbar').get_attribute('value') is None
     progress.update(phase='downloading',versions_found=100,versions_pending=36,unavailable=0,catalogs_pending=0,
         completion={'total':100,'completed':64,'remaining':36,'eta_seconds':3600,'updated_at':datetime.now(timezone.utc).isoformat()})
     # An unchanged candidate row still gets updated card progress on polling.
     await page.evaluate('refresh()');await settled(page)
-    await page.get_by_text('36 captures left',exact=True).wait_for()
-    await expect(page.get_by_role('progressbar')).to_have_attribute('value','64')
-    await expect(page.get_by_role('progressbar')).to_have_attribute('max','100')
-    await expect(page.locator('.capture-eta')).to_contain_text('ETA for listed captures: about')
+    await meter.get_by_text('36 captures left',exact=True).wait_for()
+    await expect(meter.get_by_role('progressbar')).to_have_attribute('value','64')
+    await expect(meter.get_by_role('progressbar')).to_have_attribute('max','100')
+    await expect(meter.locator('.capture-eta')).to_contain_text('ETA for listed captures: about')
     await page.get_by_role('button',name='Open '+await page.locator('.site-tile h2').inner_text(),exact=True).click()
     await settled(page)
     meter=page.locator('#stage-live .capture-meter')
@@ -2142,11 +2143,103 @@ async def complete_file_review(browser,base,width):
     await context.close()
 
 
+async def pipeline_activity_flow(browser,base,width):
+    context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
+    page=await context.new_page();errors=[];posts=[];offline=False
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    snapshot=await (await context.request.get(base+'/api/queue?filter=candidates')).json()
+    site=copy.deepcopy(snapshot['candidates'][0]);site.update(stage='capturing',state='capturing')
+    stamp=datetime.now(timezone.utc).isoformat()
+    deadline=datetime.now(timezone.utc).timestamp()+180
+    discovery={'id':'d'*32,'kind':'discover','state':'running','updated':stamp,
+               'payload':{'automatic':True,'fill_queue':True,'max_candidates':50,'min_grade':3,'max_usd':2},
+               'result':{'progress':{'phase':'grading','current_url':'http://new-guild.example/','accepted':7,'checked':23,'skipped':4,'target':50,'min_grade':3,'deadline':deadline,'max_usd':2,'estimated_usd':.12,'reserved_usd':.02}}}
+    capture={'id':'c'*32,'kind':'capture','state':'running','updated':stamp,'payload':{'sites':[site]},
+             'result':{'progress':{'files':2,'phase':'checking_wayback','current_url':'http://pub51.ezboard.com/bprexusdragons86545',
+               'ezboard':{'forums':7,'catalogs_total':660,'catalogs_remaining':209},
+               'completion':{'total':2,'completed':2,'remaining':0,'updated_at':stamp}}}}
+    auto={'settings':{'enabled':True,'configured':True,'daily_usd':2,'min_grade':3,'revision':1},
+          'estimated_usd':.12,'unresolved_usd':.02,'remaining_usd':1.86,'resets_at':datetime.fromtimestamp(deadline,timezone.utc).isoformat(),
+          'activity':{'phase':'discovering'},'held':0}
+    info={'discovery':discovery,'next_capture':None,'runtime':{'candidates':True,'capture':True,'indexing':True,'wayback':True},
+          'indexing':{'state':'published_waiting_index','job':{'waiting_for':['existing-full-reindex']},'error':None,'site':None},
+          'recent':[{'id':'a'*32,'label':'Automatically queued for capture','state':'automatic_promoted','at':stamp,'site':{'id':site['id'],'url':site['url']}}]}
+    workers={'candidates':discovery,'capture':capture,'indexing':None}
+    async def fixture(route):
+        if route.request.method!='GET':posts.append(route.request.url);await route.abort();return
+        if urlsplit(route.request.url).path=='/api/queue':
+            if offline:await route.fulfill(status=503,json={'error':'Fixture temporarily unavailable'});return
+            await route.fulfill(json={**snapshot,'candidates':[],'total':0,'operations':[],'workers':workers,'activity':info,'automation':auto,
+                                     'stage_counts':{'candidates':0,'queued':16,'capturing':1,'indexing':5,'saved':2,'history':9}})
+        elif urlsplit(route.request.url).path=='/api/candidate':
+            await route.fulfill(json={'candidate':site,'capture_operation':capture,'review':None})
+        else:await route.continue_()
+    await page.route('**/api/**',fixture)
+    await page.goto(base);await settled(page)
+    await expect(page.locator('#activity-candidates > summary')).to_contain_text('Grading with Luna')
+    await expect(page.locator('#activity-candidates')).to_contain_text('7/50 Grade 3+ sites · 23 checked')
+    await expect(page.locator('#activity-candidates')).to_contain_text('http://new-guild.example/')
+    await expect(page.locator('#discover')).to_be_disabled()
+    assert await page.locator('#pipeline-activity').evaluate('(el)=>!el.closest("fieldset")')
+    await page.locator('#automation-settings > summary').click()
+    await page.locator('#automation-daily').fill('5.50')
+    # The last automatic result remains available even when omitted from operations.
+    workers['candidates']=None;discovery['state']='completed';discovery['result']['progress'].update(phase='complete',stop_reason='links_exhausted')
+    auto['activity']={'phase':'links_exhausted','retry_at':auto['resets_at']}
+    await page.evaluate('refresh()');await settled(page)
+    await expect(page.locator('#activity-candidates > summary')).to_contain_text('Waiting for new links')
+    await expect(page.locator('#activity-candidates')).to_contain_text('Next discovery check in')
+    await expect(page.locator('#activity-candidates')).to_contain_text('Last run: 7/50')
+    await expect(page.locator('#automation-daily')).to_have_value('5.50')
+    await page.locator('#pipeline-recent > summary').click()
+    await expect(page.locator('#pipeline-events')).to_contain_text('Automatically queued for capture')
+    await page.evaluate('refresh()');assert await page.locator('#pipeline-recent').get_attribute('open') is not None
+    await stage(page,'queued')
+    await expect(page.locator('#activity-capture > summary')).to_contain_text('Checking archive listings')
+    await expect(page.locator('#activity-capture')).to_contain_text('451 of 660 archive listings checked · 209 left')
+    await expect(page.locator('#activity-capture')).to_contain_text('16 sites waiting')
+    await expect(page.locator('#activity-indexing > summary')).to_contain_text('Waiting for existing indexing Jobs')
+    await page.locator('#activity-capture .activity-site').focus()
+    capture['result']['progress']['files']=3
+    await page.evaluate('refresh()')
+    await expect(page.locator('#activity-capture .activity-site')).to_be_focused()
+    for theme in ('dark','light'):
+        await page.emulate_media(color_scheme=theme)
+        await safe_layout(page,width)
+        await page.locator('#pipeline-activity').screenshot(path=f'/tmp/curation-pipeline-{width}-{theme}.png')
+    await page.locator('#activity-capture .activity-site').click();await settled(page)
+    await expect(page.locator('#site-workspace')).to_be_visible()
+    await expect(page.locator('#pipeline-activity')).to_be_visible()
+    await page.locator('#activity-capture > summary').click()
+    await page.evaluate('refresh()');assert await page.locator('#activity-capture').get_attribute('open') is None
+    offline=True;await page.evaluate('refresh()')
+    await expect(page.locator('#pipeline-connection')).to_contain_text('Updates unavailable')
+    offline=False;info['runtime']['capture']=False;await page.evaluate('refresh()')
+    await expect(page.locator('#pipeline-connection')).to_contain_text('Checked')
+    await expect(page.locator('#activity-capture > summary')).to_contain_text('Worker unavailable')
+    await stage(page,'candidates');auto['activity']={'phase':'daily_budget'}
+    await page.evaluate('refresh()')
+    await expect(page.locator('#activity-candidates')).to_contain_text('Daily budget reset in')
+    await expect(page.locator('#discover')).to_be_disabled()
+    info['runtime']['wayback']=False;await page.evaluate('refresh()')
+    await expect(page.locator('#activity-candidates > summary')).to_contain_text('Wayback connection unavailable')
+    workers['capture']=None;info['runtime'].update(capture=True,wayback=True)
+    info['next_capture']={'id':site['id'],'url':site['url'],'ready':auto['resets_at']}
+    await stage(page,'queued');await page.evaluate('refresh()')
+    await expect(page.locator('#activity-capture')).to_contain_text('Next capture eligible in')
+    info['next_capture']=None;await page.evaluate('refresh()')
+    await expect(page.locator('#activity-capture > summary')).to_contain_text('Queued sites need attention')
+    assert not errors,errors
+    assert not posts,posts
+    await context.close()
+
+
 async def check(base):
     async with async_playwright() as playwright:
         browser=await playwright.chromium.launch()
         try:
             for width in (320,390,430,768,1280):
+                await pipeline_activity_flow(browser,base,width)
                 await continuous_mode_flow(browser,base,width)
                 await theme_flow(browser,base,width)
                 await regenerate_capture_flow(browser,base,width)

@@ -177,16 +177,19 @@ async function refresh(navigated=false,reportErrors=false) {
       return refresh(true);
     }
     delete $('error').dataset.dismissed;
+    activityReceived=Date.now();activityDisconnected=false;
     data=listing;detail=context;renderShell();renderList();renderWorkspace();renderDock();renderTools();
     $('version').textContent=`Build ${data.version}`;
     $('status').textContent=`${names[route.view]}: ${data.total} sites. ${detail ? statusLabel(detail.candidate) : ''}`;
     if (navigated) restorePosition();
   } catch (error) {
     if (error.name==='AbortError' || token!==generation) return;
+    activityDisconnected=true;updateActivityClocks();
     notification('error',error.message,navigated || reportErrors);
   }
 }
 function renderShell() {
+  renderPipelineActivity();
   renderDiscovery();
 
   renderSpending();
@@ -949,8 +952,9 @@ function renderDiscovery() {
   renderDiscoveryProgress();renderManualResult();
 }
 function renderDiscoveryProgress() {
-  const operation=data?.operations.find(op=>op.kind==='discover' && op.payload.fill_queue);
+  const operation=data?.activity?.discovery?.payload.fill_queue ? data.activity.discovery : data?.operations.find(op=>op.kind==='discover' && op.payload.fill_queue);
   const progress=operation?.result?.progress,box=$('discovery-progress');box.hidden=!progress;
+  if (data?.automation?.settings.enabled) box.hidden=true;
   if (!progress) return;
   $('discovery-meter').max=progress.target;$('discovery-meter').value=progress.accepted;
   const phases={finding_links:'Finding linked sites',resolving_ezboard:'Identifying the parent Ezboard',checking_coverage:'Checking archive coverage',sampling:'Reading Wayback samples',grading:'Grading with Luna',paused:'Paused'};
@@ -1007,6 +1011,128 @@ function renderTools() {
   });
   $('operations').replaceChildren(...operations);
 }
+let activityReceived=0,activityDisconnected=false,activityView=null;
+const discoveryPhases={finding_links:'Finding linked sites',resolving_ezboard:'Identifying the parent Ezboard',checking_coverage:'Checking archive coverage',coverage:'Checking archive coverage',sampling:'Reading Wayback samples',grading:'Grading with Luna',paused:'Paused'};
+const discoveryStops={target_reached:'Target reached',time_limit:'One-hour limit reached',spend_limit:'Run spending limit reached',links_exhausted:'No new links remain in this run'};
+function activitySite(host,site) {
+  if (!site?.id) return;
+  const link=node('a',site.url || 'Open site','activity-site');link.href=`/?view=candidates&candidate=${encodeURIComponent(site.id)}`;
+  link.addEventListener('click',event=>{event.preventDefault();openSite(site.id);});host.append(link);
+}
+function activityDeadline(host,stamp,prefix) {
+  const text=node('p',undefined,'meta');text.dataset.activityDeadline=stamp;text.dataset.prefix=prefix;host.append(text);
+}
+function activityAge(host,stamp) {
+  const text=node('p',undefined,'meta');text.dataset.activityUpdated=stamp;host.append(text);
+}
+function updateActivityClocks() {
+  const age=activityReceived ? Math.max(0,Math.floor((Date.now()-activityReceived)/1000)) : null;
+  const connection=$('pipeline-connection');
+  connection.dataset.stale=String(activityDisconnected || age>20);
+  connection.textContent=activityDisconnected ? `Updates unavailable. ${age===null ? 'No worker status received.' : `Showing the last snapshot from ${age}s ago.`} Retrying every 5 seconds while visible.` : age===null ? 'Connecting to workers…' : `${age>20 ? 'Status may be stale. ' : ''}Checked ${age}s ago · refreshes every 5 seconds while visible`;
+  for (const text of document.querySelectorAll('[data-activity-deadline]')) {
+    const seconds=Math.max(0,Math.ceil((Date.parse(text.dataset.activityDeadline)-Date.now())/1000));
+    text.textContent=seconds>0 ? `${text.dataset.prefix} in ${Math.floor(seconds/60)}m ${seconds%60}s (${new Date(text.dataset.activityDeadline).toLocaleTimeString()}).` : `${text.dataset.prefix} is due; waiting for the worker’s next check.`;
+  }
+  for (const text of document.querySelectorAll('[data-activity-updated]')) {
+    const seconds=Math.max(0,Math.floor((Date.now()-Date.parse(text.dataset.activityUpdated))/1000));
+    text.textContent=Number.isFinite(seconds) ? `Last worker update ${seconds<60 ? `${seconds}s` : `${Math.floor(seconds/60)}m`} ago${seconds>=60 ? '; no newer progress reported' : ''}.` : 'Waiting for the first worker update.';
+  }
+}
+function renderPipelineActivity() {
+  if (!data) return;
+  const info=data.activity || {},auto=data.automation,enabled=Boolean(auto?.settings.enabled);
+  $('pipeline-mode').textContent=enabled ? 'Automatic on' : 'Manual discovery';
+  const selected={candidates:'candidates',queued:'capture',capturing:'capture',indexing:'indexing'}[route.view];
+  // Retirement can change a reader's stage in the background. Keep its panel
+  // geometry (and Back positions); default expansion only on list navigation.
+  const laneChanged=activityView===null || activityView!==route.view && !route.candidate;activityView=route.view;
+  const discovery=activeOperation('candidates'),capture=activeOperation('capture'),publication=activeOperation('indexing');
+  for (const [lane,title] of [['candidates','Discovery'],['capture','Capture'],['indexing','Indexing']]) {
+    let card=$(`activity-${lane}`);
+    if (!card) {
+      card=node('details',undefined,'activity-worker');card.id=`activity-${lane}`;
+      card.append(node('summary'),node('div',undefined,'activity-body'));$('pipeline-workers').append(card);
+    }
+    if (laneChanged) card.open=selected===lane;
+    const signature=JSON.stringify([lane==='candidates' ? [discovery,info.discovery,auto] : lane==='capture' ? [capture,info.next_capture,data.capture_attention,data.capture_queue_error] : [publication,info.indexing,auto?.resets_at],info.runtime,data.stage_counts]);
+    if (card.dataset.signature===signature) continue;card.dataset.signature=signature;
+    const body=node('div',undefined,'activity-body');let status='',tone='idle';
+    if (lane==='candidates') {
+      const latest=discovery || info.discovery,progress=latest?.result?.progress,phase=auto?.activity?.phase;
+      if (discovery) {
+        status=discovery.state==='queued' ? 'Queued to start' : discoveryPhases[progress?.phase || discovery.result?.phase] || (discovery.kind==='candidate_check' ? 'Checking a site' : 'Discovering sites');tone='running';
+        activitySite(body,info.discovery?.id===discovery.id ? info.discovery.site : discovery.payload?.target);
+        if (progress?.current_url) body.append(node('p',progress.current_url,'address'));
+        body.append(node('p','Wayback requests take turns with captures; Luna grading runs independently.','meta'));
+        activityAge(body,discovery.updated);
+      } else if (enabled) {
+        if (phase==='daily_budget') {
+          status='Waiting for daily Luna funds';tone='waiting';
+          body.append(node('p',`$${Number(auto.remaining_usd).toFixed(4)} remaining today. Saved work resumes automatically when funded.`));
+          activityDeadline(body,auto.resets_at,'Daily budget reset');
+          if (auto.activity.required_usd>auto.settings.daily_usd) body.append(node('p','The next request exceeds the daily limit. Raise the limit in automatic settings to continue.','activity-warning'));
+        } else if (phase==='links_exhausted' || phase==='retry_wait') {
+          status=phase==='links_exhausted' ? 'Waiting for new links' : 'Waiting to retry';tone='waiting';
+          body.append(node('p',phase==='links_exhausted' ? 'All currently available new links have been checked. New captures can supply more links; remembered sites are kept.' : auto.activity.error || 'Saved progress is retained.'));
+          activityDeadline(body,auto.activity.retry_at,'Next discovery check');
+        } else if (phase==='attention') {status='Needs attention';tone='attention';body.append(node('p',auto.activity.error || 'Automatic scheduling is paused.','activity-warning'));}
+        else {status='Waiting for next automatic check';tone='waiting';body.append(node('p','The worker checks for eligible sites and new links every 10 seconds.'));}
+      } else {status='Ready for manual discovery';body.append(node('p','Use Discover & grade or Add a site in Candidates. Approved capture and indexing work continues.'));}
+      if (progress) {
+        body.append(node('p',`${discovery ? 'This run' : 'Last run'}: ${progress.accepted}/${progress.target} Grade ${progress.min_grade ?? auto?.settings.min_grade ?? 2}+ sites · ${progress.checked} checked · ${progress.skipped || 0} skipped.`,'activity-counts'));
+        if (discovery) {const bar=node('progress');bar.max=progress.target || 50;bar.value=progress.accepted || 0;bar.setAttribute('aria-label','Discovery qualifying sites');body.append(bar);}
+        body.append(node('p',`${discoveryStops[progress.stop_reason] || ''}${progress.stop_reason ? '. ' : ''}Luna: ${usd(progress.estimated_usd || 0)} estimated + ${usd(progress.reserved_usd || 0)} reserved${progress.max_usd ? ` of $${progress.max_usd}` : ''}.`,'meta'));
+        if (discovery && progress.deadline) activityDeadline(body,new Date(progress.deadline*1000).toISOString(),'Run deadline');
+        if (!discovery && latest.updated) body.append(node('p',`Last run updated ${new Date(latest.updated).toLocaleString()}.`,'meta'));
+      }
+      if (!discovery && latest?.state==='interrupted') {body.append(node('p',`Last check paused: ${latest.error || 'Saved progress needs an explicit resume.'}`,'activity-warning'));activitySite(body,latest.site);}
+    } else if (lane==='capture') {
+      const waiting=data.stage_counts.queued || 0,next=info.next_capture,attention=data.capture_attention || {};
+      if (capture) {
+        status=capture.state==='queued' ? 'Starting capture' : capture.result?.progress?.phase==='checking_wayback' ? 'Checking archive listings' : 'Capture running';tone='running';
+        if (Number.isInteger(capture.result?.progress?.files)) status+=` · ${capture.result.progress.files.toLocaleString()} files saved`;
+        const site=capture.payload?.sites?.find(site=>site.url===capture.result?.progress?.site_url) || capture.payload?.sites?.[0];
+        activitySite(body,site);body.append(captureMeter(capture,true));
+        body.append(node('p',`${waiting} sites waiting. The next eligible site starts after this capture finishes or pauses.`, 'meta'));
+      } else if (data.capture_queue_error) {status='Queue needs attention';tone='attention';body.append(node('p',data.capture_queue_error,'activity-warning'));}
+      else if (next) {status='Waiting to start next site';tone='waiting';activitySite(body,next);activityDeadline(body,next.ready,'Next capture eligible');}
+      else if (waiting) {status='Queued sites need attention';tone='attention';body.append(node('p','No queued site is eligible to start. Open its entry to resolve the approval or preparation error.'));}
+      else {status='No sites waiting';body.append(node('p','Approved sites enter the queue. Failed captures need an explicit Resume; other sites continue.'));}
+      if (attention.interrupted || attention.preflight) body.append(node('p',`${attention.interrupted || 0} paused captures · ${attention.preflight || 0} approval errors. These sites wait for your decision while eligible sites continue.`,'activity-warning'));
+    } else {
+      const index=info.indexing;
+      if (publication) {status='Publishing archive files';tone='running';body.append(node('p','Git publication can take several minutes. Capture and discovery continue.'));activityAge(body,publication.updated);}
+      else if (index) {
+        status=labels[index.state] || 'Preparing indexing';tone=index.state==='indexing' ? 'running' : 'waiting';
+        activitySite(body,index.site);
+        if (index.job?.waiting_for?.length) {status='Waiting for existing indexing Jobs';body.append(node('p',`Waiting for: ${index.job.waiting_for.join(', ')}`,'address'));}
+        else if (index.state==='index_budget_waiting') activityDeadline(body,auto?.resets_at || index.job?.retry_at,'Daily budget reset');
+        else body.append(node('p',index.state==='indexing' ? 'AI enrichment and import are running. Completed sites retire to History.' : 'The indexing worker checks approved work every 10 seconds.'));
+        if (index.job?.name) body.append(node('p',`Job: ${index.job.name}`,'address'));
+        if (index.error) {tone='attention';body.append(node('p',index.error,'activity-warning'));}
+      } else if (data.stage_counts.indexing) {status='Sites need attention';tone='attention';body.append(node('p',`${data.stage_counts.indexing} sites remain in Indexing. Open their entries for the saved error and retry options.`));}
+      else {status='No sites waiting';body.append(node('p','Completed captures publish and index automatically.'));}
+    }
+    if (info.runtime?.[lane]===false || lane!=='indexing' && info.runtime?.wayback===false) {
+      status=info.runtime?.[lane]===false ? 'Worker unavailable' : 'Wayback connection unavailable';tone='attention';
+      body.prepend(node('p','Saved progress is retained. The service needs to recover before this work can continue.','activity-warning'));
+    }
+    const summary=card.querySelector('summary');summary.replaceChildren(node('strong',title),node('span',status,'activity-state'));card.dataset.tone=tone;
+    const focusedSite=card.querySelector('.activity-site')===document.activeElement;
+    card.querySelector('.activity-body').replaceWith(body);
+    if (focusedSite) body.querySelector('.activity-site')?.focus({preventScroll:true});
+  }
+  const recent=info.recent || [],signature=JSON.stringify(recent),list=$('pipeline-events');
+  if (list.dataset.signature!==signature) {
+    list.dataset.signature=signature;list.replaceChildren();
+    $('pipeline-recent').querySelector('summary').textContent=recent.length ? `Recent activity · ${recent[0].label}` : 'Recent activity';
+    for (const event of recent) {const item=node('li');item.append(node('strong',event.label),node('time',new Date(event.at).toLocaleString()));activitySite(item,event.site);if(event.error) item.append(node('p',event.error,'activity-warning'));list.append(item);}
+    if (!recent.length) list.append(node('li','No completed activity recorded yet. Current work is shown above.'));
+  }
+  updateActivityClocks();
+}
+
 let automationDraft=null,automationDirty=false;
 try {const saved=JSON.parse(localStorage.getItem('curation-automatic-draft'));if (saved && typeof saved.enabled==='boolean' && Number.isInteger(saved.revision)) {automationDraft=saved;automationDirty=true;}} catch (_) {}
 function automaticFields(value) {
@@ -1110,4 +1236,4 @@ window.addEventListener('pointerdown',event=>{if (!event.isPrimary) activeSwipe?
 new ResizeObserver(measureDock).observe($('action-dock'));
 renderShell();writeRoute(true);refresh(true);
 setInterval(()=>{if (!busy && !document.hidden) refresh();},5000);
-setInterval(()=>{updateCountdown();updateCaptureEta();updateCaptureActivity();},1000);
+setInterval(()=>{updateCountdown();updateCaptureEta();updateCaptureActivity();updateActivityClocks();},1000);

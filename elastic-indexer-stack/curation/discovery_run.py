@@ -119,6 +119,8 @@ def fill(root, operation, store):
         nonlocal snapshot
         spending = store.db.execute('SELECT COALESCE(SUM(actual),0),COALESCE(SUM(reserved),0) FROM attempts').fetchone()
         snapshot = {'phase': phase, 'stop_reason': reason, 'target': payload['max_candidates'],
+                    'current_url': row['url'] if row is not None and row['id'] not in checkpoint['done']
+                        and phase in ('checking_coverage', 'sampling', 'grading', 'paused') else None,
                     'min_grade': minimum, 'accepted': len(checkpoint['accepted']), 'checked': len(checkpoint['done']),
                     'skipped': len(checkpoint['skipped']), 'started_at': checkpoint['started_at'],
                     'deadline': checkpoint['deadline'], 'remaining_seconds': max(0, checkpoint['deadline'] - time.time()),
