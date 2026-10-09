@@ -26,18 +26,20 @@ def archive(tmp_path, files):
     return repo
 
 
-def test_existing_approved_mythiran_is_removed_from_recommendations_and_cannot_capture_or_publish(tmp_path,monkeypatch):
+@pytest.mark.parametrize('archive_host', ['mythiran.com', 'www.mythiran.com:80', 'mythiran.com:443',
+                                         'www.mythiran.com_80', 'mythiran.com_443'])
+def test_existing_approved_mythiran_is_removed_from_recommendations_and_cannot_capture_or_publish(tmp_path,monkeypatch,archive_host):
     root=tmp_path/'state'
     row=add_candidate(root,url='http://www.mythiran.com/')
     decision={'id':row['id'],'manifest_sha256':row['manifest_sha256'],'decision':'approve'}
     with connect(root) as store: apply_decisions(store,[decision])
-    repo=archive(tmp_path,['mythiran.com/19990918084825/research/spells.html'])
+    repo=archive(tmp_path,[archive_host+'/19990918084825/research/spells.html'])
     monkeypatch.setenv('ARCHIVE_REPO',str(repo))
     app=create_app(root,start_worker=False)
     assert call(app,'GET','/api/queue').json()['total']==0
     current=call(app,'GET','/api/queue?filter=all').json()['candidates'][0]
     assert current['state']=='already_archived' and current['decision']['decision']=='approve'
-    assert current['coverage']['site_check']['archive_path']=='websites/mythiran.com'
+    assert current['coverage']['site_check']['archive_path']=='websites/'+archive_host
     assert call(app,'POST','/api/decisions',[decision]).status_code==409
     assert call(app,'POST','/api/capture',{'ids':[row['id']]}).status_code==409
     manifest=manifest_for(row)

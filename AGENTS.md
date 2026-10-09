@@ -230,7 +230,10 @@ shortlists and one-site manual checks retain their original bounds.
 
 Exclude already archived website/account scopes independently of capped page
 inventories. Keep shared-host accounts distinct, preserve source URL identity,
-and block approval/publication when coverage is unverified. Rechecks use bounded
+and recognize bare/www plus literal `:80`/`:443` and legacy `_80`/`_443` archive
+folders during duplicate checks. Keep nondefault ports separate and invalidate
+cached coverage when alias semantics change. Block approval/publication when
+coverage is unverified. Rechecks use bounded
 local Git metadata and resume without automatic fetches or archive walks.
 Coverage rechecks must expose incomplete results, their pause reason and saved
 snapshot progress; a successful HTTP request is not verified coverage. Use the

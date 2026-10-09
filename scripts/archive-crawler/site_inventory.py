@@ -7,7 +7,8 @@ from urllib.parse import unquote_plus, urlsplit
 
 from common import CrawlError, original_url, site_identity, site_scope, tier, within_scope
 
-VERSION = 1
+# Earlier results omitted literal default-port folders such as example.com:80.
+VERSION = 2
 
 
 class InventoryPause(CrawlError):
@@ -95,8 +96,12 @@ class SiteInventory:
             return cached
         parsed = urlsplit(site_scope(url))
         names = (parsed.netloc, parsed.netloc.removeprefix('www.'), 'www.' + parsed.netloc.removeprefix('www.'))
+        # The archive contains both literal ports and old downloader underscore
+        # encodings. Scheme/default-port normalization must not hide either.
+        # An explicit nondefault port still denotes a separate site.
         aliases = dict.fromkeys(alias for name in names for alias in
-                                (name, name.replace(':', '_'), name + '_80', name + '_443'))
+                                ((name, name.replace(':', '_')) if parsed.port is not None else
+                                 (name, name + ':80', name + ':443', name + '_80', name + '_443')))
         matches = [self.hosts[alias] for alias in aliases if alias in self.hosts]
         matches.sort(key=lambda row: row['host'])
         result = {'status': 'new_site', 'archive_sha': self.archive.sha, 'identity_basis': 'site_account',

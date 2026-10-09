@@ -370,8 +370,9 @@ Website/account duplicate checks use the Git host list and targeted tree
 metadata independently of the capped page inventory. Known ordinary hosts are
 excluded even when their linked page is absent or unenumerated. Shared hosts
 are checked by account, preserving unrelated accounts. Discovery treats `www`,
-protocol and default-port variants as site aliases; source URLs, capture identity
-and published paths remain exact. No page blobs or checkout walks are needed.
+protocol and default-port variants as site aliases, including archive folders
+ending in `:80`, `:443`, `_80` or `_443`. Nondefault ports remain distinct. Source
+URLs, capture identity and published paths remain exact. No page blobs or checkout walks are needed.
 
 The queue rechecks old candidates, retains their sources/judgments/decision
 history and moves confirmed duplicates to **already archived**. They remain
