@@ -209,13 +209,15 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
         def report(phase, url=None):
             if progress:
                 counts = {row['state']: row['n'] for row in db.execute('SELECT state,COUNT(*) n FROM full_records GROUP BY state')}
+                catalogs = db.execute('SELECT COUNT(*),COALESCE(SUM(done),0) FROM full_queries').fetchone()
                 size = db.execute("SELECT COALESCE(SUM(json_extract(capture,'$.bytes')),0) FROM full_records WHERE state='captured'").fetchone()[0]
                 progress({'phase': phase, 'files': counts.get('captured', 0), 'bytes': size,
                           'versions_found': sum(counts.values()), 'versions_pending': counts.get('pending', 0),
                           'unavailable': counts.get('unavailable', 0),
                           'failed_lookups': db.execute('SELECT COUNT(*) FROM full_queries WHERE note IS NOT NULL').fetchone()[0],
                           'excluded_urls': db.execute('SELECT COUNT(*) FROM full_exclusions').fetchone()[0],
-                          'catalogs_pending': db.execute('SELECT COUNT(*) FROM full_queries WHERE done=0').fetchone()[0],
+                          'catalogs_total': catalogs[0], 'catalogs_completed': catalogs[1],
+                          'catalogs_pending': catalogs[0] - catalogs[1],
                           'urls_checked': counts.get('captured', 0) + counts.get('unavailable', 0) + counts.get('excluded', 0),
                           'sites_total': len(sites), 'sites_done': len(sites) if phase == 'ready_for_review' else 0,
                           'site_url': sites[0]['url'], 'current_url': url, 'capture_window': dict(CAPTURE_WINDOW),

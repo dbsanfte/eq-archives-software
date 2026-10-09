@@ -267,6 +267,12 @@ details p { font-size:13px; }
 progress { width:100%; display:block; margin:18px 0; accent-color:var(--forest); }
 .capture-meter { margin:16px 0; padding:16px; border:1px solid var(--line); border-radius:12px; background:var(--soft); }
 .capture-meter .capture-remaining { margin:0 0 8px; font-size:1.35rem; font-weight:750; color:var(--forest); }
+.capture-meter .capture-phase { margin:0 0 8px; color:var(--forest); font-weight:750; font-size:1rem; }
+.capture-meter .capture-saved { margin:0 0 14px; font-size:.9rem; font-variant-numeric:tabular-nums; }
+.capture-meter .capture-query { margin:12px 0 0; font-size:.85rem; font-weight:650; }
+.capture-meter .capture-url-label { margin:12px 0 3px; font-size:.75rem; color:var(--muted); }
+.capture-meter .capture-url { margin:0; font-size:.85rem; overflow-wrap:anywhere; font-weight:500; }
+.capture-meter .capture-updated { margin:12px 0; font-size:.8rem; color:var(--muted); }
 .capture-meter .capture-fraction { margin:0; font-size:.9rem; font-variant-numeric:tabular-nums; }
 .capture-meter progress { height:16px; margin:12px 0; }
 .capture-meter .capture-eta { margin:0; font-weight:650; font-variant-numeric:tabular-nums; }
