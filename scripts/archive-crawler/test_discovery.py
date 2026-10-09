@@ -184,6 +184,51 @@ class DiscoveryTests(unittest.TestCase):
             self.assertEqual(inventory.check('http://server3.ezboard.com/botherguild.html')['status'],'new_site')
         self.assertFalse(self.store.db.execute('SELECT * FROM files').fetchone())
 
+    def test_www_and_default_port_archive_folders_block_duplicate_sites(self):
+        folders = []
+        for index, suffix in enumerate(('', ':80', ':443', '_80', '_443')):
+            for prefix in ('', 'www.'):
+                host = f'{prefix}guild{index}-{bool(prefix)}.example{suffix}'.lower()
+                self.file(host, '20000101000000', 'deep/guide.html', 'EQ guild')
+                folders.append((host, f'guild{index}-{bool(prefix)}.example'.lower()))
+        self.commit()
+        inventory = SiteInventory(Archive(self.repo, self.store, max_inventory=0))
+        with patch.object(Archive, 'files', side_effect=AssertionError('No recursive page inventory')), \
+                patch.object(SiteInventory, 'tree', side_effect=AssertionError('Host metadata suffices')):
+            for folder, host in folders:
+                for scheme, port in (('http', ''), ('http', ':80'), ('https', ''), ('https', ':443')):
+                    for prefix in ('', 'www.'):
+                        with self.subTest(folder=folder, scheme=scheme, port=port, prefix=prefix):
+                            result = inventory.check(f'{scheme}://{prefix}{host}{port}/other/page.html')
+                            self.assertEqual(result['status'], 'already_archived')
+                            self.assertEqual(result['archive_path'], 'websites/' + folder)
+
+    def test_literal_port_account_checks_keep_accounts_and_nondefault_ports_distinct(self):
+        self.file('www.geocities.com:80', '20000101000000', 'alice/eq/index.html', 'EQ guild')
+        self.file('custom.example:8080', '20000101000000', 'index.html', 'EQ guild')
+        self.file('legacy.example_8080', '20000101000000', 'index.html', 'EQ guild')
+        self.commit()
+        inventory = SiteInventory(Archive(self.repo, self.store, max_inventory=0))
+        self.assertEqual(inventory.check('https://geocities.com/alice/eq/')['status'], 'already_archived')
+        self.assertEqual(inventory.check('http://www.geocities.com/bob/')['status'], 'new_site')
+        for host in ('custom.example', 'legacy.example'):
+            self.assertEqual(inventory.check(f'http://www.{host}/')['status'], 'new_site')
+            self.assertEqual(inventory.check(f'http://www.{host}:8080/')['status'], 'already_archived')
+            self.assertEqual(inventory.check(f'http://www.{host}:8081/')['status'], 'new_site')
+        self.assertEqual(inventory.check('http://geocities.com:8080/alice/')['status'], 'new_site')
+
+    def test_port_alias_fix_rechecks_previously_cached_new_sites(self):
+        from common import site_identity
+        self.file('www.guild.example:80', '20000101000000', 'index.html', 'EQ guild')
+        self.commit()
+        archive = Archive(self.repo, self.store)
+        url = 'https://guild.example/'
+        old_cache = 'site_inventory:' + repr((1, archive.sha, site_identity(url)))
+        self.store.set(old_cache, {'status': 'new_site', 'complete': True})
+        result = SiteInventory(archive).check(url)
+        self.assertEqual(result['status'], 'already_archived')
+        self.assertEqual(result['archive_path'], 'websites/www.guild.example:80')
+
     def test_missing_shared_metadata_or_budget_is_unverified_and_never_fetches(self):
         self.file('geocities.com','20000101000000','alice/index.html','EQ guild')
         self.commit()

@@ -138,7 +138,8 @@ persists with the work directory, including older cached tree versions.
 
 Website/account novelty is checked separately from that capped page inventory.
 Existing ordinary hosts are excluded before sampling/grading, including `www`
-and default-port aliases. Shared hosts use targeted account-tree probes. Missing
+and default-port aliases stored as literal `:80`/`:443` or legacy `_80`/`_443`
+folders. Nondefault ports remain distinct. Shared hosts use targeted account-tree probes. Missing
 or budget-limited metadata never establishes absence and is excluded from new
 discovery runs. The production review queue blocks these unverified entries and
 provides a bounded resumable recheck. These checks read Git trees only, without

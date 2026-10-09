@@ -14,6 +14,10 @@ Legacy finder/worker/broad reindex Jobs retain their separate lifecycles.
 
 ## Review flow
 
+Use the light/dark toggle in the header to change the entire portal, including
+source readers and dialogs. It initially follows the device's appearance and
+remembers an explicit choice in this browser across visits.
+
 1. Review Luna's grade, reason, verbatim evidence and complete extracted source.
    Archived scripts, HTML and images never execute in this screen.
 2. Choose scope and **Approve site for capture**. This queues the site automatically,
@@ -47,6 +51,10 @@ Legacy finder/worker/broad reindex Jobs retain their separate lifecycles.
    orphan pages, images, CSS, scripts and downloads, using the pinned downloader
    with a serial persistent client. Supporting files referenced by HTML/CSS are
    checked at their exact URLs, including on external asset hosts.
+   Individual file replays returning HTTP 403/404/410, and those responses from
+   exact supporting-file lookups, become visible coverage gaps while the rest
+   continues. Failure to inventory the approved site, service/rate-limit errors,
+   and transport/storage limits still pause acquisition with its checkpoint.
 4. Completed items move into **Review capture**, newest first. Open a site to browse
    its captured pages and dated Wayback links, including
    complete extracted source and multiple versions of the same page.
@@ -59,6 +67,12 @@ Legacy finder/worker/broad reindex Jobs retain their separate lifecycles.
    Publication can be queued during another capture; the serial worker publishes
    it before claiming another capture batch, so a large capture queue cannot
    prevent publication of already reviewed files.
+   For a completed ordinary site with gaps, **Retry failed files** queues only
+   missing versions and supporting-file lookups, retaining every successful file.
+   **Undo file retry** returns its unchanged review until the worker starts.
+   Retries copy private SQLite catalog metadata, retain cumulative transport
+   usage, and produce a new review without publishing or indexing anything.
+   Prior manifests stay immutable; successful catalogs are not requested again.
 5. Publication makes one fast-forward archive commit per approved site, including
    `crawl-manifests/<batch-id>.json`. Import waits for every other unfinished,
    unsuspended Job in `eqarchives-es`, including pending/retrying Jobs with
@@ -356,8 +370,9 @@ Website/account duplicate checks use the Git host list and targeted tree
 metadata independently of the capped page inventory. Known ordinary hosts are
 excluded even when their linked page is absent or unenumerated. Shared hosts
 are checked by account, preserving unrelated accounts. Discovery treats `www`,
-protocol and default-port variants as site aliases; source URLs, capture identity
-and published paths remain exact. No page blobs or checkout walks are needed.
+protocol and default-port variants as site aliases, including archive folders
+ending in `:80`, `:443`, `_80` or `_443`. Nondefault ports remain distinct. Source
+URLs, capture identity and published paths remain exact. No page blobs or checkout walks are needed.
 
 The queue rechecks old candidates, retains their sources/judgments/decision
 history and moves confirmed duplicates to **already archived**. They remain

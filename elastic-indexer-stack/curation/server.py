@@ -117,7 +117,7 @@ def create_app(root=None, origin=None, start_worker=True):
 
     def asset(request):
         filename = request.path_params["name"]
-        if filename not in ("review.js", "review.css"):
+        if filename not in ("review.js", "review.css", "theme.js"):
             return PlainTextResponse("Not found", status_code=404)
         return FileResponse(STATIC / filename, media_type="text/javascript" if filename.endswith("js") else "text/css")
 

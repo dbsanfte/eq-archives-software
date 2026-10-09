@@ -230,7 +230,10 @@ shortlists and one-site manual checks retain their original bounds.
 
 Exclude already archived website/account scopes independently of capped page
 inventories. Keep shared-host accounts distinct, preserve source URL identity,
-and block approval/publication when coverage is unverified. Rechecks use bounded
+and recognize bare/www plus literal `:80`/`:443` and legacy `_80`/`_443` archive
+folders during duplicate checks. Keep nondefault ports separate and invalidate
+cached coverage when alias semantics change. Block approval/publication when
+coverage is unverified. Rechecks use bounded
 local Git metadata and resume without automatic fetches or archive walks.
 Coverage rechecks must expose incomplete results, their pause reason and saved
 snapshot progress; a successful HTTP request is not verified coverage. Use the
@@ -266,6 +269,10 @@ enrichment cap. Never partially approve a stale snapshot. Dismiss all retains
 sources in History with atomic Undo that rejects intervening decisions.
 Keep publication status and explicit retry on the affected site. Preserve the
 selected view/site across reloads and the open source page during status updates.
+The header light/dark toggle follows the device initially and persists an explicit
+browser choice. Theme changes never call an action API or disturb drafts/readers.
+Apply the palette before first paint without relaxing the CSP. Check both themes,
+text contrast and touch targets in real mobile and desktop Chromium.
 Design for phones first: bottom stage navigation, compact site lists, focused site
 workspaces and a reachable action bar. Confirmed capture approval returns to the
 Candidates list, retaining search/pagination/position without an approval popup.
@@ -360,7 +367,14 @@ references can add exact supporting-file URLs, including external assets, withou
 crawling their hosts. Whole-board engines retain ownership checks and collect
 verified supporting files afterward. A transport/storage/ownership bound keeps
 new work paused in Capturing; only exhausted catalogs and pending records reach
-Review, with missing/substituted replays explicitly listed as gaps. Explicit resume
+Review, with missing/substituted replays explicitly listed as gaps. Individual
+file HTTP 403/404/410 responses and exact supporting-file lookup failures are
+durable gaps that do not block other files. Primary scope inventory failures and
+service/rate-limit errors still pause. Completed ordinary sites offer Retry failed
+files: queue only missing versions/lookups, copy private checkpoint metadata,
+reuse successful sources, keep usage cumulative and previous reviews immutable.
+Undo remains available until claiming; stale or published reviews cannot retry.
+Explicit resume
 may extend exhausted capture transport allowances without resetting cumulative
 usage, paid limits or discovery deadlines. Retain all already claimed legacy work,
 reviewed/published manifests and saved operator policies. Unapproved ordinary-site

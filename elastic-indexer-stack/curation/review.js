@@ -211,9 +211,9 @@ function renderList() {
       const bottom=node('div',undefined,'tile-bottom');bottom.append(node('span',row.rating?.category?.replaceAll('_',' ') || 'Website'),node('span','Open site →','open-label'));item.append(bottom);
       if (row.stage==='queued') {
         const card=node('article',undefined,'queue-card');
-        const continuing=Boolean(capture?.continuation);
-        const undo=mutation(continuing ? 'Undo regeneration' : 'Undo approval',()=>undoApproval(row),continuing ? 'Regeneration cancelled. Original capture returned to Review.' : 'Returned to Candidates.');
-        undo.setAttribute('aria-label',`${continuing ? 'Undo regeneration' : 'Undo approval'}: ${siteName(row)}`);
+        const continuing=Boolean(capture?.continuation),label=undoCaptureLabel(row);
+        const undo=mutation(label,()=>undoApproval(row),continuing ? 'Capture retry cancelled. Original capture returned to Review.' : 'Returned to Candidates.');
+        undo.setAttribute('aria-label',`${label}: ${siteName(row)}`);
         card.append(item,undo);return card;
       }
       return row.stage==='candidates' ? candidateCard(row,item) : item;
@@ -560,7 +560,7 @@ function captureSummary(row,review) {
   const window=review?.manifest.capture_window,coverage=review?.manifest.capture_coverage?.[row.id];
   if (window) box.append(node('p',`Requested window: ${captureDate(window.from).slice(0,10)} to ${captureDate(window.to).slice(0,10)} · all available dated versions`,'meta'));
   if (coverage) box.append(node('p',coverage.reason,coverage.state==='complete' ? 'meta' : 'candidate-block'));
-  box.append(node('p',review?.manifest.capture_policy==='complete-files-v1' ? 'The complete available file inventory was checked. Missing Wayback replays are listed as coverage gaps.' : 'This is a legacy bounded capture of the chosen scope. It may contain only part of the original site.','meta'));
+  box.append(node('p',review?.manifest.capture_policy==='complete-files-v1' ? 'The site inventory was processed. Unavailable files and failed supporting-file lookups are listed as coverage gaps.' : 'This is a legacy bounded capture of the chosen scope. It may contain only part of the original site.','meta'));
   if (review?.manifest.sitepowerup) {
     const board=review.manifest.sitepowerup;
     box.append(node('p',`SitePowerUp BoardID ${board.board} · ${board.coverage.catalogs_remaining} catalog queries remaining · ${board.coverage.reason}`,'meta'));
@@ -576,6 +576,15 @@ function captureSummary(row,review) {
   if (files) box.append(control(`Browse ${files} supporting ${files===1 ? 'file' : 'files'}`,()=>go({panel:'pages',page:0,slot:0,filetype:'files'}),'wide'));
   return box;
 }
+function undoCaptureLabel(row) {
+  const continuation=row.coverage?.capture?.continuation;
+  return continuation?.mode==='retry_failed' ? 'Undo file retry' : continuation ? 'Undo regeneration' : 'Undo approval';
+}
+function canRetryFiles(review) {
+  const manifest=review?.manifest,retry=manifest?.capture_retry;
+  return manifest?.capture_policy==='complete-files-v1' && manifest.sites.length===1 &&
+    ['page','directory','site','custom'].includes(manifest.sites[0].scope_mode) && (retry?.files || retry?.lookups);
+}
 function needsRegeneration(review) {
   const manifest=review?.manifest,site=manifest?.sites?.[0];
   return Boolean(manifest && manifest.capture_policy!=='complete-files-v1' && manifest.sites.length===1 &&
@@ -590,7 +599,13 @@ function renderCaptureReview(root,row,review) {
   if (review.manifest.notes?.length) {
     const notes=panel('Capture coverage',`${review.manifest.notes.length} coverage notes. Check these before approving indexing.`,'attention');
     const list=node('details');list.append(node('summary','Read coverage notes'));
-    for (const note of review.manifest.notes) list.append(node('p',`${note.url}${note.timestamp || note.stamp ? ` (${captureDate(note.timestamp || note.stamp)})` : ''}: ${note.note || note.reason}`));notes.append(list);root.append(notes);
+    for (const note of review.manifest.notes) list.append(node('p',`${note.url}${note.timestamp || note.stamp ? ` (${captureDate(note.timestamp || note.stamp)})` : ''}: ${note.note || note.reason}`));notes.append(list);
+    if (canRetryFiles(review)) {
+      const retry=review.manifest.capture_retry;
+      notes.append(node('p',`${retry.files} file versions and ${retry.lookups} supporting-file lookups can be retried. Saved files are reused. The site returns to the capture queue, with Undo until it starts; review it again when the retry finishes.`));
+      notes.append(mutation('Retry failed files',()=>request('/api/continue-capture',{id:review.id,manifest_sha256:review.manifest_sha256}),'Failed files queued for retry. Saved captures are retained.'));
+    }
+    root.append(notes);
   }
   const decision=panel('Decide for the whole site',needsRegeneration(review) ? 'Regeneration returns this site to the capture queue. Undo remains available until it starts. You will review the completed capture before any publication or indexing.' : `Approval publishes all ${review.manifest.captures.length} captured files. Readable HTML and text pages receive AI-enriched indexing; supporting files remain preserved in the archive. Maximum enrichment spend: $${review.manifest.indexing?.max_enrichment_usd ?? 2} for this site.`);
   decision.append(node('p','Declining retains these sources in History. You can reconsider later.','meta'),mutation('Decline indexing',()=>siteDecision('decline'),'Indexing declined. Sources retained in History.'));root.append(decision);
@@ -629,6 +644,7 @@ function captureMeter(op,compact=false) {
     const catalogs=progress?.catalogs_pending ?? board?.catalogs_remaining;
     if (catalogs>0) meter.append(node('p',`${catalogs.toLocaleString()} archive listings still being checked.`,'meta'));
     if (progress?.unavailable>0) meter.append(node('p',`${progress.unavailable.toLocaleString()} unavailable captures will be listed as coverage gaps.`,'meta'));
+    if (progress?.failed_lookups>0) meter.append(node('p',`${progress.failed_lookups.toLocaleString()} supporting-file lookups failed. Other files continue downloading; retry missing files from Review when capture finishes.`,'meta'));
   }
   return meter;
 }
@@ -803,7 +819,7 @@ function renderDock(force=false) {
   } else if (row.stage==='queued') {
     hint='Your approval is saved. Capture starts automatically.';
     const continuing=Boolean(row.coverage?.capture?.continuation);
-    buttons.append(mutation(continuing ? 'Undo regeneration' : 'Undo approval',()=>undoApproval(row),continuing ? 'Regeneration cancelled. Original capture returned to Review.' : 'Returned to Candidates.',true));
+    buttons.append(mutation(undoCaptureLabel(row),()=>undoApproval(row),continuing ? 'Capture retry cancelled. Original capture returned to Review.' : 'Returned to Candidates.',true));
   } else if (row.stage==='capturing' && op?.state==='interrupted') {
     hint=op?.result?.progress?.capture_policy==='complete-files-v1' ? 'Continue pending files; extend an exhausted transport allowance.' : 'Resume the interrupted worker batch within its original budget.';
     buttons.append(mutation('Resume capture',()=>request('/api/resume',{id:op.id}),'Capture resumed.',true,hasOperation()));

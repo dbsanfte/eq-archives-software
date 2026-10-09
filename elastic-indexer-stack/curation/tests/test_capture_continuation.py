@@ -47,6 +47,76 @@ def detail(app, row):
     return call(app, 'GET', '/api/candidate?id=' + row['id']).json()
 
 
+def test_retry_failed_files_retains_review_and_retries_only_gaps(tmp_path, monkeypatch):
+    root = tmp_path / 'state'
+    row, legacy_manifest = legacy(root, count=1)
+    site = {**legacy_manifest['sites'][0], 'capture_policy': POLICY}
+    seed = site['captures'][0]
+    body = b'<p>EQ</p><img src="http://counter.example/i.gif">'
+    (root / seed['path']).write_bytes(body)
+    seed.update(bytes=len(body), sha256=digest(body))
+    failing = True
+    calls = []
+    class Downloader:
+        def __init__(self, store, args): self.store = store
+        def call(self, job):
+            calls.append((job['op'], job['url']))
+            previous = self.store.get('wayback_transport', {})
+            self.store.set('wayback_transport', {**previous, 'requests': previous.get('requests', 0) + 1})
+            if failing and ('counter.example' in job['url'] or job['op'] == 'capture_file' and job['url'].endswith('bad.png')):
+                raise CrawlError('Wayback HTTP 403')
+            if job['op'] == 'scope_list':
+                urls = [job['url']] if 'counter.example' in job['url'] else [row['scope'] + name for name in ('bad.png', 'good.png')]
+                return {'captures': [{'url': url, 'timestamp': '20061231235959'} for url in urls]}
+            Path(job['destination']).write_bytes(b'PNG')
+            return {'url': job['url'], 'timestamp': job['timestamp'], 'bytes': 3,
+                    'sha256': digest(b'PNG'), 'content_type': 'image/png'}
+        def close(self): pass
+    original = capture_sites(root, legacy_manifest['batch_id'], [site], Downloader)
+    original['indexing']['max_enrichment_usd'] = .5
+    (root / 'batches' / original['batch_id'] / 'complete' / 'manifest.json').write_text(json.dumps(original))
+    assert original['capture_retry'] == {'files': 1, 'lookups': 1}
+    assert len(original['captures']) == 2  # The later good file survived the 403.
+    with connect(root) as store:
+        store.db.execute('UPDATE batches SET manifest=?,manifest_sha256=? WHERE id=?',
+                         (json.dumps(original), digest(original), original['batch_id']))
+        store.db.commit()
+    app = create_app(root, start_worker=False)
+    monkeypatch.setattr('worker.capture_sites', lambda root, batch, sites, progress: capture_sites(root, batch, sites, Downloader, progress))
+    worker = Worker(root)
+    try:
+        assert regenerate(app, original).status_code == 202
+        assert detail(app, row)['candidate']['coverage']['capture']['continuation']['mode'] == 'retry_failed'
+        assert call(app, 'POST', '/api/undo', {'id': row['id'], 'manifest_sha256': row['manifest_sha256']}).status_code == 200
+        assert detail(app, row)['review']['manifest'] == original
+        for recovered in (False, True):
+            before = detail(app, row)['review']['manifest']
+            assert regenerate(app, before).status_code == 202
+            assert regenerate(app, before).status_code == 409
+            make_due(root);worker.capture_queue()
+            failing = not recovered;calls.clear()
+            worker.operation()
+            after = detail(app, row)
+            assert after['candidate']['stage'] == 'review', after['capture_operation']
+            result = after['review']['manifest']
+            retained = {c['url']: c for c in result['captures']}
+            assert [retained[c['url']] for c in original['captures']] == original['captures']
+            assert result['transport']['requests'] == before['transport']['requests'] + len(calls)
+            assert result['indexing'] == before['indexing']
+            assert calls == [('scope_list', 'http://counter.example/i.gif'), ('capture_file', row['scope'] + 'bad.png')] + (
+                [('capture_file', 'http://counter.example/i.gif')] if recovered else [])
+            assert result['capture_retry'] == ({'files': 0, 'lookups': 0} if recovered else {'files': 1, 'lookups': 1})
+            with connect(root) as store:
+                saved = unpack(store.db.execute('SELECT * FROM batches WHERE id=?', (before['batch_id'],)).fetchone())
+                assert saved['manifest'] == before and saved['state'] == 'capture_continued'
+                assert not store.db.execute("SELECT 1 FROM operations WHERE kind='publish'").fetchone()
+        assert len(result['captures']) == 4 and result['notes'] == []
+        assert result['capture_coverage'][row['id']]['state'] == 'complete'
+        assert regenerate(app, result).status_code == 409
+    finally:
+        worker.lease.close()
+
+
 def test_regeneration_reuses_100_sources_but_inventories_all_files_and_carries_usage(tmp_path, monkeypatch):
     root = tmp_path / 'state'
     row, original = legacy(root, count=100)
@@ -98,6 +168,69 @@ def test_regeneration_reuses_100_sources_but_inventories_all_files_and_carries_u
         old = unpack(store.db.execute('SELECT * FROM batches WHERE id=?', (original['batch_id'],)).fetchone())
         assert old['state'] == 'capture_continued' and old['manifest'] == original and old['manifest_sha256'] == digest(original)
         assert not store.db.execute("SELECT 1 FROM operations WHERE kind='publish'").fetchone()
+
+
+def test_retry_from_a_multi_site_capture_keeps_other_review_and_inventory_untouched(tmp_path, monkeypatch):
+    root = tmp_path / 'state'
+    first, a = legacy(root, count=1, url='http://first.example/')
+    second, b = legacy(root, count=1, identifier='b'*32, url='http://second.example/')
+    sites = []
+    for manifest, counter in [(a, 'http://counter.example/first.gif'), (b, 'http://counter.example/second.gif')]:
+        site = {**manifest['sites'][0], 'capture_policy': POLICY}
+        source = site['captures'][0]
+        body = f'<p>EQ</p><img src="{counter}">'.encode()
+        (root / source['path']).write_bytes(body)
+        source.update(bytes=len(body), sha256=digest(body))
+        sites.append(site)
+    calls = []
+    failing = True
+    class Downloader:
+        def __init__(self, *args): pass
+        def call(self, job):
+            calls.append(job['url'])
+            if job['op'] == 'scope_list' and 'counter.example' not in job['url']:
+                return {'captures': [{'url': job['url'] + 'bad.png', 'timestamp': '20061231235959'}]
+                        if job['url'] == first['scope'] else []}
+            if failing: raise CrawlError('Wayback HTTP 403')
+            if job['op'] == 'scope_list':
+                return {'captures': [{'url': job['url'], 'timestamp': '20061231235959'}]}
+            Path(job['destination']).write_bytes(b'GIF')
+            return {'url': job['url'], 'timestamp': job['timestamp'], 'bytes': 3,
+                    'sha256': digest(b'GIF'), 'content_type': 'image/gif'}
+        def close(self): pass
+    parent = capture_sites(root, a['batch_id'], sites, Downloader)
+    with connect(root) as store:
+        store.db.execute('DELETE FROM batches WHERE id=?', (b['batch_id'],))
+        store.db.execute('UPDATE batches SET manifest=?,manifest_sha256=? WHERE id=?',
+                         (json.dumps(parent), digest(parent), parent['batch_id']))
+        store.db.execute('UPDATE candidates SET coverage=? WHERE id=?',
+                         (json.dumps({'status':'absent_host','capture':{'batch_id':parent['batch_id']}}), second['id']))
+        store.db.commit()
+    app = create_app(root, start_worker=False)
+    before = detail(app, second)['review']
+    reviewed = detail(app, first)['review']['manifest']
+    assert reviewed['capture_retry'] == {'files':1, 'lookups':1}
+    assert before['manifest']['capture_retry'] == {'files':0, 'lookups':1}
+    assert {note['candidate_id'] for note in reviewed['notes']} == {first['id']}
+    assert any('counter.example/first.gif' == note['url'].removeprefix('http://') for note in reviewed['notes'])
+    assert regenerate(app, reviewed).status_code == 202
+    monkeypatch.setattr('worker.capture_sites', lambda root, batch, sites, progress: capture_sites(root, batch, sites, Downloader, progress))
+    worker = Worker(root)
+    try:
+        failing=False;calls.clear();make_due(root);worker.capture_queue();worker.operation()
+    finally:
+        worker.lease.close()
+    result=detail(app, first)
+    assert result['candidate']['stage']=='review',result['capture_operation']
+    assert result['review']['manifest']['capture_retry']=={'files':0,'lookups':0}
+    assert len(result['review']['manifest']['captures'])==3
+    assert all(capture['candidate_id']==first['id'] for capture in result['review']['manifest']['captures'])
+    assert calls==['http://counter.example/first.gif','http://first.example/bad.png','http://counter.example/first.gif']
+    after=detail(app,second)['review']
+    assert after['manifest']==before['manifest'] and after['manifest_sha256']==before['manifest_sha256']
+    with connect(root) as store:
+        saved=unpack(store.db.execute('SELECT * FROM batches WHERE id=?',(parent['batch_id'],)).fetchone())
+        assert saved['manifest']==parent and saved['state']=='capture_group'
 
 
 def test_small_legacy_complete_capture_can_be_regenerated_and_undone_after_grace(tmp_path):
