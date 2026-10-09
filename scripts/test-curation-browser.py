@@ -1404,6 +1404,7 @@ async def candidate_grade_controls(browser,base,width):
 async def continuous_mode_flow(browser,base,width):
     context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700,color_scheme='dark')
     page=await context.new_page();posts=[];errors=[]
+    save_release=asyncio.Event();save_release.set()
     page.on('pageerror',lambda error:errors.append(str(error)))
     snapshot=await (await context.request.get(base+'/api/queue?filter=candidates')).json()
     config={'enabled':False,'configured':False,'daily_usd':2.0,'min_grade':2,'grading_criteria':'','revision':0}
@@ -1416,6 +1417,7 @@ async def continuous_mode_flow(browser,base,width):
         if route.request.method=='POST':
             payload=route.request.post_data_json;posts.append((path,payload))
             if path=='/api/automation':
+                await save_release.wait()
                 if payload['revision']!=config['revision']:
                     await route.fulfill(status=409,json={'error':'Automatic settings changed in another session. Reload the settings before saving.'});return
                 config.update(payload);config.update(revision=config['revision']+1,configured=True)
@@ -1457,7 +1459,12 @@ async def continuous_mode_flow(browser,base,width):
     for target in ('#automation-save','#automation-reload','.automation-switch','#automation-grade'):
         box=await page.locator(target).bounding_box()
         assert box['height']>=44 and box['width']>=44,(target,box)
-    await page.locator('#automation-save').click();await settled(page)
+    save_release.clear()
+    await page.locator('#automation-save').click()
+    for identifier in ('#automation-enabled','#automation-daily','#automation-grade','#automation-criteria'):
+        await expect(page.locator(identifier)).to_be_disabled()
+    await expect(page.locator('#automation-state')).to_have_text('Off')
+    save_release.set();await settled(page)
     await expect(page.locator('#automation-state')).to_have_text('On')
     assert posts==[('/api/automation',{'enabled':True,'daily_usd':5.5,'min_grade':3,'grading_criteria':'Cleric guilds','revision':0})]
     # Budget progress must update without stealing an unsaved settings draft.

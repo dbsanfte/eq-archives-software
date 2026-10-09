@@ -983,6 +983,7 @@ function renderAutomation() {
   $('automation-budget').textContent=!settings.configured ? `Daily limit not configured. Default proposal: $${settings.daily_usd.toFixed(2)}/day. Saving settings includes today's earlier portal spending.` : `Today: $${auto.estimated_usd.toFixed(4)} estimated + $${auto.unresolved_usd.toFixed(4)} reserved · $${auto.remaining_usd.toFixed(4)} remaining of $${settings.daily_usd.toFixed(2)}. Resets at 00:00 UTC.`;
   $('automation-meter').hidden=!settings.configured;$('automation-meter').max=settings.daily_usd;$('automation-meter').value=auto.estimated_usd+auto.unresolved_usd;
   $('automation-draft').textContent=automationDirty ? automationDraft.revision!==settings.revision ? 'Saved settings changed in another session. Reload saved settings before applying your changes.' : 'Unsaved settings. The current mode continues until you save.' : 'Changes take effect only when saved.';
+  for (const id of ['automation-enabled','automation-daily','automation-grade','automation-criteria']) $(id).disabled=busy;
   $('automation-save').disabled=busy || automationDraft.revision!==settings.revision;
   $('automation-reload').disabled=busy;
   $('automation-footer').textContent=`Private intranet · automatic mode ${settings.enabled ? 'on' : 'off'}${settings.configured ? ` · $${settings.daily_usd.toFixed(2)}/day Luna limit (UTC)` : ''}`;
