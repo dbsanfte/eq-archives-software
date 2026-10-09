@@ -9,7 +9,7 @@ from candidate_checks import require_finished, start as start_check
 from common import CrawlError, capture_scope, digest, now
 from coverage_check import refresh, require_new
 from daily_budget import DailyBudget, DailyBudgetPause, AutomaticStopped
-from portal import Stage, decorate
+from portal import Stage, candidate_filter, decorate
 from review import _apply_decisions, record
 from spending import Spending
 from state import Lane, OPERATION_KINDS, active_operation, connect, enqueue, unpack
@@ -98,9 +98,9 @@ def promote(root, account):
     with connect(root) as store, account.database() as policy_lock:
         # Source verification is at most one sampled site per tick. Read actual
         # stage metadata, not the paginated list a browser happens to display.
-        rows = decorate(store, [record(store, row) for row in store.db.execute('''SELECT * FROM candidates
+        rows = candidate_filter(decorate(store, [record(store, row) for row in store.db.execute('''SELECT * FROM candidates
             WHERE state='approval_pending' AND rating IS NOT NULL ORDER BY
-            json_extract(rating,'$.grade') DESC,priority DESC,rowid''')])
+            json_extract(rating,'$.grade') DESC,priority DESC,rowid''')]))
         row = next((row for row in rows if eligible(store, row) and
                     row['rating'].get('grading_criteria', '') == config['grading_criteria']), None)
         if not row:

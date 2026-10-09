@@ -83,6 +83,7 @@ def test_human_scope_and_criteria_are_respected_and_bad_source_does_not_block_ot
     assert call(app, 'POST', '/api/scope', {'id': custom['id'], 'manifest_sha256': custom['manifest_sha256'], 'mode': 'page'}).status_code == 200
     (root / broken['captures'][0]['path']).write_text('changed source')
     with connect(root) as store:
+        store.db.execute('UPDATE candidates SET priority=200 WHERE id=?', (broken['id'],))
         store.db.execute("UPDATE candidates SET rating=json_set(rating,'$.grading_criteria','Clerics') WHERE id=?", (focused['id'],))
         store.db.commit()
     account = enable(root)
@@ -308,3 +309,20 @@ def test_automatic_evidence_check_is_tagged_atomically_and_mixed_policy_batch_ca
 def test_automatic_network_and_transport_allowance_pauses_are_resumable(message):
     pause = automation.pause_detail(CrawlError(message), {'payload':{'automatic':True}})
     assert pause['reason'] == 'transient' and pause['retry_at'] > now()
+
+
+def test_equal_grades_promote_1999_2001_captures_before_later_years(tmp_path):
+    from grading import SIGNATURE, sources
+    root = tmp_path/'state'
+    later = add_candidate(root, 'http://later.example/')
+    earlier = add_candidate(root, 'http://earlier.example/')
+    with connect(root) as store:
+        captures = later['captures']
+        captures[0].update(timestamp='20040101000000', requested_timestamp='20040101000000', tier=2)
+        store.db.execute('UPDATE candidates SET captures=? WHERE id=?', (json.dumps(captures), later['id']))
+        raw = store.db.execute('SELECT * FROM candidates WHERE id=?', (later['id'],)).fetchone()
+        rating = json.loads(raw['rating'])
+        rating['signature'] = digest({'grader':SIGNATURE,'documents':sources(store, raw, 120000)})
+        store.db.execute('UPDATE candidates SET rating=? WHERE id=?', (json.dumps(rating), later['id']))
+        store.db.commit()
+    assert automation.promote(root, enable(root))['id'] == earlier['id']
