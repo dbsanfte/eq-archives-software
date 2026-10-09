@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 
 from archive_layout import archive_path
 from common import CAPTURE_WINDOW, CrawlError, Store, capture_exclusion, digest, in_capture_window, now, original_url, save, within_capture_scope
-from indexer.capture_enrichment import DEFAULT_POLICY
+from indexer.capture_enrichment import policy_for_sites
 
 POLICY = 'complete-files-v1'
 # Cumulative transport safeguards, deliberately large enough for thousands of
@@ -158,8 +158,8 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
             check_manifest(root, result)
             return result
         used = store.get('wayback_transport', {})
-        # Invocation after a pause is always an explicit /api/resume. No worker
-        # retry renews these limits, and the ledger is never reset.
+        # A manual pause needs /api/resume. Enabled automatic mode may continue
+        # its own capture under the original approval; neither resets usage.
         extended = [key for key in ALLOWANCE if store.get('extend_transport_on_resume') or used.get(key, 0) >= config['limits'][key]]
         if extended:
             for key in extended:
@@ -372,7 +372,7 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
                     'capture_retry': {'files': db.execute("SELECT COUNT(*) FROM full_records WHERE state='unavailable'").fetchone()[0],
                                       'lookups': len(failed_queries) + len(missing)},
                     'transport': store.get('wayback_transport', {}),
-                    'indexing': dict((retained or base_manifest or {}).get('indexing', DEFAULT_POLICY)), 'visited': []}
+                    'indexing': dict((retained or base_manifest or {}).get('indexing', policy_for_sites(sites))), 'visited': []}
         if retained and (sites[0].get('continued_from', {}).get('published') or retained.get('enrichment_budget_id')):
             manifest['enrichment_budget_id'] = retained.get('enrichment_budget_id', retained['batch_id'])
         check_manifest(root, manifest)

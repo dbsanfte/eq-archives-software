@@ -30,6 +30,7 @@ from candidate_actions import dismiss_all, undo_dismissal
 from candidate_checks import attach_checks, require_finished, start as start_candidate_check
 from automatic_indexing import retry as retry_preparation
 from grading import criteria
+import automation
 from review_actions import (preview as review_preview, decide_all as decide_all_reviews,
                             apply_decision as apply_site_decision, validate_decision as validate_site_decision,
                             undo_dismissal as undo_review_dismissal)
@@ -93,6 +94,7 @@ def create_app(root=None, origin=None, start_worker=True):
         pass
     migrate(root)
     spending = Spending(root)
+    daily_budget = automation.budget(root)
 
     @asynccontextmanager
     async def lifespan(app):
@@ -167,6 +169,7 @@ def create_app(root=None, origin=None, start_worker=True):
                                  "dismissal": dismissal_preview(all_rows),
                                  "review_actions": review_preview(store, all_rows) if selected == 'review' else None,
                                  "luna_spend": spending.snapshot(),
+                                 "automation": automation.status(root, daily_budget),
                                  "all_count": len(all_rows), "approved": sum(row["state"] == "approved_waiting_batch" for row in all_rows),
                                  "recommended": sum(row['state'] in ('approval_pending','deferred') and (row['rating'] or {}).get('grade',-1)>=2 for row in all_rows),
                                  "operations": operations, "workers": workers, "batches": batches, "limits": LIMITS, "undo_seconds": UNDO_SECONDS,
@@ -432,6 +435,7 @@ def create_app(root=None, origin=None, start_worker=True):
             coverage = current["coverage"] or {}
             coverage["scope_mode"] = payload["mode"]
             store.db.execute("UPDATE candidates SET scope=?,coverage=?,decision=NULL,state='approval_pending' WHERE id=?", (scope, json.dumps(coverage), payload["id"]))
+            automation.hold(store, payload['id'], 'Scope chosen manually')
             store.db.commit()
             store.event(payload["id"], "scope_changed", {"scope": scope, "mode": payload["mode"]})
         return JSONResponse({"scope": scope})
@@ -560,8 +564,17 @@ def create_app(root=None, origin=None, start_worker=True):
     async def problem(request, error):
         return JSONResponse({"error": str(error)}, status_code=409)
 
+    async def automatic_settings(request):
+        payload = await body(request)
+        def configure():
+            from jobs import Kubernetes
+            kube = Kubernetes() if start_worker and os.environ.get('KUBERNETES_SERVICE_HOST') else None
+            return automation.configure(root, payload, kube=kube)
+        return JSONResponse(await run_in_threadpool(configure))
+
     app = Starlette(routes=[Route("/", screen), Route("/assets/{name}", asset), Route("/healthz", health),
                             Route("/api/queue", listing), Route("/api/source", source),
+                            Route('/api/automation', automatic_settings, methods=['POST']),
                             Route('/api/candidate',candidate_detail), Route('/api/restore',restore_candidate,methods=['POST']),
                             Route('/api/site',site_review), Route('/api/site-decision',site_decision,methods=['POST']),
                             Route('/api/continue-capture',capture_continuation,methods=['POST']),

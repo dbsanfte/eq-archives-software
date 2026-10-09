@@ -24,13 +24,15 @@ from publisher import publish
 from state import Lane, OPERATION_KINDS, active_operation, connect, unpack, worker_lease
 from coverage_check import refresh
 from site_reviews import materialize, migrate
-from import_status import read_error
+from import_status import read_error, read_status, read_budget_pause
 from manual import existing_site, prepare as prepare_manual
 from candidate_checks import run as check_candidate
 from discovery_run import fill, retain_ezboard_progress
 from automatic_indexing import prepare_next
 from capture_budget import budget_identity
 from capture_continuation import require_eligible
+import automation
+from daily_budget import automatic_request, require_automatic
 
 
 def campaign(root, operation):
@@ -129,6 +131,7 @@ class Worker:
         self.stop = threading.Event()
         self.lease = worker_lease(self.root)
         self.transport = SharedWayback(self.stop)
+        self.daily_budget = automation.budget(self.root)
         from ezboard_portal import consolidate
         consolidate(self.root)
         refresh(self.root)
@@ -209,6 +212,8 @@ class Worker:
             store.db.execute("UPDATE operations SET state='running',error=NULL,updated=? WHERE id=?", (now(), operation["id"]))
             store.db.commit()
         try:
+            auto_token = automatic_request.set(bool(operation['payload'].get('automatic')) and lane == Lane.CANDIDATES)
+            require_automatic()
             if operation["kind"] == "discover":
                 result = campaign(self.root, operation)
             elif operation['kind'] == 'candidate_check':
@@ -266,15 +271,32 @@ class Worker:
             with connect(self.root) as store:
                 store.db.execute("UPDATE operations SET state='completed',result=?,updated=? WHERE id=?", (json.dumps(result), now(), operation["id"]))
                 store.db.commit()
+            automation.finished(self.root, operation, result)
         except Exception as error:
             detail = str(error) if isinstance(error, CrawlError) else f"Operation failed ({type(error).__name__}); staged evidence retained"
             with connect(self.root) as store:
-                store.db.execute("UPDATE operations SET state='interrupted',error=?,updated=? WHERE id=?", (detail, now(), operation["id"]))
+                previous = store.db.execute('SELECT result FROM operations WHERE id=?', (operation['id'],)).fetchone()
+                result = json.loads(previous['result'] or '{}')
+                if pause := automation.pause_detail(error, operation):
+                    result['automatic_pause'] = pause
+                store.db.execute("UPDATE operations SET state='interrupted',error=?,result=?,updated=? WHERE id=?", (detail, json.dumps(result), now(), operation["id"]))
                 store.db.commit()
+        finally:
+            automatic_request.reset(auto_token)
+
+    def continue_import(self, batch, name):
+        from index_captures import read_batch
+        published = read_batch(self.root, f"batches/{batch['id']}/approved.json", batch['manifest_sha256'])
+        if published['publication']['commit'] != batch['publication']['commit']:
+            raise CrawlError('Published approval changed before automatic import continuation')
+        budget_identity(self.root, published['manifest'])
+        detail = {'attempt': import_attempt(batch) + 1, 'previous_name': name, 'state': 'automatic_resume_queued'}
+        import_name({**batch, 'job': detail})
+        return detail
 
     def indexing(self):
         with connect(self.root) as store:
-            batches = [unpack(row) for row in store.db.execute("SELECT * FROM batches WHERE state IN ('published_waiting_index','indexing') ORDER BY created")]
+            batches = [unpack(row) for row in store.db.execute("SELECT * FROM batches WHERE state IN ('published_waiting_index','indexing','index_budget_waiting') ORDER BY created")]
         if not batches:
             return
         self.kube = self.kube or Kubernetes()
@@ -293,9 +315,28 @@ class Worker:
                 conditions = {c["type"]: c["status"] for c in existing.get("status", {}).get("conditions", [])}
                 state = "indexed" if conditions.get("Complete") == "True" else "index_failed" if conditions.get("Failed") == "True" else "indexing"
                 detail = {**attempt_detail, "name": name, "state": state}
+                daily_job = any(item.get('name') == 'LUNA_DAILY_BUDGET_ROOT' for item in existing.get('spec', {}).get('template', {}).get('spec', {}).get('containers', [{}])[0].get('env', []))
+                if state == 'indexed' and daily_job:
+                    diagnostic = read_status(self.root, batch, name) or {}
+                    pause = read_budget_pause(self.root, batch, name)
+                    if pause:
+                        state, detail = 'index_budget_waiting', {**detail, 'state': 'waiting_budget', **pause}
+                        if self.daily_budget.snapshot()['remaining_usd'] >= pause['required_usd']:
+                            state, detail = 'published_waiting_index', self.continue_import(batch, name)
+                    elif diagnostic.get('state') != 'completed':
+                        state = 'index_failed'
+                        import_error = 'Import completion could not be verified; saved sources and paid results are retained.'
+                if (state == 'index_failed' and daily_job and batch['manifest'].get('indexing', {}).get('daily_budget') == 'portal-utc-v1'
+                        and any(c.get('type') == 'Failed' and c.get('status') == 'True' and c.get('reason') == 'DeadlineExceeded'
+                                for c in existing.get('status', {}).get('conditions', []))):
+                    # Large automatic sites can span the six-hour Job window.
+                    # Continue using caches/create-only IDs, retaining old Jobs.
+                    state, detail = 'published_waiting_index', self.continue_import(batch, name)
                 if state == 'index_failed':
-                    import_error = read_error(self.root, batch, name)
+                    import_error = import_error or read_error(self.root, batch, name)
             else:
+                if batch['state'] == 'index_budget_waiting':
+                    raise CrawlError('Budget-paused import Job is unavailable; automatic continuation is paused')
                 waiting = blockers(jobs, name)
                 if waiting:
                     state, detail = "published_waiting_index", {**attempt_detail, "waiting_for": waiting}
@@ -320,11 +361,20 @@ class Worker:
                 store.db.commit()
 
     def run(self, lane):
-        with self.transport.bind():
+        with self.transport.bind(), self.daily_budget.bind():
             self.run_lane(lane)
 
     def run_lane(self, lane):
         while not self.stop.is_set():
+            try:
+                automation.resume_owned(self.root, lane, self.daily_budget)
+                if lane == Lane.CANDIDATES:
+                    automation.promote(self.root, self.daily_budget)
+                    automation.schedule(self.root, self.daily_budget)
+            except Exception as error:
+                with connect(self.root) as store:
+                    detail = str(error) if isinstance(error, CrawlError) else 'Automatic scheduling paused; saved state is retained'
+                    store.set('automatic_activity', {'phase': 'attention', 'error': detail})
             if lane == Lane.INDEXING:
                 prepare_next(self.root)
             if lane == Lane.CAPTURE:
@@ -345,6 +395,6 @@ class Worker:
                 except Exception as error:
                     detail = str(error) if isinstance(error, CrawlError) else "Index submission paused; Kubernetes state unavailable"
                     with connect(self.root) as store:
-                        store.db.execute("UPDATE batches SET error=? WHERE state IN ('published_waiting_index','indexing')", (detail,))
+                        store.db.execute("UPDATE batches SET error=? WHERE state IN ('published_waiting_index','indexing','index_budget_waiting')", (detail,))
                         store.db.commit()
             self.stop.wait(10)

@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from import_status import write_status
 from common import CrawlError, digest
 from jobs import blockers, import_job, import_name
 from state import connect, worker_lease
@@ -135,6 +136,8 @@ def test_new_imports_wait_for_existing_active_pending_and_retrying_jobs(candidat
         assert job['metadata']['annotations']['eqarchives.org/manifest-sha256'] == expected
         assert existing['metadata']['uid'] == 'existing'
         job['status']={'conditions':[{'type':'Complete','status':'True'}]}
+        (root/'enrichment'/manifest['batch_id']).mkdir(parents=True, exist_ok=True)
+        write_status(root/'enrichment'/manifest['batch_id'], job['metadata']['name'], expected, 'completed')
         worker.indexing()
         with connect(root) as store:
             assert store.db.execute('SELECT state FROM batches').fetchone()[0] == 'indexed'
@@ -149,6 +152,8 @@ def test_import_job_only_mounts_staging_readonly_and_separate_indexing_secrets()
     mounts=spec['containers'][0]['volumeMounts']
     assert mounts[0]['readOnly'] and mounts[1]['readOnly']
     assert mounts[2]['subPath']=='enrichment' and mounts[2]['mountPath']=='/enrichment'
+    assert mounts[3]['subPath']=='luna-budget' and mounts[3]['mountPath']=='/luna-budget'
+    assert {'name':'LUNA_DAILY_BUDGET_ROOT','value':'/luna-budget'} in spec['containers'][0]['env']
     assert not any('hostPath' in volume for volume in spec['volumes'])
     secret_names=[source['secret']['name'] for source in spec['volumes'][1]['projected']['sources']]
     assert secret_names == ['eqarchives-capture-indexer-secrets','search-eqarchives-secrets','eqarchives-curation-secrets']
@@ -238,6 +243,8 @@ def test_explicit_index_retry_preserves_failed_jobs_publication_and_approved_sit
         assert retried['spec']['template']['spec']['containers'][0]['command']==original['spec']['template']['spec']['containers'][0]['command']
         assert original==snapshot
         retried['status']={'conditions':[{'type':'Complete','status':'True'}]}
+        (root/'enrichment'/batch['id']).mkdir(parents=True, exist_ok=True)
+        write_status(root/'enrichment'/batch['id'], retried['metadata']['name'], batch['manifest_sha256'], 'completed')
         worker.indexing()
         with connect(root) as store:
             saved=store.db.execute('SELECT state,manifest,publication,job FROM batches').fetchone()

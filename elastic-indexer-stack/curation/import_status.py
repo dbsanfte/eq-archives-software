@@ -3,8 +3,10 @@
 import json
 from pathlib import Path
 import re
+from datetime import datetime
 
 from common import CrawlError, now, save
+from daily_budget import DailyBudgetPause, units
 
 MESSAGES = {
     'schema': 'Luna enrichment failed schema/source validation: invalid metadata fields.',
@@ -47,18 +49,40 @@ def write_status(directory, job_name, manifest_sha256, state, error=None):
     if error is not None:
         record.update(code=error.code if isinstance(error, EnrichmentError) else 'indexing',
                       cause=error.cause if isinstance(error, EnrichmentError) else None)
+        if isinstance(error, DailyBudgetPause):
+            record.update(required_usd=error.amount, retry_at=error.retry_at)
     save(status_path(directory, job_name), record)
 
 
-def read_error(root, batch, job_name):
+def read_status(root, batch, job_name):
     try:
         path = status_path(Path(root) / 'enrichment' / batch['id'], job_name)
         if path.stat().st_size > 4096:
             return None
         record = json.loads(path.read_text())
-        if (record.get('job_name') != job_name or record.get('manifest_sha256') != batch['manifest_sha256']
-                or record.get('state') != 'failed' or record.get('code') not in MESSAGES):
+        if record.get('job_name') != job_name or record.get('manifest_sha256') != batch['manifest_sha256']:
             return None
-        return describe(record['code'], record.get('cause'))
+        return record
     except (OSError, ValueError, TypeError, AttributeError):
         return None
+
+
+def read_error(root, batch, job_name):
+    record = read_status(root, batch, job_name) or {}
+    try:
+        if record.get('state') == 'failed' and record.get('code') in MESSAGES:
+            return describe(record['code'], record.get('cause'))
+    except TypeError:
+        return None
+
+
+def read_budget_pause(root, batch, job_name):
+    record = read_status(root, batch, job_name) or {}
+    if record.get('state') != 'waiting_budget':
+        return None
+    try:
+        if not 0 < units(record['required_usd']) or datetime.fromisoformat(record['retry_at']).utcoffset() is None:
+            return None
+    except (CrawlError, KeyError, TypeError, ValueError):
+        return None
+    return {key: record[key] for key in ('required_usd', 'retry_at')}

@@ -19,6 +19,7 @@ REVIEW_STAGES = {
     'published_waiting_index': Stage.INDEXING,
     'indexing': Stage.INDEXING,
     'index_failed': Stage.INDEXING,
+    'index_budget_waiting': Stage.INDEXING,
     'indexed': Stage.HISTORY,
     'indexing_declined': Stage.HISTORY,
 }

@@ -55,8 +55,9 @@ def apply_decision(store, reviewed, decision, bulk=None, automatic=False):
     candidate = reviewed['manifest']['sites'][0]['id']
     operation = None
     if decision == 'approve':
+        autonomous = all(site.get('decision', {}).get('origin') == 'automatic_policy' for site in reviewed['manifest']['sites'])
         operation = enqueue(store, 'publish', {'batch_id': reviewed['id'],
-                            'manifest_sha256': reviewed['manifest_sha256']}, commit=False)
+                            'manifest_sha256': reviewed['manifest_sha256'], **({'automatic': True} if autonomous else {})}, commit=False)
         batch_state = 'publication_requested'
     else:
         batch_state = 'indexing_declined' if decision == 'decline' else 'awaiting_review'

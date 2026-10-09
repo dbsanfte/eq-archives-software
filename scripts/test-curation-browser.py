@@ -1401,6 +1401,107 @@ async def candidate_grade_controls(browser,base,width):
     await context.close()
 
 
+async def continuous_mode_flow(browser,base,width):
+    context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700,color_scheme='dark')
+    page=await context.new_page();posts=[];errors=[]
+    save_release=asyncio.Event();save_release.set()
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    snapshot=await (await context.request.get(base+'/api/queue?filter=candidates')).json()
+    config={'enabled':False,'configured':False,'daily_usd':2.0,'min_grade':2,'grading_criteria':'','revision':0}
+    auto={'settings':config,'estimated_usd':0.0,'unresolved_usd':0.0,'remaining_usd':2.0,
+          'resets_at':'2026-10-10T00:00:00+00:00','activity':{},'held':0}
+    row=snapshot['candidates'][0]
+    row['rating']['grade']=1
+    async def fixture(route):
+        path=urlsplit(route.request.url).path
+        if route.request.method=='POST':
+            payload=route.request.post_data_json;posts.append((path,payload))
+            if path=='/api/automation':
+                await save_release.wait()
+                if payload['revision']!=config['revision']:
+                    await route.fulfill(status=409,json={'error':'Automatic settings changed in another session. Reload the settings before saving.'});return
+                config.update(payload);config.update(revision=config['revision']+1,configured=True)
+                auto['remaining_usd']=config['daily_usd']-auto['estimated_usd']-auto['unresolved_usd']
+                await route.fulfill(status=200,json=auto);return
+            assert path=='/api/restore'
+            row.update(stage='candidates',state='approval_pending',decision=None)
+            await route.fulfill(status=200,json={'state':'approval_pending'});return
+        if path=='/api/queue':
+            view=parse_qs(urlsplit(route.request.url).query).get('filter',['candidates'])[0]
+            rows=[row] if view==row['stage'] else []
+            body={**snapshot,'automation':auto,'candidates':rows,'total':len(rows),'operations':[],
+                  'workers':{'candidates':None,'capture':None,'indexing':None}}
+        elif path=='/api/candidate':body={'candidate':row,'review':None}
+        else:await route.continue_();return
+        await route.fulfill(status=200,json=body)
+    await page.route('**/api/**',fixture)
+    await page.goto(base);await settled(page)
+    await expect(page.locator('#automation-state')).to_have_text('Off')
+    await page.locator('#automation-settings > summary').click()
+    await expect(page.locator('#automation-grade')).to_have_value('2')
+    await page.locator('#automation-enabled').check()
+    await page.locator('#automation-daily').fill('5.50')
+    await page.locator('#automation-grade').fill('3')
+    await page.locator('#automation-form .grading-options > summary').click()
+    await page.locator('#automation-criteria').fill('Cleric guilds')
+    await page.evaluate('refresh()');await settled(page)
+    await expect(page.locator('#automation-state')).to_have_text('Off')
+    await expect(page.locator('#automation-draft')).to_contain_text('Unsaved')
+    assert not posts
+    await page.reload();await settled(page)
+    await page.locator('#automation-settings > summary').click()
+    await expect(page.locator('#automation-enabled')).to_be_checked()
+    await expect(page.locator('#automation-daily')).to_have_value('5.50')
+    await expect(page.locator('#automation-grade')).to_have_value('3')
+    await page.locator('#automation-form .grading-options > summary').click()
+    await expect(page.locator('#automation-criteria')).to_have_value('Cleric guilds')
+    await safe_layout(page,width)
+    for target in ('#automation-save','#automation-reload','.automation-switch','#automation-grade'):
+        box=await page.locator(target).bounding_box()
+        assert box['height']>=44 and box['width']>=44,(target,box)
+    save_release.clear()
+    await page.locator('#automation-save').click()
+    for identifier in ('#automation-enabled','#automation-daily','#automation-grade','#automation-criteria'):
+        await expect(page.locator(identifier)).to_be_disabled()
+    await expect(page.locator('#automation-state')).to_have_text('Off')
+    save_release.set();await settled(page)
+    await expect(page.locator('#automation-state')).to_have_text('On')
+    assert posts==[('/api/automation',{'enabled':True,'daily_usd':5.5,'min_grade':3,'grading_criteria':'Cleric guilds','revision':0})]
+    # Budget progress must update without stealing an unsaved settings draft.
+    await page.locator('#automation-grade').fill('1')
+    auto.update(estimated_usd=5.4,unresolved_usd=.1,remaining_usd=0,activity={'phase':'daily_budget'})
+    await page.evaluate('refresh()');await settled(page)
+    await expect(page.locator('#automation-state')).to_have_text('Daily limit')
+    await expect(page.locator('#automation-status')).to_contain_text('resumes automatically')
+    await expect(page.locator('#automation-budget')).to_contain_text('$0.0000 remaining')
+    await expect(page.locator('#automation-grade')).to_have_value('1')
+    await page.screenshot(path=f'/tmp/curation-continuous-dark-{width}.png',full_page=True)
+    await page.get_by_role('button',name='Dark mode',exact=True).click()
+    await safe_layout(page,width)
+    await page.screenshot(path=f'/tmp/curation-continuous-light-{width}.png',full_page=True)
+    assert len(posts)==1
+    # Another operator's revision cannot be overwritten by polling or a stale tab.
+    config['revision']+=1
+    await page.evaluate('refresh()');await settled(page)
+    await expect(page.locator('#automation-save')).to_be_disabled()
+    await expect(page.locator('#automation-draft')).to_contain_text('another session')
+    await page.locator('#automation-reload').click()
+    await expect(page.locator('#automation-grade')).to_have_value('3')
+    await page.locator('#automation-enabled').uncheck()
+    await page.locator('#automation-save').click();await settled(page)
+    await expect(page.locator('#automation-state')).to_have_text('Off')
+    assert len(posts)==2 and posts[-1][1]['enabled'] is False
+    row.update(stage='saved',state='deferred',decision={'decision':'defer','automatic':{'grade':1,'min_grade':3}})
+    await stage(page,'saved')
+    await expect(page.locator('.site-tile')).to_contain_text('Grade 1 is below 3')
+    await page.locator('.site-tile').click();await settled(page)
+    await expect(page.locator('#site-workspace')).to_contain_text('it will stay under manual control')
+    await page.get_by_role('button',name='Restore to Candidates',exact=True).click();await settled(page)
+    assert posts[-1][0]=='/api/restore'
+    assert not errors,errors
+    await context.close()
+
+
 async def automatic_indexing_flow(browser,base,width):
     context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
     page=await context.new_page();posts=[];errors=[]
@@ -1449,6 +1550,11 @@ async def automatic_indexing_flow(browser,base,width):
     await expect(page.get_by_role('button',name='Approve site & index',exact=True)).to_have_count(0)
     await safe_layout(page,width)
     await page.screenshot(path=f'/tmp/curation-automatic-indexing-{width}.png',full_page=True)
+    review.update(state='index_budget_waiting',job={'name':'eqarchives-captures-'+review['id'],'required_usd':.01,'retry_at':'2026-10-10T00:00:00+00:00'});row['review_state']='index_budget_waiting'
+    await page.evaluate('refresh()');await settled(page)
+    await expect(page.get_by_role('heading',name='Waiting for daily Luna budget',exact=True)).to_be_visible()
+    await expect(page.locator('#stage-live')).to_contain_text('resumes automatically')
+    assert len(posts)==1
     review.update(state='indexed');row.update(state='indexed',review_state='indexed',stage='history')
     await page.evaluate('refresh()');await settled(page)
     await expect(page.get_by_role('heading',name='Indexed · complete',exact=True)).to_be_visible()
@@ -1814,6 +1920,7 @@ async def check(base):
         browser=await playwright.chromium.launch()
         try:
             for width in (320,390,430,768,1280):
+                await continuous_mode_flow(browser,base,width)
                 await theme_flow(browser,base,width)
                 await regenerate_capture_flow(browser,base,width)
                 await regenerate_capture_flow(browser,base,width,retry_files=True)

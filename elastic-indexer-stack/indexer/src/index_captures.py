@@ -5,6 +5,7 @@ Reuse the archive's extractor, Nomic chunker and default source-bound enrichment
 """
 
 import argparse
+from contextlib import ExitStack
 from datetime import datetime, timezone
 import html
 import json
@@ -24,6 +25,7 @@ from indexer.chunking import CHUNKING_VERSION, DOCUMENT_PREFIX, chunk_source
 from indexer.html_extraction import WEBSITE_EXTRACTION_VERSION, website_markdown
 from indexer.capture_enrichment import Enricher, policy
 from import_status import EnrichmentError, describe, write_status
+from daily_budget import DailyBudget, DailyBudgetPause
 
 
 def read_batch(root, relative, expected):
@@ -173,6 +175,7 @@ def main():
     services = None
     enricher = None
     directory = None
+    contexts = ExitStack()
     job_name = os.environ.get('IMPORT_JOB_NAME', '')
     def report(state, error=None):
         if directory is not None:
@@ -181,6 +184,8 @@ def main():
             except (OSError, ValueError):
                 print('Import status could not be saved; consult this Job log.', flush=True)
     try:
+        if budget_root := os.environ.get('LUNA_DAILY_BUDGET_ROOT'):
+            contexts.enter_context(DailyBudget(budget_root).bind())
         batch = read_batch(args.root, args.batch, args.manifest_sha256)
         settings = policy(batch["manifest"])
         if not re.fullmatch(r'[a-f0-9]{32}', batch['manifest']['batch_id']):
@@ -194,6 +199,11 @@ def main():
         services = Services(enricher=enricher)
         print(json.dumps(index_batch(args.root, batch, services)), flush=True)
         report('completed')
+    except DailyBudgetPause as error:
+        # End this immutable Job successfully, retaining paid caches and created
+        # documents. The controller starts a numbered continuation when funded.
+        report('waiting_budget', error)
+        print(str(error), flush=True)
     except (CrawlError, OSError, httpx.HTTPError) as error:
         report('failed', error)
         detail = str(error) if isinstance(error, EnrichmentError) else describe('indexing')
@@ -204,6 +214,7 @@ def main():
             services.close()
         elif enricher:
             enricher.close()
+        contexts.close()
     return 0
 
 

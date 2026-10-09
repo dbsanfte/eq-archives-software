@@ -376,3 +376,15 @@ footer { display:flex; flex-direction:column; gap:8px; margin-top:32px; padding-
 #discovery-progress {width:100%;border-top:1px solid var(--line);padding-top:12px}
 #discovery-meter {width:100%;height:12px;accent-color:var(--forest)}
 #discovery-progress-text {font-size:.9rem;line-height:1.5}
+
+.automation-heading {display:flex;align-items:center;justify-content:space-between;gap:12px}
+.automation-heading h2 {margin:0}
+.automation-panel progress {width:100%;height:12px;accent-color:var(--forest)}
+.automation-panel summary {min-height:44px;display:list-item;padding:12px 0;cursor:pointer}
+#automation-form {display:grid;gap:12px}
+#automation-form label {display:block}
+#automation-form .automation-switch {display:flex;align-items:center;gap:12px;min-height:48px}
+#automation-enabled {width:24px;min-width:24px;height:24px;accent-color:var(--forest)}
+#automation-grade {min-height:44px;width:100%;accent-color:var(--forest)}
+.automation-actions {display:flex;flex-wrap:wrap;gap:12px}
+.automation-actions button {flex:1 1 200px}
