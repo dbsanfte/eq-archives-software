@@ -480,7 +480,14 @@ Replay comparisons must accept adding/removing the scheme's default port (HTTP
 provenance, and continue rejecting other ports, source changes and exact-date
 substitution. Capture cards and workspaces show known processed/remaining totals,
 determinate progress and a recent-throughput ETA. Inventory totals may grow;
-unknown totals and stalled estimates must remain explicit. Persist progress across
+unknown totals and stalled estimates must remain explicit. Show the active phase,
+current URL, query date range and update age on Capture cards as well as workspaces.
+During archive listing, show catalog progress instead of a misleading 100% file
+count; do not estimate the site's finish time from an incomplete inventory.
+Use the uncapped capture worker snapshot for active card progress. Ezboard capture
+prioritizes submitted and source-proven servers before speculative archive hosts,
+retaining every catalog, date tier, source and continuation on resume.
+Persist progress across
 reloads, retain counts on pause, and recalculate ETA on resume without counting
 paused time or reused sources. Polling cannot start or resume capture.
 

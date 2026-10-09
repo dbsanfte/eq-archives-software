@@ -70,6 +70,8 @@ def test_full_capture_pause_keeps_checkpoint_and_never_returns_partial_review(ca
     with pytest.raises(CrawlError, match='budget'):
         capture_sites(root, 'b' * 32, [site], Downloader,progress=reports.append)
     assert (reports[-1]['files'],reports[-1]['versions_found'],reports[-1]['versions_pending'])==(2,3,1)
+    assert reports[0]['catalogs_total'] == 1 and reports[0]['catalogs_completed'] == 0
+    assert reports[-1]['catalogs_completed'] == 1 and reports[-1]['catalogs_pending'] == 0
     assert not (root / 'batches' / ('b' * 32) / 'manifest.json').exists()
     # Resume the schema used by captures already running before gap tracking.
     import sqlite3
@@ -78,6 +80,7 @@ def test_full_capture_pause_keeps_checkpoint_and_never_returns_partial_review(ca
     failing = False
     result = capture_sites(root, 'b' * 32, [site], Downloader,progress=reports.append)
     assert (reports[-1]['files'],reports[-1]['versions_found'],reports[-1]['versions_pending'])==(3,3,0)
+    assert reports[-1]['catalogs_total'] == reports[-1]['catalogs_completed'] == 1
     assert len(result['captures']) == 3
     assert calls.count('scope_list') == 1
     assert calls.count('capture_file') == 3  # one success, one failed request, one resumed success

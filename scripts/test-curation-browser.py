@@ -590,7 +590,7 @@ async def capture_flow(browser,base):
     await page.get_by_role('button',name='Resume capture',exact=True).click()
     await page.get_by_role('heading',name='Capture in progress',exact=True).wait_for()
     op['result']['progress']['files']=9
-    await page.locator('#stage-live').filter(has_text='9 HTML files staged').wait_for(timeout=8000)
+    await page.locator('#stage-live').filter(has_text='9 files saved').wait_for(timeout=8000)
     # A completed download changes only this selected site's workspace and stage.
     completed_list=await (await context.request.get(base+'/api/queue?filter=review')).json()
     completed=completed_list['candidates'][0]
@@ -646,7 +646,7 @@ async def capture_failure_isolation_flow(browser,base,width):
     await expect(page.get_by_role('button',name='Open www.guildsay.com',exact=True)).to_contain_text('Capture paused')
     await page.get_by_role('button',name='Open www.guildsay.com',exact=True).click();await settled(page)
     await expect(page.locator('#stage-live')).to_contain_text('does not block the queue')
-    await expect(page.locator('#stage-live')).to_contain_text('8493 files staged')
+    await expect(page.locator('#stage-live')).to_contain_text('8,493 files saved')
     await expect(page.get_by_role('button',name='Resume capture',exact=True)).to_be_enabled()
     await page.evaluate('refresh()');await settled(page)
     assert await page.evaluate('document.documentElement.scrollWidth<=innerWidth')
@@ -694,7 +694,7 @@ async def capture_resume_queue_flow(browser,base,width):
     await page.route('**/api/**',fixture)
     await page.goto(base+'/?view=capturing&candidate='+row['id']);await settled(page)
     await expect(page.get_by_role('button',name='Resume capture',exact=True)).to_be_enabled()
-    await expect(page.locator('#stage-live')).to_contain_text('12 files staged')
+    await expect(page.locator('#stage-live')).to_contain_text('12 files saved')
     assert not posts
     await page.get_by_role('button',name='Resume capture',exact=True).click();await settled(page)
     assert 'view=queued' in page.url
@@ -724,6 +724,77 @@ async def capture_resume_queue_flow(browser,base,width):
     await expect(page.locator('#stage-live')).to_contain_text('Capture in progress')
     assert not await page.get_by_role('button',name='Cancel queued resume',exact=True).count()
     assert len(posts)==6 and not errors,errors
+    await context.close()
+
+
+async def board_capture_activity_flow(browser,base,width):
+    context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
+    page=await context.new_page();errors=[]
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    snapshot=await (await context.request.get(base+'/api/queue?filter=candidates')).json()
+    row=copy.deepcopy(snapshot['candidates'][0]);row.update(stage='capturing',state='capturing')
+    board={'counts':{'captured':2},'hosts':165,'forums':5,'catalogs_remaining':560,
+           'catalogs_total':660,'catalogs_completed':100,'catalog_pages':101,
+           'current_query':{'host':'pub51.ezboard.com','kind':'f','from':'19990101000000','to':'20011231235959'}}
+    progress={'phase':'checking_wayback','files':2,'bytes':18768,'urls_checked':2,'sites_total':1,
+              'site_url':row['scope'],'current_url':'http://pub51.ezboard.com/fprexusdragons86545',
+              'ezboard':board,'completion':{'total':2,'remaining':0,'completed':2,'eta_seconds':None,
+                                          'updated_at':datetime.now(timezone.utc).isoformat()}}
+    op={'id':'f'*32,'kind':'capture','state':'running','payload':{'sites':[{'id':row['id']}]},'result':{'progress':progress}}
+    async def fixture(route):
+        assert route.request.method=='GET', 'Activity updates must never start paid work or resume capture'
+        if urlsplit(route.request.url).path=='/api/candidate':
+            body={'candidate':row,'review':None,'capture_operation':op,'queue_blocker':None}
+        elif urlsplit(route.request.url).path=='/api/queue':
+            body={**snapshot,'candidates':[row],'total':1,'operations':[],
+                  'workers':{'capture':op,'candidates':None,'indexing':None},
+                  'stage_counts':{name:int(name=='capturing') for name in ('candidates','queued','capturing','indexing','saved','history')}}
+        else: await route.continue_();return
+        await route.fulfill(status=200,json=body)
+    await page.route('**/api/**',fixture)
+    await page.goto(base+'/?view=capturing');await settled(page)
+    meter=page.locator('#candidates .capture-meter')
+    await expect(meter).to_contain_text('Checking Ezboard archive listings')
+    await expect(meter).to_contain_text('2 files saved')
+    await expect(meter).to_contain_text('5 forums identified')
+    await expect(meter).to_contain_text('100 of 660 archive listings checked · 560 left')
+    await expect(meter).to_contain_text('Forum & message listings · 1999–2001')
+    await expect(meter).to_contain_text(progress['current_url'])
+    await expect(meter).not_to_contain_text('100%')
+    await expect(meter).not_to_contain_text('0 captures left')
+    await expect(meter.locator('.capture-eta')).to_contain_text('Finish time unknown')
+    await expect(meter.get_by_role('progressbar',name='Archive listing progress')).to_have_attribute('value','100')
+    for theme in ('light','dark'):
+        await page.emulate_media(color_scheme=theme)
+        await safe_layout(page,width)
+        await page.screenshot(path=f'/tmp/curation-board-activity-{theme}-{width}.png',full_page=True)
+    # The uncapped worker changes while the candidate and operation list stay unchanged.
+    board.update(catalogs_completed=101,catalogs_remaining=559)
+    await expect(meter).to_contain_text('101 of 660 archive listings checked · 559 left',timeout=9000)
+    await meter.locator('.capture-updated').evaluate('(node)=>node.dataset.updated=String(Date.now()-125000)')
+    await expect(meter.locator('.capture-updated')).to_contain_text('No progress update for 2 min',timeout=2500)
+    await expect(meter.locator('.capture-updated')).to_contain_text('waiting for Wayback')
+    # Saved snapshots from before this release still show pending listings honestly.
+    board.pop('catalogs_total');board.pop('catalogs_completed')
+    await page.evaluate('refresh()');await settled(page)
+    await expect(meter).to_contain_text('559 archive listings still being checked.')
+    assert await meter.get_by_role('progressbar').get_attribute('value') is None
+    # Switch to known pending downloads, then pause without losing the current activity.
+    board.update(catalogs_remaining=0,counts={'captured':2,'pending':18})
+    progress.update(phase='downloading',completion={'total':20,'remaining':18,'completed':2,
+        'eta_seconds':180,'updated_at':datetime.now(timezone.utc).isoformat()})
+    await page.evaluate('refresh()');await settled(page)
+    await expect(meter).to_contain_text('Downloading a capture')
+    await expect(meter).to_contain_text('18 captures left')
+    await expect(meter.get_by_role('progressbar',name='Listed capture progress')).to_have_attribute('value','2')
+    op.update(state='interrupted',error='Wayback connection failed after bounded retries')
+    row.update(capture_state='interrupted',capture_error=op['error'])
+    await page.evaluate('refresh()');await settled(page)
+    await expect(meter.locator('.capture-phase')).to_contain_text('Paused')
+    await expect(meter.locator('.capture-eta')).to_contain_text('ETA paused')
+    await page.locator('.site-tile').click();await settled(page)
+    await expect(page.locator('#stage-live .capture-meter')).to_contain_text('18 captures left')
+    assert not errors,errors
     await context.close()
 
 
@@ -2081,6 +2152,7 @@ async def check(base):
                 await regenerate_capture_flow(browser,base,width)
                 await regenerate_capture_flow(browser,base,width,retry_files=True)
                 await capture_progress_flow(browser,base,width)
+                await board_capture_activity_flow(browser,base,width)
                 await complete_file_review(browser,base,width)
                 await candidate_failure_feedback(browser,base,width)
                 await sitepowerup_flow(browser,base,width)

@@ -77,6 +77,7 @@ class Capture:
             raise CrawlError('Host inventory exceeds the saved host limit')
         self.config['initial_hosts'] = names
         self.store.set(self.name + '_config', self.config)
+        self.store.set(self.name + '_catalog_pages', 0)
         for host, evidence in names.items():
             self.add_host(host, evidence)
         self.set_status('planned', 'Plan saved; capture has not started')
@@ -109,7 +110,15 @@ class Capture:
             raise CrawlError('Create a board capture plan first')
 
     def add_host(self, host, evidence):
-        if self.db.execute('SELECT 1 FROM ez_hosts WHERE host=?', (host,)).fetchone():
+        existing = self.db.execute('SELECT evidence FROM ez_hosts WHERE host=?', (host,)).fetchone()
+        if existing:
+            previous = json.loads(existing['evidence'])
+            if previous.get('source') == 'archive_host_inventory' and evidence.get('source') != 'archive_host_inventory':
+                # A source-proven move outranks a speculative root inventory host.
+                # Retain its original provenance and every catalog checkpoint.
+                self.db.execute('UPDATE ez_hosts SET evidence=? WHERE host=?',
+                                (json.dumps({**evidence, 'host_inventory': previous}), host))
+                self.db.commit()
             return
         if not self.platform.shard(host):
             raise CrawlError('Invalid board host')
@@ -179,11 +188,15 @@ class Capture:
     def status(self):
         self.require_plan()
         counts = dict(self.db.execute('SELECT state,COUNT(*) FROM ez_records GROUP BY state'))
+        catalogs = self.db.execute('SELECT COUNT(*),COALESCE(SUM(done),0) FROM ez_queries').fetchone()
         return {**self.store.get(self.name + '_status', {}), 'board': self.config['board'],
                 'capture_window': self.capture_window(),
                 'counts': counts, 'hosts': self.db.execute('SELECT COUNT(*) FROM ez_hosts').fetchone()[0],
                 'forums': self.db.execute('SELECT COUNT(*) FROM ez_forums').fetchone()[0],
-                'catalogs_remaining': self.db.execute('SELECT COUNT(*) FROM ez_queries WHERE done=0').fetchone()[0],
+                'catalogs_total': catalogs[0], 'catalogs_completed': catalogs[1],
+                'catalogs_remaining': catalogs[0] - catalogs[1],
+                'catalog_pages': self.store.get(self.name + '_catalog_pages'),
+                'catalog_rows': self.store.get(self.name + '_catalog_rows', 0),
                 'limits': self.config['limits'], 'transport': self.store.get('wayback_transport', {})}
 
     def catalog(self, downloader, query):
@@ -209,6 +222,10 @@ class Capture:
         self.db.execute('UPDATE ez_queries SET resume=?,done=? WHERE host=? AND kind=? AND tier=?',
                         (resume, int(not resume), query['host'], query['kind'], query['tier']))
         self.db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)', (self.name + '_catalog_rows', json.dumps(used + len(records))))
+        # Older checkpoints cannot recover an exact historical page count.
+        pages = self.store.get(self.name + '_catalog_pages')
+        if pages is not None:
+            self.db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)', (self.name + '_catalog_pages', json.dumps(pages + 1)))
         self.db.commit()
 
     def stage(self, downloader, row):
@@ -314,25 +331,31 @@ class Capture:
             for host, evidence in self.config.get('initial_hosts', {}).items():
                 self.add_host(host, evidence)
             while True:
-                # Board catalogs precede forum catalogs in each tier. Captures
-                # from all dates are retained, not just the oldest forum index.
-                query = self.db.execute('SELECT * FROM ez_queries WHERE done=0 ORDER BY tier,kind,host LIMIT 1').fetchone()
+                # Follow submitted/source-proven servers before speculative
+                # archive hosts, retaining every host, date and continuation.
+                # Board catalogs still precede forums within each priority/tier.
+                query = self.db.execute("""SELECT q.* FROM ez_queries q JOIN ez_hosts h ON h.host=q.host
+                    WHERE q.done=0 ORDER BY CASE WHEN json_extract(h.evidence,'$.source')='archive_host_inventory'
+                    THEN 1 ELSE 0 END,q.tier,q.kind,q.host LIMIT 1""").fetchone()
                 row = self.db.execute("SELECT * FROM ez_records WHERE state IN ('pending','downloaded') ORDER BY tier,kind,stamp,url LIMIT 1").fetchone()
                 if not query and not row:
                     self.set_status('complete', 'Saved catalogs exhausted for known hosts; Wayback may have uncaptured or unknown-host pages')
                     break
                 if not downloader:
                     downloader = downloader_factory(self.store, SimpleNamespace(**self.config['limits']))
+                activity = {'phase': 'downloading' if row else 'checking_wayback',
+                            'current_url': row['url'] if row else self.platform.catalog_url(self.config['board'], query)}
+                if not row:
+                    start, end = self.date_tiers()[query['tier']]
+                    activity['current_query'] = {'host': query['host'], 'kind': query['kind'], 'from': start, 'to': end}
                 if progress:
-                    progress({**self.status(), 'phase': 'downloading' if row and (not query or row['tier'] <= query['tier']) else 'checking_wayback',
-                              'current_url': row['url'] if row and (not query or row['tier'] <= query['tier']) else
-                                             self.platform.catalog_url(self.config['board'], query)})
-                if row and (not query or row['tier'] <= query['tier']):
+                    progress({**self.status(), **activity})
+                if row:
                     self.stage(downloader, row)
                 else:
                     self.catalog(downloader, query)
                 if progress:
-                    progress(self.status())
+                    progress({**self.status(), **activity})
         except CrawlError as error:
             bounded = isinstance(error, BoundReached) or 'budget' in str(error).lower()
             self.set_status('bounded' if bounded else 'paused', str(error))

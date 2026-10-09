@@ -59,6 +59,16 @@ servers on which a board ever existed; add any other known shard with `--host`
 when planning. The operator command permits examination of an already archived
 board; the portal's separate duplicate check blocks it from new-site approval.
 
+Submitted, operator-supplied and source-proven servers are searched before hosts
+known only from the archive inventory. A verified link can promote an existing
+inventory host without discarding its provenance or catalog checkpoint. Within
+each priority, board catalogs precede forum catalogs in each date tier; pending
+captures are saved before the next catalog request. Every remaining server and
+both date tiers are still searched. Status reports completed/total listings,
+records found, and the active query's host, board/forum kind and date range.
+New plans also count paginated listing responses; old checkpoints leave that
+historical page count unknown rather than inventing a total.
+
 `capture` resumes the same plan and durable budgets. It writes
 `ezboard-manifest.json`, a SQLite checkpoint and raw sources under
 `$EZBOARD_WORK/sources/websites/<host>/<timestamp>/<decoded path>`. Extensionless

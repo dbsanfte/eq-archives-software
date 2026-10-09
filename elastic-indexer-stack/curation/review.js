@@ -209,7 +209,7 @@ function renderShell() {
 function renderList() {
   $('view-total').textContent=`${data.total} ${data.total===1 ? 'site' : 'sites'}`;
   if (route.candidate) return;
-  const signature=JSON.stringify([route.view,route.offset,route.query,route.minGrade,route.needsGrade,data.candidates,data.candidates.map(row=>Boolean(drafts.get(row.id)?.dirty)),hasOperation(),route.view==='capturing' ? data.operations : null]);
+  const signature=JSON.stringify([route.view,route.offset,route.query,route.minGrade,route.needsGrade,data.candidates,data.candidates.map(row=>Boolean(drafts.get(row.id)?.dirty)),hasOperation(),route.view==='capturing' ? [data.operations,data.workers?.capture] : null]);
   if (signature!==listSignature) {
     activeSwipe?.cancel();
     const items=data.candidates.map(row=>{
@@ -221,12 +221,12 @@ function renderList() {
       const capture=row.coverage?.capture;
       const issue=candidateIssue(row);
       const description=row.state==='capture_resume_queued' ? 'Waiting to resume with saved files and progress. Cancel until capture starts.' : row.capture_queue_error || row.capture_error || (row.stage==='candidates' ? row.rating?.reason || (issue ? '' : 'Source review is needed.') :
-        row.stage==='queued' ? 'Approved scope saved. Undo before capture starts.' : row.stage==='capturing' ? 'Capture progress updates automatically.' :
+        row.stage==='queued' ? 'Approved scope saved. Undo before capture starts.' : row.stage==='capturing' ? '' :
         row.stage==='indexing' ? (['index_failed','index_preflight_failed'].includes(row.review_state) ? 'Sources are retained. Open this site to retry.' : 'Publication and AI-enriched indexing are automatic.') :
         row.stage==='saved' ? row.decision?.automatic ? `Saved by automatic mode: Grade ${row.decision.automatic.grade} is below ${row.decision.automatic.min_grade}. Restore to review and approve it yourself.` : 'Set aside for a later decision.' : capture ? `${capture.pages} pages · ${capture.files} dated captures${row.stage==='indexing' && capture.needs_regeneration ? ' · Full capture needed' : ''}` : 'Saved decision and source evidence.');
       if (description) item.append(node('p',description));
       if (row.stage==='capturing') {
-        const op=data.operations.find(op=>op.kind==='capture' && op.payload.sites?.some(site=>site.id===row.id));
+        const op=[data.workers?.capture,...data.operations].find(op=>op?.kind==='capture' && op.payload.sites?.some(site=>site.id===row.id));
         item.append(captureMeter(op,true));
       }
       if (issue) item.append(node('p',issue.message,'candidate-issue-summary'));
@@ -650,26 +650,53 @@ function captureMeter(op,compact=false) {
   const progress=op?.result?.progress,completion=progress?.completion || {},paused=op?.state==='interrupted';
   const {total,remaining,completed}=completion;
   const known=Number.isInteger(total) && total>0 && Number.isInteger(remaining) && remaining>=0 && remaining<=total && completed===total-remaining;
+  const board=progress?.ezboard || progress?.sitepowerup;
+  const catalogs=progress?.catalogs_pending ?? board?.catalogs_remaining;
+  const listing=progress?.phase==='checking_wayback' || catalogs>0 && known && remaining===0;
+  const catalogTotal=progress?.catalogs_total ?? board?.catalogs_total;
+  const catalogsKnown=Number.isInteger(catalogTotal) && catalogTotal>0 && Number.isInteger(catalogs) && catalogs>=0 && catalogs<=catalogTotal;
+  const phases={preparing:'Preparing sources',checking_wayback:progress?.ezboard ? 'Checking Ezboard archive listings' : progress?.sitepowerup ? 'Checking board archive listings' : 'Checking Wayback archive listings',downloading:'Downloading a capture',ready_for_review:'Preparing automatic indexing'};
   const meter=node('div',undefined,'capture-meter');meter.dataset.paused=String(paused);
+  meter.append(node('p',`${paused ? 'Paused · ' : ''}${phases[progress?.phase] || 'Working through the approved scope'}`,'capture-phase'));
   if (op?.payload?.sites?.length>1) meter.append(node('p',`Batch of ${op.payload.sites.length} sites · Current site: ${progress?.site_url || 'preparing'}`,'meta'));
-  meter.append(node('p',known ? `${remaining.toLocaleString()} captures left` : 'Counting remaining captures…','capture-remaining'));
-  const bar=node('progress');bar.setAttribute('aria-label','Listed capture progress');
-  if (known) {
+  if (Number.isInteger(progress?.files)) meter.append(node('p',`${progress.files.toLocaleString()} files saved${board ? ` · ${Number(board.forums || 0).toLocaleString()} forums identified` : ''}`,'capture-saved'));
+  if (!listing) meter.append(node('p',known ? `${remaining.toLocaleString()} captures left` : 'Counting remaining captures…','capture-remaining'));
+  const bar=node('progress');bar.setAttribute('aria-label',listing ? 'Archive listing progress' : 'Listed capture progress');
+  if (listing) {
+    if (catalogsKnown) {
+      bar.max=catalogTotal;bar.value=catalogTotal-catalogs;
+      const text=`${(catalogTotal-catalogs).toLocaleString()} of ${catalogTotal.toLocaleString()} archive listings checked · ${catalogs.toLocaleString()} left`;
+      meter.append(node('p',text,'capture-fraction'));bar.setAttribute('aria-valuetext',text);
+    } else {
+      const text=catalogs>0 ? `${catalogs.toLocaleString()} archive listings still being checked.` : 'The capture inventory is still being listed';
+      meter.append(node('p',text,'capture-fraction'));bar.setAttribute('aria-valuetext',text);
+    }
+  } else if (known) {
     bar.max=total;bar.value=completed;
     bar.setAttribute('aria-valuetext',`${completed.toLocaleString()} of ${total.toLocaleString()} listed captures processed; ${remaining.toLocaleString()} left`);
     meter.append(node('p',`${completed.toLocaleString()} of ${total.toLocaleString()} listed captures processed · ${Math.floor(completed/total*100)}%`,'capture-fraction'));
   } else bar.setAttribute('aria-valuetext','The capture inventory is still being listed');
   meter.append(bar);
+  if (!listing && catalogs>0) meter.append(node('p',`${catalogs.toLocaleString()} archive listings still being checked.`,'meta'));
+  if (listing && Number.isInteger(board?.catalog_pages)) meter.append(node('p',`${board.catalog_pages.toLocaleString()} listing pages read · ${Number(board.catalog_rows || 0).toLocaleString()} records found`,'meta'));
+  const query=board?.current_query;
+  if (listing && query) meter.append(node('p',`${progress.ezboard ? (query.kind==='b' ? 'Board indexes' : 'Forum & message listings') : 'Board listings'} · ${query.from.slice(0,4)}–${query.to.slice(0,4)}`,'capture-query'));
+  if (progress?.current_url) {
+    const current=node('p',progress.current_url,'capture-url');current.title=progress.current_url;
+    meter.append(node('p',paused ? 'Last activity' : listing ? 'Looking up' : 'Current file','capture-url-label'),current);
+  }
+  const activity=node('p',undefined,'capture-updated');activity.dataset.updated=String(Date.parse(completion.updated_at || op?.updated));
+  activity.dataset.paused=String(paused);activity.dataset.waiting=String(['checking_wayback','downloading'].includes(progress?.phase));
+  meter.append(activity);updateCaptureActivity(activity);
   const eta=node('p',undefined,'capture-eta');eta.dataset.paused=String(paused);
+  eta.dataset.listing=String(listing);
   eta.dataset.empty=String(known && remaining===0);eta.dataset.phase=progress?.phase || '';
   const stamp=Date.parse(completion.updated_at),seconds=completion.eta_seconds;
   if (known && Number.isFinite(stamp) && Number.isFinite(seconds) && seconds>0) eta.dataset.finish=String(stamp+seconds*1000);
   meter.append(eta);updateCaptureEta(eta);
   if (!compact) {
     meter.append(node('p','Counts cover the files listed so far and can grow as more pages and supporting files are found. ETA uses recent capture speed.','meta'));
-    const board=progress?.ezboard || progress?.sitepowerup;
-    const catalogs=progress?.catalogs_pending ?? board?.catalogs_remaining;
-    if (catalogs>0) meter.append(node('p',`${catalogs.toLocaleString()} archive listings still being checked.`,'meta'));
+    if (Number.isFinite(progress?.bytes)) meter.append(node('p',`${(progress.bytes/1048576).toFixed(2)} MiB ${board ? 'transferred from Wayback' : 'saved'} · ${Number(progress.urls_checked || 0).toLocaleString()} records checked`,'meta'));
     if (progress?.unavailable>0) meter.append(node('p',`${progress.unavailable.toLocaleString()} unavailable captures will be listed as coverage gaps.`,'meta'));
     if (progress?.failed_lookups>0) meter.append(node('p',`${progress.failed_lookups.toLocaleString()} supporting-file lookups failed. Other files continue downloading; retry missing files from Indexing or History after publication.`,'meta'));
     if (progress?.excluded_urls>0) meter.append(node('p',`${progress.excluded_urls.toLocaleString()} advertising URLs intentionally skipped (ad.* and ads.*).`,'meta'));
@@ -679,6 +706,7 @@ function captureMeter(op,compact=false) {
 function updateCaptureEta(target) {
   for (const eta of target ? [target] : document.querySelectorAll('.capture-eta')) {
     if (eta.dataset.paused==='true') eta.textContent='ETA paused. Recalculates after resume.';
+    else if (eta.dataset.listing==='true') eta.textContent='Finish time unknown during archive listing.';
     else if (eta.dataset.empty==='true') eta.textContent='Checking for any remaining files…';
     else if (!eta.dataset.finish) eta.textContent='ETA calculating after the next captures…';
     else {
@@ -691,6 +719,15 @@ function updateCaptureEta(target) {
         eta.textContent=`ETA: about ${duration} remaining (around ${finish}).`;
       }
     }
+  }
+}
+function updateCaptureActivity(target) {
+  for (const activity of target ? [target] : document.querySelectorAll('.capture-updated')) {
+    const stamp=Number(activity.dataset.updated),elapsed=Math.max(0,Math.floor((Date.now()-stamp)/1000));
+    if (!Number.isFinite(stamp)) activity.textContent='Waiting for the worker’s first progress update.';
+    else if (activity.dataset.paused==='true') activity.textContent=`Progress saved ${new Date(stamp).toLocaleString()}`;
+    else if (elapsed<60) activity.textContent=elapsed<5 ? 'Updated just now' : `Updated ${elapsed} sec ago`;
+    else activity.textContent=`No progress update for ${Math.floor(elapsed/60)} min${activity.dataset.waiting==='true' ? ' · waiting for Wayback; the connection may be busy or retrying' : ''}`;
   }
 }
 function renderLive() {
@@ -719,11 +756,9 @@ function renderLive() {
     if (op?.error) box.append(node('p',op.error));
     if (paused) box.append(node('p','This site is waiting for your decision. Other approved sites continue; this failure does not block the queue.','meta'));
     if (progress) {
-      const phases={preparing:'Preparing sources',checking_wayback:'Checking Wayback captures',downloading:'Downloading a capture',ready_for_review:'Preparing automatic indexing'};
-      box.append(node('p',phases[progress.phase] || 'Working through the approved scope','progress-title'),node('p',`${progress.files} ${progress.capture_policy ? 'files' : 'HTML files'} staged · ${(progress.bytes/1048576).toFixed(2)} MiB · ${progress.urls_checked} ${progress.ezboard || progress.sitepowerup || progress.capture_policy ? 'capture records' : 'URLs'} checked`));
       box.append(captureMeter(op));
       if (progress.site_url) box.append(node('p',`Current site: ${progress.site_url}`,'meta'));
-      if (progress.current_url) box.append(external(progress.current_url));
+      if (progress.current_url) box.append(external(progress.current_url,'Open current URL'));
       box.append(node('p',`Worker batch progress · ${progress.sites_total} approved ${progress.sites_total===1 ? 'site' : 'sites'}. Each completed site publishes and indexes automatically.`,'meta'));
     } else {box.append(node('p','Waiting for the worker’s first progress update.'),captureMeter(op));}
     host.append(box);
@@ -1075,4 +1110,4 @@ window.addEventListener('pointerdown',event=>{if (!event.isPrimary) activeSwipe?
 new ResizeObserver(measureDock).observe($('action-dock'));
 renderShell();writeRoute(true);refresh(true);
 setInterval(()=>{if (!busy && !document.hidden) refresh();},5000);
-setInterval(()=>{updateCountdown();updateCaptureEta();},1000);
+setInterval(()=>{updateCountdown();updateCaptureEta();updateCaptureActivity();},1000);

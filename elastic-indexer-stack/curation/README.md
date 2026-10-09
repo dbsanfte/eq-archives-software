@@ -262,13 +262,21 @@ retains the stage, site, selected page and version across reloads; browser Back,
 status polling and manual refresh preserve page filters, scope drafts and reading
 positions. Sources are plain extracted text; archived HTML/scripts/images never run.
 
-Capture cards and workspaces refresh every five seconds with remaining captures,
-processed/known totals, a percentage bar and a running ETA, alongside actual file,
-byte and URL counts. Totals can grow as catalogs and supporting files are discovered;
-unknown totals stay indeterminate. ETA uses up to 30 recent progress samples from
+Capture cards and workspaces refresh every five seconds with the current phase,
+saved files, current URL and time since the last worker update. Archive searches
+show checked/remaining listings, including Ezboard board/forum and date-range
+context. While listing, the bar measures listings, not completion of the site;
+two saved files cannot misleadingly show the entire capture as 100% complete.
+Downloads show remaining captures, processed/known totals and a running ETA;
+byte and record counts are available in the workspace. Totals can grow as catalogs
+and supporting files are discovered; unknown totals stay indeterminate. Finish
+time remains unknown during listing. ETA uses up to 30 recent progress samples from
 the current attempt, excluding reused sources and paused time. A slow replay cannot
 make the countdown claim completion. Counts persist across reloads and pauses;
-resume recalculates the estimate. Multi-site operations are labeled as batch
+resume recalculates the estimate. A minute without an update is visible, without
+mistaking a pending or retrying Wayback request for a failed capture. The active
+worker's progress stays visible independently of the recent-operations list cap.
+Multi-site operations are labeled as batch
 progress with the current site named. Capture errors stay in Capturing
 with an explicit Resume; queued sites explain why they wait. Indexing separates
 publication, waiting for existing Jobs, and AI enrichment/import, with no invented

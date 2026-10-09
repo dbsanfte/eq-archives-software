@@ -117,6 +117,33 @@ class EzboardTests(unittest.TestCase):
         self.assertEqual(len(FakeDownloader.instances[0].calls), first_count)
         self.assertEqual(self.capture.verify()['verified_captures'], 4)
 
+    def test_known_board_servers_precede_speculative_hosts_without_losing_coverage(self):
+        self.fixture()
+        self.capture.add_host('pub1.ezboard.com', {'source': 'archive_host_inventory', 'sha': 'archive'})
+        self.capture.add_host('pub110.ezboard.com', {'source': 'archive_host_inventory', 'sha': 'archive'})
+        snapshots = []
+        manifest = self.capture.run(FakeDownloader, snapshots.append)
+        calls = FakeDownloader.instances[0].calls
+        speculative = next(i for i, call in enumerate(calls) if 'pub1.ezboard.com/' in call['url'])
+        moved = next(i for i, call in enumerate(calls) if call['op'] == 'capture' and call['url'] == MOVED)
+        self.assertLess(moved, speculative)
+        self.assertEqual(manifest['coverage']['state'], 'complete')
+        self.assertEqual(len(manifest['captures']), 4)
+        coverage = manifest['coverage']
+        self.assertEqual((coverage['catalogs_total'], coverage['catalogs_completed'], coverage['catalogs_remaining']), (12, 12, 0))
+        self.assertEqual(coverage['catalog_pages'], 13)  # one paginated forum listing
+        self.assertEqual(coverage['catalog_rows'], 4)
+        query = next(s for s in snapshots if s.get('phase') == 'checking_wayback')
+        self.assertEqual(query['current_query'], {'host': 'pub4.ezboard.com', 'kind': 'b',
+                         'from': '19990101000000', 'to': '20011231235959'})
+        self.assertTrue(all(s.get('phase') in ('checking_wayback', 'downloading') for s in snapshots))
+        resumed = Capture(self.store).run(FakeDownloader)
+        self.assertEqual(resumed['coverage']['catalog_pages'], 13)
+        self.assertEqual(len(FakeDownloader.instances), 1)
+        evidence = json.loads(self.store.db.execute("SELECT evidence FROM ez_hosts WHERE host='pub110.ezboard.com'").fetchone()[0])
+        self.assertEqual(evidence['source'], 'captured_link')
+        self.assertEqual(evidence['host_inventory']['sha'], 'archive')
+
     def test_interrupted_catalog_resumes_without_redownloading_saved_sources(self):
         self.fixture()
         FakeDownloader.failure = staticmethod(lambda job: job.get('resume_key') == 'next')
@@ -127,6 +154,19 @@ class EzboardTests(unittest.TestCase):
         resumed = Capture(self.store).run(FakeDownloader)
         self.assertEqual(len(resumed['captures']), 4)
         self.assertNotIn(BOARD, [c['url'] for c in FakeDownloader.instances[-1].calls if c['op'] == 'capture'])
+
+    def test_legacy_checkpoint_listing_page_count_stays_unknown_on_resume(self):
+        self.fixture()
+        FakeDownloader.failure = staticmethod(lambda job: job.get('resume_key') == 'next')
+        self.capture.run(FakeDownloader)
+        self.store.db.execute("DELETE FROM meta WHERE key='ezboard_catalog_pages'")
+        self.store.db.commit()
+        FakeDownloader.failure = None
+        result = Capture(self.store).run(FakeDownloader)
+        self.assertEqual(result['coverage']['catalogs_completed'], result['coverage']['catalogs_total'])
+        self.assertEqual(result['coverage']['catalog_rows'], 4)
+        self.assertIsNone(result['coverage']['catalog_pages'])
+        self.assertEqual(len(result['captures']), 4)
 
     def test_limits_do_not_reset_and_an_explicit_extension_retains_progress(self):
         self.fixture()
