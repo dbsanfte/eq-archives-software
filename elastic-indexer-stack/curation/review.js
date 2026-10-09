@@ -716,7 +716,7 @@ function updateCaptureEta(target) {
         const minutes=Math.ceil(seconds/60),hours=Math.floor(minutes/60);
         const duration=seconds<60 ? 'less than a minute' : hours ? `${hours} hr${minutes%60 ? ` ${minutes%60} min` : ''}` : `${minutes} min`;
         const finish=new Date(Number(eta.dataset.finish)).toLocaleString(undefined,{...(hours>=24 ? {weekday:'short'} : {}),hour:'2-digit',minute:'2-digit'});
-        eta.textContent=`ETA: about ${duration} remaining (around ${finish}).`;
+        eta.textContent=`ETA for listed captures: about ${duration} remaining (around ${finish}).`;
       }
     }
   }
