@@ -4,7 +4,7 @@ const stages = ['candidates','queued','capturing','review','indexing'];
 const names = {candidates:'Candidates',queued:'Capture queue',capturing:'Capturing',review:'Review capture',indexing:'Indexing',saved:'Saved for later',history:'History'};
 const descriptions = {
   candidates:'Find the next piece of EverQuest history. Review a site’s evidence and choose what to capture.',
-  queued:'Approved sites download automatically. Undo is available until the worker starts.',
+  queued:'Approved sites download automatically, independently of publication and indexing. Undo is available until capture starts.',
   capturing:'Follow downloads here. Completed captures move to Review automatically.',
   review:'Browse each captured site, then decide whether to publish and index it.',
   indexing:'Approved sites are published, enriched with AI, and indexed automatically.',
@@ -415,7 +415,7 @@ function recoveryControls(row) {
   button.setAttribute('aria-label',`${label}: ${siteName(row)}`);box.append(button);
   box.append(node('p',active ? 'This site is being checked. Approval becomes available after readable samples receive a grade.' :
     `${check ? 'Original' : 'One site ·'} $${check?.max_usd ?? 2} cap for Luna. ${row.captures?.length ? 'Uses the saved source samples.' : 'Finds exact Wayback samples from 1999–2006 before grading.'}`,'meta'));
-  if (!active && hasOperation()) box.append(node('p','Another task is running. This action becomes available when it finishes.','meta'));
+  if (!active && hasOperation()) box.append(node('p','Capture, discovery or another evidence check is using the download worker. This action becomes available when it finishes.','meta'));
   box.append(node('p',`Grading focus: ${focus || 'General EverQuest relevance'}`,'meta'));
   return box;
 }
@@ -701,8 +701,8 @@ function renderLive() {
     const until=node('p',undefined,'grace-period');until.dataset.until=row.decision?.capture_after || '';box.append(until);
     if (detail.capture_queue_error) box.append(node('p',detail.capture_queue_error));
     const blocker=detail.queue_blocker;
-    if (blocker) box.append(node('p',blocker.state==='interrupted' ? 'Waiting for a paused capture to be resumed.' : `Waiting for the current ${blocker.kind==='publish' ? 'publication' : blocker.kind==='discover' ? 'discovery' : 'capture'} operation to finish.`,'meta'));
-    box.append(node('p','You can undo until the worker starts. The queue has no item-count limit.','meta'));host.append(box);updateCountdown();
+    if (blocker) box.append(node('p',blocker.state==='interrupted' ? 'Waiting for a paused capture to be resumed.' : `Waiting for the current ${blocker.kind==='discover' ? 'discovery' : blocker.kind==='candidate_check' ? 'evidence check' : 'capture'} operation to finish.`,'meta'));
+    box.append(node('p','You can undo until capture starts. Publication and indexing run separately. The queue has no item-count limit.','meta'));host.append(box);updateCountdown();
   } else if (row.stage==='capturing') {
     const paused=op?.state==='interrupted',progress=op?.result?.progress;
     const box=panel(paused ? 'Capture paused' : 'Capture in progress',paused ? (progress?.capture_policy==='complete-files-v1' ? 'Saved files and catalog progress are retained. Resume continues pending files and extends an exhausted transport allowance without resetting usage.' : 'Staged files are retained. Resume within the original capture budget.') : 'This screen updates automatically as URLs are checked and downloaded.',paused ? 'attention' : '');
@@ -720,6 +720,7 @@ function renderLive() {
     const state=review.state,publishing=state==='publication_requested',paused=publishing && review.operation?.state==='interrupted',failed=state==='index_failed';
     const title=paused ? 'Publication paused' : failed ? 'Indexing needs attention' : publishing ? 'Publishing approved files' : state==='published_waiting_index' ? 'Waiting to index' : 'AI enrichment & indexing';
     const box=panel(title,paused ? 'Your approval is saved. Retry publication to continue with the retained sources.' : failed ? 'Published sources are retained. Retry with saved AI results and the same site budget; existing entries are skipped.' : publishing ? 'The approved site is being added to the archive. Git publication can take several minutes.' : state==='published_waiting_index' ? 'Indexing starts when the worker is available and other indexing Jobs finish.' : 'Luna enrichment and indexing are running. The site will retire from the active portal when the import completes.',paused || failed ? 'attention' : '');
+    box.append(node('p','Capture and discovery continue independently of publication and indexing.','meta'));
     if (review.error || review.operation?.error) box.append(node('p',review.error || review.operation.error));
     const step=publishing ? 0 : state==='published_waiting_index' ? 1 : 2,pipeline=node('ol',undefined,'pipeline');
     ['Publish approved site','Wait for an available worker','AI enrichment & indexing','Complete and retire'].forEach((text,index)=>{const li=node('li',text);li.dataset.progress=index<step ? 'done' : index===step ? 'current' : 'upcoming';pipeline.append(li);});box.append(pipeline);
@@ -826,7 +827,7 @@ function scrollButtons(target,name) {
 function renderDock(force=false) {
   if (!detail || !route.candidate || detail.candidate.id!==route.candidate) { $('action-dock').hidden=true;measureDock();return; }
   const row=detail.candidate,review=detail.review,draft=getDraft(row),op=detail.capture_operation;
-  const signature=JSON.stringify([row.id,row.state,row.stage,row.manifest_sha256,row.candidate_check,review?.state,review?.operation?.state,review?.job,op?.id,op?.state,hasOperation(),route.panel,route.page,route.slot,draft.dirty,busy]);
+  const signature=JSON.stringify([row.id,row.state,row.stage,row.manifest_sha256,row.candidate_check,review?.state,review?.operation?.state,review?.job,op?.id,op?.state,hasOperation(),hasOperation('indexing'),route.panel,route.page,route.slot,draft.dirty,busy]);
   if (!force && signature===dockSignature) return;
   const dock=$('action-dock'),inner=node('div',undefined,'dock-inner'),buttons=node('div',undefined,'dock-buttons');let hint='';
   if (route.panel==='reader') {
@@ -856,7 +857,7 @@ function renderDock(force=false) {
       buttons.append(mutation('Approve site & index',()=>siteDecision('approve'),'Approved. Publication and indexing are queued.',true,!review.manifest.captures.length));
     }
   } else if (row.stage==='indexing' && review?.state==='publication_requested' && review.operation?.state==='interrupted') {
-    hint='Approval retained · no recapture needed';buttons.append(mutation('Retry publication',()=>request('/api/resume',{id:review.operation.id}),'Publication queued again.',true,hasOperation()));
+    hint='Approval retained · no recapture needed';buttons.append(mutation('Retry publication',()=>request('/api/resume',{id:review.operation.id}),'Publication queued again.',true,hasOperation('indexing')));
   } else if (row.stage==='indexing' && review?.state==='index_failed' && review.job?.name) {
     hint='Reuse saved AI results and the original site budget';buttons.append(mutation('Retry indexing',()=>request('/api/index-retry',{id:review.id,manifest_sha256:review.manifest_sha256,job_name:review.job.name}),'Indexing queued again.',true));
   } else if (row.coverage?.candidate_exclusion || row.coverage?.ezboard_parent_required) {
@@ -868,8 +869,11 @@ function renderDock(force=false) {
   if (hint || busy) inner.append(node('p',busy ? 'Saving your decision…' : hint,'dock-hint'));inner.append(buttons);dock.replaceChildren(inner);dock.hidden=!buttons.childElementCount;dockSignature=signature;measureDock();
 }
 function measureDock() { document.documentElement.style.setProperty('--dock',`${$('action-dock').hidden ? 0 : $('action-dock').getBoundingClientRect().height}px`); }
-function hasOperation() { return data?.operations.some(op=>['queued','running'].includes(op.state)); }
-function currentDiscovery() { return data?.operations.find(op=>op.kind==='discover' && ['queued','running','interrupted'].includes(op.state)); }
+function activeOperation(lane='capture') {
+  return data?.workers?.[lane] || data?.operations.find(op=>['queued','running'].includes(op.state) && (op.kind==='publish' ? 'indexing' : 'capture')===lane);
+}
+function hasOperation(lane='capture') { return Boolean(activeOperation(lane)); }
+function currentDiscovery() { const active=activeOperation();return active?.kind==='discover' ? active : data?.operations.find(op=>op.kind==='discover' && ['queued','running','interrupted'].includes(op.state)); }
 function operationLabel(op) { return op.kind==='discover' && op.payload.target ? 'Site check' : {publish:'Archive publication',capture:'Capture',discover:'Discovery',candidate_check:'Evidence & grading'}[op.kind] || 'Another task'; }
 function renderDiscovery() {
   $('discovery').hidden=route.view!=='candidates' || Boolean(route.candidate);
@@ -880,7 +884,7 @@ function renderDiscovery() {
   $('ungraded-view').textContent=`Needs grading (${data?.candidate_grades?.['-1'] ?? 0})`;
   $('dismiss-all').textContent=`Dismiss all candidates (${data?.dismissal?.count ?? data?.stage_counts.candidates ?? 0})`;
   $('dismiss-all').disabled=busy || !data?.dismissal?.count;
-  const active=data?.operations.find(op=>['queued','running'].includes(op.state)),discovery=currentDiscovery();
+  const active=activeOperation(),discovery=currentDiscovery();
   const paused=discovery?.state==='interrupted';
   $('discover').textContent=paused ? discovery.payload.target ? 'Resume site check' : 'Resume discovery' : 'Discover & grade';
   $('discover').disabled=!data || busy || Boolean(active);
@@ -891,7 +895,7 @@ function renderDiscovery() {
   const status=!data ? 'Checking worker availability…' : busy ? 'Submitting your request…' : active ?
     `${operationLabel(active)} is ${active.state}. ${active.kind==='discover' ? 'Results will appear here for your capture approval.' : 'Discovery becomes available when current work finishes.'}` : paused ?
     `${operationLabel(discovery)} paused. Resume within the original limits; previous spending still counts.${discovery.error ? ' '+discovery.error : ''}` :
-    'Ready. Results still need your capture approval.';
+    'Ready. Publication and indexing run separately. Results still need your capture approval.';
   if ($('discovery-status').textContent!==status) $('discovery-status').textContent=status;
   $('manual-submit').disabled=!data || busy || Boolean(active) || !$('manual-url').value.trim();
   renderDiscoveryProgress();renderManualResult();

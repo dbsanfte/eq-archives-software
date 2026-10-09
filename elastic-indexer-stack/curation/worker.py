@@ -1,10 +1,11 @@
-"""One resumable worker for discovery, staged acquisition and targeted indexing."""
+"""Independent resumable capture and publication/indexing workers."""
 
 import json
 import os
 from pathlib import Path
 import sqlite3
 import threading
+import time
 from datetime import datetime, timedelta
 
 from common import CrawlError, Store, capture_scope, digest, now, save, site_scope
@@ -19,7 +20,7 @@ from captures import capture_sites
 from capture_progress import CaptureProgress
 from jobs import Kubernetes, blockers, import_attempt, import_job, import_name
 from publisher import publish
-from state import connect, unpack, worker_lease
+from state import Lane, OPERATION_KINDS, active_operation, connect, unpack, worker_lease
 from coverage_check import refresh, require_new
 from site_reviews import materialize, migrate
 from import_status import read_error
@@ -138,15 +139,28 @@ class Worker:
                     grant['capture_after'] = (datetime.fromisoformat(now()) + timedelta(seconds=UNDO_SECONDS)).isoformat()
                     store.db.execute('UPDATE candidates SET decision=? WHERE id=?', (json.dumps(grant), row['id']))
             store.db.commit()
-        self.thread = threading.Thread(target=self.run, name="curation-worker", daemon=True)
+        # One process lease owns both workers. Existing operation kinds select
+        # their queue, without migrating payloads, checkpoints or approvals.
+        self.threads = {lane: threading.Thread(target=self.run, args=(lane,),
+                        name=f"curation-{lane.value}", daemon=True) for lane in Lane}
 
     def start(self):
-        self.thread.start()
+        for thread in self.threads.values():
+            thread.start()
+
+    def healthy(self):
+        return not self.stop.is_set() and all(thread.is_alive() for thread in self.threads.values())
 
     def close(self):
         self.stop.set()
-        self.thread.join(timeout=100)
-        self.lease.close()
+        deadline = time.monotonic() + 100
+        for thread in self.threads.values():
+            if thread.ident is not None:
+                thread.join(timeout=max(0, deadline - time.monotonic()))
+        # Never hand ownership to another process while a download or Git
+        # request is still in flight. Process exit releases a retained lease.
+        if not any(thread.is_alive() for thread in self.threads.values()):
+            self.lease.close()
 
     def capture_queue(self):
         with connect(self.root) as store:
@@ -158,7 +172,7 @@ class Worker:
         refresh(self.root)
         with connect(self.root) as store:
             store.db.execute('BEGIN IMMEDIATE')
-            if store.db.execute("SELECT 1 FROM operations WHERE state IN ('queued','running') OR kind='capture' AND state='interrupted'").fetchone():
+            if active_operation(store, paused_capture=True):
                 store.db.rollback()
                 return
             rows = store.db.execute("SELECT id FROM candidates WHERE state='approved_waiting_batch' AND json_extract(decision,'$.capture_after')<=? ORDER BY json_extract(decision,'$.capture_after'),rowid LIMIT 1", (now(),)).fetchall()
@@ -172,10 +186,14 @@ class Worker:
             if store.get('capture_queue_error'):
                 store.set('capture_queue_error', None)
 
-    def operation(self):
+    def operation(self, lane=Lane.CAPTURE):
+        kinds = OPERATION_KINDS[Lane(lane)]
         with connect(self.root) as store:
             store.db.execute("BEGIN IMMEDIATE")
-            row = store.db.execute("SELECT * FROM operations WHERE state='queued' ORDER BY created LIMIT 1").fetchone()
+            if active_operation(store, lane, states=('running',)):
+                store.db.rollback()
+                return
+            row = store.db.execute(f"SELECT * FROM operations WHERE state='queued' AND kind IN ({','.join('?' for _ in kinds)}) ORDER BY created,rowid LIMIT 1", kinds).fetchone()
             if not row:
                 store.db.rollback()
                 return
@@ -287,24 +305,26 @@ class Worker:
                         store.db.execute('UPDATE candidates SET state=? WHERE id=?', (transition(row['state'], Action.INDEX), site['id']))
                 store.db.commit()
 
-    def run(self):
+    def run(self, lane):
         while not self.stop.is_set():
-            try:
-                self.capture_queue()
-            except Exception as error:
-                # Keep invalid/stale approvals queued for an explicit correction.
-                with connect(self.root) as store:
-                    detail = str(error) if isinstance(error, CrawlError) else 'Capture queue paused; staging is unavailable'
-                    if store.get('capture_queue_error') != detail:
-                        store.set('capture_queue_error', detail)
-            self.operation()
+            if lane == Lane.CAPTURE:
+                try:
+                    self.capture_queue()
+                except Exception as error:
+                    # Keep stale approvals queued for an explicit correction.
+                    with connect(self.root) as store:
+                        detail = str(error) if isinstance(error, CrawlError) else 'Capture queue paused; staging is unavailable'
+                        if store.get('capture_queue_error') != detail:
+                            store.set('capture_queue_error', detail)
+            self.operation(lane)
             if self.stop.is_set():
                 break
-            try:
-                self.indexing()
-            except Exception as error:
-                detail = str(error) if isinstance(error, CrawlError) else "Index submission paused; Kubernetes state unavailable"
-                with connect(self.root) as store:
-                    store.db.execute("UPDATE batches SET error=? WHERE state IN ('published_waiting_index','indexing')", (detail,))
-                    store.db.commit()
+            if lane == Lane.INDEXING:
+                try:
+                    self.indexing()
+                except Exception as error:
+                    detail = str(error) if isinstance(error, CrawlError) else "Index submission paused; Kubernetes state unavailable"
+                    with connect(self.root) as store:
+                        store.db.execute("UPDATE batches SET error=? WHERE state IN ('published_waiting_index','indexing')", (detail,))
+                        store.db.commit()
             self.stop.wait(10)

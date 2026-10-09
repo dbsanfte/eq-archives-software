@@ -1,6 +1,7 @@
 """Durable review state and an exclusive worker lease, outside archive Git."""
 
 from contextlib import contextmanager
+from enum import Enum
 import fcntl
 import json
 from pathlib import Path
@@ -8,6 +9,35 @@ import re
 import uuid
 
 from common import CrawlError, Store, now
+
+
+class Lane(str, Enum):
+    CAPTURE = 'capture'
+    INDEXING = 'indexing'
+
+
+OPERATION_KINDS = {
+    Lane.CAPTURE: ('capture', 'discover', 'candidate_check'),
+    Lane.INDEXING: ('publish',),
+}
+
+
+def operation_lane(kind):
+    for lane, kinds in OPERATION_KINDS.items():
+        if kind in kinds:
+            return lane
+    raise CrawlError('Unknown operation kind')
+
+
+def active_operation(store, lane=Lane.CAPTURE, *, paused_capture=False, states=('queued', 'running')):
+    """Read uncapped worker state; callers hold a transaction before claiming."""
+    kinds = OPERATION_KINDS[Lane(lane)]
+    return store.db.execute(f"""SELECT * FROM operations
+        WHERE kind IN ({','.join('?' for _ in kinds)})
+          AND (state IN ({','.join('?' for _ in states)})
+               OR (? AND kind='capture' AND state='interrupted'))
+        ORDER BY CASE state WHEN 'interrupted' THEN 0 WHEN 'running' THEN 1 ELSE 2 END,
+                 created,rowid LIMIT 1""", (*kinds, *states, paused_capture)).fetchone()
 
 
 def identifier():
@@ -57,10 +87,11 @@ def worker_lease(directory):
 
 
 def enqueue(store, kind, payload, commit=True):
+    lane = operation_lane(kind)
     if commit:
         store.db.execute("BEGIN IMMEDIATE")
-    if kind != 'publish' and store.db.execute("SELECT 1 FROM operations WHERE state IN ('queued','running')").fetchone():
-        raise CrawlError("Capture, discovery or archive publication is already queued or running; wait for it to finish")
+    if lane == Lane.CAPTURE and active_operation(store, lane):
+        raise CrawlError("Capture, discovery or evidence grading is already queued or running; wait for it to finish")
     operation = identifier()
     store.db.execute("INSERT INTO operations VALUES (?,?,?, ?,NULL,NULL,?,?)",
                      (operation, kind, "queued", json.dumps(payload), now(), now()))

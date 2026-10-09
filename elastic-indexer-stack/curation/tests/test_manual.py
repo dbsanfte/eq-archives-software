@@ -88,7 +88,12 @@ def test_existing_site_is_returned_without_changing_its_decision_or_work(candida
         assert store.candidates()[0]['state']=='rejected'
         assert json.loads(store.candidates()[0]['decision'])=={'decision':'reject'}
     other=call(app,'POST','/api/submit-site',{'url':'http://different.example/','max_usd':2})
-    assert other.status_code==409 and 'publication' in other.json()['error']
+    assert other.status_code==202
+    with connect(root) as store:
+        assert store.db.execute("SELECT state FROM operations WHERE kind='publish'").fetchone()[0]=='queued'
+        assert store.db.execute('SELECT COUNT(*) FROM operations').fetchone()[0]==2
+    blocked=call(app,'POST','/api/submit-site',{'url':'http://another.example/','max_usd':2})
+    assert blocked.status_code==409 and 'discovery' in blocked.json()['error']
 
 
 def test_shared_accounts_remain_distinct(tmp_path):

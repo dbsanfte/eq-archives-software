@@ -64,9 +64,10 @@ remembers an explicit choice in this browser across visits.
    $2 maximum shown for that site before approval. **Decline indexing** keeps its
    files in staging without publication or indexing; **Reconsider indexing**
    returns a declined site to review. Decisions are independent for each site.
-   Publication can be queued during another capture; the serial worker publishes
-   it before claiming another capture batch, so a large capture queue cannot
-   prevent publication of already reviewed files.
+   Publication and indexing have an independent worker. They continue during a
+   long capture, and a slow archive commit or waiting import cannot hold up
+   downloads. Each worker processes its own durable queue serially; capture,
+   discovery and evidence checks still share one throttled Wayback client at a time.
    For a completed ordinary site with gaps, **Retry failed files** queues only
    missing versions and supporting-file lookups, retaining every successful file.
    **Undo file retry** returns its unchanged review until the worker starts.
@@ -192,7 +193,7 @@ percentage. Publication and indexing failures remain in Indexing with a contextu
 Retry action. Technical Job details expand separately and remain open across polls.
 Discover & grade is a primary action at the top of Candidates, with the explicit
 50-site target, one-hour deadline and $2 total run limit beside it. A visible
-explanation names any capture, discovery or publication occupying the shared worker; polling makes the button available
+explanation names any capture, discovery or evidence check occupying the download worker; publication and indexing do not block it. Polling makes the button available
 when that work finishes, without starting a run. Paused discovery can be resumed
 there within its original limits, deadline and budget. Candidates polls every five
 seconds while visible: completed site checks appear immediately, with a progress
@@ -206,7 +207,7 @@ replay/calendar link. Bare addresses use HTTP; original protocol, path case,
 escaping and query order are preserved. Wayback links identify the original page,
 with the submitted link retained as provenance; sampling still prefers 1999–2001,
 then 2002–2006. Submitting explicitly permits checking **one site, up to $2**.
-The single worker checks archive/account coverage, takes the usual bounded samples
+The capture/discovery worker checks archive/account coverage, takes the usual bounded samples
 and runs the normal Luna grader. It does not spider out to other sites. Results
 join Candidates with the ordinary evidence, sources, grade and capture-scope
 review. Missing sources or invalid grades remain unapproved.
@@ -495,7 +496,14 @@ local-path requests are not filesystem quotas. Back it up separately from the
 public archive using SQLite's backup API plus manifest-listed captures. Preserve
 publication/indexing state on restore and keep private state/keys outside Git.
 
-One replica uses `Recreate` and an exclusive worker lease. A one-time init copies
+One replica uses `Recreate` and an exclusive process lease covering two worker
+threads: capture/discovery and publication/indexing. Atomic SQLite claims prevent
+two operations from using the same worker; API actions and retries check only
+their own worker. `/api/queue` includes uncapped `workers.capture` and
+`workers.indexing` activity independently of its recent-operations list. Health
+requires both threads, and shutdown retains the lease while either has an
+in-flight request. Restart retains payloads, approvals and progress and requires
+explicit resume for interrupted operations in either queue. A one-time init copies
 only the pilot database and listed captures from a read-only mount, excluding
 its tree reader, screenshots and orphan downloads. Both archive checkouts,
 existing ingestion Jobs and the model service stay untouched. Rollback applies
@@ -514,7 +522,8 @@ kubectl kustomize elastic-indexer-stack/curation/k8s >/dev/null
 ```
 
 The image build runs Python 3.13 API/state/scope/source/campaign/publication/import
-pytest, including an over-50-item queue and Undo/worker claim races. The runtime
+pytest, including simultaneous capture/publication, indexing reconciliation during
+capture, both-worker health/recovery, an over-50-item queue and Undo/worker claim races. The runtime
 defines a Unix account for UID/GID 10001: OpenSSH requires the passwd entry even
 when the private key and destination are supplied explicitly. The container
 smoke check exercises SSH configuration offline as that non-root user. CI also uses

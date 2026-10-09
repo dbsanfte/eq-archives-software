@@ -15,7 +15,7 @@ from starlette.routing import Route
 from common import CrawlError, capture_scope, digest, now, site_identity
 from review import apply_decisions, checked_sources, queue, record
 from captures import LIMITS, TEXT_LIMIT, check_manifest, document, readable, verified_path
-from state import connect, enqueue, unpack, valid_id
+from state import Lane, active_operation, connect, enqueue, operation_lane, unpack, valid_id
 from worker import Worker
 from coverage_check import refresh, require_new
 from capture_flow import Action, UNDO_SECONDS, transition
@@ -108,7 +108,7 @@ def create_app(root=None, origin=None, start_worker=True):
 
     def health(request):
         worker = getattr(request.app.state, "worker", None)
-        healthy = not start_worker or worker and worker.thread.is_alive()
+        healthy = not start_worker or worker and worker.healthy()
         return JSONResponse({"status": "ok" if healthy else "unavailable", "version": os.environ.get("GIT_SHA", "development")},
                             status_code=200 if healthy else 503)
 
@@ -155,6 +155,7 @@ def create_app(root=None, origin=None, start_worker=True):
             if search:
                 rows = [row for row in rows if search_matches(row, search)]
             operations = [unpack(row) for row in store.db.execute("SELECT * FROM operations ORDER BY CASE state WHEN 'running' THEN 0 WHEN 'queued' THEN 1 WHEN 'interrupted' THEN 2 ELSE 3 END,created DESC LIMIT 20")]
+            workers = {lane.value: unpack(active) if (active := active_operation(store, lane)) else None for lane in Lane}
             fields = 'id,state,manifest_sha256,publication,job,error,created,updated' if request.query_params.get('compact') == '1' else '*'
             batches = [unpack(row) for row in store.db.execute(f"SELECT {fields} FROM batches WHERE state!='capture_group' ORDER BY created DESC LIMIT 100")]
             page_rows = rows[offset:offset + 50]
@@ -166,7 +167,7 @@ def create_app(root=None, origin=None, start_worker=True):
                                  "luna_spend": spending.snapshot(),
                                  "all_count": len(all_rows), "approved": sum(row["state"] == "approved_waiting_batch" for row in all_rows),
                                  "recommended": sum(row['state'] in ('approval_pending','deferred') and (row['rating'] or {}).get('grade',-1)>=2 for row in all_rows),
-                                 "operations": operations, "batches": batches, "limits": LIMITS, "undo_seconds": UNDO_SECONDS,
+                                 "operations": operations, "workers": workers, "batches": batches, "limits": LIMITS, "undo_seconds": UNDO_SECONDS,
                                  "capturing": sum(row['state']=='capturing' for row in all_rows),
                                  "captured": sum(row['state'] in CAPTURED_STATES for row in all_rows),
                                  "awaiting_site_review": store.db.execute("SELECT COUNT(*) FROM batches WHERE state='awaiting_review'").fetchone()[0],
@@ -187,11 +188,11 @@ def create_app(root=None, origin=None, start_worker=True):
                 (SELECT 1 FROM json_each(operations.payload,'$.sites') WHERE json_extract(value,'$.id')=?)
                 ORDER BY created DESC,rowid DESC LIMIT 1""", (candidate['id'],)).fetchone()
             ids = queue_order(store)
-            blocker = store.db.execute("SELECT id,kind,state FROM operations WHERE state IN ('running','queued') OR (kind='capture' AND state='interrupted') ORDER BY CASE state WHEN 'interrupted' THEN 0 ELSE 1 END,created LIMIT 1").fetchone()
+            blocker = active_operation(store, paused_capture=True)
             return JSONResponse({'candidate': candidate, 'review': review,
                 'capture_operation': unpack(operation) if operation else None,
                 'queue_position': ids.index(candidate['id']) + 1 if candidate['id'] in ids else None,
-                'queue_blocker': dict(blocker) if blocker else None,
+                'queue_blocker': {key: blocker[key] for key in ('id', 'kind', 'state')} if blocker else None,
                 'capture_queue_error': store.get('capture_queue_error')})
 
     async def restore_candidate(request):
@@ -535,8 +536,11 @@ def create_app(root=None, origin=None, start_worker=True):
             raise CrawlError("Resume requires an operation ID")
         with connect(root) as store:
             store.db.execute("BEGIN IMMEDIATE")
-            if store.db.execute("SELECT 1 FROM operations WHERE state IN ('queued','running')").fetchone():
-                raise CrawlError("Another operation is queued or running")
+            operation = store.db.execute("SELECT kind FROM operations WHERE id=? AND state='interrupted'", (valid_id(payload['id']),)).fetchone()
+            if not operation:
+                raise CrawlError("Operation is not awaiting an explicit resume")
+            if active_operation(store, operation_lane(operation['kind'])):
+                raise CrawlError("Another operation for this worker is queued or running")
             result = store.db.execute("UPDATE operations SET state='queued',error=NULL,updated=? WHERE id=? AND state='interrupted'", (now(), valid_id(payload["id"])))
             if result.rowcount != 1:
                 raise CrawlError("Operation is not awaiting an explicit resume")

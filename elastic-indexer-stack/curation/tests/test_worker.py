@@ -7,7 +7,7 @@ import pytest
 from common import CrawlError, Store, digest
 from graph import staged_links
 from review import checked_sources, record
-from state import connect, enqueue
+from state import Lane, connect, enqueue
 from worker import Worker, campaign
 from conftest import add_candidate, manifest_for
 
@@ -84,7 +84,7 @@ def test_capture_then_publication_operation_is_durable_without_any_index_write(c
             store.db.commit()
             enqueue(store,'publish',{'batch_id':manifest['batch_id'],'manifest_sha256':digest(manifest)})
         monkeypatch.setattr('worker.publish',lambda *args:{'commit':'b'*40,'marker':'crawl-manifests/test.json'})
-        worker.operation()
+        worker.operation(Lane.INDEXING)
         with connect(root) as store:
             assert store.db.execute('SELECT state FROM batches').fetchone()[0]=='published_waiting_index'
             assert store.db.execute('SELECT state FROM candidates').fetchone()[0]=='published'
