@@ -258,7 +258,7 @@ def test_small_legacy_complete_capture_can_be_regenerated_and_undone_after_grace
     assert regenerate(app, manifest).status_code == 202
 
 
-def test_regeneration_queue_exceeds_ten_and_waits_behind_paused_capture(tmp_path):
+def test_regeneration_queue_exceeds_ten_and_passes_paused_capture(tmp_path):
     root = tmp_path / 'state'
     rows = [legacy(root, identifier=f'{index:032x}', url=f'http://guild{index}.example/') for index in range(12)]
     app = create_app(root, start_worker=False)
@@ -274,10 +274,9 @@ def test_regeneration_queue_exceeds_ten_and_waits_behind_paused_capture(tmp_path
     try:
         make_due(root)
         worker.capture_queue()
-        assert call(app, 'GET', '/api/queue?filter=queued').json()['total'] == 12
+        assert call(app, 'GET', '/api/queue?filter=queued').json()['total'] == 11
         with connect(root) as store:
-            store.db.execute("UPDATE operations SET state='completed' WHERE id=?", ('f' * 32,))
-            store.db.commit()
+            assert store.db.execute('SELECT state FROM operations WHERE id=?', ('f' * 32,)).fetchone()[0] == 'interrupted'
         worker.capture_queue()
         assert call(app, 'GET', '/api/queue?filter=queued').json()['total'] == 11
         assert call(app, 'GET', '/api/queue?filter=capturing').json()['total'] == 1

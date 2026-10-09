@@ -35,9 +35,11 @@ function external(url, text=url) {
   return item;
 }
 function badge(text,tone='') { const item=node('span',text,'badge');item.dataset.tone=tone;return item; }
-function tone(row) { return candidateIssue(row) || ['index_failed','index_preflight_failed'].includes(row.review_state) || row.state==='coverage_unverified' ? 'attention' : (row.review_state || row.state)==='indexed' ? 'complete' : ['queued','capturing','indexing'].includes(row.stage) ? 'active' : ''; }
+function tone(row) { return row.capture_queue_error || row.capture_state==='interrupted' || candidateIssue(row) || ['index_failed','index_preflight_failed'].includes(row.review_state) || row.state==='coverage_unverified' ? 'attention' : (row.review_state || row.state)==='indexed' ? 'complete' : ['queued','capturing','indexing'].includes(row.stage) ? 'active' : ''; }
 function siteName(row) { if (row.sitepowerup) return `SitePowerUp · Board ${row.sitepowerup}`;const url=new URL(row.scope);return url.host+(url.pathname==='/' ? '' : url.pathname); }
 function statusLabel(row) {
+  if (row.capture_queue_error) return 'Capture needs attention';
+  if (row.capture_state==='interrupted') return 'Capture paused';
   const check=row.candidate_check;
   if (row.stage==='candidates' && check && ['queued','running'].includes(check.state)) return {coverage:'Checking coverage',sampling:'Finding Wayback samples',grading:'Grading with Luna'}[check.phase] || 'Evidence check queued';
   const issue=candidateIssue(row);if (issue) return issue.title;
@@ -218,10 +220,10 @@ function renderList() {
       item.append(top,node('h2',siteName(row)),node('span',row.url,'address'));
       const capture=row.coverage?.capture;
       const issue=candidateIssue(row);
-      const description=row.stage==='candidates' ? row.rating?.reason || (issue ? '' : 'Source review is needed.') :
+      const description=row.capture_queue_error || row.capture_error || (row.stage==='candidates' ? row.rating?.reason || (issue ? '' : 'Source review is needed.') :
         row.stage==='queued' ? 'Approved scope saved. Undo before capture starts.' : row.stage==='capturing' ? 'Capture progress updates automatically.' :
         row.stage==='indexing' ? (['index_failed','index_preflight_failed'].includes(row.review_state) ? 'Sources are retained. Open this site to retry.' : 'Publication and AI-enriched indexing are automatic.') :
-        row.stage==='saved' ? row.decision?.automatic ? `Saved by automatic mode: Grade ${row.decision.automatic.grade} is below ${row.decision.automatic.min_grade}. Restore to review and approve it yourself.` : 'Set aside for a later decision.' : capture ? `${capture.pages} pages · ${capture.files} dated captures${row.stage==='indexing' && capture.needs_regeneration ? ' · Full capture needed' : ''}` : 'Saved decision and source evidence.';
+        row.stage==='saved' ? row.decision?.automatic ? `Saved by automatic mode: Grade ${row.decision.automatic.grade} is below ${row.decision.automatic.min_grade}. Restore to review and approve it yourself.` : 'Set aside for a later decision.' : capture ? `${capture.pages} pages · ${capture.files} dated captures${row.stage==='indexing' && capture.needs_regeneration ? ' · Full capture needed' : ''}` : 'Saved decision and source evidence.');
       if (description) item.append(node('p',description));
       if (row.stage==='capturing') {
         const op=data.operations.find(op=>op.kind==='capture' && op.payload.sites?.some(site=>site.id===row.id));
@@ -254,10 +256,11 @@ function renderList() {
   $('pagination').hidden=data.total<=50 && route.offset===0;
   $('page').textContent=data.total ? `${route.offset+1}–${Math.min(route.offset+50,data.total)} of ${data.total}` : '0 sites';
   $('previous').disabled=route.offset===0;$('next').disabled=route.offset+50>=data.total;
-  const paused=data.operations.find(op=>op.kind==='capture' && op.state==='interrupted');
-  $('stage-activity').hidden=!(['queued','capturing'].includes(route.view) && (paused || data.capture_queue_error));
+  const paused=data.capture_attention?.interrupted ?? data.operations.filter(op=>op.kind==='capture' && op.state==='interrupted').length;
+  const held=data.capture_attention?.preflight || 0;
+  $('stage-activity').hidden=!(['queued','capturing'].includes(route.view) && (paused || held || data.capture_queue_error));
   if (!$('stage-activity').hidden) {
-    const box=panel('Queue waiting','A paused capture needs attention. Other approved sites stay queued.','attention');
+    const box=panel(data.capture_queue_error ? 'Capture worker needs attention' : 'Sites need attention',data.capture_queue_error ? 'The worker could not access the capture queue. Saved approvals are retained.' : `${paused+held} interrupted or unstarted captures need your decision. Other approved sites continue automatically.`,'attention');
     if (data.capture_queue_error) box.append(node('p',data.capture_queue_error));
     if (paused) box.append(control('Open paused captures',()=>openStage('capturing')));$('stage-activity').replaceChildren(box);
   }
@@ -689,21 +692,23 @@ function updateCaptureEta(target) {
 function renderLive() {
   const host=$('stage-live');if (!host || !detail) return;
   const {candidate:row,review,capture_operation:op}=detail;
-  const signature=JSON.stringify([row.stage,detail.queue_position,detail.queue_blocker,detail.capture_queue_error,op,review?.state,review?.operation,review?.job,review?.error]);
+  const signature=JSON.stringify([row.stage,row.capture_queue_error,detail.queue_position,detail.queue_blocker,detail.capture_queue_error,op,review?.state,review?.operation,review?.job,review?.error]);
   if (signature===liveSignature) return;
   const expanded=new Set([...host.querySelectorAll('details[open]')].map(n=>n.dataset.key));
   host.replaceChildren();
   if (row.stage==='queued') {
-    const box=panel('Ready for automatic capture',`Queue position ${detail.queue_position ?? 'pending'}. New approvals have a ${data.undo_seconds ?? 60}-second Undo grace period.`);
+    const box=panel(row.capture_queue_error ? 'Capture needs attention' : 'Ready for automatic capture',row.capture_queue_error ? 'Capture could not start. Other sites continue. Undo this approval to review the scope and evidence before approving again.' : `Queue position ${detail.queue_position ?? 'pending'}. New approvals have a ${data.undo_seconds ?? 60}-second Undo grace period.`,row.capture_queue_error ? 'attention' : '');
+    if (row.capture_queue_error) box.append(node('p',row.capture_queue_error));
     const until=node('p',undefined,'grace-period');until.dataset.until=row.decision?.capture_after || '';box.append(until);
     if (detail.capture_queue_error) box.append(node('p',detail.capture_queue_error));
     const blocker=detail.queue_blocker;
-    if (blocker) box.append(node('p',blocker.state==='interrupted' ? 'Waiting for a paused capture to be resumed.' : 'Waiting for the current capture to finish.','meta'));
+    if (blocker && !row.capture_queue_error) box.append(node('p','Waiting for the current capture to finish.','meta'));
     box.append(node('p','You can undo until capture starts. Candidate gathering and indexing run separately. The queue has no item-count limit.','meta'));host.append(box);updateCountdown();
   } else if (row.stage==='capturing') {
     const paused=op?.state==='interrupted',progress=op?.result?.progress;
     const box=panel(paused ? 'Capture paused' : 'Capture in progress',paused ? (progress?.capture_policy==='complete-files-v1' ? 'Saved files and catalog progress are retained. Resume continues pending files and extends an exhausted transport allowance without resetting usage.' : 'Staged files are retained. Resume within the original capture budget.') : 'This screen updates automatically as URLs are checked and downloaded.',paused ? 'attention' : '');
     if (op?.error) box.append(node('p',op.error));
+    if (paused) box.append(node('p','This site is waiting for your decision. Other approved sites continue; this failure does not block the queue.','meta'));
     if (progress) {
       const phases={preparing:'Preparing sources',checking_wayback:'Checking Wayback captures',downloading:'Downloading a capture',ready_for_review:'Preparing automatic indexing'};
       box.append(node('p',phases[progress.phase] || 'Working through the approved scope','progress-title'),node('p',`${progress.files} ${progress.capture_policy ? 'files' : 'HTML files'} staged · ${(progress.bytes/1048576).toFixed(2)} MiB · ${progress.urls_checked} ${progress.ezboard || progress.sitepowerup || progress.capture_policy ? 'capture records' : 'URLs'} checked`));

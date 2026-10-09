@@ -41,8 +41,15 @@ CANDIDATE_STAGES = {
 
 def decorate(store, rows):
     # Read status metadata without copying manifests or inspecting archive files.
+    from capture_queue import held
+    failures = held(store)
     states = dict(store.db.execute('SELECT id,state FROM batches'))
+    captures = {row['candidate']: row for row in store.db.execute("""SELECT json_extract(site.value,'$.id') candidate,
+        operations.state,operations.error FROM operations,json_each(operations.payload,'$.sites') site
+        WHERE kind='capture' ORDER BY operations.created,operations.rowid""")}
     for row in rows:
+        if row['id'] in failures:
+            row['capture_queue_error'] = failures[row['id']]
         capture = (row.get('coverage') or {}).get('capture') or {}
         review_id = capture.get('review_id') or capture.get('batch_id')
         if capture.get('continuation') and row['state'] in ('approved_waiting_batch', 'capturing'):
@@ -51,6 +58,9 @@ def decorate(store, rows):
             row['review_state'] = states[review_id]
         row['stage'] = REVIEW_STAGES.get(row.get('review_state'),
                          CANDIDATE_STAGES.get(row['state'], Stage.CANDIDATES)).value
+        if row['stage'] == Stage.CAPTURING and row['id'] in captures:
+            row['capture_state'] = captures[row['id']]['state']
+            row['capture_error'] = captures[row['id']]['error']
     return rows
 
 

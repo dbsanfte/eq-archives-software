@@ -248,9 +248,10 @@ Automatic promotion requires verified grading and coverage, preserves board/shar
 account boundaries, and uses whole-site scopes only for pristine suggestions.
 Keep lower grades in Saved for later and exclude their identities from discovery.
 Restore, Undo and manual scope edits must prevent automatic reapproval. Preserve
-explicit human decisions. Exhausted link frontiers wait five minutes; only owned
-interrupted/transient operations can resume automatically. Manual pauses retain
-explicit resume; unsafe/invalid work remains visible for attention.
+explicit human decisions. Exhausted link frontiers wait five minutes. Only owned
+budget/disabled/restart interruptions resume automatically; failed sites retain
+their errors and checkpoints for an explicit user decision while other sites advance.
+Never let one failed site hold a worker queue, in either manual or automatic mode.
 Each explicit Discover run targets
 50 new sites meeting its saved minimum grade (default 2), continuing past low grades and unavailable samples, until the target,
 one-hour deadline or $2 total Luna reservation cap is reached. Stop visibly when
@@ -288,9 +289,13 @@ The queue has no count cap; after a 60-second grace period the automatic worker 
 one oldest eligible site immediately before starting it. Keep later sites queued
 and undoable until they start; the explicit operator API retains its five-site
 batch limit and existing claimed work remains unchanged. Preserve typed transitions,
-atomic Undo/claim locking and durable progress in the appropriate stage. A paused manual
-capture requires explicit resume and holds the capture queue; enabled automatic
-mode can resume only its own interrupted/transient work. Candidate gathering,
+atomic Undo/claim locking and durable progress in the appropriate stage. A failed
+capture requires explicit resume but never holds the capture queue. Retain failed
+preflight approvals as undoable entries with a decision-bound error; skip them
+until the operator changes the approval. Show failures independently of capped
+operation lists, and isolate import submission failures per site. Reconcile an
+uncertain Kubernetes create before advancing; retain the unfinished-Job guard.
+Candidate gathering,
 capture, and publication/indexing have independent serial workers under one process lease;
 slow downloads, Git publication and waiting imports must not block the other
 workers. Scope busy checks, claims and explicit resume to the relevant worker.
