@@ -270,7 +270,9 @@ two saved files cannot misleadingly show the entire capture as 100% complete.
 Downloads show remaining captures, processed/known totals and a running ETA;
 byte and record counts are available in the workspace. Totals can grow as catalogs
 and supporting files are discovered; unknown totals stay indeterminate. Finish
-time remains unknown during listing. ETA uses up to 30 recent progress samples from
+time remains unknown during listing. Download estimates are explicitly labeled
+**ETA for listed captures**, since undiscovered files and remaining catalogs can
+extend the site's finish time. ETA uses up to 30 recent progress samples from
 the current attempt, excluding reused sources and paused time. A slow replay cannot
 make the countdown claim completion. Counts persist across reloads and pauses;
 resume recalculates the estimate. A minute without an update is visible, without

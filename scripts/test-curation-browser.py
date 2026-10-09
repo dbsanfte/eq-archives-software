@@ -828,7 +828,7 @@ async def capture_progress_flow(browser,base,width):
     await page.get_by_text('36 captures left',exact=True).wait_for()
     await expect(page.get_by_role('progressbar')).to_have_attribute('value','64')
     await expect(page.get_by_role('progressbar')).to_have_attribute('max','100')
-    await expect(page.locator('.capture-eta')).to_contain_text('ETA: about')
+    await expect(page.locator('.capture-eta')).to_contain_text('ETA for listed captures: about')
     await page.get_by_role('button',name='Open '+await page.locator('.site-tile h2').inner_text(),exact=True).click()
     await settled(page)
     meter=page.locator('#stage-live .capture-meter')
@@ -845,7 +845,7 @@ async def capture_progress_flow(browser,base,width):
     await expect(meter).to_contain_text('3 advertising URLs intentionally skipped (ad.* and ads.*).')
     await page.reload();await settled(page)
     await expect(meter).to_contain_text('15,000 captures left')
-    await expect(meter.locator('.capture-eta')).to_contain_text('ETA: about')
+    await expect(meter.locator('.capture-eta')).to_contain_text('ETA for listed captures: about')
     # A stalled replay cannot make the countdown claim that work finished.
     await meter.locator('.capture-eta').evaluate('(node)=>node.dataset.finish=String(Date.now()-1)')
     await expect(meter.locator('.capture-eta')).to_have_text('ETA updating: waiting for the next capture.',timeout=2500)
