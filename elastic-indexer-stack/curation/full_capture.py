@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 from archive_layout import archive_path
-from common import CAPTURE_WINDOW, CrawlError, Store, digest, in_capture_window, now, original_url, save, within_capture_scope
+from common import CAPTURE_WINDOW, CrawlError, Store, capture_exclusion, digest, in_capture_window, now, original_url, save, within_capture_scope
 from indexer.capture_enrichment import DEFAULT_POLICY
 
 POLICY = 'complete-files-v1'
@@ -42,7 +42,9 @@ def seed_retry(root, store, retained):
             captures = [json.loads(row[0]) for row in source.execute("SELECT capture FROM full_records WHERE site=? AND state='captured' ORDER BY rowid", (site,))]
             if captures != retained['captures']:
                 raise CrawlError('Completed file inventory changed; failed files cannot be retried')
-            for table in ('full_queries', 'full_records', 'full_dependencies', 'full_scanned'):
+            for table in ('full_queries', 'full_records', 'full_dependencies', 'full_scanned', 'full_exclusions'):
+                if table == 'full_exclusions' and not source.execute("SELECT 1 FROM sqlite_master WHERE name=?", (table,)).fetchone():
+                    continue  # completed checkpoints from before host filtering
                 restriction = "id IN (SELECT id FROM full_records WHERE site=?)" if table == 'full_scanned' else 'site=?'
                 rows = source.execute('SELECT * FROM ' + table + ' WHERE ' + restriction, (site,))
                 columns = [item[0] for item in rows.description]
@@ -118,6 +120,7 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
           CREATE INDEX IF NOT EXISTS full_pending ON full_records(state);
           CREATE TABLE IF NOT EXISTS full_dependencies (url TEXT, site TEXT, parent TEXT NOT NULL, PRIMARY KEY(url,site));
           CREATE TABLE IF NOT EXISTS full_scanned (id TEXT PRIMARY KEY);
+          CREATE TABLE IF NOT EXISTS full_exclusions (site TEXT, url TEXT, reason TEXT NOT NULL, PRIMARY KEY(site,url));
         ''')
         if 'note' not in {row['name'] for row in db.execute('PRAGMA table_info(full_queries)')}:
             db.execute('ALTER TABLE full_queries ADD COLUMN note TEXT')
@@ -165,6 +168,21 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
             store.set('extend_transport_on_resume', False)
         site_map = {site['id']: site for site in sites}
         dependencies = {(r['url'], r['site']): json.loads(r['parent']) for r in db.execute('SELECT * FROM full_dependencies')}
+        def excluded(url, site):
+            reason = capture_exclusion(url)
+            if reason:
+                db.execute('INSERT OR IGNORE INTO full_exclusions VALUES (?,?,?)', (site, url, reason))
+            return reason
+        # Old checkpoints can contain pending catalogs, failed lookups and
+        # unavailable files on newly excluded hosts. Preserve saved sources and
+        # completed manifests; exclusions must not become retryable failures.
+        for query in db.execute('SELECT * FROM full_queries WHERE done=0 OR note IS NOT NULL OR found=0').fetchall():
+            if excluded(query['url'], query['site']):
+                db.execute('UPDATE full_queries SET done=1,note=NULL WHERE id=?', (query['id'],))
+        for record in db.execute("SELECT id,site,url FROM full_records WHERE state='unavailable'").fetchall():
+            if reason := excluded(record['url'], record['site']):
+                db.execute("UPDATE full_records SET state='excluded',note=? WHERE id=?", (reason, record['id']))
+        db.commit()
         def record_key(site, url, stamp):
             return digest([site, original_url(url), stamp])
         def commit_capture(capture, record_id):
@@ -196,8 +214,9 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
                           'versions_found': sum(counts.values()), 'versions_pending': counts.get('pending', 0),
                           'unavailable': counts.get('unavailable', 0),
                           'failed_lookups': db.execute('SELECT COUNT(*) FROM full_queries WHERE note IS NOT NULL').fetchone()[0],
+                          'excluded_urls': db.execute('SELECT COUNT(*) FROM full_exclusions').fetchone()[0],
                           'catalogs_pending': db.execute('SELECT COUNT(*) FROM full_queries WHERE done=0').fetchone()[0],
-                          'urls_checked': counts.get('captured', 0) + counts.get('unavailable', 0),
+                          'urls_checked': counts.get('captured', 0) + counts.get('unavailable', 0) + counts.get('excluded', 0),
                           'sites_total': len(sites), 'sites_done': len(sites) if phase == 'ready_for_review' else 0,
                           'site_url': sites[0]['url'], 'current_url': url, 'capture_window': dict(CAPTURE_WINDOW),
                           'capture_policy': POLICY, 'transport': store.get('wayback_transport', {})})
@@ -220,6 +239,8 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
                 parent = json.loads(row['capture'])
                 evidence = {key: parent[key] for key in ('url', 'timestamp', 'sha256')}
                 for url in references(root, parent):
+                    if excluded(url, row['site']):
+                        continue
                     if allowed(url, site_map[row['site']]):
                         continue  # the whole-scope inventory already covers this file
                     db.execute('INSERT OR IGNORE INTO full_dependencies(url,site,parent) VALUES (?,?,?)',
@@ -234,6 +255,10 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
         # provides an honest total even when acquisition later pauses.
         def catalogs():
             for query in db.execute('SELECT * FROM full_queries WHERE done=0 ORDER BY rowid').fetchall():
+                if excluded(query['url'], query['site']):
+                    db.execute('UPDATE full_queries SET done=1,note=NULL WHERE id=?', (query['id'],))
+                    db.commit()
+                    continue
                 resume = query['resume']
                 while True:
                     report('checking_wayback', query['url'])
@@ -262,6 +287,8 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
                         if not allowed(record['url'], site_map[query['site']]) and not (
                                 dependency and original_url(record['url']) == query['url']):
                             continue
+                        if excluded(record['url'], query['site']):
+                            continue
                         if dependency:
                             record = {**record, 'supporting_source': dependency}
                         found += 1
@@ -281,6 +308,10 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
             row = db.execute("SELECT * FROM full_records WHERE state='pending' ORDER BY rowid LIMIT 1").fetchone()
             if not row:
                 break
+            if reason := excluded(row['url'], row['site']):
+                db.execute("UPDATE full_records SET state='excluded',note=? WHERE id=?", (reason, row['id']))
+                db.commit()
+                continue
             report('downloading', row['url'])
             record = json.loads(row['record'])
             destination = folder / row['id']
@@ -314,11 +345,15 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
                  for row in db.execute("SELECT site,url,timestamp,note FROM full_records WHERE state='unavailable' ORDER BY rowid")]
         failed_queries = [dict(row) for row in db.execute('SELECT url,site,note FROM full_queries WHERE note IS NOT NULL')]
         notes += [{'candidate_id': row['site'], 'url': row['url'], 'note': 'Supporting-file lookup failed: ' + row['note']} for row in failed_queries]
-        missing = [dict(row) for row in db.execute('SELECT url,site FROM full_queries WHERE found=0 AND note IS NULL')
+        exclusions = [dict(row) for row in db.execute('SELECT * FROM full_exclusions ORDER BY site,url')]
+        notes += [{'candidate_id': row['site'], 'url': row['url'], 'kind': 'excluded', 'note': row['reason']} for row in exclusions]
+        missing = [dict(row) for row in db.execute('''SELECT url,site FROM full_queries q WHERE found=0 AND note IS NULL
+                    AND NOT EXISTS (SELECT 1 FROM full_exclusions e WHERE e.site=q.site AND e.url=q.url)''')
                    if (row['url'], row['site']) in dependencies]
         notes += [{'candidate_id': row['site'], 'url': row['url'], 'note': 'Referenced supporting file has no successful archived version in 1999–2006.'} for row in missing]
         coverage = {}
         for site in sites:
+            excluded_urls = sum(row['site'] == site['id'] for row in exclusions)
             gaps = sum(row['site'] == site['id'] for row in db.execute("SELECT site FROM full_records WHERE state='unavailable'"))
             retry = {'files': gaps, 'lookups': sum(row['site'] == site['id'] for row in missing + failed_queries)}
             gaps += retry['lookups']
@@ -327,7 +362,9 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
                 counts = board.get('coverage', {}).get('counts', {})
                 gaps += counts.get('unavailable', 0) + counts.get('excluded', 0)
             coverage[site['id']] = {'state': 'complete_with_gaps' if gaps else 'complete', 'unavailable': gaps, 'retry': retry,
+                'excluded_urls': excluded_urls,
                 'reason': 'The site inventory and listed versions were processed for 1999–2006. ' +
+                          (f'{excluded_urls} advertising-subdomain URLs were intentionally excluded. ' if excluded_urls else '') +
                           (f'{gaps} file versions or supporting-file lookups remain unavailable; see the URLs, known dates and reasons below.' if gaps else 'Wayback may not have archived every original file.')}
         manifest = {**(base_manifest or {}), 'schema': 1, 'batch_id': batch_id, 'created_at': config['created_at'], 'capture_policy': POLICY,
                     'capture_window': dict(CAPTURE_WINDOW), 'sites': sites, 'captures': captures,

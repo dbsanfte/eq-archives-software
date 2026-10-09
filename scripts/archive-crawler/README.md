@@ -145,6 +145,12 @@ discovery runs. The production review queue blocks these unverified entries and
 provides a bounded resumable recheck. These checks read Git trees only, without
 fetching missing objects, reading page blobs or walking the checkout.
 
+Discovery skips hostnames beginning with `ad.` or `ads.` (case-insensitive,
+independent of scheme/port). This is a hostname rule: similar names such as
+`adventure.example` and paths such as `/ads/` remain eligible. The production
+capture engine also excludes these hosts' pending lookups/downloads and reports
+them as intentional exclusions, separately from files eligible for retry.
+
 Legacy filenames lose protocol and some escaping information. Coverage is a
 dated legacy-path check: missing host/page, tier-2-only page, tier-1 match,
 partial inventory or uncertain legacy identity. HTTPS/encoded URLs remain

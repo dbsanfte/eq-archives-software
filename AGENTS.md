@@ -249,8 +249,11 @@ Capture queue. Indexed sites retire automatically to secondary History; declined
 dismissed and duplicate sites also stay there. Deferred sites live in Saved for
 later. Restore can return only deferred/dismissed candidates to Candidates, without
 approving or starting work. Stage counts and filtering use all review status metadata,
-independently of capped batch inventories. Preserve existing operator API filters. The
-queue has no count cap; after a 60-second grace period the automatic worker claims
+independently of capped batch inventories. Preserve existing operator API filters.
+Confirmation and error notifications have an accessible 44px close button. Closing
+a message never sends an action, undoes a decision or changes the selected route;
+polling must not reopen a dismissed message. Preserve the separate Undo action.
+The queue has no count cap; after a 60-second grace period the automatic worker claims
 one oldest eligible site immediately before starting it. Keep later sites queued
 and undoable until they start; the explicit operator API retains its five-site
 batch limit and existing claimed work remains unchanged. Preserve typed transitions,
@@ -365,7 +368,13 @@ path. Stream binary files and Git hashes; keep catalog/file checkpoints in SQLit
 without growing per-file JSON rewrites or archive walks. Source-verified HTML/CSS
 references can add exact supporting-file URLs, including external assets, without
 crawling their hosts. Whole-board engines retain ownership checks and collect
-verified supporting files afterward. A transport/storage/ownership bound keeps
+verified supporting files afterward. Exclude case-insensitive hostname prefixes
+`ad.` and `ads.` before new supporting-file queries and replays, including saved
+pending/failed work on resume; do not match similar names or URL paths. Keep
+intentional exclusions visible and separate from retryable failures. Preserve
+already saved sources and immutable completed manifests, including their source
+reference verification. Apply the same host filter to discovery/manual candidates.
+A transport/storage/ownership bound keeps
 new work paused in Capturing; only exhausted catalogs and pending records reach
 Review, with missing/substituted replays explicitly listed as gaps. Individual
 file HTTP 403/404/410 responses and exact supporting-file lookup failures are

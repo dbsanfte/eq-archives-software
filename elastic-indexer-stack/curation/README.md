@@ -78,6 +78,10 @@ remembers an explicit choice in this browser across visits.
    unsuspended Job in `eqarchives-es`, including pending/retrying Jobs with
    `active=0`. The controller cannot patch, suspend or delete Jobs.
 
+Confirmation and error messages have a **×** close button. Closing a message
+only hides it; it does not undo the decision or submit another request. Undo
+remains a separate action, and polling does not reopen a closed message.
+
 The portal has five active stages: **Candidates**, **Capture queue**, **Capturing**,
 **Review capture**, and **Indexing**. Each candidate belongs to exactly one stage,
 using its durable review status where available. Indexed sites retire automatically
@@ -260,7 +264,14 @@ aliases retain their exact source identities while sharing the approved path or
 account boundary. External supporting files require verified HTML/CSS references;
 their exact URLs are inventoried without crawling the surrounding external site.
 The custom board engines verify discussion ownership before collecting linked
-supporting files. All available dated versions in inclusive UTC **1999-01-01
+supporting files. Hostnames starting with `ad.` or `ads.` are intentionally
+excluded before supporting-file lookups or downloads, case-insensitively and
+independently of scheme/port. The filter also applies to pending/failed work when
+an existing capture resumes. Exclusions appear in progress and coverage notes,
+separately from retryable failures. Saved files and completed review manifests
+are preserved. Names such as `adventure.example` and paths such as `/ads/` remain
+eligible; discovery and manual submissions also skip advertising subdomains.
+All available dated versions in inclusive UTC **1999-01-01
 through 2006-12-31** are requested, including identical-content versions and
 previously sampled URLs. Actual replays must match the requested URL and date;
 a nearest-date replacement is reported as a coverage gap, never relabelled.
