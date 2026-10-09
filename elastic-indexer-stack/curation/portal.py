@@ -25,6 +25,7 @@ REVIEW_STAGES = {
 }
 CANDIDATE_STAGES = {
     'approved_waiting_batch': Stage.QUEUED,
+    'capture_resume_queued': Stage.QUEUED,
     'capturing': Stage.CAPTURING,
     'captured_awaiting_review': Stage.INDEXING,
     'approved_waiting_publication': Stage.INDEXING,
@@ -45,20 +46,21 @@ def decorate(store, rows):
     failures = held(store)
     states = dict(store.db.execute('SELECT id,state FROM batches'))
     captures = {row['candidate']: row for row in store.db.execute("""SELECT json_extract(site.value,'$.id') candidate,
-        operations.state,operations.error FROM operations,json_each(operations.payload,'$.sites') site
+        operations.id,operations.state,operations.error FROM operations,json_each(operations.payload,'$.sites') site
         WHERE kind='capture' ORDER BY operations.created,operations.rowid""")}
     for row in rows:
         if row['id'] in failures:
             row['capture_queue_error'] = failures[row['id']]
         capture = (row.get('coverage') or {}).get('capture') or {}
         review_id = capture.get('review_id') or capture.get('batch_id')
-        if capture.get('continuation') and row['state'] in ('approved_waiting_batch', 'capturing'):
+        if capture.get('continuation') and row['state'] in ('approved_waiting_batch', 'capture_resume_queued', 'capturing'):
             row['review_state'] = 'capture_continued'
         elif review_id in states:
             row['review_state'] = states[review_id]
         row['stage'] = REVIEW_STAGES.get(row.get('review_state'),
                          CANDIDATE_STAGES.get(row['state'], Stage.CANDIDATES)).value
-        if row['stage'] == Stage.CAPTURING and row['id'] in captures:
+        if row['stage'] in (Stage.CAPTURING, Stage.QUEUED) and row['id'] in captures:
+            row['capture_operation_id'] = captures[row['id']]['id']
             row['capture_state'] = captures[row['id']]['state']
             row['capture_error'] = captures[row['id']]['error']
     return rows

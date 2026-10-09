@@ -10,6 +10,7 @@ from conftest import add_candidate, manifest_for
 from server import create_app
 from state import Lane, connect, enqueue, operation_lane, worker_lease
 from test_capture_queue import approve, make_due
+from test_capture_resume import interrupted
 from test_server import call
 from worker import Worker
 from wayback_transport import current_transport
@@ -34,12 +35,15 @@ def test_publication_does_not_block_either_acquisition_worker(candidate, kind, p
 @pytest.mark.parametrize('resumed,busy', [(a,b) for a in ('capture','discover','candidate_check','publish')
                                        for b in ('capture','discover','publish') if operation_lane(a) != operation_lane(b)])
 def test_resume_only_checks_its_own_worker_and_retains_saved_progress(candidate, resumed, busy):
-    root, _ = candidate
+    root, row = candidate
     app = create_app(root, start_worker=False)
     payload = {'saved': 'original budget and manifest'}
     progress = {'files': 786}
+    if resumed == 'capture':
+        operation, payload, _ = interrupted(root, app, row)
     with connect(root) as store:
-        operation = enqueue(store, resumed, payload)
+        if resumed != 'capture':
+            operation = enqueue(store, resumed, payload)
         store.db.execute("UPDATE operations SET state='interrupted',result=? WHERE id=?", (json.dumps(progress), operation))
         store.db.commit()
         other = enqueue(store, busy, {})
@@ -50,7 +54,8 @@ def test_resume_only_checks_its_own_worker_and_retains_saved_progress(candidate,
     assert call(app, 'POST', '/api/resume', {'id': operation}).status_code == 409
     with connect(root) as store:
         saved = store.db.execute('SELECT * FROM operations WHERE id=?', (operation,)).fetchone()
-        assert saved['state'] == 'queued' and json.loads(saved['payload']) == payload
+        assert saved['state'] == ('resume_queued' if resumed == 'capture' else 'queued')
+        assert json.loads(saved['payload']) == payload
         assert json.loads(saved['result']) == progress
         assert store.db.execute('SELECT state FROM operations WHERE id=?', (other,)).fetchone()[0] == 'running'
 

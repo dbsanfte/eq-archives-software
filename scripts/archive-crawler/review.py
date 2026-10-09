@@ -96,7 +96,7 @@ def _apply_decisions(store, incoming, capture_delay=0, before_approve=None):
             raise CrawlError('Undo queued regeneration before changing its capture decision')
         if row["state"] in ("already_archived", "duplicate_candidate") or row['state'] == 'coverage_unverified' and decision['decision'] == 'approve':
             raise CrawlError("Candidate is already archived, duplicated or its coverage is unverified")
-        if row["state"] in ("capturing", "captured_awaiting_review", "publication_requested", "published", "indexed"):
+        if row["state"] in ("capturing", "capture_resume_queued", "captured_awaiting_review", "publication_requested", "published", "indexed"):
             raise CrawlError("Candidate already belongs to a capture batch")
         if decision["decision"] == "approve":
             if before_approve:

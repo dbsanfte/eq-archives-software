@@ -655,6 +655,78 @@ async def capture_failure_isolation_flow(browser,base,width):
     await context.close()
 
 
+async def capture_resume_queue_flow(browser,base,width):
+    context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
+    page=await context.new_page();posts=[];errors=[]
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    snapshot=await (await context.request.get(base+'/api/queue?filter=candidates')).json()
+    row=copy.deepcopy(snapshot['candidates'][0]);row.update(stage='capturing',state='capturing',capture_operation_id='f'*32)
+    op={'id':'f'*32,'kind':'capture','state':'interrupted','payload':{'sites':[{'id':row['id']}]},
+        'error':'Wayback connection failed after bounded retries',
+        'result':{'progress':{'files':12,'bytes':4096,'urls_checked':15,'sites_total':1,'capture_policy':'complete-files-v1'}}}
+    other={'id':'e'*32,'kind':'capture','state':'running','payload':{'sites':[{'id':'a'*24}]}}
+    automatic={'settings':{'enabled':True,'configured':True,'revision':1,'min_grade':3,'daily_usd':2,'grading_criteria':''},
+        'estimated_usd':0.0,'unresolved_usd':0.0,'remaining_usd':2.0,'activity':{},'held':0}
+    claim_before_cancel=False
+    async def fixture(route):
+        path=urlsplit(route.request.url).path
+        if route.request.method=='POST':
+            payload=route.request.post_data_json;posts.append((path,payload))
+            assert payload=={'id':op['id']}
+            if path=='/api/resume':
+                op['state']='resume_queued';row.update(stage='queued',state='capture_resume_queued')
+                await route.fulfill(status=202,json={'resumed':op['id'],'state':'resume_queued'});return
+            assert path=='/api/cancel-resume'
+            row.update(stage='capturing',state='capturing')
+            op['state']='running' if claim_before_cancel else 'interrupted'
+            await route.fulfill(status=409 if claim_before_cancel else 200,
+                json={'error':'Resume is no longer queued; capture may have started'} if claim_before_cancel else {'state':'interrupted'});return
+        if path=='/api/queue':
+            view=parse_qs(urlsplit(route.request.url).query).get('filter',['candidates'])[0]
+            rows=[row] if view==row['stage'] else []
+            body={**snapshot,'candidates':rows,'total':len(rows),'operations':[], 'automation':automatic,
+                'workers':{'candidates':None,'capture':other,'indexing':None},
+                'stage_counts':{name:int(name==row['stage']) for name in ('candidates','queued','capturing','indexing','saved','history')}}
+        elif path=='/api/candidate':
+            body={'candidate':row,'capture_operation':op,'review':None,'queue_position':3,'queue_blocker':other}
+        else:await route.continue_();return
+        await route.fulfill(status=200,json=body)
+    await page.route('**/api/**',fixture)
+    await page.goto(base+'/?view=capturing&candidate='+row['id']);await settled(page)
+    await expect(page.get_by_role('button',name='Resume capture',exact=True)).to_be_enabled()
+    await expect(page.locator('#stage-live')).to_contain_text('12 files staged')
+    assert not posts
+    await page.get_by_role('button',name='Resume capture',exact=True).click();await settled(page)
+    assert 'view=queued' in page.url
+    await expect(page.locator('#stage-live')).to_contain_text('Resume queued')
+    await expect(page.locator('#stage-live')).to_contain_text('12 files already saved')
+    await expect(page.locator('#stage-live')).to_contain_text('Waiting for the current capture')
+    await page.reload();await settled(page)
+    await expect(page.get_by_role('button',name='Cancel queued resume',exact=True)).to_be_enabled()
+    await safe_layout(page,width)
+    await page.screenshot(path=f'/tmp/curation-resume-queued-{width}.png',full_page=True)
+    await page.get_by_role('button',name='Cancel queued resume',exact=True).click();await settled(page)
+    assert 'view=capturing' in page.url
+    await expect(page.get_by_role('button',name='Resume capture',exact=True)).to_be_enabled()
+    automatic['settings']['enabled']=False
+    await page.evaluate('refresh()');await settled(page)
+    await page.get_by_role('button',name='Resume capture',exact=True).click();await settled(page)
+    await stage(page,'queued')
+    cancel=page.get_by_role('button',name='Cancel queued resume:',exact=False)
+    await expect(cancel).to_be_enabled()
+    await cancel.click();await settled(page)
+    assert row['stage']=='capturing' and len(posts)==4
+    await page.goto(base+'/?view=capturing&candidate='+row['id']);await settled(page)
+    await page.get_by_role('button',name='Resume capture',exact=True).click();await settled(page)
+    claim_before_cancel=True
+    await page.get_by_role('button',name='Cancel queued resume',exact=True).click();await settled(page)
+    await expect(page.locator('#error')).to_contain_text('capture may have started')
+    await expect(page.locator('#stage-live')).to_contain_text('Capture in progress')
+    assert not await page.get_by_role('button',name='Cancel queued resume',exact=True).count()
+    assert len(posts)==6 and not errors,errors
+    await context.close()
+
+
 async def capture_progress_flow(browser,base,width):
     context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
     page=await context.new_page();errors=[]
@@ -1485,6 +1557,11 @@ async def continuous_mode_flow(browser,base,width):
     await page.route('**/api/**',fixture)
     await page.goto(base);await settled(page)
     await expect(page.locator('#automation-state')).to_have_text('Off')
+    manual_controls=page.locator('#discovery button, #discovery input, #discovery textarea')
+    await expect(page.locator('#discover')).to_be_enabled()
+    await page.locator('#minimum-grade').fill('1');await settled(page)
+    await page.locator('#grading-advanced > summary').click()
+    await page.locator('#grading-criteria').fill('Ranger class sites')
     await page.locator('#automation-settings > summary').click()
     await expect(page.locator('#automation-grade')).to_have_value('2')
     await page.locator('#automation-enabled').check()
@@ -1494,6 +1571,8 @@ async def continuous_mode_flow(browser,base,width):
     await page.locator('#automation-criteria').fill('Cleric guilds')
     await page.evaluate('refresh()');await settled(page)
     await expect(page.locator('#automation-state')).to_have_text('Off')
+    await expect(page.locator('#minimum-grade')).to_be_enabled()
+    await expect(page.locator('#discover')).to_be_enabled()
     await expect(page.locator('#automation-draft')).to_contain_text('Unsaved')
     assert not posts
     await page.reload();await settled(page)
@@ -1515,6 +1594,18 @@ async def continuous_mode_flow(browser,base,width):
     save_release.set();await settled(page)
     await expect(page.locator('#automation-state')).to_have_text('On')
     assert posts==[('/api/automation',{'enabled':True,'daily_usd':5.5,'min_grade':3,'grading_criteria':'Cleric guilds','revision':0})]
+    # Saved automatic mode disables the entire manual pane, even while idle.
+    for control in await manual_controls.all():
+        await expect(control).to_be_disabled()
+    await expect(page.locator('#discovery-status')).to_contain_text('Automatic mode is on')
+    await expect(page.locator('#discovery')).to_have_css('filter','grayscale(1)')
+    await expect(page.locator('#minimum-grade')).to_have_value('1')
+    await expect(page.locator('#grading-criteria')).to_have_value('Ranger class sites')
+    await page.locator('#grading-advanced > summary').evaluate('(el)=>el.focus()')
+    assert not await page.locator('#grading-advanced > summary').evaluate('(el)=>el===document.activeElement')
+    await page.locator('#discover').dispatch_event('click')
+    assert len(posts)==1,'Disabled discovery must not submit or resume a paid run'
+    await expect(page.locator('#manual-url')).to_be_enabled()
     # Budget progress must update without stealing an unsaved settings draft.
     await page.locator('#automation-grade').fill('1')
     auto.update(estimated_usd=5.4,unresolved_usd=.1,remaining_usd=0,activity={'phase':'daily_budget'})
@@ -1523,6 +1614,8 @@ async def continuous_mode_flow(browser,base,width):
     await expect(page.locator('#automation-status')).to_contain_text('resumes automatically')
     await expect(page.locator('#automation-budget')).to_contain_text('$0.0000 remaining')
     await expect(page.locator('#automation-grade')).to_have_value('1')
+    for control in await manual_controls.all():
+        await expect(control).to_be_disabled()
     await page.screenshot(path=f'/tmp/curation-continuous-dark-{width}.png',full_page=True)
     await page.get_by_role('button',name='Dark mode',exact=True).click()
     await safe_layout(page,width)
@@ -1536,9 +1629,24 @@ async def continuous_mode_flow(browser,base,width):
     await page.locator('#automation-reload').click()
     await expect(page.locator('#automation-grade')).to_have_value('3')
     await page.locator('#automation-enabled').uncheck()
+    # An unsaved Off draft must not enable manual discovery.
+    await expect(page.locator('#minimum-grade')).to_be_disabled()
     await page.locator('#automation-save').click();await settled(page)
     await expect(page.locator('#automation-state')).to_have_text('Off')
     assert len(posts)==2 and posts[-1][1]['enabled'] is False
+    await expect(page.locator('#discover')).to_be_enabled()
+    await expect(page.locator('#minimum-grade')).to_be_enabled()
+    await expect(page.locator('#minimum-grade')).to_have_value('1')
+    await expect(page.locator('#grading-criteria')).to_have_value('Ranger class sites')
+    await expect(page.locator('#discovery')).to_have_css('filter','none')
+    # Polling an enabled mode from another session restores the disabled pane,
+    # including after reload, without starting any work.
+    config.update(enabled=True,revision=config['revision']+1)
+    await page.evaluate('refresh()');await settled(page)
+    await page.reload();await settled(page)
+    for control in await manual_controls.all():
+        await expect(control).to_be_disabled()
+    assert len(posts)==2
     row.update(stage='saved',state='deferred',decision={'decision':'defer','automatic':{'grade':1,'min_grade':3}})
     await stage(page,'saved')
     await expect(page.locator('.site-tile')).to_contain_text('Grade 1 is below 3')
@@ -1980,6 +2088,7 @@ async def check(base):
                 await ezboard_flow(browser,base,width)
                 await automatic_indexing_flow(browser,base,width)
                 await capture_failure_isolation_flow(browser,base,width)
+                await capture_resume_queue_flow(browser,base,width)
                 await candidate_grade_controls(browser,base,width)
                 await candidate_quick_actions(browser,base,width)
                 await capture_approval_navigation(browser,base,width)

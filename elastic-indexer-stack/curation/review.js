@@ -11,7 +11,7 @@ const descriptions = {
   history:'Completed and declined sites stay here, away from your active work.'
 };
 const aliases = {recommended:'candidates',approved:'queued',captured:'indexing',review:'indexing',pending:'candidates',all:'history'};
-const labels = {approval_pending:'Needs a capture decision',coverage_unverified:'Coverage needs checking',deferred:'Saved for later',rejected:'Dismissed',already_archived:'Already archived',duplicate_candidate:'Duplicate candidate',approved_waiting_batch:'Queued for capture',capturing:'Capture in progress',captured_awaiting_review:'Preparing indexing',approved_waiting_publication:'Publication approved',awaiting_review:'Preparing indexing',index_preflight_failed:'Indexing preparation paused',publication_requested:'Publishing',published_waiting_index:'Waiting to index',indexing:'Enriching & indexing',index_failed:'Indexing needs attention',index_budget_waiting:'Waiting for daily Luna budget',indexed:'Indexed',indexing_declined:'Indexing declined'};
+const labels = {approval_pending:'Needs a capture decision',coverage_unverified:'Coverage needs checking',deferred:'Saved for later',rejected:'Dismissed',already_archived:'Already archived',duplicate_candidate:'Duplicate candidate',approved_waiting_batch:'Queued for capture',capture_resume_queued:'Resume queued',capturing:'Capture in progress',captured_awaiting_review:'Preparing indexing',approved_waiting_publication:'Publication approved',awaiting_review:'Preparing indexing',index_preflight_failed:'Indexing preparation paused',publication_requested:'Publishing',published_waiting_index:'Waiting to index',indexing:'Enriching & indexing',index_failed:'Indexing needs attention',index_budget_waiting:'Waiting for daily Luna budget',indexed:'Indexed',indexing_declined:'Indexing declined'};
 let route = readRoute(), data = null, detail = null, busy = false, generation = 0, controller = null;
 let listSignature = '', workspaceSignature = '', dockSignature = '', liveSignature = '', sourceGeneration = 0;
 let searchTimer,gradeTimer,dismissSnapshot=null;
@@ -220,7 +220,7 @@ function renderList() {
       item.append(top,node('h2',siteName(row)),node('span',row.url,'address'));
       const capture=row.coverage?.capture;
       const issue=candidateIssue(row);
-      const description=row.capture_queue_error || row.capture_error || (row.stage==='candidates' ? row.rating?.reason || (issue ? '' : 'Source review is needed.') :
+      const description=row.state==='capture_resume_queued' ? 'Waiting to resume with saved files and progress. Cancel until capture starts.' : row.capture_queue_error || row.capture_error || (row.stage==='candidates' ? row.rating?.reason || (issue ? '' : 'Source review is needed.') :
         row.stage==='queued' ? 'Approved scope saved. Undo before capture starts.' : row.stage==='capturing' ? 'Capture progress updates automatically.' :
         row.stage==='indexing' ? (['index_failed','index_preflight_failed'].includes(row.review_state) ? 'Sources are retained. Open this site to retry.' : 'Publication and AI-enriched indexing are automatic.') :
         row.stage==='saved' ? row.decision?.automatic ? `Saved by automatic mode: Grade ${row.decision.automatic.grade} is below ${row.decision.automatic.min_grade}. Restore to review and approve it yourself.` : 'Set aside for a later decision.' : capture ? `${capture.pages} pages · ${capture.files} dated captures${row.stage==='indexing' && capture.needs_regeneration ? ' · Full capture needed' : ''}` : 'Saved decision and source evidence.');
@@ -234,8 +234,8 @@ function renderList() {
       const bottom=node('div',undefined,'tile-bottom');bottom.append(node('span',row.rating?.category?.replaceAll('_',' ') || 'Website'),node('span','Open site →','open-label'));item.append(bottom);
       if (row.stage==='queued') {
         const card=node('article',undefined,'queue-card');
-        const continuing=Boolean(capture?.continuation),label=undoCaptureLabel(row);
-        const undo=mutation(label,()=>undoApproval(row),continuing ? 'Capture retry cancelled. Original capture status restored.' : 'Returned to Candidates.');
+        const label=undoCaptureLabel(row);
+        const undo=mutation(label,()=>undoApproval(row),undoCaptureMessage(row));
         undo.setAttribute('aria-label',`${label}: ${siteName(row)}`);
         card.append(item,undo);return card;
       }
@@ -291,7 +291,7 @@ function decideCandidate(row,decision) {
     decision==='approve' ? {quiet:true} : {undo:{payload,path:'/api/restore',label:'Undo dismissal'}});
 }
 async function undoApproval(row) {
-  try { return await request('/api/undo',{id:row.id,manifest_sha256:row.manifest_sha256}); }
+  try { return row.state==='capture_resume_queued' ? await request('/api/cancel-resume',{id:row.capture_operation_id}) : await request('/api/undo',{id:row.id,manifest_sha256:row.manifest_sha256}); }
   catch (error) { await refresh();throw error; }
 }
 function candidateCard(row,item) {
@@ -601,8 +601,12 @@ function captureSummary(row,review) {
   return box;
 }
 function undoCaptureLabel(row) {
+  if (row.state==='capture_resume_queued') return 'Cancel queued resume';
   const continuation=row.coverage?.capture?.continuation;
   return continuation?.mode==='retry_failed' ? 'Undo file retry' : continuation ? 'Undo regeneration' : 'Undo approval';
+}
+function undoCaptureMessage(row) {
+  return row.state==='capture_resume_queued' ? 'Resume cancelled. The site remains paused with its saved files.' : row.coverage?.capture?.continuation ? 'Capture retry cancelled. Original capture status restored.' : 'Returned to Candidates.';
 }
 function canRetryFiles(review) {
   const manifest=review?.manifest,retry=manifest?.capture_retry;
@@ -697,13 +701,18 @@ function renderLive() {
   const expanded=new Set([...host.querySelectorAll('details[open]')].map(n=>n.dataset.key));
   host.replaceChildren();
   if (row.stage==='queued') {
-    const box=panel(row.capture_queue_error ? 'Capture needs attention' : 'Ready for automatic capture',row.capture_queue_error ? 'Capture could not start. Other sites continue. Undo this approval to review the scope and evidence before approving again.' : `Queue position ${detail.queue_position ?? 'pending'}. New approvals have a ${data.undo_seconds ?? 60}-second Undo grace period.`,row.capture_queue_error ? 'attention' : '');
+    const resuming=row.state==='capture_resume_queued';
+    const box=panel(resuming ? 'Resume queued' : row.capture_queue_error ? 'Capture needs attention' : 'Ready for automatic capture',resuming ? `Queue position ${detail.queue_position ?? 'pending'}. Resume will continue the original capture, reusing its saved files and checkpoint.` : row.capture_queue_error ? 'Capture could not start. Other sites continue. Undo this approval to review the scope and evidence before approving again.' : `Queue position ${detail.queue_position ?? 'pending'}. New approvals have a ${data.undo_seconds ?? 60}-second Undo grace period.`,row.capture_queue_error ? 'attention' : '');
     if (row.capture_queue_error) box.append(node('p',row.capture_queue_error));
-    const until=node('p',undefined,'grace-period');until.dataset.until=row.decision?.capture_after || '';box.append(until);
+    if (resuming) {
+      if (op?.result?.progress) box.append(node('p',`${Number(op.result.progress.files || 0).toLocaleString()} files already saved. Original scope and cumulative budgets retained.`));
+      if (op?.error) box.append(node('p',`Previous stop: ${op.error}`,'meta'));
+      if (op?.payload?.sites?.length>1) box.append(node('p',`Resumes the original batch of ${op.payload.sites.length} sites together.`,'meta'));
+    } else {const until=node('p',undefined,'grace-period');until.dataset.until=row.decision?.capture_after || '';box.append(until);}
     if (detail.capture_queue_error) box.append(node('p',detail.capture_queue_error));
     const blocker=detail.queue_blocker;
     if (blocker && !row.capture_queue_error) box.append(node('p','Waiting for the current capture to finish.','meta'));
-    box.append(node('p','You can undo until capture starts. Candidate gathering and indexing run separately. The queue has no item-count limit.','meta'));host.append(box);updateCountdown();
+    box.append(node('p',`${resuming ? 'You can cancel this resume' : 'You can undo'} until capture starts. Candidate gathering and indexing run separately. The queue has no item-count limit.`,'meta'));host.append(box);updateCountdown();
   } else if (row.stage==='capturing') {
     const paused=op?.state==='interrupted',progress=op?.result?.progress;
     const box=panel(paused ? 'Capture paused' : 'Capture in progress',paused ? (progress?.capture_policy==='complete-files-v1' ? 'Saved files and catalog progress are retained. Resume continues pending files and extends an exhausted transport allowance without resetting usage.' : 'Staged files are retained. Resume within the original capture budget.') : 'This screen updates automatically as URLs are checked and downloaded.',paused ? 'attention' : '');
@@ -845,12 +854,11 @@ function renderDock(force=false) {
     hint=approvalBlock(row) || 'Capture → publish → index · AI enrichment up to $2/site';
     buttons.append(mutation('Approve site for capture',()=>request('/api/decisions',[{id:row.id,manifest_sha256:row.manifest_sha256,decision:'approve'}]),'Approved for capture. Undo is available in Queue until capture starts.',true,Boolean(approvalBlock(row)),{returnToCandidates:true,quiet:true}));
   } else if (row.stage==='queued') {
-    hint='Your approval is saved. Capture starts automatically.';
-    const continuing=Boolean(row.coverage?.capture?.continuation);
-    buttons.append(mutation(undoCaptureLabel(row),()=>undoApproval(row),continuing ? 'Capture retry cancelled. Original capture status restored.' : 'Returned to Candidates.',true));
+    hint=row.state==='capture_resume_queued' ? 'Resume is queued. Cancel until the worker starts it.' : 'Your approval is saved. Capture starts automatically.';
+    buttons.append(mutation(undoCaptureLabel(row),()=>undoApproval(row),undoCaptureMessage(row),true));
   } else if (row.stage==='capturing' && op?.state==='interrupted') {
-    hint=op?.result?.progress?.capture_policy==='complete-files-v1' ? 'Continue pending files; extend an exhausted transport allowance.' : 'Resume the interrupted worker batch within its original budget.';
-    buttons.append(mutation('Resume capture',()=>request('/api/resume',{id:op.id}),'Capture resumed.',true,hasOperation('capture')));
+    hint='Add this capture to the queue. Saved files and progress are retained; automatic mode can stay on.';
+    buttons.append(mutation('Resume capture',()=>request('/api/resume',{id:op.id}),'Resume added to the capture queue. Cancel it there until capture starts.',true));
   } else if (row.stage==='indexing' && needsRegeneration(review) && ['awaiting_review','index_preflight_failed'].includes(review.state)) {
     hint='All files · 1999–2006 · reuse saved captures';
     buttons.append(mutation('Regenerate full capture',()=>request('/api/continue-capture',{id:review.id,manifest_sha256:review.manifest_sha256}),'Full capture queued. Undo is available until it starts.',true));
@@ -878,6 +886,9 @@ function currentDiscovery() { const active=activeOperation();return active?.kind
 function operationLabel(op) { return op.kind==='discover' && op.payload.target ? 'Site check' : {publish:'Archive publication',capture:'Capture',discover:'Discovery',candidate_check:'Evidence & grading'}[op.kind] || 'Another task'; }
 function renderDiscovery() {
   renderAutomation();
+  const automatic=Boolean(data?.automation?.settings?.enabled);
+  $('discovery').disabled=!data || automatic;
+  $('grading-advanced').inert=!data || automatic;
   $('discovery').hidden=route.view!=='candidates' || Boolean(route.candidate);
   $('manual-site').hidden=$('discovery').hidden;
   $('minimum-grade').value=route.minGrade;$('minimum-grade-value').value=route.minGrade;
@@ -893,8 +904,8 @@ function renderDiscovery() {
   $('run-criteria').hidden=!discovery;
   $('run-criteria').textContent=discovery ? `Saved run criteria: ${discovery.payload.grading_criteria || 'General EverQuest relevance'}. ${paused ? 'Resume uses these criteria; Advanced edits apply only to new runs.' : 'Advanced edits apply only to new runs.'}` : '';
   $('discovery-limits').textContent=discovery ? discovery.payload.fill_queue ? `Target ${discovery.payload.max_candidates} candidates at Grade ${discovery.payload.min_grade}+ · 1 hour · $${discovery.payload.max_usd} total cap` : `Up to ${discovery.payload.max_candidates} candidates · $${discovery.payload.max_usd} original cap` : `Target 50 candidates at Grade ${route.minGrade}+ · 1 hour · $2 total cap`;
-  $('discovery').dataset.state=active || paused ? 'blocked' : 'ready';
-  const status=!data ? 'Checking worker availability…' : busy ? 'Submitting your request…' : active ?
+  $('discovery').dataset.state=automatic ? 'automatic' : active || paused ? 'blocked' : 'ready';
+  const status=automatic ? 'Automatic mode is on. Use its settings above, or turn it off to discover manually.' : !data ? 'Checking worker availability…' : busy ? 'Submitting your request…' : active ?
     `${operationLabel(active)} is ${active.state}. ${active.kind==='discover' ? 'New sites are checked against the current approval settings.' : 'Discovery becomes available when current work finishes.'}` : paused ?
     `${operationLabel(discovery)} paused. Resume within the original limits; previous spending still counts.${discovery.error ? ' '+discovery.error : ''}` :
     'Ready. Capture and indexing run separately. Wayback requests take turns. Automatic mode, when enabled, promotes qualifying sites.';
@@ -938,7 +949,7 @@ async function submitManualSite(event) {
   },result=>result.candidate_id ? 'Site already found. Open its existing entry below.' : result.existing ? 'This site check already exists. Its original budget is retained.' : 'Site check queued: one site, up to $2.');
 }
 async function startDiscovery() {
-  if (!data || busy || hasOperation()) return;
+  if (!data || busy || hasOperation() || data.automation?.settings?.enabled) return;
   const discovery=currentDiscovery(),paused=discovery?.state==='interrupted';
   await act(paused ? 'Resuming discovery' : 'Starting discovery',async()=>{
     try { return await request(paused ? '/api/resume' : '/api/discover',paused ? {id:discovery.id} : {max_candidates:50,max_usd:2,min_grade:route.minGrade,...newGradingCriteria()}); }
