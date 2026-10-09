@@ -819,16 +819,17 @@ async def capture_progress_flow(browser,base,width):
         await route.fulfill(status=200,json=body)
     await page.route('**/api/**',fixture)
     await page.goto(base+'/?view=capturing');await settled(page)
-    await page.get_by_text('Counting remaining captures…',exact=True).wait_for()
-    assert await page.get_by_role('progressbar').get_attribute('value') is None
+    meter=page.locator('#candidates .capture-meter')
+    await meter.get_by_text('Counting remaining captures…',exact=True).wait_for()
+    assert await meter.get_by_role('progressbar').get_attribute('value') is None
     progress.update(phase='downloading',versions_found=100,versions_pending=36,unavailable=0,catalogs_pending=0,
         completion={'total':100,'completed':64,'remaining':36,'eta_seconds':3600,'updated_at':datetime.now(timezone.utc).isoformat()})
     # An unchanged candidate row still gets updated card progress on polling.
     await page.evaluate('refresh()');await settled(page)
-    await page.get_by_text('36 captures left',exact=True).wait_for()
-    await expect(page.get_by_role('progressbar')).to_have_attribute('value','64')
-    await expect(page.get_by_role('progressbar')).to_have_attribute('max','100')
-    await expect(page.locator('.capture-eta')).to_contain_text('ETA for listed captures: about')
+    await meter.get_by_text('36 captures left',exact=True).wait_for()
+    await expect(meter.get_by_role('progressbar')).to_have_attribute('value','64')
+    await expect(meter.get_by_role('progressbar')).to_have_attribute('max','100')
+    await expect(meter.locator('.capture-eta')).to_contain_text('ETA for listed captures: about')
     await page.get_by_role('button',name='Open '+await page.locator('.site-tile h2').inner_text(),exact=True).click()
     await settled(page)
     meter=page.locator('#stage-live .capture-meter')
