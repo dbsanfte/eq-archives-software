@@ -33,7 +33,9 @@ class SharedTransportTests(unittest.TestCase):
         self.temporary.cleanup()
 
     def args(self, **overrides):
-        return SimpleNamespace(**{'delay': .04, 'bytes_per_second': 10000000, 'max_requests': 2,
+        # Simulate saved plans with the previous connection policy. The shared
+        # portal must apply its current policy without rewriting their budgets.
+        return SimpleNamespace(**{'delay': 3, 'bytes_per_second': 131072, 'max_requests': 2,
             'max_page_bytes': 4096, 'max_bytes': 8192, 'max_seconds': 30, **overrides})
 
     def job(self, name):
@@ -93,10 +95,34 @@ class SharedTransportTests(unittest.TestCase):
         self.assertEqual(usage['candidate']['requests'], 1)
         self.assertEqual(usage['candidate']['bytes'], len(self.server.body))
         self.assertEqual(usage['capture']['bytes'], 2 * len(self.server.body))
-        for (_, start), (_, end) in zip(self.server.requests, self.server.requests[1:]):
-            self.assertGreaterEqual(end - start, .03)
+        # Three serial requests finish without fixed one/three-second sleeps,
+        # even though both sessions carry legacy pacing settings.
+        self.assertLess(self.server.requests[-1][1] - self.server.requests[0][1], 1.5)
         self.assertIsNone(current_transport.get())
         self.assertTrue(self.shared.healthy())
+
+    def test_resumed_plan_uses_unlimited_bandwidth_and_retains_saved_limits_and_usage(self):
+        self.server.body = b'x' * (2 * 1024**2)
+        store = Store(self.root / 'capture')
+        legacy = self.args(bytes_per_second=100, max_requests=7, max_page_bytes=3 * 1024**2,
+                           max_bytes=5 * 1024**2, max_seconds=6)
+        store.set('saved_limits', vars(legacy))
+        store.set('wayback_transport', {'requests': 5, 'bytes': 50, 'seconds': 2})
+        try:
+            with self.shared.bind():
+                client = Downloader(store, legacy)
+                result = client.call(self.job('capture'))
+                client.close()
+            self.assertEqual((self.root / 'capture.html').read_bytes(), self.server.body)
+            self.assertEqual(result['bytes'], len(self.server.body))
+            self.assertEqual(store.get('saved_limits'), vars(legacy))
+            usage = store.get('wayback_transport')
+            self.assertEqual(usage['requests'], 6)
+            self.assertEqual(usage['bytes'], 50 + len(self.server.body))
+            self.assertGreaterEqual(usage['seconds'], 2)
+            self.assertLess(usage['seconds'], 6)
+        finally:
+            store.close()
 
     def test_shared_backoff_survives_a_session_hitting_its_time_budget(self):
         self.server.statuses = [429, 200]

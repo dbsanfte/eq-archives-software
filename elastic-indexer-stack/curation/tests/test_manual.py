@@ -107,7 +107,7 @@ def test_shared_accounts_remain_distinct(tmp_path):
 class SampleDownloader:
     requests=[]
     def __init__(self,store,args):
-        assert args.max_candidates==1 and args.delay==3 and args.bytes_per_second==131072
+        assert args.max_candidates==1 and args.delay==0 and args.bytes_per_second==0
     def call(self,request):
         self.requests.append(request)
         if request['op']=='list':

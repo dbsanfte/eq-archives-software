@@ -90,8 +90,8 @@ paths and content/identity collisions are refused rather than overwritten.
 Default cumulative bounds are 2,000 downloaded captures, 100,000 CDX rows,
 4,000 HTTP requests including retries/redirects, 256 MiB transfer/source bytes,
 one hour of active downloader time, and 1 MiB per response. All requests share a
-serial persistent client, at least three seconds apart, at most 128 KiB/s, with
-bounded 422/429 backoff. Limits can be reduced on `plan`, or explicitly increased
+serial persistent client with no fixed request delay or bandwidth cap and
+bounded 422/429 backoff. Cumulative limits can be reduced on `plan`, or explicitly increased
 without resetting usage:
 
 ```bash

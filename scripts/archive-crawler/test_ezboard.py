@@ -175,9 +175,20 @@ class EzboardTests(unittest.TestCase):
         with self.assertRaises(CrawlError):
             self.capture.plan(FORUM)
         with self.assertRaises(CrawlError):
-            self.capture.plan(BOARD, limits={'delay': 1})
+            self.capture.plan(BOARD, limits={'delay': -1})
         with self.assertRaises(CrawlError):
             self.capture.plan(BOARD, hosts=['evil.example'])
+
+    def test_unlimited_transfer_is_valid_but_byte_time_and_request_budgets_stay_positive(self):
+        planned = self.capture.plan(BOARD)
+        limits = planned['limits']
+        self.assertEqual((limits['delay'], limits['bytes_per_second']), (0, 0))
+        for key, value in [('bytes_per_second', -1), ('bytes_per_second', False),
+                           ('max_bytes', 0), ('max_requests', 0), ('max_seconds', 0), ('delay', -1), ('delay', False)]:
+            with self.subTest(key=key, value=value), self.assertRaises(CrawlError):
+                self.capture.validate_limits({**limits, key: value})
+        # Existing standalone operator plans with explicit caps remain readable.
+        self.capture.validate_limits({**limits, 'delay': 3, 'bytes_per_second': 131072})
 
     def test_repeated_cdx_cursor_pauses_and_keeps_saved_capture(self):
         self.fixture()

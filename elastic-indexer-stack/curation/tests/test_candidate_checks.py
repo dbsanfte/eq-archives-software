@@ -161,7 +161,7 @@ def test_sampling_failure_is_visible_and_retry_preserves_operation_and_transport
     transport = []
     class Downloader:
         def __init__(self, store, args):
-            assert args.max_candidates == 1 and args.delay == 3 and args.bytes_per_second == 131072
+            assert args.max_candidates == 1 and args.delay == 0 and args.bytes_per_second == 0
             transport.append(store.get('wayback_transport', {}))
             store.set('wayback_transport', {'requests': len(transport)})
         def call(self, request):

@@ -24,7 +24,7 @@ def test_full_inventory_keeps_thousands_of_versions_and_every_file_type(candidat
                                        ('js', 'application/javascript'), ('zip', 'application/zip')]]
     # Same digest never collapses different URLs or dated versions.
     class Downloader:
-        def __init__(self, store, args): calls.append(('open', args.delay))
+        def __init__(self, store, args): calls.append(('open', args.delay, args.bytes_per_second))
         def call(self, job):
             calls.append((job['op'], job['url']))
             if job['op'] == 'scope_list':
@@ -42,7 +42,7 @@ def test_full_inventory_keeps_thousands_of_versions_and_every_file_type(candidat
     assert {c['timestamp'] for c in result['captures']} >= {'19990101000000', '20061231235959'}
     assert sum(c['kind'] == 'file' for c in result['captures']) == 2640
     assert result['capture_coverage'][site['id']]['state'] == 'complete'
-    assert calls.count(('open', 3)) == 1
+    assert calls.count(('open', 0, 0)) == 1
     check_manifest(root, result)
     # Completion and retry are metadata-based; no redownload of any file.
     def unexpected(*args): raise AssertionError('Completed capture reopened transport')

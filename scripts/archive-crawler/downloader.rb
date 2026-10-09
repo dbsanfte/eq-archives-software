@@ -29,15 +29,16 @@ class PersistentWayback
   # Switch per-command budgets without resetting the connection or shared
   # throttle/backoff. The Python turn queue is serial across all portal workers.
   def limits(config)
-    @delay = Float(config.fetch('delay', 3))
-    @rate = Integer(config.fetch('bytes_per_second', 131072))
+    # Upstream PR #280 keeps Net::HTTP open and uses no fixed sleeps.
+    @delay = Float(config.fetch('delay', 0))
+    @rate = Integer(config.fetch('bytes_per_second', 0)) # zero means unlimited
     @maximum = Integer(config.fetch('max_requests', 240))
     @body_limit = Integer(config.fetch('max_response_bytes', 1048576))
     @byte_limit = Integer(config.fetch('max_total_bytes', 25165824))
     @started = clock
     duration = Float(config.fetch('max_seconds', 900))
     @deadline = @started + duration
-    if !@delay.finite? || @delay < 0 || @rate <= 0 || @maximum <= 0 || @body_limit <= 0 || @byte_limit <= 0 || !duration.finite? || duration <= 0
+    if !@delay.finite? || @delay < 0 || @rate < 0 || @maximum <= 0 || @body_limit <= 0 || @byte_limit <= 0 || !duration.finite? || duration <= 0
       raise CaptureFailure, 'Invalid transport bounds'
     end
     @requests = @bytes = @connections = 0
@@ -120,7 +121,9 @@ class PersistentWayback
             else
               consume.call(chunk)
             end
-            pause([wire_bytes.to_f / @rate - (clock - started), 0].max)
+            # Even unlimited transfers must check the operation's deadline on
+            # each chunk; a stream of small reads can outlast read_timeout.
+            pause(@rate.positive? ? [wire_bytes.to_f / @rate - (clock - started), 0].max : 0)
           end
           raise CaptureFailure, 'Incomplete compressed response' if inflater && !inflater.finished?
         end

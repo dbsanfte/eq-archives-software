@@ -12,6 +12,7 @@ from unittest.mock import Mock, patch
 
 from common import CrawlError, Store, digest
 from acquisition import Downloader, sample
+from crawler import parser
 from grading import SIGNATURE, Luna, grade, reserve, sources, validate
 from review import batch, decisions, queue, review
 from wayback_transport import SharedWayback, TransportUnavailable
@@ -49,6 +50,15 @@ class WorkflowTests(unittest.TestCase):
 
     def arguments(self, maximum=2):
         return SimpleNamespace(api_key_file="unused-private-fixture", max_usd=maximum, max_candidates=50, max_source_characters=120000)
+
+    def test_operator_can_request_unlimited_bandwidth_without_disabling_other_bounds(self):
+        args = parser().parse_args(['--work-dir', str(self.store.root), 'sample', '--bytes-per-second', '0'])
+        self.assertEqual((args.delay, args.bytes_per_second), (0, 0))
+        self.assertGreater(args.max_bytes, 0)
+        self.assertGreater(args.max_requests, 0)
+        self.assertGreater(args.max_seconds, 0)
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit):
+            parser().parse_args(['--work-dir', str(self.store.root), 'sample', '--bytes-per-second', '-1'])
 
     def test_stopped_portal_worker_cannot_start_paid_grading_or_skip_sampling(self):
         self.candidate()
