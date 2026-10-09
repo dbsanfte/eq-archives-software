@@ -139,7 +139,7 @@ immediate. A forum-only match without verified ownership remains uncertain and
 blocks approval.
 
 New board candidates default to the explicit **Whole Ezboard** scope. Each
-approved board receives its own capture budget and whole-site review; the worker
+approved board receives its own capture budget and whole-site indexing record; the worker
 preserves queue order and the Undo grace period. Newly claimed portal work uses
 [complete-files-v1](../../elastic-indexer-stack/curation/README.md): larger cumulative
 transport allowances, exact dated replays and source-verified supporting-file
@@ -148,8 +148,8 @@ archive's root metadata. Limits keep new work paused in Capturing until explicit
 resumed; no bounded subset is reported as complete. Existing claimed portal work
 and standalone operator plans retain their saved discussion-only bounds above. Source membership and exact
 archive destinations are verified again before publication. Existing page,
-directory and custom-folder approvals retain their original scope. Indexing
-still requires separate whole-site approval and uses the existing $2/site
+directory and custom-folder approvals retain their original scope. Completed portal captures publish and index automatically under the original
+capture approval, using the existing $2/site
 source-bound enrichment budget.
 
 On deployment, unapproved legacy thread/forum suggestions with valid saved

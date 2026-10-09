@@ -7,7 +7,7 @@ from captures import check_manifest
 from common import CrawlError, digest, now
 from coverage_check import require_new
 from indexer.capture_enrichment import DEFAULT_POLICY, policy
-from portal import Stage, decorate
+from portal import decorate
 from review import queue
 from site_reviews import get
 from state import connect, enqueue, identifier
@@ -19,7 +19,7 @@ def preview(store, rows=None):
         json_array_length(manifest,'$.captures') AS files FROM batches WHERE state='awaiting_review'""")}
     sites = []
     for row in sorted(rows, key=lambda item: item['id']):
-        if row['stage'] != Stage.REVIEW:
+        if row.get('review_state') != 'awaiting_review':
             continue
         capture = (row.get('coverage') or {}).get('capture') or {}
         review_id = capture.get('review_id') or capture.get('batch_id')
@@ -49,7 +49,7 @@ def validate_decision(store, reviewed, decision):
     return transition(row['state'], action)
 
 
-def apply_decision(store, reviewed, decision, bulk=None):
+def apply_decision(store, reviewed, decision, bulk=None, automatic=False):
     """Caller owns the write transaction and validates approval sources first."""
     state = validate_decision(store, reviewed, decision)
     candidate = reviewed['manifest']['sites'][0]['id']
@@ -63,10 +63,12 @@ def apply_decision(store, reviewed, decision, bulk=None):
     store.db.execute('UPDATE batches SET state=?,updated=? WHERE id=?', (batch_state, now(), reviewed['id']))
     store.db.execute('UPDATE candidates SET state=? WHERE id=?', (state, candidate))
     detail = {'id': reviewed['id'], 'manifest_sha256': reviewed['manifest_sha256'], 'decision': decision}
+    if automatic:
+        detail['authorization'] = 'original_site_capture_approval'
     if bulk:
         detail['bulk'] = bulk
     event = store.db.execute('INSERT INTO events(candidate,action,detail,created) VALUES (?,?,?,?)',
-                            (candidate, 'site_indexing_' + decision, json.dumps(detail), now()))
+                            (candidate, 'site_indexing_automatic' if automatic else 'site_indexing_' + decision, json.dumps(detail), now()))
     return {'state': state, 'operation': operation, 'event': event.lastrowid}
 
 

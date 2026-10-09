@@ -7,14 +7,14 @@ class Stage(str, Enum):
     CANDIDATES = 'candidates'
     QUEUED = 'queued'
     CAPTURING = 'capturing'
-    REVIEW = 'review'
     INDEXING = 'indexing'
     SAVED = 'saved'
     HISTORY = 'history'
 
 
 REVIEW_STAGES = {
-    'awaiting_review': Stage.REVIEW,
+    'awaiting_review': Stage.INDEXING,
+    'index_preflight_failed': Stage.INDEXING,
     'publication_requested': Stage.INDEXING,
     'published_waiting_index': Stage.INDEXING,
     'indexing': Stage.INDEXING,
@@ -25,7 +25,7 @@ REVIEW_STAGES = {
 CANDIDATE_STAGES = {
     'approved_waiting_batch': Stage.QUEUED,
     'capturing': Stage.CAPTURING,
-    'captured_awaiting_review': Stage.REVIEW,
+    'captured_awaiting_review': Stage.INDEXING,
     'approved_waiting_publication': Stage.INDEXING,
     'publication_requested': Stage.INDEXING,
     'published': Stage.INDEXING,
@@ -44,7 +44,9 @@ def decorate(store, rows):
     for row in rows:
         capture = (row.get('coverage') or {}).get('capture') or {}
         review_id = capture.get('review_id') or capture.get('batch_id')
-        if review_id in states:
+        if capture.get('continuation') and row['state'] in ('approved_waiting_batch', 'capturing'):
+            row['review_state'] = 'capture_continued'
+        elif review_id in states:
             row['review_state'] = states[review_id]
         row['stage'] = REVIEW_STAGES.get(row.get('review_state'),
                          CANDIDATE_STAGES.get(row['state'], Stage.CANDIDATES)).value

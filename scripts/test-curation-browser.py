@@ -14,7 +14,7 @@ async def settled(page):
 
 
 async def stage(page,name):
-    if name in ('candidates','queued','capturing','review','indexing'):
+    if name in ('candidates','queued','capturing','indexing'):
         await page.locator(f'#stages [data-view="{name}"]').click()
     else:
         await page.get_by_role('button',name='Open tools and history').click()
@@ -135,7 +135,7 @@ async def basic_flow(browser,base,width):
     assert await page.locator('.site-tile').count()==2  # The real API hides the grade-1 fixture by default.
     await page.get_by_role('slider',name='Minimum Luna grade').press('Home')
     await page.locator('.site-tile').nth(2).wait_for()
-    assert await page.locator('#stages button').count()==5
+    assert await page.locator('#stages button').count()==4
     assert await page.locator('#site-workspace').is_hidden()
     await safe_layout(page,width)
     await open_site(page,'guild.example/eq/')
@@ -178,7 +178,7 @@ async def basic_flow(browser,base,width):
     await page.get_by_role('button',name='← Back to pages',exact=True).click()
     await page.locator('.page-browser').wait_for()
     if width<1000: assert await page.locator('.document-reader').is_hidden()
-    await page.get_by_role('button',name='Back to site decision',exact=True).click()
+    await page.get_by_role('button',name='Back to site',exact=True).click()
     await page.get_by_role('heading',name='Choose capture scope',exact=True).wait_for()
     scope=page.get_by_label('Download scope',exact=True)
     await scope.select_option('custom')
@@ -244,7 +244,7 @@ async def basic_flow(browser,base,width):
     await page.get_by_role('button',name='Save capture scope',exact=True).click()
     await settled(page)
     await page.screenshot(path=f'/tmp/curation-mobile-candidate-{width}.png',full_page=True)
-    await stage(page,'review')
+    await stage(page,'indexing')
     await open_site(page,'captured-guild.example/eq/')
     await page.get_by_role('button',name='Browse 2 captured pages',exact=True).click()
     await page.get_by_label('Find a captured page').fill('child')
@@ -257,13 +257,9 @@ async def basic_flow(browser,base,width):
     await page.go_back()
     await page.locator('.page-browser').wait_for()
     assert await page.get_by_label('Find a captured page').input_value()=='child'
-    await page.get_by_role('button',name='Back to site decision',exact=True).click()
-    await page.get_by_role('button',name='Decline indexing',exact=True).click()
-    await page.get_by_role('button',name='Reconsider indexing',exact=True).wait_for()
-    assert 'view=history' in page.url
-    await page.get_by_role('button',name='Reconsider indexing',exact=True).click()
-    await page.get_by_role('button',name='Approve site & index',exact=True).wait_for()
-    assert 'view=review' in page.url
+    await page.get_by_role('button',name='Back to site',exact=True).click()
+    assert await page.get_by_role('button',name='Approve site & index',exact=True).count()==0
+    await page.get_by_role('heading',name='Preparing automatic indexing',exact=True).wait_for()
     await page.screenshot(path=f'/tmp/curation-mobile-review-{width}.png',full_page=True)
     await safe_layout(page,width)
     await page.get_by_role('button',name='Open tools and history').click()
@@ -362,12 +358,8 @@ async def status_flow(browser,base):
     listing=await (await context.request.get(base+'/api/queue?filter=review')).json()
     row=next(row for row in listing['candidates'] if 'captured-guild' in row['url'])
     detail=await (await context.request.get(base+'/api/candidate?id='+row['id'])).json()
-    # Exercise the real manifest-bound site approval once; the fixture has no worker.
-    await page.goto(base+'/?view=review&candidate='+row['id'])
-    await page.get_by_role('button',name='Approve site & index',exact=True).click()
-    await page.get_by_role('heading',name='Publishing approved files',exact=True).wait_for()
-    assert 'view=indexing' in page.url
-    detail=await (await context.request.get(base+'/api/candidate?id='+row['id'])).json()
+    detail['candidate'].update(stage='indexing',state='approved_waiting_publication',review_state='publication_requested')
+    detail['review'].update(state='publication_requested',operation={'id':'d'*32,'kind':'publish','state':'queued','payload':{}})
     approved=copy.deepcopy(detail)
     mutations=[]
     async def fixture(route):
@@ -386,10 +378,11 @@ async def status_flow(browser,base):
             body=copy.deepcopy(listing);view=parse_qs(parsed.query)['filter'][0]
             body['candidates']=[detail['candidate']] if view==detail['candidate']['stage'] else []
             body['total']=len(body['candidates']);body['operations']=[{'id':'c'*32,'kind':'capture','state':'running','payload':{}}]
-            body['stage_counts']={name:int(name==detail['candidate']['stage']) for name in ('candidates','queued','capturing','review','indexing','saved','history')}
+            body['stage_counts']={name:int(name==detail['candidate']['stage']) for name in ('candidates','queued','capturing','indexing','saved','history')}
         else:await route.continue_();return
         await route.fulfill(status=200,json=body)
     await page.route('**/api/**',fixture)
+    await page.goto(base+'/?view=indexing&candidate='+row['id']);await settled(page)
     detail['review']['operation']['state']='interrupted';detail['review']['operation']['error']='Publication transport failed; sources retained'
     await page.locator('#refresh').click()
     await page.get_by_role('heading',name='Publication paused',exact=True).wait_for()
@@ -437,7 +430,7 @@ async def search_and_queue(browser,base):
         offset=int(args['offset'][0]);query=args.get('search',[''])[0]
         rows=[{**template,'id':f'{index:024x}','url':f'http://site-{index:02}.example/','scope':f'http://site-{index:02}.example/','stage':'queued','state':'approved_waiting_batch','review_state':None} for index in range(remaining)]
         if query:rows=[row for row in rows if query in row['scope']]
-        body={**snapshot,'candidates':rows[offset:offset+50],'total':len(rows),'approved':remaining,'stage_counts':{'candidates':0,'queued':remaining,'capturing':0,'review':0,'indexing':0,'saved':0,'history':0}}
+        body={**snapshot,'candidates':rows[offset:offset+50],'total':len(rows),'approved':remaining,'stage_counts':{'candidates':0,'queued':remaining,'capturing':0,'indexing':0,'saved':0,'history':0}}
         if query=='site-1':await asyncio.sleep(.6)
         await route.fulfill(status=200,json=body)
     await page.route('**/api/queue?**',listing)
@@ -475,7 +468,7 @@ async def unavailable_candidate(browser,base):
         elif parsed.path=='/api/queue':
             view=parse_qs(parsed.query)['filter'][0]
             body={**snapshot,'candidates':[row] if view==row['stage'] else [],'total':int(view==row['stage']),
-                  'stage_counts':{name:int(name==row['stage']) for name in ('candidates','queued','capturing','review','indexing','saved','history')}}
+                  'stage_counts':{name:int(name==row['stage']) for name in ('candidates','queued','capturing','indexing','saved','history')}}
         else:raise AssertionError(parsed.path)
         await route.fulfill(status=200,json=body)
     await page.route('**/api/**',fixture)
@@ -526,7 +519,7 @@ async def coverage_feedback(browser,base,width):
             elif parsed.path=='/api/queue':
                 view=parse_qs(parsed.query)['filter'][0]
                 body={**snapshot,'candidates':[row] if view==row['stage'] else [],'total':int(view==row['stage']),
-                      'operations':[],'stage_counts':{name:int(name==row['stage']) for name in ('candidates','queued','capturing','review','indexing','saved','history')}}
+                      'operations':[],'stage_counts':{name:int(name==row['stage']) for name in ('candidates','queued','capturing','indexing','saved','history')}}
             else:raise AssertionError(parsed.path)
             await route.fulfill(status=200,json=body)
         await page.route('**/api/**',fixture)
@@ -578,7 +571,7 @@ async def capture_flow(browser,base):
         elif parsed.path=='/api/queue':
             view=parse_qs(parsed.query)['filter'][0]
             body={**snapshot,'candidates':[row] if view==row['stage'] else [],'total':int(view==row['stage']),
-                'stage_counts':{name:int(name==row['stage']) for name in ('candidates','queued','capturing','review','indexing','saved','history')},
+                'stage_counts':{name:int(name==row['stage']) for name in ('candidates','queued','capturing','indexing','saved','history')},
                 'operations':[{'id':'b'*32,'kind':'publish','state':'running','payload':{}},
                               *([context_data['capture_operation']] if context_data['capture_operation'] else [])]}
         else:await route.continue_();return
@@ -602,15 +595,15 @@ async def capture_flow(browser,base):
     completed_list=await (await context.request.get(base+'/api/queue?filter=review')).json()
     completed=completed_list['candidates'][0]
     completed_context=await (await context.request.get(base+'/api/candidate?id='+completed['id'])).json()
-    row.update(stage='review',state='captured_awaiting_review')
+    row.update(stage='indexing',state='captured_awaiting_review')
     context_data['review']=completed_context['review']
     op['state']='completed'
     await page.locator('#refresh').click()
     await page.get_by_role('heading',name='Your captured site',exact=True).wait_for()
-    assert 'view=review' in page.url
+    assert 'view=indexing' in page.url
     assert await page.locator('[data-count=capturing]').inner_text()=='0'
-    assert await page.locator('[data-count=review]').inner_text()=='1'
-    assert await page.get_by_role('button',name='Approve site & index',exact=True).is_enabled()
+    assert await page.locator('[data-count=indexing]').inner_text()=='1'
+    assert not await page.get_by_role('button',name='Approve site & index',exact=True).count()
     await context.close()
 
 
@@ -630,7 +623,7 @@ async def capture_progress_flow(browser,base,width):
         if parsed.path=='/api/candidate': body=detail
         elif parsed.path=='/api/queue':
             body={**snapshot,'candidates':[row],'total':1,'operations':[op],
-                  'stage_counts':{name:int(name=='capturing') for name in ('candidates','queued','capturing','review','indexing','saved','history')}}
+                  'stage_counts':{name:int(name=='capturing') for name in ('candidates','queued','capturing','indexing','saved','history')}}
         else: await route.continue_();return
         await route.fulfill(status=200,json=body)
     await page.route('**/api/**',fixture)
@@ -685,7 +678,7 @@ async def regenerate_capture_flow(browser,base,width,retry_files=False):
     page=await context.new_page();posts=[];errors=[]
     page.on('pageerror',lambda error:errors.append(str(error)))
     snapshot=await (await context.request.get(base+'/api/queue?filter=candidates')).json()
-    row=copy.deepcopy(snapshot['candidates'][0]);row.update(stage='review',state='captured_awaiting_review')
+    row=copy.deepcopy(snapshot['candidates'][0]);row.update(stage='indexing',state='captured_awaiting_review')
     row['coverage']['capture']={'needs_regeneration':True,'pages':1,'files':2}
     manifest={'sites':[row],'captures':row['captures'],'limits':{'files':100},
               'capture_coverage':{row['id']:{'state':'bounded','reason':'Legacy batch file limit reached'}}}
@@ -694,6 +687,8 @@ async def regenerate_capture_flow(browser,base,width,retry_files=False):
         manifest.update(capture_policy='complete-files-v1',capture_retry={'files':1,'lookups':1},
             notes=[{'url':'http://counter.example/i.gif','note':'Supporting-file lookup failed: Wayback HTTP 403'}])
         row['coverage']['capture']['needs_regeneration']=False
+        row.update(state='published',review_state='published_waiting_index')
+        reviewed['state']='published_waiting_index'
     action='Retry failed files' if retry_files else 'Regenerate full capture'
     undo='Undo file retry' if retry_files else 'Undo regeneration'
     reject=True
@@ -709,9 +704,10 @@ async def regenerate_capture_flow(browser,base,width,retry_files=False):
                 row['coverage']['capture']['continuation']={'review_id':reviewed['id'],**({'mode':'retry_failed'} if retry_files else {})}
                 reviewed['state']='capture_continued'
             elif path=='/api/undo':
-                row.update(stage='review',state='captured_awaiting_review')
+                row.update(stage='indexing',state='captured_awaiting_review')
                 row['coverage']['capture'].pop('continuation')
-                reviewed['state']='awaiting_review'
+                reviewed['state']='published_waiting_index' if retry_files else 'awaiting_review'
+                row['review_state']=reviewed['state']
             else:raise AssertionError(path)
             await route.fulfill(status=202,json={'state':row['state']});return
         if path=='/api/candidate':body={'candidate':row,'review':reviewed,'capture_operation':None}
@@ -719,17 +715,14 @@ async def regenerate_capture_flow(browser,base,width,retry_files=False):
             view=parse_qs(urlsplit(route.request.url).query)['filter'][0]
             body={**snapshot,'candidates':[row] if view==row['stage'] else [],'total':int(view==row['stage']),'operations':[],
                   'review_actions':{'count':1,'incomplete_count':0 if retry_files else 1},
-                  'stage_counts':{name:int(name==row['stage']) for name in ('candidates','queued','capturing','review','indexing','saved','history')}}
+                  'stage_counts':{name:int(name==row['stage']) for name in ('candidates','queued','capturing','indexing','saved','history')}}
         else:await route.continue_();return
         await route.fulfill(status=200,json=body)
     await page.route('**/api/**',fixture)
     await page.goto(base+'/?view=review');await settled(page)
-    if not retry_files:
-        await expect(page.locator('#review-approve-all')).to_be_disabled()
-        await expect(page.locator('#review-actions-summary')).to_contain_text('1 older captures need regeneration')
     await page.locator('.site-tile').click();await settled(page)
     if retry_files:
-        await expect(page.get_by_role('button',name='Approve site & index',exact=True)).to_be_enabled()
+        await expect(page.get_by_role('button',name='Approve site & index',exact=True)).to_have_count(0)
         await page.get_by_text('Read coverage notes',exact=True).click()
         await expect(page.locator('#site-workspace')).to_contain_text('Supporting-file lookup failed: Wayback HTTP 403')
     else:
@@ -737,13 +730,13 @@ async def regenerate_capture_flow(browser,base,width,retry_files=False):
         assert await page.get_by_role('button',name='Approve site & index',exact=True).count()==0
     await page.get_by_role('button',name=action,exact=True).click();await settled(page)
     await expect(page.locator('#error')).to_contain_text('Captured site changed')
-    assert 'view=review' in page.url
+    assert 'view=indexing' in page.url
     reject=False
     await page.get_by_role('button',name=action,exact=True).click();await settled(page)
     assert 'view=queued' in page.url
     await page.reload();await settled(page)
     await page.get_by_role('button',name=undo,exact=True).click();await settled(page)
-    assert 'view=review' in page.url
+    assert 'view=indexing' in page.url
     await expect(page.get_by_role('button',name=action,exact=True)).to_be_enabled()
     await safe_layout(page,width)
     await page.screenshot(path=f'/tmp/curation-{"retry-files" if retry_files else "regeneration"}-{width}.png',full_page=True)
@@ -784,7 +777,7 @@ async def discovery_flow(browser,base,width):
         assert path=='/api/queue',path
         loading.set();await release_listing.wait()
         await route.fulfill(status=200,json={'candidates':arrivals,'total':len(arrivals),'offset':0,'operations':operations,'workers':workers,
-            'stage_counts':{name:0 for name in ('candidates','queued','capturing','review','indexing','saved','history')},
+            'stage_counts':{name:0 for name in ('candidates','queued','capturing','indexing','saved','history')},
             'capture_queue_error':None,'version':'discovery-fixture'})
     await page.route('**/api/**',fixture)
     await page.goto(base+'/?view=candidates')
@@ -808,7 +801,7 @@ async def discovery_flow(browser,base,width):
     await page.get_by_role('button',name='Open tools and history').click()
     assert not await page.locator('#tools #discover').count()
     await page.get_by_role('button',name='Close tools',exact=True).click()
-    for name in ('capturing','queued','review','indexing'):
+    for name in ('capturing','queued','indexing'):
         await stage(page,name)
         assert await button.is_hidden(),name
     await stage(page,'candidates')
@@ -986,7 +979,7 @@ async def capture_approval_navigation(browser,base,width):
             offset=int(args['offset'][0])
             await route.fulfill(status=200,json={**snapshot,'operations':[],'candidates':candidates[offset:offset+50],
                 'total':len(candidates),'offset':offset,'stage_counts':{name:sum(row['stage']==name for row in rows)
-                    for name in ('candidates','queued','capturing','review','indexing','saved','history')}})
+                    for name in ('candidates','queued','capturing','indexing','saved','history')}})
         elif path=='/api/candidate':
             await route.fulfill(status=200,json={'candidate':next(row for row in rows if row['id']==args['id'][0]),'review':None})
         else:raise AssertionError(path)
@@ -1095,7 +1088,7 @@ async def candidate_quick_actions(browser,base,width):
             selected=[row for row in rows if row['stage']==args['filter'][0]]
             await route.fulfill(status=200,json={**snapshot,'operations':[],'luna_spend':spend,'candidates':selected,
                 'total':len(selected),'offset':0,'stage_counts':{name:sum(row['stage']==name for row in rows)
-                    for name in ('candidates','queued','capturing','review','indexing','saved','history')}})
+                    for name in ('candidates','queued','capturing','indexing','saved','history')}})
         elif path=='/api/candidate':
             await route.fulfill(status=200,json={'candidate':next(row for row in rows if row['id']==args['id'][0]),'review':None})
         else:raise AssertionError(path)
@@ -1400,85 +1393,60 @@ async def candidate_grade_controls(browser,base,width):
     await context.close()
 
 
-async def review_bulk_actions(browser,base,width):
+async def automatic_indexing_flow(browser,base,width):
     context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
     page=await context.new_page();posts=[];errors=[]
     page.on('pageerror',lambda error:errors.append(str(error)))
-    original=await (await context.request.get(base+'/api/queue?filter=review')).json()
-    template=original['candidates'][0]
-    rows=[]
-    for index in range(58):
-        row=copy.deepcopy(template)
-        row.update(id=f'{index:024x}',url=f'http://review-{index}.example/eq/',scope=f'http://review-{index}.example/eq/',stage='review')
-        rows.append(row)
-    version=0;fail=True;submitted=asyncio.Event();release=asyncio.Event()
+    snapshot=await (await context.request.get(base+'/api/queue?filter=review')).json()
+    row=snapshot['candidates'][0]
+    detail=await (await context.request.get(base+'/api/candidate?id='+row['id'])).json()
+    row=detail['candidate'];review=detail['review']
     async def fixture(route):
-        nonlocal version,fail
-        path=urlsplit(route.request.url).path
+        parsed=urlsplit(route.request.url)
         if route.request.method=='POST':
-            payload=route.request.post_data_json;posts.append((path,payload))
-            if path=='/api/undo-review-dismissal':
-                assert payload=={'dismissal':'d'*32}
-                for row in rows: row.update(stage='review',state='captured_awaiting_review',review_state='awaiting_review')
-                version+=1;await route.fulfill(status=200,json={'restored':58});return
-            assert path=='/api/review-decisions'
-            assert payload['token']==str(version)
-            if fail:
-                fail=False;version+=1
-                await route.fulfill(status=409,json={'error':'Review sites changed. Refresh and confirm the new list.'});return
-            if payload['decision']=='approve':
-                submitted.set();await release.wait()
-                for row in rows: row.update(stage='indexing',state='publication_requested',review_state='publication_requested')
-            else:
-                for row in rows: row.update(stage='history',state='indexing_declined',review_state='indexing_declined')
-            version+=1;await route.fulfill(status=202 if payload['decision']=='approve' else 200,json={'count':58,'decision':payload['decision'],'dismissal':'d'*32});return
-        assert path=='/api/queue'
-        query=parse_qs(urlsplit(route.request.url).query);view=query.get('filter',['review'])[0];offset=int(query.get('offset',['0'])[0]);search=query.get('search',[''])[0]
-        selected=[row for row in rows if row['stage']==view and search in row['url']]
-        reviewed=[row for row in rows if row['stage']=='review']
-        await route.fulfill(status=200,json={**original,'candidates':selected[offset:offset+50],'total':len(selected),'offset':offset,'operations':[],
-            'stage_counts':{name:sum(row['stage']==name for row in rows) for name in ('candidates','queued','capturing','review','indexing','saved','history')},
-            'review_actions':{'count':len(reviewed),'files':len(reviewed)*2,'max_enrichment_usd':len(reviewed)*2,'token':str(version),
-                              'sites':[{'id':row['id'],'scope':row['scope'],'files':2} for row in reviewed]}})
+            payload=route.request.post_data_json;posts.append((parsed.path,payload))
+            assert parsed.path=='/api/prepare-indexing'
+            assert payload=={'id':review['id'],'manifest_sha256':review['manifest_sha256']}
+            review.update(state='awaiting_review',error=None);row['review_state']='awaiting_review'
+            await route.fulfill(status=202,json={'state':'awaiting_review'});return
+        if parsed.path=='/api/candidate':body=detail
+        elif parsed.path=='/api/queue':
+            view=parse_qs(parsed.query)['filter'][0]
+            body={**snapshot,'candidates':[row] if view==row['stage'] else [],'total':int(view==row['stage']),'operations':[],
+                  'stage_counts':{name:int(name==row['stage']) for name in ('candidates','queued','capturing','indexing','saved','history')}}
+        else:await route.continue_();return
+        await route.fulfill(status=200,json=body)
     await page.route('**/api/**',fixture)
-    await page.goto(base+'/?view=review');await settled(page)
-    await expect(page.locator('#candidates .site-tile')).to_have_count(50)
-    await page.locator('#next').click();await expect(page.locator('#candidates .site-tile')).to_have_count(8)
-    await page.get_by_label('Find a site',exact=True).fill('review-57.')
-    await expect(page.locator('#candidates .site-tile')).to_have_count(1)
-    await page.locator('#review-approve-all').click()
-    await expect(page.locator('#review-dialog-title')).to_have_text('Approve all 58 sites?')
-    await expect(page.locator('#review-dialog-budget')).to_contain_text('$116 total ($2 per site)')
-    await expect(page.locator('#review-dialog-description')).to_contain_text('116 captures')
+    # Saved Review links resolve to the new stage, including reader navigation.
+    await page.goto(base+'/?view=review&candidate='+row['id']);await settled(page)
+    assert 'view=indexing' in page.url
+    await expect(page.locator('#stages button')).to_have_count(4)
+    await expect(page.locator('[data-view=review],#review-actions,#review-dialog')).to_have_count(0)
+    await expect(page.get_by_role('heading',name='Preparing automatic indexing',exact=True)).to_be_visible()
+    await expect(page.locator('#stage-live')).to_contain_text('up to $2 for this site, including retries')
+    assert not posts
+    review.update(state='index_preflight_failed',error='Archive coverage is unverified. Retry after checking coverage.')
+    row['review_state']='index_preflight_failed'
+    await page.evaluate('refresh()');await settled(page)
+    await expect(page.get_by_role('heading',name='Indexing preparation paused',exact=True)).to_be_visible()
+    await expect(page.locator('#stage-live')).to_contain_text(review['error'])
+    await page.reload();await settled(page)
+    assert not posts
+    await page.get_by_role('button',name='Retry indexing preparation',exact=True).click();await settled(page)
+    await expect(page.get_by_role('heading',name='Preparing automatic indexing',exact=True)).to_be_visible()
+    assert len(posts)==1
+    review.update(state='publication_requested');row['review_state']='publication_requested'
+    await page.evaluate('refresh()');await settled(page)
+    await expect(page.get_by_role('heading',name='Publishing approved files',exact=True)).to_be_visible()
+    await expect(page.get_by_role('button',name='Approve site & index',exact=True)).to_have_count(0)
     await safe_layout(page,width)
-    await page.locator('#review-dialog details summary').click()
-    assert await page.locator('#review-dialog-sites a').count()==58
-    confirm_bounds=await page.locator('#review-dialog-confirm').bounding_box()
-    assert confirm_bounds['y']>=0 and confirm_bounds['y']+confirm_bounds['height']<=844
-    await page.screenshot(path=f'/tmp/curation-review-bulk-{width}.png',full_page=True)
-    await page.locator('#review-dialog-cancel').click();assert not posts
-    await page.locator('#review-dismiss-all').click()
-    await expect(page.locator('#review-dialog-budget')).to_be_hidden()
-    await page.locator('#review-dialog-confirm').click();await settled(page)
-    await expect(page.locator('#error')).to_contain_text('Review sites changed')
-    assert 'view=review' in page.url
-    await page.locator('#refresh').click()
-    await page.wait_for_function('()=>data.review_actions.token==="1"')
-    await page.locator('#review-dismiss-all').click();await page.locator('#review-dialog-confirm').click();await settled(page)
-    await expect(page.locator('[data-count=review]')).to_have_text('0')
-    await expect(page.locator('#notice')).to_contain_text('58 sites moved to History')
-    await expect(page.locator('#review-approve-all')).to_be_disabled()
-    await page.get_by_role('button',name='Undo dismiss all',exact=True).click();await settled(page)
-    await expect(page.locator('[data-count=review]')).to_have_text('58')
-    await page.locator('#review-approve-all').click();await page.locator('#review-dialog-confirm').click()
-    await asyncio.wait_for(submitted.wait(),timeout=3)
-    assert 'view=review' in page.url and await page.locator('#review-approve-all').is_disabled()
-    release.set()
-    await page.wait_for_url('**/?view=indexing*');await settled(page)
-    await expect(page.locator('[data-count=indexing]')).to_have_text('58')
-    await expect(page.locator('#review-actions')).to_be_hidden()
-    await stage(page,'candidates');await expect(page.locator('#review-actions')).to_be_hidden()
-    assert len(posts)==4 and not errors,(posts,errors)
+    await page.screenshot(path=f'/tmp/curation-automatic-indexing-{width}.png',full_page=True)
+    review.update(state='indexed');row.update(state='indexed',review_state='indexed',stage='history')
+    await page.evaluate('refresh()');await settled(page)
+    await expect(page.get_by_role('heading',name='Indexed · complete',exact=True)).to_be_visible()
+    assert 'view=history' in page.url
+    await stage(page,'indexing');await expect(page.locator('.site-tile')).to_have_count(0)
+    assert len(posts)==1 and not errors,(posts,errors)
     await context.close()
 
 
@@ -1503,7 +1471,7 @@ async def ezboard_flow(browser,base,width):
             await route.fulfill(status=200,json={'scope':url});return
         if parsed.path=='/api/queue':
             body={**snapshot,'operations':[],'candidates':[row],'total':1,
-                  'stage_counts':{name:int(name==row['stage']) for name in ('candidates','queued','capturing','review','indexing','saved','history')}}
+                  'stage_counts':{name:int(name==row['stage']) for name in ('candidates','queued','capturing','indexing','saved','history')}}
         elif parsed.path=='/api/candidate':body={'candidate':row,'review':review}
         elif parsed.path=='/api/source':body={**review['manifest']['captures'][0],'complete_extracted_text':'EverQuest Lanys thread, replies 21 through 37.'}
         else:raise AssertionError(parsed.path)
@@ -1521,7 +1489,7 @@ async def ezboard_flow(browser,base,width):
     source=copy.deepcopy(row['captures'][0])
     source.update(url='http://pub110.ezboard.com/feqasylumfrm25.showMessageRange?topicID=2358.topic&start=21&stop=37',
                   timestamp='20020602023020',title='Lanys raid thread',candidate_id=row['id'])
-    row.update(stage='review',state='captured_awaiting_review',review_state='awaiting_review')
+    row.update(stage='indexing',state='captured_awaiting_review',review_state='awaiting_review')
     review={'id':'c'*32,'state':'awaiting_review','manifest_sha256':'e'*64,'page_identities':[source['url']],'source_slots':[0],
             'manifest':{'sites':[row],'captures':[source],'notes':[{'url':source['url'],'reason':'Unavailable archived discussion'}],
                         'capture_window':{'from':'19990101000000','to':'20061231235959','versions':'all_available'},
@@ -1564,7 +1532,7 @@ async def candidate_failure_feedback(browser,base,width):
         if parsed.path=='/api/candidate':body={'candidate':row,'review':None}
         elif parsed.path=='/api/queue':
             body={**snapshot,'candidates':[row],'total':1,'operations':[],
-                  'stage_counts':{name:int(name==row['stage']) for name in ('candidates','queued','capturing','review','indexing','saved','history')}}
+                  'stage_counts':{name:int(name==row['stage']) for name in ('candidates','queued','capturing','indexing','saved','history')}}
         else:raise AssertionError(parsed.path)
         await route.fulfill(status=200,json=body)
     await page.route('**/api/**',fixture)
@@ -1637,7 +1605,7 @@ async def sitepowerup_flow(browser,base,width):
             await route.fulfill(status=200,json=body);return
         if parsed.path=='/api/queue':
             body={**snapshot,'operations':[],'candidates':[row],'total':1,
-                  'stage_counts':{name:int(name==row['stage']) for name in ('candidates','queued','capturing','review','indexing','saved','history')}}
+                  'stage_counts':{name:int(name==row['stage']) for name in ('candidates','queued','capturing','indexing','saved','history')}}
         elif parsed.path=='/api/candidate':body={'candidate':row,'review':review}
         elif parsed.path=='/api/source':body={**review['manifest']['captures'][0],
                                            'complete_extracted_text':'Archived Enchanter message. Exact reply identity retained.'}
@@ -1662,7 +1630,7 @@ async def sitepowerup_flow(browser,base,width):
     source=copy.deepcopy(row['captures'][0])
     source.update(url='http://www.sitepowerup.com/mb/view.asp?Action=Reply&BoardID=102010&Reply=12155',
                   timestamp='20000109050003',title='Enchanter message',candidate_id=row['id'])
-    row.update(stage='review',state='captured_awaiting_review',review_state='awaiting_review')
+    row.update(stage='indexing',state='captured_awaiting_review',review_state='awaiting_review')
     review={'id':'c'*32,'state':'awaiting_review','manifest_sha256':'e'*64,
             'page_identities':[source['url']],'source_slots':[0],
             'manifest':{'sites':[row],'captures':[source],'notes':[],
@@ -1780,7 +1748,7 @@ async def complete_file_review(browser,base,width):
     page=await context.new_page();errors=[];requests=[]
     page.on('pageerror',lambda error:errors.append(str(error)))
     snapshot=await (await context.request.get(base+'/api/queue?filter=candidates')).json()
-    row=copy.deepcopy(snapshot['candidates'][0]);row.update(stage='review',state='captured_awaiting_review',review_state='awaiting_review')
+    row=copy.deepcopy(snapshot['candidates'][0]);row.update(stage='indexing',state='captured_awaiting_review',review_state='awaiting_review')
     page_capture={**row['captures'][0],'kind':'page','candidate_id':row['id']}
     files=[{**page_capture,'url':row['scope']+f'images/sword-{i}.png','kind':'file','title':'',
             'content_type':'image/png','timestamp':'20061231235959','bytes':1234} for i in range(1100)]
@@ -1796,7 +1764,7 @@ async def complete_file_review(browser,base,width):
         if parsed.path=='/api/queue':
             assert query.get('compact')==['1']
             body={**snapshot,'candidates':[row],'total':1,'operations':[],'batches':[],
-                  'stage_counts':{name:int(name==row['stage']) for name in ('candidates','queued','capturing','review','indexing','saved','history')}}
+                  'stage_counts':{name:int(name==row['stage']) for name in ('candidates','queued','capturing','indexing','saved','history')}}
         elif parsed.path=='/api/candidate':
             cached={k:v for k,v in review.items() if k not in ('manifest','source_slots','page_identities')}
             body={'candidate':row,'review':{**cached,'manifest_unchanged':True} if query.get('known_manifest')==['e'*64] else review}
@@ -1845,7 +1813,7 @@ async def check(base):
                 await sitepowerup_flow(browser,base,width)
                 await advanced_grading_flow(browser,base,width)
                 await ezboard_flow(browser,base,width)
-                await review_bulk_actions(browser,base,width)
+                await automatic_indexing_flow(browser,base,width)
                 await candidate_grade_controls(browser,base,width)
                 await candidate_quick_actions(browser,base,width)
                 await capture_approval_navigation(browser,base,width)

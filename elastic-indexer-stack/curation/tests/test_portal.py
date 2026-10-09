@@ -24,7 +24,8 @@ def test_portal_stages_are_exclusive_and_completed_sites_retire_even_with_legacy
     root=tmp_path/'state'
     expected={}
     for index,(state,stage,candidate_state) in enumerate([
-        ('awaiting_review','review','captured_awaiting_review'),
+        ('awaiting_review','indexing','captured_awaiting_review'),
+        ('index_preflight_failed','indexing','captured_awaiting_review'),
         ('publication_requested','indexing','captured_awaiting_review'),
         ('published_waiting_index','indexing','published'),('indexing','indexing','published'),
         ('index_failed','indexing','published'),('indexed','history','published'),('indexed','history','capturing'),
@@ -40,7 +41,7 @@ def test_portal_stages_are_exclusive_and_completed_sites_retire_even_with_legacy
         expected[row['id']]=stage
     app=create_app(root,start_worker=False)
     actual={}
-    for stage in ('candidates','queued','capturing','review','indexing','saved','history'):
+    for stage in ('candidates','queued','capturing','indexing','saved','history'):
         response=call(app,'GET',f'/api/queue?filter={stage}').json()
         assert response['stage_counts'][stage]==len(response['candidates'])
         for row in response['candidates']:

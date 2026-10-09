@@ -21,12 +21,15 @@ from capture_progress import CaptureProgress
 from jobs import Kubernetes, blockers, import_attempt, import_job, import_name
 from publisher import publish
 from state import Lane, OPERATION_KINDS, active_operation, connect, unpack, worker_lease
-from coverage_check import refresh, require_new
+from coverage_check import refresh
 from site_reviews import materialize, migrate
 from import_status import read_error
 from manual import existing_site, prepare as prepare_manual
 from candidate_checks import run as check_candidate
 from discovery_run import fill, retain_ezboard_progress
+from automatic_indexing import prepare_next
+from capture_budget import budget_identity
+from capture_continuation import require_eligible
 
 
 def campaign(root, operation):
@@ -214,7 +217,8 @@ class Worker:
                     raise CrawlError("Publication approval is no longer current")
                 with connect(self.root) as store:
                     for site in batch['manifest']['sites']:
-                        require_new(store, site['url'])
+                        require_eligible(store, site)
+                budget_identity(self.root, batch['manifest'])
                 result = publish(self.root, batch["manifest"], expected)
                 destination = self.root / "batches" / batch_id / "approved.json"
                 destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -230,7 +234,7 @@ class Worker:
             else:
                 with connect(self.root) as store:
                     for site in operation['payload']['sites']:
-                        require_new(store, site['url'])
+                        require_eligible(store, site)
                 batch_id = operation["payload"]["batch_id"]
                 latest = None
                 tracker = CaptureProgress()
@@ -301,12 +305,19 @@ class Worker:
                                  (state, json.dumps(detail), import_error, now(), batch["id"]))
                 if state == "indexed":
                     for site in batch["manifest"]["sites"]:
-                        row = store.db.execute('SELECT state FROM candidates WHERE id=?', (site['id'],)).fetchone()
-                        store.db.execute('UPDATE candidates SET state=? WHERE id=?', (transition(row['state'], Action.INDEX), site['id']))
+                        row = store.db.execute('SELECT state,coverage FROM candidates WHERE id=?', (site['id'],)).fetchone()
+                        capture = json.loads(row['coverage'] or '{}').get('capture', {})
+                        current = capture.get('review_id') or capture.get('batch_id')
+                        # Finishing an earlier import must not retire a site
+                        # whose missing files are being retried in a new batch.
+                        if row['state'] == 'published' and (not current or current == batch['id']):
+                            store.db.execute('UPDATE candidates SET state=? WHERE id=?', (transition(row['state'], Action.INDEX), site['id']))
                 store.db.commit()
 
     def run(self, lane):
         while not self.stop.is_set():
+            if lane == Lane.INDEXING:
+                prepare_next(self.root)
             if lane == Lane.CAPTURE:
                 try:
                     self.capture_queue()
