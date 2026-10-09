@@ -36,9 +36,11 @@ def snapshot(store, worker=None):
         WHERE kind IN ('discover','candidate_check') ORDER BY updated DESC,rowid DESC LIMIT 1""").fetchone())
     next_capture = store.db.execute(f"""SELECT q.id,c.url,q.ready FROM ({QUEUE}) q
         JOIN candidates c ON c.id=q.id WHERE q.held=0 ORDER BY ready,ordinal LIMIT 1""").fetchone()
+    # Publication has its own uncapped active operation. A publication_requested
+    # batch may instead be paused, so it is not evidence of a busy worker.
     index = store.db.execute("""SELECT id,state,job,error,updated FROM batches
-        WHERE state IN ('awaiting_review','publication_requested','published_waiting_index','indexing','index_budget_waiting')
-        ORDER BY CASE state WHEN 'indexing' THEN 0 WHEN 'publication_requested' THEN 1 ELSE 2 END,created LIMIT 1""").fetchone()
+        WHERE state IN ('awaiting_review','published_waiting_index','indexing','index_budget_waiting')
+        ORDER BY CASE state WHEN 'indexing' THEN 0 ELSE 1 END,created LIMIT 1""").fetchone()
     index = unpack(index) if index else None
     if index:
         row = store.db.execute("""SELECT id,url FROM candidates WHERE

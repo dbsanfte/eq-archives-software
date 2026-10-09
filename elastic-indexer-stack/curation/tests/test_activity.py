@@ -60,6 +60,21 @@ def test_activity_exposes_waiting_import_even_outside_batch_cap_and_queue_grace(
     assert listing['activity']['indexing']['error'] == 'Kubernetes state unavailable'
 
 
+def test_paused_publication_is_attention_not_running_work(candidate):
+    root, _ = candidate
+    app = create_app(root, start_worker=False)
+    with connect(root) as store:
+        operation = enqueue(store, 'publish', {'batch_id': 'a'*32})
+        store.db.execute("UPDATE operations SET state='interrupted',error='Git publication paused' WHERE id=?", (operation,))
+        store.db.execute('INSERT INTO batches VALUES (?,?,?,?,?,?,?,?,?)',
+                         ('a'*32, 'publication_requested', '{}', '', None, None, None, now(), now()))
+        store.db.commit()
+    listing = call(app, 'GET', '/api/queue').json()
+    assert listing['workers']['indexing'] is None
+    assert listing['activity']['indexing'] is None
+    assert listing['activity']['recent'][0]['error'] == 'Git publication paused'
+
+
 def test_empty_activity_and_per_worker_health(tmp_path):
     app = create_app(tmp_path, start_worker=False)
     class Worker:
