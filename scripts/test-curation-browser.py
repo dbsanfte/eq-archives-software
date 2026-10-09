@@ -385,7 +385,7 @@ async def status_flow(browser,base):
         elif parsed.path=='/api/queue':
             body=copy.deepcopy(listing);view=parse_qs(parsed.query)['filter'][0]
             body['candidates']=[detail['candidate']] if view==detail['candidate']['stage'] else []
-            body['total']=len(body['candidates']);body['operations']=[]
+            body['total']=len(body['candidates']);body['operations']=[{'id':'c'*32,'kind':'capture','state':'running','payload':{}}]
             body['stage_counts']={name:int(name==detail['candidate']['stage']) for name in ('candidates','queued','capturing','review','indexing','saved','history')}
         else:await route.continue_();return
         await route.fulfill(status=200,json=body)
@@ -393,6 +393,7 @@ async def status_flow(browser,base):
     detail['review']['operation']['state']='interrupted';detail['review']['operation']['error']='Publication transport failed; sources retained'
     await page.locator('#refresh').click()
     await page.get_by_role('heading',name='Publication paused',exact=True).wait_for()
+    assert await page.get_by_role('button',name='Retry publication',exact=True).is_enabled(),'Capture must not block publication retry'
     await page.get_by_role('button',name='Retry publication',exact=True).click()
     await page.get_by_role('heading',name='Publishing approved files',exact=True).wait_for()
     detail['review']['state']='index_failed';detail['candidate']['review_state']='index_failed';detail['review']['job']={'name':'failed-import'}
@@ -578,7 +579,8 @@ async def capture_flow(browser,base):
             view=parse_qs(parsed.query)['filter'][0]
             body={**snapshot,'candidates':[row] if view==row['stage'] else [],'total':int(view==row['stage']),
                 'stage_counts':{name:int(name==row['stage']) for name in ('candidates','queued','capturing','review','indexing','saved','history')},
-                'operations':[context_data['capture_operation']] if context_data['capture_operation'] else []}
+                'operations':[{'id':'b'*32,'kind':'publish','state':'running','payload':{}},
+                              *([context_data['capture_operation']] if context_data['capture_operation'] else [])]}
         else:await route.continue_();return
         await route.fulfill(status=200,json=body)
     await page.route('**/api/**',fixture)
@@ -591,6 +593,7 @@ async def capture_flow(browser,base):
     op=context_data['capture_operation'];op['state']='interrupted';op['error']='Wayback budget pause'
     await page.locator('#refresh').click()
     await page.get_by_role('heading',name='Capture paused',exact=True).wait_for()
+    assert await page.get_by_role('button',name='Resume capture',exact=True).is_enabled(),'Publication must not block capture resume'
     await page.get_by_role('button',name='Resume capture',exact=True).click()
     await page.get_by_role('heading',name='Capture in progress',exact=True).wait_for()
     op['result']['progress']['files']=9
@@ -757,7 +760,7 @@ async def discovery_flow(browser,base,width):
     operations=[{'id':'a'*32,'kind':'publish','state':'running','payload':{}}]
     loading,release_listing=asyncio.Event(),asyncio.Event()
     submitted,release_action=asyncio.Event(),asyncio.Event()
-    reject=False;arrivals=[]
+    reject=False;arrivals=[];workers=None
     original=await (await context.request.get(base+'/api/queue?filter=candidates')).json()
     template=original['candidates'][0]
     async def fixture(route):
@@ -767,19 +770,20 @@ async def discovery_flow(browser,base,width):
             posts.append((path,route.request.post_data_json))
             assert path in ('/api/discover','/api/resume'),path
             if reject:
-                operations=[{'id':'c'*32,'kind':'publish','state':'running','payload':{}}]
-                await route.fulfill(status=409,json={'error':'Archive publication has already started.'});return
+                operations=[{'id':'c'*32,'kind':'capture','state':'running','payload':{}}]
+                await route.fulfill(status=409,json={'error':'Capture has already started.'});return
             submitted.set();await release_action.wait()
             if path=='/api/discover':
                 assert route.request.post_data_json=={'max_candidates':50,'max_usd':2,'min_grade':2}
-                operations=[{'id':'b'*32,'kind':'discover','state':'queued','payload':route.request.post_data_json}]
+                operations=[{'id':'b'*32,'kind':'discover','state':'queued','payload':route.request.post_data_json},
+                            *[op for op in operations if op['kind']=='publish']]
             else:
                 assert route.request.post_data_json=={'id':'b'*32}
                 operations[0]['state']='queued'
             await route.fulfill(status=202,json={'operation':'b'*32});return
         assert path=='/api/queue',path
         loading.set();await release_listing.wait()
-        await route.fulfill(status=200,json={'candidates':arrivals,'total':len(arrivals),'offset':0,'operations':operations,
+        await route.fulfill(status=200,json={'candidates':arrivals,'total':len(arrivals),'offset':0,'operations':operations,'workers':workers,
             'stage_counts':{name:0 for name in ('candidates','queued','capturing','review','indexing','saved','history')},
             'capture_queue_error':None,'version':'discovery-fixture'})
     await page.route('**/api/**',fixture)
@@ -789,10 +793,10 @@ async def discovery_flow(browser,base,width):
     assert await page.locator('#stage-list #discover').is_visible(),'Discovery must be on Candidates, outside More'
     assert await button.is_disabled(),'Availability must be checked before enabling a paid action'
     release_listing.set();await settled(page)
-    await status.filter(has_text='Archive publication is running.').wait_for()
-    assert await button.is_disabled() and not posts
+    await status.filter(has_text='Ready. Publication and indexing run separately.').wait_for()
+    assert await button.is_enabled() and not posts
     await page.locator('#manual-url').fill('http://typed-while-busy.example/')
-    assert await page.locator('#manual-submit').is_disabled()
+    assert await page.locator('#manual-submit').is_enabled()
     assert 'discovery-status' in await button.get_attribute('aria-describedby')
     assert '50 candidates' in await page.locator('#discovery-limits').inner_text()
     assert '$2' in await page.locator('#discovery-limits').inner_text()
@@ -800,7 +804,7 @@ async def discovery_flow(browser,base,width):
     bounds=await button.bounding_box()
     assert bounds['height']>=48 and bounds['width']>=44
     assert bounds['y']>=0 and bounds['y']+bounds['height']<min(760,await page.evaluate('innerHeight'))
-    await page.screenshot(path=f'/tmp/curation-discovery-blocked-{width}.png',full_page=True)
+    await page.screenshot(path=f'/tmp/curation-discovery-during-publication-{width}.png',full_page=True)
     await page.get_by_role('button',name='Open tools and history').click()
     assert not await page.locator('#tools #discover').count()
     await page.get_by_role('button',name='Close tools',exact=True).click()
@@ -809,13 +813,21 @@ async def discovery_flow(browser,base,width):
         assert await button.is_hidden(),name
     await stage(page,'candidates')
     assert await button.is_visible()
-    # Each worker type explains the block, including queued publication.
-    for kind,state,text in (('publish','queued','Archive publication is queued.'),('capture','running','Capture is running.'),('discover','running','Discovery is running.')):
+    # Only another acquisition blocks the serial Wayback worker.
+    for kind,state,text in (('capture','running','Capture is running.'),('discover','running','Discovery is running.')):
         operations=[{'id':'a'*32,'kind':kind,'state':state,'payload':{'max_candidates':50,'max_usd':2}}]
         await page.locator('#refresh').click()
         await status.filter(has_text=text).wait_for()
         assert await button.is_disabled()
-    operations=[]
+    # Worker availability must survive a long publication backlog that fills
+    # the capped recent-operations list.
+    workers={'capture':operations[0],'indexing':None}
+    operations=[{'id':f'{i:032x}','kind':'publish','state':'queued','payload':{}} for i in range(20)]
+    await page.locator('#refresh').click();await settled(page)
+    assert await button.is_disabled()
+    assert 'Discovery is running.' in await status.inner_text()
+    workers=None
+    operations=[{'id':'a'*32,'kind':'publish','state':'queued','payload':{}}]
     # The ordinary poll releases the button; it must never start a paid run itself.
     await page.wait_for_function('()=>!document.getElementById("discover").disabled',timeout=8000)
     assert not posts
@@ -860,9 +872,9 @@ async def discovery_flow(browser,base,width):
     await page.reload();await settled(page)
     assert await button.is_enabled()
     await button.click()
-    await page.locator('#error').filter(has_text='Archive publication has already started.').wait_for()
+    await page.locator('#error').filter(has_text='Capture has already started.').wait_for()
     # A worker claim between polling and clicking refreshes the visible blocker.
-    await status.filter(has_text='Archive publication is running.').wait_for()
+    await status.filter(has_text='Capture is running.').wait_for()
     assert await button.is_disabled() and await page.locator('#notice').is_hidden()
     assert len(posts)==3 and not errors,(posts,errors)
     await context.close()

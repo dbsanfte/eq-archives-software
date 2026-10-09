@@ -263,7 +263,16 @@ one oldest eligible site immediately before starting it. Keep later sites queued
 and undoable until they start; the explicit operator API retains its five-site
 batch limit and existing claimed work remains unchanged. Preserve typed transitions,
 atomic Undo/claim locking and durable progress in the appropriate stage. A paused
-capture requires explicit resume and holds the queue. Source
+capture requires explicit resume and holds the capture queue. Capture/discovery
+and publication/indexing have independent serial workers under one process lease;
+slow downloads, Git publication and waiting imports must not block the other
+worker. Scope busy checks, claims and explicit resume to the relevant worker.
+Retain serial Wayback requests across capture, discovery and evidence checks,
+and serial publication with the existing unfinished-Job guard for imports.
+Expose worker availability independently of capped operation lists, require both
+workers for health and retain the lease until both stop. Preserve operations,
+approvals and progress across restart; interrupted work needs explicit resume.
+Source
 reading and scope drafts must not prevent progress polling or lose edits. Download
 completion creates an independent review for each site. Review and approve all
 captured pages within one site's chosen scope at a time, with dated Wayback links
@@ -318,7 +327,8 @@ Use bounded, cached, read-only metadata queries; never walk sources or archive G
 Incomplete accounting must be visible rather than displayed as zero.
 Failures cannot advance it or return to the list. Discover & grade is a primary action
 on Candidates, with its explicit 50-site target, one-hour/$2-total limits and a
-visible shared-worker blocker. Persist each completed candidate as it arrives and poll every five seconds
+visible capture/discovery-worker blocker. Publication and indexing do not disable
+discovery, manual submissions or evidence grading. Persist each completed candidate as it arrives and poll every five seconds
 while visible, displaying qualified/checked counts, phase, time, spend and stop
 reason. Polling may enable it but must never start a paid run. Paused discovery
 resumes there within its original bounds. Manual URL submissions also live on

@@ -12,7 +12,7 @@ from ezboard import address as ezboard_address, shard as ezboard_shard
 from grading import criteria, grade, sources
 from portal import Stage, decorate
 from review import record
-from state import connect, enqueue, unpack
+from state import active_operation, connect, enqueue, unpack
 
 ELIGIBLE = {'approval_pending', 'discovered', 'sampled', 'sample_error', 'unavailable',
             'identity_unresolved', 'grade_error', 'coverage_unverified'}
@@ -71,8 +71,8 @@ def start(store, payload):
         if (previous['payload']['manifest_sha256'] != row['manifest_sha256']
                 and previous['payload'].get('source_sha256') != source_identity(row)):
             raise CrawlError('Evidence changed since this check. Its saved results and budget are retained.')
-        if store.db.execute("SELECT 1 FROM operations WHERE state IN ('queued','running')").fetchone():
-            raise CrawlError('Another operation is queued or running. Retry when it finishes.')
+        if active_operation(store):
+            raise CrawlError('Another capture, discovery or evidence check is queued or running. Retry when it finishes.')
         # A changed capture scope can reuse the same samples, cached grade and
         # budget. Bind the next merge to the newly reviewed scope, never an old one.
         resumed = {**previous['payload'], 'manifest_sha256': row['manifest_sha256'], 'grading_criteria': focus}
