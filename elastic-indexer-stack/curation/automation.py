@@ -234,6 +234,10 @@ def resume_owned(root, lane, account):
             ORDER BY updated,created,rowid""", kinds).fetchall()
         for row in rows:
             operation = unpack(row)
+            last_resume = store.db.execute("""SELECT action FROM events WHERE json_extract(detail,'$.operation')=?
+                AND action IN ('queue_capture_resume','cancel_capture_resume') ORDER BY rowid DESC LIMIT 1""", (operation['id'],)).fetchone()
+            if last_resume and last_resume['action'] == 'cancel_capture_resume':
+                continue  # A human cancelled this resume, including an owned restart.
             pause = (operation['result'] or {}).get('automatic_pause') or {}
             reason = pause.get('reason')
             allowed = (reason == 'disabled' or

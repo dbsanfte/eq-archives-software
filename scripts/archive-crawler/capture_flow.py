@@ -11,6 +11,7 @@ class CandidateState(str, Enum):
     # Retain the persisted value for compatibility with existing operator state.
     AWAITING_CAPTURE = 'approved_waiting_batch'
     CAPTURING = 'capturing'
+    RESUME_QUEUED = 'capture_resume_queued'
     CAPTURED = 'captured_awaiting_review'
     INDEX_APPROVED = 'approved_waiting_publication'
     INDEX_DECLINED = 'indexing_declined'
@@ -26,6 +27,9 @@ class Action(str, Enum):
     REJECT = 'reject'
     UNDO = 'undo'
     START = 'start_capture'
+    QUEUE_RESUME = 'queue_capture_resume'
+    RESUME = 'resume_capture'
+    CANCEL_RESUME = 'cancel_capture_resume'
     COMPLETE = 'capture_complete'
     CONTINUE = 'continue_capture'
     UNDO_CONTINUE = 'undo_capture_continuation'
@@ -49,6 +53,9 @@ TRANSITIONS = {
     Action.DEFER: (REVIEWABLE | {'grade_error', 'coverage_unverified'}, CandidateState.DEFERRED),
     Action.UNDO: ({CandidateState.AWAITING_CAPTURE}, CandidateState.SUGGESTED),
     Action.START: ({CandidateState.AWAITING_CAPTURE}, CandidateState.CAPTURING),
+    Action.QUEUE_RESUME: ({CandidateState.CAPTURING}, CandidateState.RESUME_QUEUED),
+    Action.RESUME: ({CandidateState.RESUME_QUEUED}, CandidateState.CAPTURING),
+    Action.CANCEL_RESUME: ({CandidateState.RESUME_QUEUED}, CandidateState.CAPTURING),
     Action.COMPLETE: ({CandidateState.CAPTURING}, CandidateState.CAPTURED),
     Action.CONTINUE: ({CandidateState.CAPTURED}, CandidateState.AWAITING_CAPTURE),
     Action.UNDO_CONTINUE: ({CandidateState.AWAITING_CAPTURE}, CandidateState.CAPTURED),

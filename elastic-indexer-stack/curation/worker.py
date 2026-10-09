@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 
 from common import CrawlError, Store, capture_scope, digest, now, save, site_scope
 from capture_flow import Action, UNDO_SECONDS, transition
-from capture_queue import claim
+from capture_queue import claim, claim_resume, next_entry
 from crawler import parser
 from discovery import discover
 from acquisition import Downloader, sample
@@ -179,7 +179,7 @@ class Worker:
 
     def capture_queue(self):
         with connect(self.root) as store:
-            due = store.db.execute("SELECT 1 FROM candidates WHERE state='approved_waiting_batch' AND json_extract(decision,'$.capture_after')<=?", (now(),)).fetchone()
+            due = next_entry(store, now())
             if not due:
                 if store.get('capture_queue_error'):
                     store.set('capture_queue_error', None)
@@ -190,25 +190,26 @@ class Worker:
             if active_operation(store):
                 store.db.rollback()
                 return
-            rows = store.db.execute("""SELECT id,decision FROM candidates c WHERE state='approved_waiting_batch'
-                AND json_extract(decision,'$.capture_after')<=? AND NOT EXISTS
-                    (SELECT 1 FROM capture_queue_failures f WHERE f.candidate=c.id AND f.decision=c.decision)
-                ORDER BY json_extract(decision,'$.capture_after'),rowid LIMIT 1""", (now(),)).fetchall()
-            if not rows:
+            entry = next_entry(store, now())
+            if not entry:
                 store.db.rollback()
+                return
+            if entry['operation']:
+                claim_resume(store, entry['operation'])
+                store.db.commit()
                 return
             # Claim only the site about to start. Later approvals remain queued
             # and undoable throughout an earlier site's download.
             store.db.execute('SAVEPOINT capture_claim')
             try:
-                claim(store, [row['id'] for row in rows])
+                claim(store, [entry['id']])
             except Exception as error:
                 # Retain the approval and Undo; do not re-read broken sources
                 # every tick or prevent another site from being claimed.
                 store.db.execute('ROLLBACK TO capture_claim')
                 detail = str(error) if isinstance(error, CrawlError) else 'Capture preparation failed; saved approval and sources are retained.'
                 store.db.execute('INSERT OR REPLACE INTO capture_queue_failures VALUES (?,?,?,?)',
-                                 (rows[0]['id'], rows[0]['decision'], detail, now()))
+                                 (entry['id'], entry['decision'], detail, now()))
             store.db.execute('RELEASE capture_claim')
             store.db.commit()
             if store.get('capture_queue_error'):

@@ -21,6 +21,12 @@ sliders, unsaved drafts, polling and deployment never enable it. Settings persis
 the existing PVC, with revision checks against stale browser tabs. Drafts remain
 local to the browser until saved.
 
+Saved automatic mode greys out the entire manual **Discover more sites** pane,
+including its minimum-grade slider and advanced controls. Use automatic settings
+for that mode; turning it off re-enables the retained manual settings. An unsaved
+toggle or daily-budget wait does not change this behavior. Manual URL submissions
+remain available when the candidate worker is free.
+
 When enabled, the candidate worker continually starts bounded discovery runs
 (50 qualifying sites, one hour and $2 per run). Each graded result is checked for
 current source evidence and archive coverage before promotion. Pristine ordinary
@@ -114,6 +120,13 @@ remembers an explicit choice in this browser across visits.
    immediately without resuming or discarding the failure. A preflight failure stays
    in Queue with **Capture needs attention** and Undo; other entries pass it. Undo
    the failed approval to review and approve it again. Items move into **Capturing** when claimed.
+   **Resume capture** moves a paused capture back to **Capture queue**, including
+   while another capture is running or automatic mode is enabled. It joins the
+   same FIFO as fresh approvals without a new grace period, and retains the original
+   operation, batch, files, scope and cumulative budgets. **Cancel queued resume**
+   returns it to its paused state until the worker claims it; it does not revoke the
+   original capture approval. Legacy multi-site batches resume together. Queueing,
+   cancellation and worker claims share an atomic lock and survive restarts.
    The worker inventories the entire approved scope through paginated Wayback
    CDX listings, then downloads every listed successful file version. It includes
    orphan pages, images, CSS, scripts and downloads, using the pinned downloader

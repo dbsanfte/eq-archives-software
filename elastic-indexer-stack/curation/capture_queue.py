@@ -1,11 +1,13 @@
 """Atomically claim bounded batches from an unbounded approval queue."""
+import json
+
 from capture_flow import Action, transition
 from common import CrawlError, now, original_url, within_capture_scope
 from captures import LIMITS
 from full_capture import POLICY
 from indexer.capture_enrichment import policy_for_sites
 from review import checked_sources, record
-from state import enqueue, identifier
+from state import enqueue, identifier, unpack
 
 
 def held(store):
@@ -19,13 +21,74 @@ def attention(store):
         "SELECT COUNT(*) FROM operations WHERE kind='capture' AND state='interrupted'").fetchone()[0]}
 
 
-def queue_order(store):
-    """Use the worker's eligibility time and insertion-order tie break."""
-    return [row['id'] for row in store.db.execute("""SELECT c.id FROM candidates c
+QUEUE = """SELECT c.id,c.decision,c.rowid ordinal,
+        COALESCE(json_extract(c.decision,'$.capture_after'),json_extract(c.decision,'$.reviewed_at')) ready,
+        (f.candidate IS NOT NULL) held,NULL operation FROM candidates c
         LEFT JOIN capture_queue_failures f ON f.candidate=c.id AND f.decision=c.decision
         WHERE c.state='approved_waiting_batch'
-        ORDER BY (f.candidate IS NOT NULL),
-            COALESCE(json_extract(c.decision,'$.capture_after'), json_extract(c.decision,'$.reviewed_at')),c.rowid""")]
+        UNION ALL SELECT c.id,c.decision,c.rowid,o.updated,0,o.id
+        FROM operations o,json_each(o.payload,'$.sites') site
+        JOIN candidates c ON c.id=json_extract(site.value,'$.id')
+        WHERE o.kind='capture' AND o.state='resume_queued' AND c.state='capture_resume_queued'"""
+
+
+def queue_order(store):
+    """Fresh approvals and explicit resumes share one uncapped FIFO."""
+    return [row['id'] for row in store.db.execute(f'SELECT * FROM ({QUEUE}) ORDER BY held,ready,ordinal')]
+
+
+def next_entry(store, at):
+    return store.db.execute(f'SELECT * FROM ({QUEUE}) WHERE held=0 AND ready<=? ORDER BY ready,ordinal LIMIT 1', (at,)).fetchone()
+
+
+def resume_members(store, operation, action):
+    sites = operation['payload'].get('sites', [])
+    if not sites or len({site['id'] for site in sites}) != len(sites):
+        raise CrawlError('Capture resume requires its original sites')
+    members = []
+    for site in sites:
+        row = store.db.execute('SELECT * FROM candidates WHERE id=?', (site['id'],)).fetchone()
+        latest = store.db.execute("""SELECT id FROM operations WHERE kind='capture' AND EXISTS
+            (SELECT 1 FROM json_each(payload,'$.sites') WHERE json_extract(value,'$.id')=?)
+            ORDER BY created DESC,rowid DESC LIMIT 1""", (site['id'],)).fetchone()
+        if not row or not latest or latest['id'] != operation['id']:
+            raise CrawlError('Capture changed since this operation; refresh before resuming')
+        members.append((site['id'], transition(row['state'], action)))
+    return members
+
+
+def move_resume(store, operation, action, state):
+    """Caller owns BEGIN IMMEDIATE, shared by explicit resume, cancel and claim."""
+    members = resume_members(store, operation, action)
+    store.db.execute('UPDATE operations SET state=?,updated=? WHERE id=?', (state, now(), operation['id']))
+    for candidate, target in members:
+        store.db.execute('UPDATE candidates SET state=? WHERE id=?', (target, candidate))
+        store.db.execute('INSERT INTO events(candidate,action,detail,created) VALUES (?,?,?,?)',
+                         (candidate, action.value, json.dumps({'operation': operation['id']}), now()))
+    # Leave the original payload, result/checkpoint and error intact. The worker
+    # clears the error only when it starts; cancellation restores the same pause.
+
+
+def queue_resume(store, operation):
+    move_resume(store, operation, Action.QUEUE_RESUME, 'resume_queued')
+
+
+def cancel_resume(store, operation):
+    move_resume(store, operation, Action.CANCEL_RESUME, 'interrupted')
+
+
+def claim_resume(store, identifier):
+    operation = unpack(store.db.execute("SELECT * FROM operations WHERE id=? AND state='resume_queued'", (identifier,)).fetchone())
+    try:
+        move_resume(store, operation, Action.RESUME, 'queued')
+    except CrawlError as error:
+        # A stale entry must never monopolize the worker's next turn.
+        store.db.execute("UPDATE operations SET state='interrupted',error=?,updated=? WHERE id=?", (str(error), now(), identifier))
+        for site in operation['payload'].get('sites', []):
+            store.db.execute("""UPDATE candidates SET state='capturing' WHERE id=? AND state='capture_resume_queued'
+                AND ?=(SELECT id FROM operations WHERE kind='capture' AND EXISTS
+                    (SELECT 1 FROM json_each(payload,'$.sites') WHERE json_extract(value,'$.id')=candidates.id)
+                    ORDER BY created DESC,rowid DESC LIMIT 1)""", (site['id'], identifier))
 
 
 def claim(store, ids):

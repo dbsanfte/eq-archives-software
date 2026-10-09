@@ -229,7 +229,10 @@ identity/content collisions. Bind only the LAN IP, allow actual peers in
 JSON actions. There is no public route or authentication. Do not enable paid discovery on
 deployment. Continuous scheduling requires the
 operator's saved automatic-mode opt-in (default off, $2/day, minimum grade 2).
-Persist revision-checked settings and browser-local unsaved drafts. Keep one
+Persist revision-checked settings and browser-local unsaved drafts. Saved automatic
+mode disables and greys the entire manual Discover pane, including its slider and
+advanced controls; drafts and budget waits cannot re-enable it. Disabling the saved
+mode restores manual controls and drafts, subject to worker availability. Keep one
 shared private SQLite daily reservation ledger across portal grading and new
 import Jobs; reserve atomically before calls, retain uncertain costs and count
 corrections. Include prior current-day portal spend on configuration. Use UTC
@@ -290,7 +293,12 @@ one oldest eligible site immediately before starting it. Keep later sites queued
 and undoable until they start; the explicit operator API retains its five-site
 batch limit and existing claimed work remains unchanged. Preserve typed transitions,
 atomic Undo/claim locking and durable progress in the appropriate stage. A failed
-capture requires explicit resume but never holds the capture queue. Retain failed
+capture requires explicit resume but never holds the capture queue. Explicit capture
+resume joins the uncapped FIFO queue, even while another capture runs or automatic
+mode is on. Retain the operation, batch, approval, sources and cumulative budgets;
+claim only when the capture worker is free. Cancel queued resume restores the pause
+until atomic claiming wins, and prevents automatic restart recovery from overriding
+that cancellation. Existing multi-site batches resume together. Retain failed
 preflight approvals as undoable entries with a decision-bound error; skip them
 until the operator changes the approval. Show failures independently of capped
 operation lists, and isolate import submission failures per site. Reconcile an

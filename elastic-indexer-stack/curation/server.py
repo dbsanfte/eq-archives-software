@@ -19,7 +19,7 @@ from state import Lane, active_operation, connect, enqueue, operation_lane, unpa
 from worker import Worker
 from coverage_check import refresh, require_new
 from capture_flow import Action, UNDO_SECONDS, transition
-from capture_queue import claim, queue_order, attention as capture_attention
+from capture_queue import claim, queue_order, queue_resume, cancel_resume, attention as capture_attention
 from capture_continuation import start as continue_capture, require_complete
 from site_reviews import get as get_site_review, migrate
 from jobs import import_attempt, import_name
@@ -144,7 +144,7 @@ def create_app(root=None, origin=None, start_worker=True):
                     selected == "recommended" and row["state"] in ("approval_pending", "deferred")
                     and (row["rating"] or {}).get("grade", -1) >= 2 or
                     selected == "pending" and row["state"] in ("approval_pending", "deferred") or
-                    selected == "approved" and row["state"] == 'approved_waiting_batch' or
+                    selected == "approved" and row['stage'] == Stage.QUEUED or
                     selected == "review" and row.get('review_state') == 'awaiting_review' or
                     selected == "captured" and row['state'] in CAPTURED_STATES]
             if selected == 'candidates':
@@ -170,7 +170,7 @@ def create_app(root=None, origin=None, start_worker=True):
                                  "review_actions": review_preview(store, all_rows) if selected == 'review' else None,
                                  "luna_spend": spending.snapshot(),
                                  "automation": automation.status(root, daily_budget),
-                                 "all_count": len(all_rows), "approved": sum(row["state"] == "approved_waiting_batch" for row in all_rows),
+                                 "all_count": len(all_rows), "approved": sum(row['stage'] == Stage.QUEUED for row in all_rows),
                                  "recommended": sum(row['state'] in ('approval_pending','deferred') and (row['rating'] or {}).get('grade',-1)>=2 for row in all_rows),
                                  "operations": operations, "workers": workers, "batches": batches, "limits": LIMITS, "undo_seconds": UNDO_SECONDS,
                                  "capturing": sum(row['state']=='capturing' for row in all_rows),
@@ -551,9 +551,13 @@ def create_app(root=None, origin=None, start_worker=True):
             raise CrawlError("Resume requires an operation ID")
         with connect(root) as store:
             store.db.execute("BEGIN IMMEDIATE")
-            operation = store.db.execute("SELECT kind FROM operations WHERE id=? AND state='interrupted'", (valid_id(payload['id']),)).fetchone()
+            operation = store.db.execute("SELECT * FROM operations WHERE id=? AND state='interrupted'", (valid_id(payload['id']),)).fetchone()
             if not operation:
                 raise CrawlError("Operation is not awaiting an explicit resume")
+            if operation['kind'] == 'capture':
+                queue_resume(store, unpack(operation))
+                store.db.commit()
+                return JSONResponse({'resumed': payload['id'], 'state': 'resume_queued'}, status_code=202)
             if active_operation(store, operation_lane(operation['kind'])):
                 raise CrawlError("Another operation for this worker is queued or running")
             result = store.db.execute("UPDATE operations SET state='queued',error=NULL,updated=? WHERE id=? AND state='interrupted'", (now(), valid_id(payload["id"])))
@@ -561,6 +565,19 @@ def create_app(root=None, origin=None, start_worker=True):
                 raise CrawlError("Operation is not awaiting an explicit resume")
             store.db.commit()
         return JSONResponse({"resumed": payload["id"]}, status_code=202)
+
+    async def cancel_capture_resume(request):
+        payload = await body(request)
+        if not isinstance(payload, dict) or set(payload) != {'id'}:
+            raise CrawlError('Cancel resume requires the queued operation ID')
+        with connect(root) as store:
+            store.db.execute('BEGIN IMMEDIATE')
+            operation = store.db.execute("SELECT * FROM operations WHERE id=? AND kind='capture' AND state='resume_queued'", (valid_id(payload['id']),)).fetchone()
+            if not operation:
+                raise CrawlError('Resume is no longer queued; capture may have started')
+            cancel_resume(store, unpack(operation))
+            store.db.commit()
+        return JSONResponse({'state': 'interrupted'})
 
     async def problem(request, error):
         return JSONResponse({"error": str(error)}, status_code=409)
@@ -574,6 +591,7 @@ def create_app(root=None, origin=None, start_worker=True):
         return JSONResponse(await run_in_threadpool(configure))
 
     app = Starlette(routes=[Route("/", screen), Route("/assets/{name}", asset), Route("/healthz", health),
+                            Route('/api/cancel-resume', cancel_capture_resume, methods=['POST']),
                             Route("/api/queue", listing), Route("/api/source", source),
                             Route('/api/automation', automatic_settings, methods=['POST']),
                             Route('/api/candidate',candidate_detail), Route('/api/restore',restore_candidate,methods=['POST']),
