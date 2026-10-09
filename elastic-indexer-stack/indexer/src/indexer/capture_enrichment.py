@@ -12,6 +12,7 @@ import yaml
 from common import CrawlError, Store, digest, now
 from grading import Luna, MODEL, PRICING
 from import_status import EnrichmentError
+from daily_budget import current_budget, reserve_attempt, settle_attempt
 
 RESOURCES = Path(__file__).with_name("resources")
 TASKS = ("classification", "summary", "tagging", "date")
@@ -30,6 +31,7 @@ SCHEMA = {"type": "object", "additionalProperties": False, "properties": {
 }}
 SCHEMA["required"] = list(SCHEMA["properties"])
 DEFAULT_POLICY = {"enrichment": True, "model": MODEL, "max_enrichment_usd": 2}
+AUTO_POLICY = {"enrichment": True, "model": MODEL, "max_enrichment_usd": None, "daily_budget": "portal-utc-v1"}
 MAX_CORRECTIONS = 2
 MISSING_RESPONSE = object()
 EVIDENCE_INSTRUCTIONS = (
@@ -42,9 +44,16 @@ EVIDENCE_INSTRUCTIONS = (
 )
 
 
+def policy_for_sites(sites):
+    automatic = [site.get('decision', {}).get('automatic', {}).get('enrichment_budget') == 'daily-v1' for site in sites]
+    if any(automatic) and not all(automatic):
+        raise CrawlError('Automatic and manual capture approvals require separate site batches')
+    return dict(AUTO_POLICY if automatic and all(automatic) else DEFAULT_POLICY)
+
+
 def policy(manifest):
     settings = manifest.get("indexing", DEFAULT_POLICY)
-    if (settings != DEFAULT_POLICY):
+    if settings != DEFAULT_POLICY and (settings != AUTO_POLICY or policy_for_sites(manifest.get('sites', [])) != AUTO_POLICY):
         raise CrawlError("Import enrichment policy differs from the reviewed default")
     return dict(settings)
 
@@ -125,7 +134,8 @@ def validate(response, source):
 
 class Enricher:
     def __init__(self, directory, key_file, maximum=2, client_factory=Luna):
-        if maximum != DEFAULT_POLICY["max_enrichment_usd"]:
+        daily = current_budget.get()
+        if maximum != DEFAULT_POLICY["max_enrichment_usd"] and not (maximum is None and daily and daily.settings()['configured']):
             raise CrawlError("Enrichment requires the reviewed batch budget")
         self.store, self.client, self.maximum = Store(directory), None, maximum
         self.client_factory, self.key_file = client_factory, key_file
@@ -165,11 +175,12 @@ class Enricher:
                 return MISSING_RESPONSE  # A lost response consumes its correction slot.
             raise EnrichmentError('request')
         reserved = self.store.db.execute('SELECT COALESCE(SUM(reserved),0) FROM attempts').fetchone()[0]
-        if reserved + amount > self.maximum:
+        if self.maximum is not None and reserved + amount > self.maximum:
             self.store.db.rollback()
             raise EnrichmentError('budget')
         attempt = self.store.db.execute('INSERT INTO attempts(candidate,signature,reserved,status,created) VALUES (?,?,?,?,?)',
                                         (capture['archive_path'], signature, amount, 'reserved', now())).lastrowid
+        reserve_attempt(self.store, attempt, amount)
         self.store.db.commit()
         try:
             self.client = self.client or self.client_factory(self.key_file)
@@ -181,8 +192,12 @@ class Enricher:
         self.store.set('enrichment:' + signature, {'response': response, 'signature': signature,
                        'source_sha256': capture['sha256'], 'received_at': now(), 'parent': parent})
         usage = response.get('usage', {}) if isinstance(response, dict) else {}
+        if isinstance(usage, dict) and not all(key in usage for key in ('input_tokens', 'output_tokens')):
+            self.store.db.execute("UPDATE attempts SET status='received' WHERE id=?", (attempt,))
+            self.store.db.commit()
+            return response  # Retain the reservation; validation/corrections still apply.
         try:
-            input_tokens, output_tokens = usage.get('input_tokens', 0), usage.get('output_tokens', 0)
+            input_tokens, output_tokens = usage.get('input_tokens'), usage.get('output_tokens')
             if any(type(value) is not int or value < 0 for value in (input_tokens, output_tokens)):
                 raise ValueError
             long_context = input_tokens > 272000
@@ -194,6 +209,7 @@ class Enricher:
             raise EnrichmentError('usage') from None
         self.store.db.execute("UPDATE attempts SET actual=?,status='received' WHERE id=?", (actual, attempt))
         self.store.db.commit()
+        settle_attempt(self.store, attempt, actual, usage)
         return response
 
     def accepted(self, response, source, signature):

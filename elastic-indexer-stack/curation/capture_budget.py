@@ -46,6 +46,7 @@ def budget_identity(root, manifest):
         previous = published_manifest(root, prior)['manifest']
         if (len(previous['sites']) != 1
                 or {**previous['sites'][0], 'continued_from': prior} != site
+                or previous.get('indexing') != manifest.get('indexing')
                 or previous.get('enrichment_budget_id', previous['batch_id']) != budget):
             raise CrawlError('Retry changed the original site or enrichment budget')
         manifest = previous

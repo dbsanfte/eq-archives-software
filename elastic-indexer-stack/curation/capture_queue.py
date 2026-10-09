@@ -3,6 +3,7 @@ from capture_flow import Action, transition
 from common import CrawlError, now, original_url, within_capture_scope
 from captures import LIMITS
 from full_capture import POLICY
+from indexer.capture_enrichment import policy_for_sites
 from review import checked_sources, record
 from state import enqueue, identifier
 
@@ -39,12 +40,14 @@ def claim(store, ids):
                       'captures': snapshots, 'reviewed_captures': site['captures'], 'capture_policy': POLICY})
     if not 1 <= len(sites) <= LIMITS['sites']:
         raise CrawlError('Capture batches require 1–5 sites')
+    policy_for_sites(sites)  # Reject mixed approvals before claiming/downloading.
     if len(sites) != 1 and any(site.get('continued_from') for site in sites):
         raise CrawlError('Regenerate each site independently; the automatic queue starts one site at a time')
     if len(sites) != 1 and any(site['scope_mode'] in ('ezboard', 'sitepowerup') for site in sites):
         raise CrawlError('Capture each whole board separately from other sites')
     batch_id = identifier()
-    operation = enqueue(store, 'capture', {'batch_id': batch_id, 'sites': sites}, commit=False)
+    automatic = all(site.get('decision', {}).get('origin') == 'automatic_policy' for site in sites)
+    operation = enqueue(store, 'capture', {'batch_id': batch_id, 'sites': sites, **({'automatic': True} if automatic else {})}, commit=False)
     store.db.execute("INSERT INTO batches VALUES (?,'capturing',NULL,NULL,NULL,NULL,NULL,?,?)", (batch_id, now(), now()))
     for site in sites:
         store.db.execute('UPDATE candidates SET state=? WHERE id=?', (transition('approved_waiting_batch', Action.START), site['id']))

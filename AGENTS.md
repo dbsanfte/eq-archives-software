@@ -226,8 +226,32 @@ browser/TCP checks for changes. Preserve the exact Linux
 `websites/<host>/<timestamp>/<decoded path>` convention and refuse unsafe names or
 identity/content collisions. Bind only the LAN IP, allow actual peers in
 `192.168.0.0/16`, ignore forwarded headers and require literal Host/same-origin
-JSON actions. There is no public route or authentication. Do not run paid discovery
-on deployment or schedule it without a request. Each explicit Discover run targets
+JSON actions. There is no public route or authentication. Do not enable paid discovery on
+deployment. Continuous scheduling requires the
+operator's saved automatic-mode opt-in (default off, $2/day, minimum grade 2).
+Persist revision-checked settings and browser-local unsaved drafts. Keep one
+shared private SQLite daily reservation ledger across portal grading and new
+import Jobs; reserve atomically before calls, retain uncertain costs and count
+corrections. Include prior current-day portal spend on configuration. Use UTC
+midnight resets, retain original operation limits/deadlines, and resume funded
+work automatically. Automatically approved sites use the daily enrichment policy
+across days; existing/manual approvals keep $2/site. Keep both policies explicit
+in original approvals/manifests and preserve them through failed-file lineage.
+A daily-budget import pause must remain in Indexing with a current Job/manifest
+bound diagnostic; create a new numbered continuation only when funded. Never
+modify previous Jobs or infer indexing completion from a budget exit. New import
+Jobs require a verified completion diagnostic. Automatic imports that exceed the
+Job time limit can continue in a new numbered Job with the original budget/cache. Disabling automatic mode stops new
+automatic discovery/approvals; approved work continues under the daily cap.
+Do not enable while a legacy paid import without the shared ledger is unfinished.
+Automatic promotion requires verified grading and coverage, preserves board/shared
+account boundaries, and uses whole-site scopes only for pristine suggestions.
+Keep lower grades in Saved for later and exclude their identities from discovery.
+Restore, Undo and manual scope edits must prevent automatic reapproval. Preserve
+explicit human decisions. Exhausted link frontiers wait five minutes; only owned
+interrupted/transient operations can resume automatically. Manual pauses retain
+explicit resume; unsafe/invalid work remains visible for attention.
+Each explicit Discover run targets
 50 new sites meeting its saved minimum grade (default 2), continuing past low grades and unavailable samples, until the target,
 one-hour deadline or $2 total Luna reservation cap is reached. Stop visibly when
 links are exhausted; pause on transport/authentication failures. Keep serial
@@ -264,8 +288,9 @@ The queue has no count cap; after a 60-second grace period the automatic worker 
 one oldest eligible site immediately before starting it. Keep later sites queued
 and undoable until they start; the explicit operator API retains its five-site
 batch limit and existing claimed work remains unchanged. Preserve typed transitions,
-atomic Undo/claim locking and durable progress in the appropriate stage. A paused
-capture requires explicit resume and holds the capture queue. Candidate gathering,
+atomic Undo/claim locking and durable progress in the appropriate stage. A paused manual
+capture requires explicit resume and holds the capture queue; enabled automatic
+mode can resume only its own interrupted/transient work. Candidate gathering,
 capture, and publication/indexing have independent serial workers under one process lease;
 slow downloads, Git publication and waiting imports must not block the other
 workers. Scope busy checks, claims and explicit resume to the relevant worker.
@@ -279,12 +304,12 @@ existing unfinished-Job guard for imports.
 Expose worker availability independently of capped operation lists, require all
 workers and the shared transport for health and retain the lease until all stop.
 Preserve operations,
-approvals and progress across restart; interrupted work needs explicit resume.
+approvals and progress across restart; interrupted manual work needs explicit resume.
 Source reading and scope drafts must not prevent progress polling or lose edits.
 Download completion creates an independent manifest per site and automatically
 queues whole-site publication/indexing under the original capture approval.
-There is no Review tab or second approval. Show the automatic flow and $2/site
-AI enrichment cap before capture approval, including mobile quick actions.
+There is no Review tab or second approval. Show the automatic flow and the manual
+$2/site or automatic daily AI enrichment policy before capture approval, including mobile quick actions.
 Preflight original approval, current scope/hash, coverage, policy and every saved
 source before atomically queuing publication once. Persist failures as
 index_preflight_failed in Indexing, requiring explicit manifest-bound retry;
@@ -367,7 +392,8 @@ separate enrichment subdirectory writable. They receive their dedicated
 create-only ES account, existing Nomic key and only the paid Luna key item,
 never the publication key. AI enrichment is enabled by default using the
 existing text prompts/schema enums, with source-bound caching, conservative
-reservations and a separate $2 cap per approved site. Preserve full source,
+reservations and a separate $2 cap per manually approved site (automatic approvals
+retain their configured daily policy). Preserve full source,
 model provenance and supported date evidence; capture dates are not publication
 estimates. Enrichment failures leave the new document pending. Skip existing
 IDs without paying for enrichment or overwriting their metadata.
@@ -410,7 +436,7 @@ Undo remains available until claiming; stale manifests cannot retry. Published
 sites may retry only their saved missing files under the identical approved scope
 and hash-bound published predecessor. Retain existing Jobs and published manifests;
 older import completion cannot retire newer acquisition. Retry manifests share
-the original site's enrichment_budget_id, paid response cache and $2 total cap,
+the original site's enrichment_budget_id, paid response cache and original daily or $2 total cap,
 with diagnostics still bound to each current manifest/Job. Validate that lineage
 before publication or any paid import. A pending published-file retry must finish
 publication before another missing-file retry. Show these controls in Indexing

@@ -23,6 +23,26 @@
     <section id="stage-list" aria-labelledby="view-title">
       <div class="view-heading"><div><p class="eyebrow" id="view-step"></p><h1 id="view-title">Candidates</h1></div><span id="view-total" class="total"></span></div>
       <p id="view-description" class="description"></p>
+      <section id="automation" class="panel automation-panel" aria-labelledby="automation-title" hidden>
+        <div class="automation-heading"><h2 id="automation-title">Automatic mode</h2><span id="automation-state" class="badge">Off</span></div>
+        <p id="automation-status" role="status" aria-live="polite">Loading automatic mode…</p>
+        <p id="automation-budget" class="meta"></p>
+        <progress id="automation-meter" max="2" value="0" aria-label="Daily Luna budget used and reserved"></progress>
+        <details id="automation-settings"><summary>Configure automatic mode</summary>
+          <form id="automation-form">
+            <label class="automation-switch"><input id="automation-enabled" type="checkbox"> Enable continuous discovery, capture & indexing</label>
+            <label for="automation-daily">Daily Luna limit (USD)</label><input id="automation-daily" type="number" min="0.01" max="1000000" step="0.01" inputmode="decimal" value="2" required>
+            <label for="automation-grade">Minimum grade to auto-approve <output id="automation-grade-value" for="automation-grade">2</output></label>
+            <input id="automation-grade" type="range" min="0" max="3" step="1" value="2">
+            <div class="grade-ticks" aria-hidden="true"><span>0 · Any</span><span>1</span><span>2</span><span>3 · Dedicated EQ</span></div>
+            <details class="grading-options"><summary>Advanced · Grading focus</summary><label for="automation-criteria">Additional criteria for automatic discovery</label><textarea id="automation-criteria" rows="3" maxlength="1000" placeholder="For example: Cleric class sites or EverQuest guilds"></textarea></details>
+            <p class="meta">Saving with automatic mode enabled approves qualifying whole sites and accounts for capture, publication and AI-enriched indexing. Lower grades stay in Saved for later. Restoring a saved site or undoing an approval leaves it under your control.</p>
+            <p class="meta">The daily limit covers all portal Luna grading and enrichment, including manual requests. It resets at 00:00 UTC. Automatically approved sites can continue across days; manual approvals retain their $2 site cap. Turning this mode off stops new discovery and approvals; already approved work continues under the daily limit.</p>
+            <p id="automation-draft" class="meta"></p>
+            <div class="automation-actions"><button id="automation-save" type="submit" class="primary" disabled>Save automatic settings</button><button id="automation-reload" type="button">Reload saved settings</button></div>
+          </form>
+        </details>
+      </section>
       <section id="discovery" class="discovery-panel" aria-labelledby="discovery-title" hidden>
         <div><h2 id="discovery-title">Discover more sites</h2><p>Find candidates from known EQ sites with Luna.</p></div>
         <div class="discovery-controls"><p id="discovery-limits">Target 50 new candidates · 1 hour · $2 total cap</p><button id="discover" type="button" class="primary" aria-describedby="discovery-limits discovery-status" disabled>Discover & grade</button></div>
@@ -61,7 +81,7 @@
       <nav id="pagination" aria-label="Site list pages" hidden><button id="previous">Previous</button><span id="page"></span><button id="next">Next</button></nav>
     </section>
     <section id="site-workspace" aria-label="Site workspace" hidden></section>
-    <footer><span>Private intranet · no scheduled paid runs</span><span id="version"></span></footer>
+    <footer><span id="automation-footer">Private intranet · automatic mode off</span><span id="version"></span></footer>
   </main>
   <div id="action-dock" hidden></div>
   <dialog id="dismiss-dialog" aria-labelledby="dismiss-title"><h2 id="dismiss-title">Dismiss all candidates?</h2><p id="dismiss-description"></p><div class="dialog-actions"><button id="dismiss-cancel" type="button">Cancel</button><button id="dismiss-confirm" type="button">Dismiss all</button></div></dialog>

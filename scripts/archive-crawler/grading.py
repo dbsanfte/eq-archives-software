@@ -8,6 +8,7 @@ from pathlib import Path
 
 from common import CATEGORIES, CrawlError, Page, decode, digest, now
 from wayback_transport import TransportUnavailable, current_transport
+from daily_budget import AutomaticStopped, DailyBudgetPause, reserve_attempt, settle_attempt
 
 MODEL = "gpt-6-luna"
 PRICING = {"input_per_million": 0.10, "output_per_million": 0.50,
@@ -191,6 +192,7 @@ def reserve(store, candidate, signature, payload, maximum):
         raise CrawlError("Luna dollar budget reached; judgments retained")
     cursor = store.db.execute("INSERT INTO attempts(candidate,signature,reserved,status,created) VALUES (?,?,?,?,?)",
                               (candidate, signature, amount, "reserved", now()))
+    reserve_attempt(store, cursor.lastrowid, amount)
     store.db.commit()
     return cursor.lastrowid
 
@@ -245,22 +247,30 @@ def grade(args, store, *, candidates=None, client=None):
                     # made for a different focus or resets reservations.
                     store.set('luna_response:' + signature, {'attempt': attempt, 'response': response})
                 usage = response.get("usage", {})
-                actual = (usage.get("input_tokens", 0) * PRICING["input_per_million"]
-                          + usage.get("output_tokens", 0) * PRICING["output_per_million"]) / 1_000_000
-                store.db.execute("UPDATE attempts SET actual=?,status='response_received' WHERE id=?", (actual, attempt))
+                actual = None  # Unknown usage retains the full reservation.
+                if isinstance(usage, dict) and all(type(usage.get(key)) is int and usage[key] >= 0 for key in ('input_tokens', 'output_tokens')):
+                    actual = (usage['input_tokens'] * PRICING['input_per_million']
+                              + usage['output_tokens'] * PRICING['output_per_million']) / 1_000_000
+                # A campaign copies cached responses from its seed ledger but
+                # starts its own attempt IDs. Never settle an unrelated local
+                # request that happens to reuse a copied cache's integer ID.
+                owned_attempt = store.db.execute('SELECT 1 FROM attempts WHERE id=? AND signature=?', (attempt, signature)).fetchone()
+                if actual is not None and owned_attempt:
+                    settle_attempt(store, attempt, actual, usage)
+                store.db.execute("UPDATE attempts SET actual=?,status='response_received' WHERE id=? AND signature=?", (actual, attempt, signature))
                 store.db.commit()
                 rating = validate(response, documents)
                 rating.update({"origin": "model", "model": MODEL, "signature": signature,
                                "response_model": response.get("model"), "response_id": response.get("id"),
                                "grader_signature": grader, "grading_criteria": focus, "usage": usage, "graded_at": now(),
                                "assessed_scope": "supplied_captures_only"})
-                store.db.execute("UPDATE attempts SET status='judged' WHERE id=?", (attempt,))
+                store.db.execute("UPDATE attempts SET status='judged' WHERE id=? AND signature=?", (attempt, signature))
                 store.db.commit()
                 save_rating(store, candidate, rating)
                 store.set('luna_grade:' + signature, rating)
                 count += 1
                 print(f"Luna graded {count}: grade {rating['grade']}, {rating['category']}, {rating['confidence']} confidence", flush=True)
-            except TransportUnavailable:
+            except (TransportUnavailable, DailyBudgetPause, AutomaticStopped):
                 raise
             except CrawlError as error:
                 store.db.execute("UPDATE candidates SET state='grade_error',error=?,rating=NULL,decision=NULL WHERE id=?", (str(error), candidate["id"]))

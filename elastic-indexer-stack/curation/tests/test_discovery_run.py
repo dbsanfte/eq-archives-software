@@ -270,3 +270,47 @@ def test_fill_resolves_ezboard_threads_before_creating_one_board_candidate(run_f
     with connect(root) as main:
         rows=main.candidates()
         assert len(rows)==1 and rows[0]['url']==board and rows[0]['scope']==board
+
+
+def test_automatic_loop_promotes_each_qualified_result_and_retains_low_grades(run_fixture):
+    import automation
+    from test_daily_budget import settings as daily_settings
+    root, clock, client, downloader, settings, operation, observed, discovered = run_fixture
+    settings.update(available=5, bad_grades=2)
+    account = automation.budget(root)
+    account.configure(daily_settings(account, enabled=True))
+    op = operation(target=3)
+    op['payload']['automatic'] = True
+    with account.bind(automatic=True):
+        result = campaign(root, op)['progress']
+    assert result['accepted'] == 3 and result['checked'] == 5
+    with connect(root) as main:
+        rows = main.candidates()
+        assert sum(row['state'] == 'approved_waiting_batch' for row in rows) == 3
+        assert sum(row['state'] == 'deferred' for row in rows) == 2
+    assert 0 < account.snapshot()['estimated_usd'] < .01
+    assert account.snapshot()['unresolved_usd'] == 0
+
+
+def test_daily_budget_pause_retains_sample_and_resume_merges_grade_without_repaying(run_fixture):
+    import automation
+    from daily_budget import DailyBudgetPause
+    from test_daily_budget import settings as daily_settings
+    root, clock, client, downloader, settings, operation, observed, discovered = run_fixture
+    settings['available'] = 1
+    account = automation.budget(root)
+    account.configure(daily_settings(account, enabled=True, daily_usd=.000001))
+    op = operation(target=1)
+    op['payload']['automatic'] = True
+    with account.bind(automatic=True), pytest.raises(DailyBudgetPause): campaign(root, op)
+    client.request.assert_not_called()
+    with connect(root) as main:
+        row = main.candidates()[0]
+        assert row['state'] == 'sampled' and json.loads(row['captures']) and not row['rating']
+    account.configure(daily_settings(account, daily_usd=2))
+    with account.bind(automatic=True): result = campaign(root, op)
+    assert result['progress']['accepted'] == 1
+    assert client.request.call_count == 1
+    with connect(root) as main:
+        assert main.candidates()[0]['state'] == 'approved_waiting_batch'
+        assert json.loads(main.candidates()[0]['rating'])['grade'] == 3

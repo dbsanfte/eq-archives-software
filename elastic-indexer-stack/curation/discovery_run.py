@@ -12,6 +12,7 @@ from grading import Luna, grade
 from graph import staged_links
 from state import connect
 from review import checked_sources, record
+from daily_budget import DailyBudgetPause, AutomaticStopped, require_automatic
 
 SECONDS = 3600
 
@@ -23,29 +24,49 @@ def merge_site(root, operation, row, minimum):
         receipt = main.db.execute("SELECT detail FROM events WHERE candidate=? AND action='discovery_result' AND json_extract(detail,'$.operation')=?",
                                   (row['id'], operation['id'])).fetchone()
         if receipt:
-            return json.loads(receipt[0])['accepted']
+            detail = json.loads(receipt[0])
+            current = main.db.execute('SELECT * FROM candidates WHERE id=?', (row['id'],)).fetchone()
+            rating = json.loads(row['rating'] or 'null')
+            if (rating and detail.get('pending_hash') and current and not current['decision']
+                    and record(main, current)['manifest_sha256'] == detail['pending_hash']):
+                accepted = rating['grade'] >= minimum
+                main.db.execute('UPDATE candidates SET state=?,rating=?,error=? WHERE id=?', (row['state'], row['rating'], row['error'], row['id']))
+                main.db.execute("UPDATE events SET detail=? WHERE candidate=? AND action='discovery_result' AND json_extract(detail,'$.operation')=?",
+                    (json.dumps({'operation': operation['id'], 'accepted': accepted}), row['id'], operation['id']))
+                main.db.commit()
+                return accepted
+            return detail['accepted']
         if any(site_identity(item['url'], main) == site_identity(row['url'], main) for item in main.candidates()):
             return False
-        record = dict(row)
-        record['scope'] = capture_scope(record['url'], json.loads(record['coverage'] or '{}').get('scope_mode', 'directory'))
-        record['captures'] = json.dumps([{**capture, 'path': f"runs/{operation['id']}/" + capture['path']}
-                                        for capture in json.loads(record['captures'])])
-        keys = list(record)
-        main.db.execute(f"INSERT INTO candidates({','.join(keys)}) VALUES ({','.join('?' for _ in keys)})", list(record.values()))
-        rating = json.loads(record['rating'] or 'null')
+        saved = dict(row)
+        saved['scope'] = capture_scope(saved['url'], json.loads(saved['coverage'] or '{}').get('scope_mode', 'directory'))
+        saved['captures'] = json.dumps([{**capture, 'path': f"runs/{operation['id']}/" + capture['path']}
+                                        for capture in json.loads(saved['captures'])])
+        keys = list(saved)
+        main.db.execute(f"INSERT INTO candidates({','.join(keys)}) VALUES ({','.join('?' for _ in keys)})", list(saved.values()))
+        rating = json.loads(saved['rating'] or 'null')
         accepted = rating is not None and rating['grade'] >= minimum
+        detail = {'operation': operation['id'], 'accepted': accepted}
+        if rating is None:
+            detail['pending_hash'] = record(main, main.db.execute('SELECT * FROM candidates WHERE id=?', (row['id'],)).fetchone())['manifest_sha256']
         main.db.execute('INSERT INTO events(candidate,action,detail,created) VALUES (?,?,?,?)',
-                        (row['id'], 'discovery_result', json.dumps({'operation': operation['id'], 'accepted': accepted}), now()))
+                        (row['id'], 'discovery_result', json.dumps(detail), now()))
         main.db.commit()
         return accepted
 
 
 def owned_or_new(root, operation, row):
     with connect(root) as main:
-        owned = main.db.execute("SELECT 1 FROM events WHERE candidate=? AND action='discovery_result' AND json_extract(detail,'$.operation')=?",
+        owned = main.db.execute("SELECT detail FROM events WHERE candidate=? AND action='discovery_result' AND json_extract(detail,'$.operation')=?",
                                 (row['id'], operation['id'])).fetchone()
         exists = any(site_identity(item['url'], main) == site_identity(row['url'], main) for item in main.candidates())
         if owned:
+            receipt = json.loads(owned[0])
+            current = main.db.execute('SELECT * FROM candidates WHERE id=?', (row['id'],)).fetchone()
+            if (receipt.get('pending_hash') and current and not current['decision']
+                    and record(main, current)['manifest_sha256'] == receipt['pending_hash']):
+                require_new(main, row['url'])
+                return 'new'  # The retained sample still needs its first grade.
             return 'owned'
         if exists:
             return 'duplicate'
@@ -91,6 +112,7 @@ def fill(root, operation, store):
                                             '--max-candidates', '1', '--max-usd', str(payload['max_usd'])])
     grade_args.grading_criteria = payload.get('grading_criteria', '')
     downloader = client = None
+    row = None
     snapshot = {}
 
     def progress(phase, reason=None):
@@ -117,6 +139,7 @@ def fill(root, operation, store):
             return finish(checkpoint['stop_reason'])
         store.set('acquisition_started', store.get('acquisition_started') or now())
         while True:
+            require_automatic()
             if len(checkpoint['accepted']) >= payload['max_candidates']:
                 return finish('target_reached')
             if time.time() >= checkpoint['deadline']:
@@ -207,6 +230,9 @@ def fill(root, operation, store):
                     store.db.commit()
                     row = store.db.execute('SELECT * FROM candidates WHERE id=?', (row['id'],)).fetchone()
             accepted = merge_site(root, operation, row, minimum)
+            if operation['payload'].get('automatic'):
+                from automation import budget, promote
+                promote(root, budget(root))
             checkpoint['done'].append(row['id'])
             if accepted:
                 checkpoint['accepted'].append(row['id'])
@@ -218,6 +244,14 @@ def fill(root, operation, store):
                 return finish('spend_limit')
             if any(part in error for part in ('budget', '422 after', '429 after', 'HTTP 401', 'HTTP 403')):
                 raise CrawlError(error)
+    except (DailyBudgetPause, AutomaticStopped):
+        # Carry the sampled site into durable Suggestions before sleeping. A
+        # campaign whose hour expires overnight cannot strand its saved source.
+        if row is not None:
+            current = store.db.execute('SELECT * FROM candidates WHERE id=?', (row['id'],)).fetchone()
+            merge_site(root, operation, current, minimum)
+        progress('paused')
+        raise
     except CrawlError:
         if time.time() >= checkpoint['deadline']:
             return finish('time_limit')

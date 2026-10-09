@@ -12,6 +12,69 @@ immutable digest with [deploy-curation.sh](../../scripts/deploy-curation.sh).
 The same image contains [index_captures.py](../indexer/src/index_captures.py).
 Legacy finder/worker/broad reindex Jobs retain their separate lifecycles.
 
+## Continuous automatic mode
+
+**Candidates → Automatic mode → Configure automatic mode** is an explicit opt-in.
+It defaults **off**, with a proposed **$2/day**, **Grade 2+** policy and optional
+additional grading criteria. Edit the controls and press **Save automatic settings**;
+sliders, unsaved drafts, polling and deployment never enable it. Settings persist on
+the existing PVC, with revision checks against stale browser tabs. Drafts remain
+local to the browser until saved.
+
+When enabled, the candidate worker continually starts bounded discovery runs
+(50 qualifying sites, one hour and $2 per run). Each graded result is checked for
+current source evidence and archive coverage before promotion. Pristine ordinary
+suggestions expand to the whole site or shared-host account; board identities keep
+their custom scope. Explicit human scope edits are left for manual approval.
+Qualifying sites receive a recorded **automatic-policy approval**, enter the
+unlimited capture queue with the normal 60-second grace period and Undo, and
+proceed through capture, publication and indexing without a second approval.
+These are policy-driven approvals, not claims of human validation.
+
+Lower grades move to **Saved for later**, preserving evidence, grading criteria,
+score and URL/account identity. They remain excluded from future discovery.
+Changing the threshold does not reactivate them. **Restore to Candidates** lets
+an operator review and approve a saved site manually. Restore, Undo and manual
+scope edits prevent subsequent automatic approval of that entry.
+
+A private SQLite/WAL ledger at `luna-budget/budget.sqlite3` reserves conservative
+request costs **before** Luna calls across all three workers and new import Jobs.
+The daily ceiling covers portal grading and enrichment, including manual requests;
+standalone operator commands and the existing broad reindex are outside this mode.
+Estimated usage releases excess reservation only when usage is valid. Uncertain
+requests retain their reservation, rejected responses/corrections count, and paid
+caches never count twice. Accounting uses the UTC day on which a request was
+reserved; the daily window resets at **00:00 UTC**. Existing current-day portal
+ledgers are included when settings are first saved. Enabling waits for any older
+paid import Job without the shared ledger to finish; those Jobs are never changed.
+
+At the cap, paid work saves its position. Discovery resumes under its original
+operation limits and deadline when enough daily funds are available; an expired
+run ends before a fresh bounded run starts, retaining pending source samples.
+Captured files and already indexed documents remain available. An import that
+needs more daily funds writes a manifest/Job-bound `waiting_budget` diagnostic
+and exits successfully. The controller keeps the site in **Indexing**, waits for
+funds, validates the original publication, then creates a **new numbered Job**.
+Previous Jobs, manifests, source hashes and paid caches are retained; existing ES
+IDs are skipped. Automatic sites that outlast the six-hour Kubernetes Job deadline
+also continue in a new numbered Job under the same policy. A missing or mismatched completion diagnostic cannot retire a
+site. The controller still waits for every other unfinished, unsuspended Job.
+Raising the cap can resume work before midnight. If the next single reservation
+exceeds the entire daily limit, the displayed required amount must be funded.
+
+New automatic approvals use the shared daily enrichment policy across days,
+allowing large sites to finish without a $2 lifetime ceiling. Manual and existing
+approvals keep their original $2/site cap as well as any configured daily limit.
+Failed-file retries retain the original site's policy and enrichment budget/cache.
+Turning automatic mode off stops new automatic discovery and approvals; already
+approved captures and imports continue under the configured daily limit. Turning
+it back on resumes retained automatic work. Manual paused work still needs explicit
+resume. Automation-owned interrupted work recovers after restart; known transient
+transport/publication errors retry after five minutes without resetting usage.
+Source, coverage, authentication and validation errors remain visible for operator
+attention. Exhausted discovery links are rechecked after five minutes, without
+regrading remembered sites or opening additional Wayback connections.
+
 ## Curation flow
 
 Use the light/dark toggle in the header to change the entire portal, including
@@ -21,7 +84,7 @@ remembers an explicit choice in this browser across visits.
 1. Review Luna's grade, reason, verbatim evidence and complete extracted source.
    Archived scripts, HTML and images never execute in this screen.
 2. Choose scope and **Approve site for capture**. This authorizes capture, publication
-   and AI-enriched indexing, with a $2 enrichment cap per site. It queues the site,
+   and AI-enriched indexing, with a $2 enrichment cap per manually approved site. It queues the site,
    removes it from **Candidates**, and moves it into **Capture queue**.
    The screen returns to the Candidates list with its search and position retained,
    without a capture approval popup. **Undo approval** lives directly on each
@@ -45,8 +108,9 @@ remembers an explicit choice in this browser across visits.
    sites in Queue and available to Undo. The explicit operator batch API still
    accepts up to five sites; existing claimed batches keep their saved work.
    Existing approvals receive a one-time grace period on migration;
-   restarting does not reset it. A paused capture holds the queue until explicitly
-   resumed, retaining its budgets. Items move into **Capturing** when claimed.
+   restarting does not reset it. A paused manual capture holds the queue until explicitly
+   resumed, retaining its budgets. Automatic mode may resume its own interrupted
+   or transiently failed captures under the saved policy. Items move into **Capturing** when claimed.
    The worker inventories the entire approved scope through paginated Wayback
    CDX listings, then downloads every listed successful file version. It includes
    orphan pages, images, CSS, scripts and downloads, using the pinned downloader
@@ -72,7 +136,7 @@ remembers an explicit choice in this browser across visits.
    `crawl-manifests/<batch-id>.json`. Import waits for every other unfinished,
    unsuspended Job in `eqarchives-es`, including pending/retrying Jobs with
    `active=0`. The controller cannot patch, suspend or delete Jobs.
-   AI enrichment uses Luna by default, within the site's $2 total budget.
+   AI enrichment uses Luna by default, within the saved daily or manual $2/site policy.
    Indexed sites retire to **History** automatically.
 
 Completed ordinary sites with gaps offer **Retry failed files** in Indexing or
@@ -82,7 +146,7 @@ queues only missing versions/lookups, retains successful files, and supports
 metadata and retain cumulative transport usage. The resulting manifest publishes
 and indexes automatically; prior manifests, publications and Jobs stay immutable.
 A retry of published files inherits its original site's enrichment ledger and
-cached responses, so it cannot renew the $2 cap. Existing document IDs are skipped
+cached responses, so it cannot renew a manual $2 cap or change the automatic daily policy. Existing document IDs are skipped
 without paid calls. Pending imports remain serial behind existing Jobs. An older
 import finishing cannot retire a site with newer acquisition still in progress.
 
@@ -204,7 +268,7 @@ seconds while visible: completed site checks appear immediately, with a progress
 bar, qualified/checked counts, current phase, remaining time, estimated usage and
 reserved spending. Changing the grade slider filters the view; it does not change
 the saved grade target of an active run. More contains recent operations,
-capture limits and secondary history views. There are no scheduled paid runs.
+capture limits and secondary history views. Paid scheduling requires explicit automatic-mode opt-in.
 
 Add a site, also in Candidates, accepts an original HTTP(S) URL or a Wayback
 replay/calendar link. Bare addresses use HTTP; original protocol, path case,
@@ -224,7 +288,7 @@ samples through the same serial, persistent downloader and date tiers. Sampling
 failures and unresolved URL identity are shown directly, instead of the generic
 "graded source evidence required" message. The card shows queued/coverage/sampling/
 grading progress. **Retry evidence & grading** resumes that operation's original
-Luna and Wayback budgets and reuses a saved valid grade. It never auto-approves
+Luna and Wayback budgets and reuses a saved valid grade. In manual mode it never auto-approves
 capture. Concurrent human decisions or changed source manifests prevent a stale
 result from replacing the current candidate.
 
@@ -374,8 +438,8 @@ Wayback keeps one serial persistent downloader, no fixed request delay or
 bandwidth cap, 1 MiB responses, and cumulative ceilings of 1,200 requests/128 MiB within the
 remaining hour. Seed/staging source reads retain their existing 66-read/16 MiB
 limits, with cached local inventories and links reused across runs.
-Each requested run owns its own durable cap; there are no scheduled paid runs
-or grading calls on deployment. Reservations precede calls and survive ambiguous
+Each requested run owns its own durable cap. Automatic mode can schedule these
+runs only after explicit opt-in; deployment does not enable it. Reservations precede calls and survive ambiguous
 failures. Valid unchanged judgments are reused on resume; unverifiable or
 oversized sources remain unjudged. Model judgments are not human validation.
 
@@ -463,7 +527,8 @@ source and specific validation failure. Corrections pass the same strict
 validator; an unsupported quote is never accepted by relaxing the check.
 An explicit model refusal remains pending without correction requests.
 
-Each approved site has a separate cumulative $2 enrichment cap.
+Each manually approved site has a separate cumulative $2 enrichment cap. Newly
+automatically approved sites instead use the configured shared UTC daily ceiling.
 Reservations use conservative long-context rates and precede calls; ambiguous
 failures retain reservations. Paid responses, including rejected evidence, are
 cached by source/prompt/model signature in a writable `enrichment/` subdirectory
@@ -473,8 +538,8 @@ all rejected evidence and the final matched verbatim excerpts. The original paid
 response is never overwritten. Each correction slot can spend only once, including
 an ambiguous/lost response, and the two-slot limit survives pod and Job retries.
 An initial request with no received response has at most two reserved attempts.
-Every reservation counts against the same site's $2 cap; retries neither reset
-that cap nor silently create an unenriched document. Exhausted corrections require
+Every reservation counts against the original daily or $2/site policy; retries neither reset
+that policy nor silently create an unenriched document. Exhausted corrections require
 operator attention rather than another paid loop.
 The approved
 sources/manifests remain read-only in import Jobs. Completed results are reused
@@ -498,7 +563,10 @@ allow an older attempt's failure to replace a newer attempt's status.
 ## Storage, deployment and checks
 
 The `eqarchives-curation` local-path PVC stores SQLite/WAL state, captures,
-bounded campaign caches, manifests and publisher objects. Its request is 25 GiB;
+bounded campaign caches, manifests, publisher objects and the shared daily Luna ledger.
+Import Jobs mount only `enrichment/` and `luna-budget/` writable; approved sources
+and manifests stay read-only. Back up the daily ledger and its settings alongside
+operation/enrichment ledgers to preserve reservations and automatic approval policy. Its request is 25 GiB;
 local-path requests are not filesystem quotas. Back it up separately from the
 public archive using SQLite's backup API plus manifest-listed captures. Preserve
 publication/indexing state on restore and keep private state/keys outside Git.
@@ -520,7 +588,8 @@ A large file may delay the next sample, but an entire site cannot monopolize the
 connection. Closing a downloader session leaves the shared connection available.
 Health requires all three threads and the shared transport; shutdown retains the
 lease while any worker has an in-flight request. Restart retains payloads,
-approvals and progress and requires explicit resume for interrupted operations in any queue. Lost transport responses
+approvals and progress. Interrupted manual operations require explicit resume; enabled
+automatic mode can resume only its own operations under retained limits. Lost transport responses
 conservatively retain the outstanding HTTP allowance, rather than resetting usage.
 A one-time init copies only the pilot database and listed captures from a read-only mount, excluding
 its tree reader, screenshots and orphan downloads. Both archive checkouts,
