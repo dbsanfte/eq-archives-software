@@ -22,7 +22,10 @@ def materialize(store, parent):
             reviewed = {**manifest, 'batch_id':review_id, 'review_unit':'site', 'capture_batch_id':parent['id'],
                         'capture_manifest_sha256':parent['manifest_sha256'], 'sites':[site], 'captures':captures,
                         'visited':[entry for entry in manifest.get('visited',[]) if entry[0] == site['id']],
-                        'notes':[note for note in manifest.get('notes',[]) if within_scope(note['url'],site['scope'])]}
+                        'notes':[note for note in manifest.get('notes',[]) if
+                                 (note['candidate_id'] == site['id'] if note.get('candidate_id') else within_scope(note['url'],site['scope']))]}
+            if 'capture_retry' in manifest:
+                reviewed['capture_retry'] = manifest.get('capture_coverage', {}).get(site['id'], {}).get('retry', {})
             existing = store.db.execute('SELECT manifest_sha256 FROM batches WHERE id=?',(review_id,)).fetchone()
             if existing and existing[0] != digest(reviewed):
                 raise CrawlError('Site review identity collides with another manifest')

@@ -227,7 +227,7 @@ def test_blocked_external_counter_catalog_does_not_stop_site_files(candidate):
         def close(self): pass
     result = capture_sites(root, '2' * 32, [site], Downloader, reports.append)
     assert len(result['captures']) == 2
-    assert result['notes'] == [{'url': 'http://v1.extreme-dm.com/i.gif',
+    assert result['notes'] == [{'candidate_id': site['id'], 'url': 'http://v1.extreme-dm.com/i.gif',
                                'note': 'Supporting-file lookup failed: Wayback HTTP 403'}]
     assert result['capture_coverage'][site['id']]['state'] == 'complete_with_gaps'
     assert result['capture_retry'] == {'files': 0, 'lookups': 1}

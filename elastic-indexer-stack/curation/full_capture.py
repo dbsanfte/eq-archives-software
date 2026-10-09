@@ -31,18 +31,20 @@ def seed_retry(root, store, retained):
     """
     from state import valid_id
     directory = Path(root).resolve() / 'batches' / valid_id(retained.get('capture_batch_id', retained['batch_id'])) / 'complete'
+    site = retained['sites'][0]['id']
     try:
         checkpoint = json.loads((directory / 'manifest.json').read_text())
-        if digest(checkpoint) != digest(retained):
+        if digest(checkpoint) != retained.get('capture_manifest_sha256', digest(retained)):
             raise CrawlError('Completed capture checkpoint changed; failed files cannot be retried')
         source = sqlite3.connect((directory / 'crawl.sqlite3').as_uri() + '?mode=ro', uri=True)
         try:
             source.row_factory = sqlite3.Row
-            captures = [json.loads(row[0]) for row in source.execute("SELECT capture FROM full_records WHERE state='captured' ORDER BY rowid")]
+            captures = [json.loads(row[0]) for row in source.execute("SELECT capture FROM full_records WHERE site=? AND state='captured' ORDER BY rowid", (site,))]
             if captures != retained['captures']:
                 raise CrawlError('Completed file inventory changed; failed files cannot be retried')
             for table in ('full_queries', 'full_records', 'full_dependencies', 'full_scanned'):
-                rows = source.execute('SELECT * FROM ' + table)
+                restriction = "id IN (SELECT id FROM full_records WHERE site=?)" if table == 'full_scanned' else 'site=?'
+                rows = source.execute('SELECT * FROM ' + table + ' WHERE ' + restriction, (site,))
                 columns = [item[0] for item in rows.description]
                 store.db.executemany(f"INSERT INTO {table}({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})", rows)
         finally:
@@ -308,23 +310,23 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
         if not captures:
             raise CrawlError('No files could be recovered in the approved scope for 1999–2006. Sources and catalog progress are retained.')
         notes = list(base_manifest.get('notes', [])) if base_manifest else []
-        notes += [{'url': row['url'], 'timestamp': row['timestamp'], 'note': row['note']}
-                 for row in db.execute("SELECT url,timestamp,note FROM full_records WHERE state='unavailable' ORDER BY rowid")]
+        notes += [{'candidate_id': row['site'], 'url': row['url'], 'timestamp': row['timestamp'], 'note': row['note']}
+                 for row in db.execute("SELECT site,url,timestamp,note FROM full_records WHERE state='unavailable' ORDER BY rowid")]
         failed_queries = [dict(row) for row in db.execute('SELECT url,site,note FROM full_queries WHERE note IS NOT NULL')]
-        notes += [{'url': row['url'], 'note': 'Supporting-file lookup failed: ' + row['note']} for row in failed_queries]
+        notes += [{'candidate_id': row['site'], 'url': row['url'], 'note': 'Supporting-file lookup failed: ' + row['note']} for row in failed_queries]
         missing = [dict(row) for row in db.execute('SELECT url,site FROM full_queries WHERE found=0 AND note IS NULL')
                    if (row['url'], row['site']) in dependencies]
-        notes += [{'url': row['url'], 'note': 'Referenced supporting file has no successful archived version in 1999–2006.'} for row in missing]
+        notes += [{'candidate_id': row['site'], 'url': row['url'], 'note': 'Referenced supporting file has no successful archived version in 1999–2006.'} for row in missing]
         coverage = {}
         for site in sites:
             gaps = sum(row['site'] == site['id'] for row in db.execute("SELECT site FROM full_records WHERE state='unavailable'"))
-            gaps += sum(row['site'] == site['id'] for row in missing)
-            gaps += sum(row['site'] == site['id'] for row in failed_queries)
+            retry = {'files': gaps, 'lookups': sum(row['site'] == site['id'] for row in missing + failed_queries)}
+            gaps += retry['lookups']
             if base_manifest:
                 board = base_manifest.get('ezboard') or base_manifest.get('sitepowerup') or {}
                 counts = board.get('coverage', {}).get('counts', {})
                 gaps += counts.get('unavailable', 0) + counts.get('excluded', 0)
-            coverage[site['id']] = {'state': 'complete_with_gaps' if gaps else 'complete', 'unavailable': gaps,
+            coverage[site['id']] = {'state': 'complete_with_gaps' if gaps else 'complete', 'unavailable': gaps, 'retry': retry,
                 'reason': 'The site inventory and listed versions were processed for 1999–2006. ' +
                           (f'{gaps} file versions or supporting-file lookups remain unavailable; see the URLs, known dates and reasons below.' if gaps else 'Wayback may not have archived every original file.')}
         manifest = {**(base_manifest or {}), 'schema': 1, 'batch_id': batch_id, 'created_at': config['created_at'], 'capture_policy': POLICY,
