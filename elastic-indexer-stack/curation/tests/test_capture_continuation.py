@@ -47,6 +47,73 @@ def detail(app, row):
     return call(app, 'GET', '/api/candidate?id=' + row['id']).json()
 
 
+def test_retry_failed_files_retains_review_and_retries_only_gaps(tmp_path, monkeypatch):
+    root = tmp_path / 'state'
+    row, legacy_manifest = legacy(root, count=1)
+    site = {**legacy_manifest['sites'][0], 'capture_policy': POLICY}
+    seed = site['captures'][0]
+    body = b'<p>EQ</p><img src="http://counter.example/i.gif">'
+    (root / seed['path']).write_bytes(body)
+    seed.update(bytes=len(body), sha256=digest(body))
+    failing = True
+    calls = []
+    class Downloader:
+        def __init__(self, store, args): self.store = store
+        def call(self, job):
+            calls.append((job['op'], job['url']))
+            previous = self.store.get('wayback_transport', {})
+            self.store.set('wayback_transport', {**previous, 'requests': previous.get('requests', 0) + 1})
+            if failing and ('counter.example' in job['url'] or job['op'] == 'capture_file' and job['url'].endswith('bad.png')):
+                raise CrawlError('Wayback HTTP 403')
+            if job['op'] == 'scope_list':
+                urls = [job['url']] if 'counter.example' in job['url'] else [row['scope'] + name for name in ('bad.png', 'good.png')]
+                return {'captures': [{'url': url, 'timestamp': '20061231235959'} for url in urls]}
+            Path(job['destination']).write_bytes(b'PNG')
+            return {'url': job['url'], 'timestamp': job['timestamp'], 'bytes': 3,
+                    'sha256': digest(b'PNG'), 'content_type': 'image/png'}
+        def close(self): pass
+    original = capture_sites(root, legacy_manifest['batch_id'], [site], Downloader)
+    assert original['capture_retry'] == {'files': 1, 'lookups': 1}
+    assert len(original['captures']) == 2  # The later good file survived the 403.
+    with connect(root) as store:
+        store.db.execute('UPDATE batches SET manifest=?,manifest_sha256=? WHERE id=?',
+                         (json.dumps(original), digest(original), original['batch_id']))
+        store.db.commit()
+    app = create_app(root, start_worker=False)
+    monkeypatch.setattr('worker.capture_sites', lambda root, batch, sites, progress: capture_sites(root, batch, sites, Downloader, progress))
+    worker = Worker(root)
+    try:
+        assert regenerate(app, original).status_code == 202
+        assert detail(app, row)['candidate']['coverage']['capture']['continuation']['mode'] == 'retry_failed'
+        assert call(app, 'POST', '/api/undo', {'id': row['id'], 'manifest_sha256': row['manifest_sha256']}).status_code == 200
+        assert detail(app, row)['review']['manifest'] == original
+        for recovered in (False, True):
+            before = detail(app, row)['review']['manifest']
+            assert regenerate(app, before).status_code == 202
+            assert regenerate(app, before).status_code == 409
+            make_due(root);worker.capture_queue()
+            failing = not recovered;calls.clear()
+            worker.operation()
+            after = detail(app, row)
+            assert after['candidate']['stage'] == 'review', after['capture_operation']
+            result = after['review']['manifest']
+            retained = {c['url']: c for c in result['captures']}
+            assert [retained[c['url']] for c in original['captures']] == original['captures']
+            assert result['transport']['requests'] == before['transport']['requests'] + len(calls)
+            assert calls == [('scope_list', 'http://counter.example/i.gif'), ('capture_file', row['scope'] + 'bad.png')] + (
+                [('capture_file', 'http://counter.example/i.gif')] if recovered else [])
+            assert result['capture_retry'] == ({'files': 0, 'lookups': 0} if recovered else {'files': 1, 'lookups': 1})
+            with connect(root) as store:
+                saved = unpack(store.db.execute('SELECT * FROM batches WHERE id=?', (before['batch_id'],)).fetchone())
+                assert saved['manifest'] == before and saved['state'] == 'capture_continued'
+                assert not store.db.execute("SELECT 1 FROM operations WHERE kind='publish'").fetchone()
+        assert len(result['captures']) == 4 and result['notes'] == []
+        assert result['capture_coverage'][row['id']]['state'] == 'complete'
+        assert regenerate(app, result).status_code == 409
+    finally:
+        worker.lease.close()
+
+
 def test_regeneration_reuses_100_sources_but_inventories_all_files_and_carries_usage(tmp_path, monkeypatch):
     root = tmp_path / 'state'
     row, original = legacy(root, count=100)

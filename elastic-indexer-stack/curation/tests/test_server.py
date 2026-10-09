@@ -199,7 +199,7 @@ def test_queue_filters_pagination_bad_actions_and_assets(candidate):
     assert call(app,"GET","/api/queue?filter=all&offset=50").json()["candidates"] == []
     for path in ("/api/queue?offset=-1", "/api/queue?offset=bad", "/api/queue?filter=bogus", "/api/source?slot=-1", "/api/source?slot=x", "/api/source?candidate=unknown", "/api/source?candidate="+row["id"]+"&slot=8"):
         assert call(app,"GET",path).status_code == 409
-    for path in ("/assets/review.js", "/assets/review.css", "/", "/healthz"):
+    for path in ("/assets/review.js", "/assets/review.css", "/assets/theme.js", "/", "/healthz"):
         assert call(app,"GET",path).status_code == 200
     assert call(app,"GET","/assets/secret").status_code == 404
     for path in ("/api/capture", "/api/scope", "/api/publish", "/api/resume", "/api/decisions"):

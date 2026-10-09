@@ -71,6 +71,10 @@ def test_full_capture_pause_keeps_checkpoint_and_never_returns_partial_review(ca
         capture_sites(root, 'b' * 32, [site], Downloader,progress=reports.append)
     assert (reports[-1]['files'],reports[-1]['versions_found'],reports[-1]['versions_pending'])==(2,3,1)
     assert not (root / 'batches' / ('b' * 32) / 'manifest.json').exists()
+    # Resume the schema used by captures already running before gap tracking.
+    import sqlite3
+    with sqlite3.connect(root / 'batches' / ('b' * 32) / 'complete' / 'crawl.sqlite3') as checkpoint:
+        checkpoint.execute('ALTER TABLE full_queries DROP COLUMN note')
     failing = False
     result = capture_sites(root, 'b' * 32, [site], Downloader,progress=reports.append)
     assert (reports[-1]['files'],reports[-1]['versions_found'],reports[-1]['versions_pending'])==(3,3,0)
@@ -180,7 +184,7 @@ def test_external_supporting_files_follow_verified_html_and_css_only(candidate):
         check_manifest(root, result)
 
 
-@pytest.mark.parametrize('failure', ['Wayback HTTP 404', 'Wayback HTTP 410', 'Replay returned a different dated version; requested version remains unavailable'])
+@pytest.mark.parametrize('failure', ['Wayback HTTP 403', 'Wayback HTTP 404', 'Wayback HTTP 410', 'Replay returned a different dated version; requested version remains unavailable'])
 def test_unavailable_versions_remain_explicit_gaps(candidate, failure):
     root, row = candidate
     site = {**manifest_for(row)['sites'][0], 'capture_policy': POLICY}
@@ -198,6 +202,55 @@ def test_unavailable_versions_remain_explicit_gaps(candidate, failure):
     assert result['notes'][0]['note'] == failure
     assert progress[-1]['phase'] == 'ready_for_review' and progress[-1]['unavailable'] == 1
     check_manifest(root, result)
+
+
+def test_blocked_external_counter_catalog_does_not_stop_site_files(candidate):
+    root, row = candidate
+    site = {**manifest_for(row)['sites'][0], 'capture_policy': POLICY}
+    source = site['captures'][0]
+    body = b'<p>EQ history</p><img src="http://v1.extreme-dm.com/i.gif">'
+    (root / source['path']).write_bytes(body)
+    source.update(bytes=len(body), sha256=digest(body))
+    calls, reports = [], []
+    class Downloader:
+        def __init__(self, *args): pass
+        def call(self, job):
+            calls.append(job)
+            if job['url'] == 'http://v1.extreme-dm.com/i.gif':
+                assert job['op'] == 'scope_list' and job['match'] == 'exact'
+                raise CrawlError('Wayback HTTP 403')
+            if job['op'] == 'scope_list':
+                return {'captures': [{'url': site['scope'] + 'orphan.zip', 'timestamp': '20061231235959'}]}
+            Path(job['destination']).write_bytes(b'zip')
+            return {'url': job['url'], 'timestamp': job['timestamp'], 'bytes': 3,
+                    'sha256': digest(b'zip'), 'content_type': 'application/zip'}
+        def close(self): pass
+    result = capture_sites(root, '2' * 32, [site], Downloader, reports.append)
+    assert len(result['captures']) == 2
+    assert result['notes'] == [{'url': 'http://v1.extreme-dm.com/i.gif',
+                               'note': 'Supporting-file lookup failed: Wayback HTTP 403'}]
+    assert result['capture_coverage'][site['id']]['state'] == 'complete_with_gaps'
+    assert result['capture_retry'] == {'files': 0, 'lookups': 1}
+    assert reports[-1]['failed_lookups'] == 1
+    assert len(calls) == 3
+    check_manifest(root, result)
+
+
+@pytest.mark.parametrize('operation,failure', [('scope_list','Wayback HTTP 403'),
+                                             ('capture_file','Wayback HTTP 429'),
+                                             ('capture_file','Wayback HTTP 503')])
+def test_scope_catalog_and_service_failures_still_pause(candidate, operation, failure):
+    root, row = candidate
+    site = {**manifest_for(row)['sites'][0], 'capture_policy': POLICY}
+    class Downloader:
+        def __init__(self, *args): pass
+        def call(self, job):
+            if job['op'] == operation: raise CrawlError(failure)
+            return {'captures': [{'url': site['scope'] + 'one.png', 'timestamp': '20061231235959'}]}
+        def close(self): pass
+    with pytest.raises(CrawlError, match=failure):
+        capture_sites(root, '2' * 32, [site], Downloader)
+    assert not (root / 'batches' / ('2' * 32) / 'complete' / 'manifest.json').exists()
 
 
 def test_partial_catalog_repeated_cursor_wrong_date_and_disk_full_cannot_complete(candidate, monkeypatch):

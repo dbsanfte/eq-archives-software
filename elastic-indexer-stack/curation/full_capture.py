@@ -7,6 +7,7 @@ Runtime limits pause acquisition; only an exhausted inventory reaches Review.
 import json
 from pathlib import Path
 import shutil
+import sqlite3
 from types import SimpleNamespace
 from urllib.parse import urlsplit
 
@@ -19,6 +20,38 @@ POLICY = 'complete-files-v1'
 # files. Explicit resume can extend an exhausted allowance, retaining all usage.
 ALLOWANCE = {'requests': 100000, 'bytes': 50 * 1024**3, 'seconds': 7 * 86400}
 DISK_RESERVE = 256 * 1024**2
+FILE_UNAVAILABLE = {'Wayback HTTP 403', 'Wayback HTTP 404', 'Wayback HTTP 410'}
+
+
+def seed_retry(root, store, retained):
+    """Copy only private catalog metadata; successful sources stay in place.
+
+    The caller commits this together with the new plan. Repeated retries never
+    alter an earlier review, reset transport usage, or re-download its files.
+    """
+    from state import valid_id
+    directory = Path(root).resolve() / 'batches' / valid_id(retained.get('capture_batch_id', retained['batch_id'])) / 'complete'
+    try:
+        checkpoint = json.loads((directory / 'manifest.json').read_text())
+        if digest(checkpoint) != digest(retained):
+            raise CrawlError('Completed capture checkpoint changed; failed files cannot be retried')
+        source = sqlite3.connect((directory / 'crawl.sqlite3').as_uri() + '?mode=ro', uri=True)
+        try:
+            source.row_factory = sqlite3.Row
+            captures = [json.loads(row[0]) for row in source.execute("SELECT capture FROM full_records WHERE state='captured' ORDER BY rowid")]
+            if captures != retained['captures']:
+                raise CrawlError('Completed file inventory changed; failed files cannot be retried')
+            for table in ('full_queries', 'full_records', 'full_dependencies', 'full_scanned'):
+                rows = source.execute('SELECT * FROM ' + table)
+                columns = [item[0] for item in rows.description]
+                store.db.executemany(f"INSERT INTO {table}({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})", rows)
+        finally:
+            source.close()
+    except (OSError, ValueError, sqlite3.Error) as error:
+        raise CrawlError('Completed capture checkpoint is unavailable; saved files are retained') from error
+    store.db.execute("UPDATE full_records SET state='pending',note=NULL WHERE state='unavailable'")
+    store.db.execute("""UPDATE full_queries SET done=0,note=NULL WHERE note IS NOT NULL OR
+        (found=0 AND EXISTS (SELECT 1 FROM full_dependencies d WHERE d.url=full_queries.url AND d.site=full_queries.site))""")
 
 
 def board_limits(legacy):
@@ -75,7 +108,7 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
         db.executescript('''
           CREATE TABLE IF NOT EXISTS full_queries (
             id TEXT PRIMARY KEY, site TEXT NOT NULL, url TEXT NOT NULL, match TEXT NOT NULL,
-            resume TEXT, done INTEGER NOT NULL DEFAULT 0, found INTEGER NOT NULL DEFAULT 0);
+            resume TEXT, done INTEGER NOT NULL DEFAULT 0, found INTEGER NOT NULL DEFAULT 0, note TEXT);
           CREATE TABLE IF NOT EXISTS full_records (
             id TEXT PRIMARY KEY, site TEXT NOT NULL, url TEXT NOT NULL, timestamp TEXT NOT NULL,
             record TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', capture TEXT,
@@ -84,17 +117,24 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
           CREATE TABLE IF NOT EXISTS full_dependencies (url TEXT, site TEXT, parent TEXT NOT NULL, PRIMARY KEY(url,site));
           CREATE TABLE IF NOT EXISTS full_scanned (id TEXT PRIMARY KEY);
         ''')
+        if 'note' not in {row['name'] for row in db.execute('PRAGMA table_info(full_queries)')}:
+            db.execute('ALTER TABLE full_queries ADD COLUMN note TEXT')
+            db.commit()
         config = store.get('complete_config')
         if config and config['signature'] != signature:
             raise CrawlError('Approved capture scope or evidence changed after acquisition started')
         if not config:
             config = {'signature': signature, 'created_at': now(), 'limits': dict(ALLOWANCE)}
+            retrying = retained and sites[0].get('continued_from', {}).get('mode') == 'retry_failed'
+            if retrying:
+                seed_retry(root, store, retained)
+                config['limits'] = dict(retained['limits'])
             if base_manifest or retained:
                 # Commit usage with the initial plan, without a separate commit
                 # that could reset later usage following interrupted setup.
                 db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)',
                            ('wayback_transport', json.dumps((base_manifest or retained).get('transport', {}))))
-            for site in ([] if base_manifest else sites):
+            for site in ([] if base_manifest or retrying else sites):
                 scope = urlsplit(site['scope'])
                 match = 'exact' if site['scope_mode'] == 'page' or scope.query or not scope.path.endswith('/') else 'prefix'
                 url = site['url'] if site['scope_mode'] == 'page' else site['scope']
@@ -139,7 +179,7 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
             seeds = base_manifest or retained
             sources = [c for c in seeds['captures'] if c['candidate_id'] == site['id']] if seeds else site['captures']
             for source in sources:
-                if not in_capture_window(source['timestamp']) or not (base_manifest or allowed(source['url'], site)):
+                if not in_capture_window(source['timestamp']) or not (base_manifest or retained and retained.get('capture_policy') == POLICY or allowed(source['url'], site)):
                     continue
                 key = record_key(site['id'], source['url'], source['timestamp'])
                 if not db.execute('SELECT 1 FROM full_records WHERE id=?', (key,)).fetchone():
@@ -153,6 +193,7 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
                 progress({'phase': phase, 'files': counts.get('captured', 0), 'bytes': size,
                           'versions_found': sum(counts.values()), 'versions_pending': counts.get('pending', 0),
                           'unavailable': counts.get('unavailable', 0),
+                          'failed_lookups': db.execute('SELECT COUNT(*) FROM full_queries WHERE note IS NOT NULL').fetchone()[0],
                           'catalogs_pending': db.execute('SELECT COUNT(*) FROM full_queries WHERE done=0').fetchone()[0],
                           'urls_checked': counts.get('captured', 0) + counts.get('unavailable', 0),
                           'sites_total': len(sites), 'sites_done': len(sites) if phase == 'ready_for_review' else 0,
@@ -194,8 +235,20 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
                 resume = query['resume']
                 while True:
                     report('checking_wayback', query['url'])
-                    listing = acquire({'op': 'scope_list', 'url': query['url'], 'match': query['match'],
-                                       **CAPTURE_WINDOW, 'resume_key': resume})
+                    try:
+                        listing = acquire({'op': 'scope_list', 'url': query['url'], 'match': query['match'],
+                                           **CAPTURE_WINDOW, 'resume_key': resume})
+                    except CrawlError as error:
+                        # An excluded external counter/image is an individual
+                        # supporting-file gap, never grounds to abandon the site.
+                        # The primary scope inventory and service failures still
+                        # pause: they cannot establish complete site coverage.
+                        if (str(error) not in FILE_UNAVAILABLE or query['match'] != 'exact'
+                                or (query['url'], query['site']) not in dependencies):
+                            raise
+                        db.execute('UPDATE full_queries SET done=1,note=? WHERE id=?', (str(error), query['id']))
+                        db.commit()
+                        break
                     continuation = listing.get('resume_key')
                     if continuation and continuation == resume:
                         raise CrawlError('Wayback repeated its catalog continuation; full coverage remains unresolved')
@@ -246,7 +299,7 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
                     raise CrawlError('Downloaded file did not retain its exact catalog URL and date')
                 commit_capture(captured, row['id'])
             except CrawlError as error:
-                if str(error) not in ('Wayback HTTP 404', 'Wayback HTTP 410') and not str(error).startswith(
+                if str(error) not in FILE_UNAVAILABLE and not str(error).startswith(
                         ('Replay returned a different original URL', 'Replay returned a different dated version')):
                     raise
                 db.execute("UPDATE full_records SET state='unavailable',note=? WHERE id=?", (str(error), row['id']))
@@ -257,23 +310,28 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
         notes = list(base_manifest.get('notes', [])) if base_manifest else []
         notes += [{'url': row['url'], 'timestamp': row['timestamp'], 'note': row['note']}
                  for row in db.execute("SELECT url,timestamp,note FROM full_records WHERE state='unavailable' ORDER BY rowid")]
-        missing = [dict(row) for row in db.execute('SELECT url,site FROM full_queries WHERE found=0')
+        failed_queries = [dict(row) for row in db.execute('SELECT url,site,note FROM full_queries WHERE note IS NOT NULL')]
+        notes += [{'url': row['url'], 'note': 'Supporting-file lookup failed: ' + row['note']} for row in failed_queries]
+        missing = [dict(row) for row in db.execute('SELECT url,site FROM full_queries WHERE found=0 AND note IS NULL')
                    if (row['url'], row['site']) in dependencies]
         notes += [{'url': row['url'], 'note': 'Referenced supporting file has no successful archived version in 1999–2006.'} for row in missing]
         coverage = {}
         for site in sites:
             gaps = sum(row['site'] == site['id'] for row in db.execute("SELECT site FROM full_records WHERE state='unavailable'"))
             gaps += sum(row['site'] == site['id'] for row in missing)
+            gaps += sum(row['site'] == site['id'] for row in failed_queries)
             if base_manifest:
                 board = base_manifest.get('ezboard') or base_manifest.get('sitepowerup') or {}
                 counts = board.get('coverage', {}).get('counts', {})
                 gaps += counts.get('unavailable', 0) + counts.get('excluded', 0)
             coverage[site['id']] = {'state': 'complete_with_gaps' if gaps else 'complete', 'unavailable': gaps,
-                'reason': 'All catalog pages and listed file versions checked for 1999–2006. ' +
-                          (f'{gaps} listed versions could not be replayed; see the exact URLs and dates below.' if gaps else 'Wayback may not have archived every original file.')}
+                'reason': 'The site inventory and listed versions were processed for 1999–2006. ' +
+                          (f'{gaps} file versions or supporting-file lookups remain unavailable; see the URLs, known dates and reasons below.' if gaps else 'Wayback may not have archived every original file.')}
         manifest = {**(base_manifest or {}), 'schema': 1, 'batch_id': batch_id, 'created_at': config['created_at'], 'capture_policy': POLICY,
                     'capture_window': dict(CAPTURE_WINDOW), 'sites': sites, 'captures': captures,
                     'capture_coverage': coverage, 'notes': notes, 'limits': config['limits'],
+                    'capture_retry': {'files': db.execute("SELECT COUNT(*) FROM full_records WHERE state='unavailable'").fetchone()[0],
+                                      'lookups': len(failed_queries) + len(missing)},
                     'transport': store.get('wayback_transport', {}), 'indexing': dict(DEFAULT_POLICY), 'visited': []}
         check_manifest(root, manifest)
         save(result_path, manifest)

@@ -40,6 +40,85 @@ async def safe_layout(page,width):
         assert box['width']>=44 and box['height']>=44,(width,box)
 
 
+async def theme_flow(browser,base,width):
+    context=await browser.new_context(viewport={'width':width,'height':844},
+        is_mobile=width<700,has_touch=width<700,color_scheme='dark')
+    page=await context.new_page();errors=[];posts=[]
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    page.on('request',lambda request:posts.append(request.url) if request.method=='POST' else None)
+    await page.goto(base);await settled(page)
+    toggle=page.get_by_role('button',name='Dark mode',exact=True)
+    await expect(toggle).to_have_attribute('aria-pressed','true')
+    await expect(page.locator('html')).to_have_attribute('data-theme','dark')
+    box=await toggle.bounding_box();spend=await page.locator('#luna-spend summary').bounding_box()
+    assert box['width']>=44 and box['height']>=44
+    assert box['x']+box['width']<=spend['x'] or box['y']>=spend['y']+spend['height']
+    # Text and controls must stay legible on every themed surface.
+    async def contrast():
+        failures=await page.evaluate('''() => {
+          const rgb=s=>s.match(/[\\d.]+/g).map(Number);
+          const luminance=c=>c.slice(0,3).map(v=>v/255).map(v=>v<=.04045?v/12.92:((v+.055)/1.055)**2.4).reduce((a,v,i)=>a+v*[.2126,.7152,.0722][i],0);
+          const failures=[];
+          for (const el of document.querySelectorAll('p,h1,h2,label,summary,a,button,input,select,textarea,.meta,.badge,.panel-label,.document-text')) {
+            if (!el.checkVisibility() || el.disabled || getComputedStyle(el).opacity<1) continue;
+            let parent=el,bg;
+            while(parent) {bg=rgb(getComputedStyle(parent).backgroundColor);if(bg.length===3 || bg[3]===1)break;parent=parent.parentElement;}
+            const fg=rgb(getComputedStyle(el).color),a=luminance(fg),b=luminance(bg);
+            const ratio=(Math.max(a,b)+.05)/(Math.min(a,b)+.05);
+            if(ratio<4.5) failures.push([el.className || el.id || el.tagName,ratio]);
+          }
+          return failures;
+        }''')
+        assert not failures,failures
+    await contrast();await safe_layout(page,width)
+    await page.screenshot(path=f'/tmp/curation-theme-dark-{width}.png',full_page=True)
+    # Follow OS changes until a choice is made, then persist that override.
+    await page.emulate_media(color_scheme='light')
+    await expect(toggle).to_have_attribute('aria-pressed','false')
+    if width<700: await toggle.tap()
+    else: await toggle.focus();await page.keyboard.press('Enter')
+    await expect(toggle).to_have_attribute('aria-pressed','true')
+    await page.reload();await settled(page)
+    await expect(toggle).to_have_attribute('aria-pressed','true')
+    await page.emulate_media(color_scheme='dark');await page.emulate_media(color_scheme='light')
+    await expect(toggle).to_have_attribute('aria-pressed','true')
+    await open_site(page,'guild.example/eq/')
+    await page.get_by_label('Download scope',exact=True).select_option('custom')
+    await page.get_by_label('Custom capture folder path').fill('/theme-draft/')
+    await toggle.click();await page.evaluate('refresh()');await settled(page)
+    await expect(page.get_by_label('Custom capture folder path')).to_have_value('/theme-draft/')
+    await toggle.click()
+    await page.get_by_role('button',name='Read source evidence · 2 captures').click()
+    await page.get_by_role('button',name='Read guild EQ archive',exact=True).click()
+    source=page.locator('.document-text')
+    await expect(source).to_contain_text('Early EverQuest guild history.')
+    url=page.url
+    await contrast()
+    await page.screenshot(path=f'/tmp/curation-theme-reader-dark-{width}.png',full_page=True)
+    if width>=1000:
+        assert await page.locator('.page-browser').evaluate('e=>getComputedStyle(e).backgroundColor') != await page.locator('.document-reader').evaluate('e=>getComputedStyle(e).backgroundColor')
+    await toggle.click();await page.evaluate('refresh()');await settled(page)
+    assert page.url==url
+    await expect(source).to_contain_text('Early EverQuest guild history.')
+    await contrast();await safe_layout(page,width)
+    await page.reload();await expect(source).to_contain_text('Early EverQuest guild history.')
+    await expect(toggle).to_have_attribute('aria-pressed','false')
+    await page.screenshot(path=f'/tmp/curation-theme-reader-light-{width}.png',full_page=True)
+    # Secondary dialogs inherit the same palette.
+    await toggle.click();await page.get_by_role('button',name='Open tools and history').click()
+    await contrast();await page.get_by_role('button',name='Close tools',exact=True).click()
+    assert not errors and not posts,(errors,posts)
+    await context.close()
+    if width==320:
+        context=await browser.new_context(viewport={'width':width,'height':844},color_scheme='dark')
+        await context.add_init_script("Object.defineProperty(window,'localStorage',{get(){throw new Error('Storage blocked')}})")
+        page=await context.new_page();await page.goto(base);await settled(page)
+        toggle=page.get_by_role('button',name='Dark mode',exact=True)
+        await expect(toggle).to_have_attribute('aria-pressed','true')
+        await toggle.click();await expect(toggle).to_have_attribute('aria-pressed','false')
+        await context.close()
+
+
 async def basic_flow(browser,base,width):
     context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
     page=await context.new_page()
@@ -563,13 +642,14 @@ async def capture_progress_flow(browser,base,width):
     meter=page.locator('#stage-live .capture-meter')
     await expect(meter).to_contain_text('36 captures left')
     await expect(meter).to_contain_text('Counts cover the files listed so far')
-    progress.update(files=5000,versions_found=20000,versions_pending=15000,catalogs_pending=2,
+    progress.update(files=5000,versions_found=20000,versions_pending=15000,catalogs_pending=2,failed_lookups=1,
         completion={'total':20000,'completed':5000,'remaining':15000,'eta_seconds':5400,'updated_at':datetime.now(timezone.utc).isoformat()})
     await page.evaluate('refresh()');await settled(page)
     await expect(meter).to_contain_text('15,000 captures left')
     await expect(meter).to_contain_text('5,000 of 20,000 listed captures processed · 25%')
     await expect(meter.get_by_role('progressbar')).to_have_attribute('max','20000')
     await expect(meter).to_contain_text('2 archive listings still being checked.')
+    await expect(meter).to_contain_text('1 supporting-file lookups failed. Other files continue downloading')
     await page.reload();await settled(page)
     await expect(meter).to_contain_text('15,000 captures left')
     await expect(meter.locator('.capture-eta')).to_contain_text('ETA: about')
@@ -591,7 +671,7 @@ async def capture_progress_flow(browser,base,width):
     await context.close()
 
 
-async def regenerate_capture_flow(browser,base,width):
+async def regenerate_capture_flow(browser,base,width,retry_files=False):
     context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
     page=await context.new_page();posts=[];errors=[]
     page.on('pageerror',lambda error:errors.append(str(error)))
@@ -601,6 +681,12 @@ async def regenerate_capture_flow(browser,base,width):
     manifest={'sites':[row],'captures':row['captures'],'limits':{'files':100},
               'capture_coverage':{row['id']:{'state':'bounded','reason':'Legacy batch file limit reached'}}}
     reviewed={'id':'e'*32,'manifest_sha256':'f'*64,'state':'awaiting_review','manifest':manifest}
+    if retry_files:
+        manifest.update(capture_policy='complete-files-v1',capture_retry={'files':1,'lookups':1},
+            notes=[{'url':'http://counter.example/i.gif','note':'Supporting-file lookup failed: Wayback HTTP 403'}])
+        row['coverage']['capture']['needs_regeneration']=False
+    action='Retry failed files' if retry_files else 'Regenerate full capture'
+    undo='Undo file retry' if retry_files else 'Undo regeneration'
     reject=True
     async def fixture(route):
         path=urlsplit(route.request.url).path
@@ -611,7 +697,7 @@ async def regenerate_capture_flow(browser,base,width):
                 if reject:
                     await route.fulfill(status=409,json={'error':'Captured site changed; refresh before regeneration.'});return
                 row.update(stage='queued',state='approved_waiting_batch')
-                row['coverage']['capture']['continuation']={'review_id':reviewed['id']}
+                row['coverage']['capture']['continuation']={'review_id':reviewed['id'],**({'mode':'retry_failed'} if retry_files else {})}
                 reviewed['state']='capture_continued'
             elif path=='/api/undo':
                 row.update(stage='review',state='captured_awaiting_review')
@@ -623,29 +709,35 @@ async def regenerate_capture_flow(browser,base,width):
         elif path=='/api/queue':
             view=parse_qs(urlsplit(route.request.url).query)['filter'][0]
             body={**snapshot,'candidates':[row] if view==row['stage'] else [],'total':int(view==row['stage']),'operations':[],
-                  'review_actions':{'count':1,'incomplete_count':1},
+                  'review_actions':{'count':1,'incomplete_count':0 if retry_files else 1},
                   'stage_counts':{name:int(name==row['stage']) for name in ('candidates','queued','capturing','review','indexing','saved','history')}}
         else:await route.continue_();return
         await route.fulfill(status=200,json=body)
     await page.route('**/api/**',fixture)
     await page.goto(base+'/?view=review');await settled(page)
-    await expect(page.locator('#review-approve-all')).to_be_disabled()
-    await expect(page.locator('#review-actions-summary')).to_contain_text('1 older captures need regeneration')
+    if not retry_files:
+        await expect(page.locator('#review-approve-all')).to_be_disabled()
+        await expect(page.locator('#review-actions-summary')).to_contain_text('1 older captures need regeneration')
     await page.locator('.site-tile').click();await settled(page)
-    await page.get_by_role('heading',name='Full capture needed',exact=True).wait_for()
-    assert await page.get_by_role('button',name='Approve site & index',exact=True).count()==0
-    await page.get_by_role('button',name='Regenerate full capture',exact=True).click();await settled(page)
+    if retry_files:
+        await expect(page.get_by_role('button',name='Approve site & index',exact=True)).to_be_enabled()
+        await page.get_by_text('Read coverage notes',exact=True).click()
+        await expect(page.locator('#site-workspace')).to_contain_text('Supporting-file lookup failed: Wayback HTTP 403')
+    else:
+        await page.get_by_role('heading',name='Full capture needed',exact=True).wait_for()
+        assert await page.get_by_role('button',name='Approve site & index',exact=True).count()==0
+    await page.get_by_role('button',name=action,exact=True).click();await settled(page)
     await expect(page.locator('#error')).to_contain_text('Captured site changed')
     assert 'view=review' in page.url
     reject=False
-    await page.get_by_role('button',name='Regenerate full capture',exact=True).click();await settled(page)
+    await page.get_by_role('button',name=action,exact=True).click();await settled(page)
     assert 'view=queued' in page.url
     await page.reload();await settled(page)
-    await page.get_by_role('button',name='Undo regeneration',exact=True).click();await settled(page)
+    await page.get_by_role('button',name=undo,exact=True).click();await settled(page)
     assert 'view=review' in page.url
-    await expect(page.get_by_role('button',name='Regenerate full capture',exact=True)).to_be_enabled()
+    await expect(page.get_by_role('button',name=action,exact=True)).to_be_enabled()
     await safe_layout(page,width)
-    await page.screenshot(path=f'/tmp/curation-regeneration-{width}.png',full_page=True)
+    await page.screenshot(path=f'/tmp/curation-{"retry-files" if retry_files else "regeneration"}-{width}.png',full_page=True)
     assert len(posts)==3 and not errors,(posts,errors)
     await context.close()
 
@@ -1678,7 +1770,9 @@ async def check(base):
         browser=await playwright.chromium.launch()
         try:
             for width in (320,390,430,768,1280):
+                await theme_flow(browser,base,width)
                 await regenerate_capture_flow(browser,base,width)
+                await regenerate_capture_flow(browser,base,width,retry_files=True)
                 await capture_progress_flow(browser,base,width)
                 await complete_file_review(browser,base,width)
                 await candidate_failure_feedback(browser,base,width)

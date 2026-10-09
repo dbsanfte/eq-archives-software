@@ -1,7 +1,7 @@
-"""Explicit continuation of an unapproved, bounded ordinary-site capture.
+"""Continue an unapproved ordinary-site capture without changing its old review.
 
-Keep the old manifest and sources immutable. A separate acquisition inventories
-the entire approved scope; retained files are seeds, never a completed catalog.
+Legacy captures inventory the whole scope; complete captures retry only gaps.
+Retained manifests and successful sources stay immutable through either path.
 """
 import json
 from datetime import datetime, timedelta
@@ -22,6 +22,14 @@ def incomplete(manifest):
             and ('limits' in manifest or 'capture_coverage' in manifest))
 
 
+def retryable(manifest):
+    sites = manifest.get('sites', [])
+    gaps = manifest.get('capture_retry', {})
+    return (manifest.get('capture_policy') == POLICY and len(sites) == 1
+            and sites[0].get('scope_mode') in ('page', 'directory', 'site', 'custom')
+            and sum(gaps.get(key, 0) for key in ('files', 'lookups')) > 0)
+
+
 def require_complete(manifest):
     if incomplete(manifest):
         raise CrawlError('This legacy capture has not checked the complete file inventory. Use Regenerate full capture before approving indexing.')
@@ -35,7 +43,7 @@ def checked_review(store, review_id, expected):
     manifest = reviewed['manifest']
     if (not manifest or reviewed['manifest_sha256'] != expected or digest(manifest) != expected
             or reviewed['state'] != 'awaiting_review' or reviewed['publication'] or reviewed['job']
-            or not incomplete(manifest)):
+            or not (incomplete(manifest) or retryable(manifest))):
         raise CrawlError('Only an unchanged, unapproved incomplete capture can be continued')
     site = manifest['sites'][0]
     row = store.db.execute('SELECT * FROM candidates WHERE id=?', (site['id'],)).fetchone()
@@ -64,6 +72,8 @@ def start(root, review_id, expected):
         store.db.execute('BEGIN IMMEDIATE')
         reviewed, current = checked_review(store, review_id, expected)
         prior = {'review_id': review_id, 'manifest_sha256': expected}
+        if retryable(reviewed['manifest']):
+            prior['mode'] = 'retry_failed'
         site = reviewed['manifest']['sites'][0]
         store.db.execute("UPDATE batches SET state='capture_continued',updated=? WHERE id=?", (now(), review_id))
         pending = {**prior, 'previous_decision': current['decision']}
@@ -106,7 +116,7 @@ def queued_site(store, current):
     if site['id'] != current['id'] or site['manifest_sha256'] != current['manifest_sha256']:
         raise CrawlError('The approved site scope or evidence changed while queued')
     return {**site, 'capture_policy': POLICY,
-            'continued_from': {key: prior[key] for key in ('review_id', 'manifest_sha256')}}
+            'continued_from': {key: prior[key] for key in ('review_id', 'manifest_sha256', 'mode') if key in prior}}
 
 
 def retained_manifest(root, site):
@@ -118,9 +128,9 @@ def retained_manifest(root, site):
             raise CrawlError('Retained capture is unavailable')
         reviewed = unpack(row)
     manifest = reviewed['manifest']
-    original_site = {key: value for key, value in site.items() if key not in ('capture_policy', 'continued_from')}
     if (reviewed['state'] != 'capture_continued' or not manifest or digest(manifest) != prior['manifest_sha256']
-            or reviewed['manifest_sha256'] != prior['manifest_sha256'] or manifest['sites'] != [original_site]):
+            or reviewed['manifest_sha256'] != prior['manifest_sha256'] or len(manifest['sites']) != 1
+            or {**manifest['sites'][0], 'capture_policy': POLICY, 'continued_from': prior} != site):
         raise CrawlError('Retained capture or approved scope changed; continuation paused')
     check_manifest(root, manifest)
     return manifest
