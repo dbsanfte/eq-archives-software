@@ -60,6 +60,27 @@ def run_fixture(tmp_path, monkeypatch):
     return root, clock, client, downloader, configuration, operation, observed, discovered
 
 
+def test_status_names_the_site_during_sampling_and_grading_then_clears_it(run_fixture, monkeypatch):
+    import discovery_run
+    root, clock, client, downloader, settings, operation, observed, discovered = run_fixture
+    sample, grade = discovery_run.sample, discovery_run.grade
+    phases = []
+    def checked(action, phase):
+        def run(*args, **kwargs):
+            with connect(root) as main:
+                progress = unpack(main.db.execute('SELECT * FROM operations').fetchone())['result']['progress']
+            assert progress['phase'] == phase
+            assert progress['current_url'] == kwargs['candidates'][0]['url']
+            phases.append(phase)
+            return action(*args, **kwargs)
+        return run
+    monkeypatch.setattr(discovery_run, 'sample', checked(sample, 'sampling'))
+    monkeypatch.setattr(discovery_run, 'grade', checked(grade, 'grading'))
+    result = campaign(root, operation(target=2))['progress']
+    assert phases == ['sampling', 'grading', 'sampling', 'grading']
+    assert result['current_url'] is None
+
+
 def test_fill_continues_past_low_grades_and_publishes_each_result_while_running(run_fixture):
     root, clock, client, downloader, settings, operation, observed, discovered = run_fixture
     settings.update(bad_grades=10, unavailable=2)

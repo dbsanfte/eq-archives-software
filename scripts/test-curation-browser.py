@@ -2152,7 +2152,7 @@ async def pipeline_activity_flow(browser,base,width):
     deadline=datetime.now(timezone.utc).timestamp()+180
     discovery={'id':'d'*32,'kind':'discover','state':'running','updated':stamp,
                'payload':{'automatic':True,'fill_queue':True,'max_candidates':50,'min_grade':3,'max_usd':2},
-               'result':{'progress':{'phase':'grading','accepted':7,'checked':23,'skipped':4,'target':50,'min_grade':3,'deadline':deadline,'max_usd':2,'estimated_usd':.12,'reserved_usd':.02}}}
+               'result':{'progress':{'phase':'grading','current_url':'http://new-guild.example/','accepted':7,'checked':23,'skipped':4,'target':50,'min_grade':3,'deadline':deadline,'max_usd':2,'estimated_usd':.12,'reserved_usd':.02}}}
     capture={'id':'c'*32,'kind':'capture','state':'running','updated':stamp,'payload':{'sites':[site]},
              'result':{'progress':{'files':2,'phase':'checking_wayback','current_url':'http://pub51.ezboard.com/bprexusdragons86545',
                'ezboard':{'forums':7,'catalogs_total':660,'catalogs_remaining':209},
@@ -2177,6 +2177,7 @@ async def pipeline_activity_flow(browser,base,width):
     await page.goto(base);await settled(page)
     await expect(page.locator('#activity-candidates > summary')).to_contain_text('Grading with Luna')
     await expect(page.locator('#activity-candidates')).to_contain_text('7/50 Grade 3+ sites · 23 checked')
+    await expect(page.locator('#activity-candidates')).to_contain_text('http://new-guild.example/')
     await expect(page.locator('#discover')).to_be_disabled()
     assert await page.locator('#pipeline-activity').evaluate('(el)=>!el.closest("fieldset")')
     await page.locator('#automation-settings > summary').click()
