@@ -5,6 +5,7 @@ import io
 import json
 from pathlib import Path
 import tempfile
+import threading
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -13,6 +14,7 @@ from common import CrawlError, Store, digest
 from acquisition import Downloader, sample
 from grading import SIGNATURE, Luna, grade, reserve, sources, validate
 from review import batch, decisions, queue, review
+from wayback_transport import SharedWayback, TransportUnavailable
 
 
 def response(excerpt="EverQuest guild history", status="completed"):
@@ -47,6 +49,25 @@ class WorkflowTests(unittest.TestCase):
 
     def arguments(self, maximum=2):
         return SimpleNamespace(api_key_file="unused-private-fixture", max_usd=maximum, max_candidates=50, max_source_characters=120000)
+
+    def test_stopped_portal_worker_cannot_start_paid_grading_or_skip_sampling(self):
+        self.candidate()
+        stop = threading.Event()
+        shared = SharedWayback(stop)
+        stop.set()
+        with shared.bind(), patch('grading.Luna') as client:
+            with self.assertRaisesRegex(TransportUnavailable, 'Worker stopped'):
+                grade(self.arguments(), self.store)
+            client.return_value.request.assert_not_called()
+            self.assertEqual(self.store.db.execute('SELECT COUNT(*) FROM attempts').fetchone()[0], 0)
+            self.store.db.execute("UPDATE candidates SET captures='[]'")
+            self.store.db.commit()
+            downloader = Mock()
+            downloader.call.side_effect = TransportUnavailable('Worker stopped; resume explicitly')
+            with self.assertRaisesRegex(TransportUnavailable, 'Worker stopped'):
+                sample(SimpleNamespace(max_candidates=1, retry_unresolved=True), self.store, downloader=downloader)
+            self.assertEqual(downloader.call.call_count, 1)
+            self.assertIsNone(self.store.get('sampling_result'))
 
     def grade(self, result=None, maximum=2):
         with patch("grading.Luna") as client:

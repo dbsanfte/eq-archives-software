@@ -12,12 +12,14 @@ from common import CrawlError, Store, now
 
 
 class Lane(str, Enum):
+    CANDIDATES = 'candidates'
     CAPTURE = 'capture'
     INDEXING = 'indexing'
 
 
 OPERATION_KINDS = {
-    Lane.CAPTURE: ('capture', 'discover', 'candidate_check'),
+    Lane.CANDIDATES: ('discover', 'candidate_check'),
+    Lane.CAPTURE: ('capture',),
     Lane.INDEXING: ('publish',),
 }
 
@@ -90,8 +92,9 @@ def enqueue(store, kind, payload, commit=True):
     lane = operation_lane(kind)
     if commit:
         store.db.execute("BEGIN IMMEDIATE")
-    if lane == Lane.CAPTURE and active_operation(store, lane):
-        raise CrawlError("Capture, discovery or evidence grading is already queued or running; wait for it to finish")
+    if lane != Lane.INDEXING and active_operation(store, lane):
+        raise CrawlError('Candidate discovery or evidence grading is already queued or running; wait for it to finish'
+                         if lane == Lane.CANDIDATES else 'Capture is already queued or running; wait for it to finish')
     operation = identifier()
     store.db.execute("INSERT INTO operations VALUES (?,?,?, ?,NULL,NULL,?,?)",
                      (operation, kind, "queued", json.dumps(payload), now(), now()))

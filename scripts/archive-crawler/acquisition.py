@@ -3,8 +3,10 @@
 import json
 from pathlib import Path
 import subprocess
+import time
 
 from common import CrawlError, Page, TIERS, decode, digest, in_capture_window, now, original_url, site_scope, tier, within_capture_scope
+from wayback_transport import TransportUnavailable, current_transport
 
 
 class Downloader:
@@ -15,6 +17,12 @@ class Downloader:
                      (("requests", args.max_requests), ("bytes", args.max_bytes), ("seconds", args.max_seconds))}
         if min(remaining.values()) <= 0:
             raise CrawlError("Cumulative Wayback budget reached; staged evidence retained")
+        self.shared = current_transport.get()
+        if self.shared is not None:
+            self.args, self.started = args, time.monotonic()
+            self.usage = dict(self.previous)
+            self.closed = False
+            return
         self.process = subprocess.Popen(["ruby", str(Path(__file__).with_name("downloader.rb"))],
                                         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
@@ -26,6 +34,8 @@ class Downloader:
             raise
 
     def call(self, job):
+        if self.shared is not None:
+            return self.shared_call(job)
         self.process.stdin.write(json.dumps(job) + "\n")
         self.process.stdin.flush()
         line = self.process.stdout.readline()
@@ -42,7 +52,42 @@ class Downloader:
             raise CrawlError(response["error"])
         return response["result"]
 
+    def shared_call(self, job):
+        if self.closed:
+            raise CrawlError('Downloader session is closed')
+        deadline = self.started + self.args.max_seconds - self.previous.get('seconds', 0)
+        try:
+            with self.shared.turn(deadline):
+                remaining = {key: maximum - self.usage.get(key, 0) for key, maximum in
+                             (('requests', self.args.max_requests), ('bytes', self.args.max_bytes))}
+                seconds = deadline - time.monotonic()
+                if min(*remaining.values(), seconds) <= 0:
+                    raise CrawlError('Cumulative Wayback budget reached; staged evidence retained')
+                try:
+                    response = self.shared.request({**job, 'transport': {
+                        'delay': self.args.delay, 'bytes_per_second': self.args.bytes_per_second,
+                        'max_requests': remaining['requests'], 'max_total_bytes': remaining['bytes'],
+                        'max_response_bytes': self.args.max_page_bytes, 'max_seconds': seconds}})
+                except CrawlError:
+                    # An unreadable/lost response cannot establish actual usage.
+                    # Retain the remaining reservation until an explicit extension.
+                    self.usage.update(requests=self.args.max_requests, bytes=self.args.max_bytes)
+                    raise
+                for key in ('requests', 'bytes', 'connections'):
+                    self.usage[key] = self.usage.get(key, 0) + response['transport'].get(key, 0)
+                if not response['ok']:
+                    raise CrawlError(response['error'])
+                return response['result']
+        finally:
+            # Waiting, grading and local work still count against this session's
+            # wall-clock allowance. A competing site cannot reset its deadline.
+            self.usage['seconds'] = self.previous.get('seconds', 0) + time.monotonic() - self.started
+            self.store.set('wayback_transport', self.usage)
+
     def close(self):
+        if self.shared is not None:
+            self.closed = True
+            return
         self.process.stdin.close()
         try:
             self.process.wait(timeout=5)
@@ -185,6 +230,8 @@ def sample(args, store, *, candidates=None, downloader=None):
                                  (state, error, candidate["id"]))
                 store.event(candidate["id"], "sample", {"listings": listings, "captures": len(captures)})
                 successes += bool(captures)
+            except TransportUnavailable:
+                raise
             except CrawlError as error:
                 successes += bool(captures)
                 store.db.execute("UPDATE candidates SET state=?,error=? WHERE id=?",

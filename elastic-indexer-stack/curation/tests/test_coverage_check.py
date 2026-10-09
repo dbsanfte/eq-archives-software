@@ -26,6 +26,30 @@ def archive(tmp_path, files):
     return repo
 
 
+@pytest.mark.parametrize('new_state', ['capturing', 'rejected', 'approved_waiting_batch'])
+def test_slow_coverage_refresh_cannot_overwrite_a_concurrent_claim_or_decision(tmp_path, monkeypatch, new_state):
+    root = tmp_path / 'state'
+    row = add_candidate(root)
+    repo = archive(tmp_path, ['other.example/20000101000000/index.html'])
+    monkeypatch.setenv('ARCHIVE_REPO', str(repo))
+    refresh(root)
+    changed = {'site_check': {'status': 'new_site', 'complete': True}, 'capture': {'batch_id': 'a' * 32}}
+    def delayed_check(*args, **kwargs):
+        with connect(root) as concurrent:
+            concurrent.db.execute('UPDATE candidates SET state=?,coverage=?,decision=? WHERE id=?',
+                                  (new_state, json.dumps(changed), json.dumps({'decision': 'approve'}), row['id']))
+            concurrent.db.commit()
+        return {'status': 'already_archived', 'complete': True}
+    monkeypatch.setattr('coverage_check.SiteInventory.check', delayed_check)
+    refresh(root)
+    with connect(root) as store:
+        saved = store.candidates()[0]
+        assert saved['state'] == new_state
+        assert json.loads(saved['coverage']) == changed
+        assert json.loads(saved['decision']) == {'decision': 'approve'}
+        assert not store.db.execute("SELECT 1 FROM events WHERE action='site_coverage_changed'").fetchone()
+
+
 @pytest.mark.parametrize('archive_host', ['mythiran.com', 'www.mythiran.com:80', 'mythiran.com:443',
                                          'www.mythiran.com_80', 'mythiran.com_443'])
 def test_existing_approved_mythiran_is_removed_from_recommendations_and_cannot_capture_or_publish(tmp_path,monkeypatch,archive_host):

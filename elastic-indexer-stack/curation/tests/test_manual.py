@@ -9,7 +9,7 @@ from common import digest
 from manual import site_url
 from review import checked_sources
 from server import create_app
-from state import connect, enqueue, unpack
+from state import Lane, connect, enqueue, unpack
 from worker import Worker
 from conftest import add_candidate
 from test_coverage_check import archive
@@ -140,7 +140,7 @@ def test_manual_site_gets_normal_coverage_sources_grade_and_review_without_spide
     try:
         with patch('worker.discover') as spider,patch('worker.staged_links') as graph,patch('grading.Luna') as client:
             client.return_value.request.return_value=response
-            worker.operation()
+            worker.operation(Lane.CANDIDATES)
             spider.assert_not_called();graph.assert_not_called()
             assert client.return_value.request.call_count==1
             listing=call(app,'GET','/api/queue?filter=candidates').json()
@@ -160,7 +160,7 @@ def test_manual_site_gets_normal_coverage_sources_grade_and_review_without_spide
             # reuses the candidate and never grades it again.
             with connect(root) as store:
                 store.db.execute("UPDATE operations SET state='queued'");store.db.commit()
-            worker.operation()
+            worker.operation(Lane.CANDIDATES)
             assert client.return_value.request.call_count==1
     finally:worker.lease.close()
 
@@ -173,7 +173,7 @@ def test_already_archived_manual_site_retires_without_download_or_payment(tmp_pa
     worker=Worker(root)
     try:
         with patch('worker.sample') as download,patch('worker.grade') as paid:
-            worker.operation();download.assert_not_called();paid.assert_not_called()
+            worker.operation(Lane.CANDIDATES);download.assert_not_called();paid.assert_not_called()
         listing=call(app,'GET','/api/queue?filter=history').json()
         assert listing['total']==1 and listing['candidates'][0]['state']=='already_archived'
         assert listing['operations'][0]['state']=='completed'
@@ -192,14 +192,14 @@ def test_unverified_manual_coverage_pauses_and_resumes_without_spending(tmp_path
         monkeypatch.setattr(SiteInventory,'check',lambda *args,**kwargs:{'status':'inventory_partial','complete':False,
             'progress':{'checked':2,'total':30},'message':'Resume the metadata check.'})
         with patch('worker.sample') as download,patch('worker.grade') as paid:
-            worker.operation();download.assert_not_called();paid.assert_not_called()
+            worker.operation(Lane.CANDIDATES);download.assert_not_called();paid.assert_not_called()
             with connect(root) as store:
                 operation=unpack(store.db.execute('SELECT * FROM operations').fetchone())
                 assert operation['state']=='interrupted' and '2 of 30' in operation['error']
                 assert not store.candidates()
             monkeypatch.setattr(SiteInventory,'check',check)
             assert call(app,'POST','/api/resume',{'id':op}).status_code==202
-            worker.operation()
+            worker.operation(Lane.CANDIDATES)
             assert download.call_count==1 and paid.call_count==1
             assert paid.call_args.args[0].max_usd==0.2
     finally:worker.lease.close()

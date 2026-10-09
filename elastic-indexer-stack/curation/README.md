@@ -196,7 +196,8 @@ percentage. Publication and indexing failures remain in Indexing with a contextu
 Retry action. Technical Job details expand separately and remain open across polls.
 Discover & grade is a primary action at the top of Candidates, with the explicit
 50-site target, one-hour deadline and $2 total run limit beside it. A visible
-explanation names any capture, discovery or evidence check occupying the download worker; publication and indexing do not block it. Polling makes the button available
+explanation names any discovery or evidence check occupying the candidate worker;
+capture, publication and indexing do not block it. Polling makes the button available
 when that work finishes, without starting a run. Paused discovery can be resumed
 there within its original limits, deadline and budget. Candidates polls every five
 seconds while visible: completed site checks appear immediately, with a progress
@@ -210,7 +211,7 @@ replay/calendar link. Bare addresses use HTTP; original protocol, path case,
 escaping and query order are preserved. Wayback links identify the original page,
 with the submitted link retained as provenance; sampling still prefers 1999–2001,
 then 2002–2006. Submitting explicitly permits checking **one site, up to $2**.
-The capture/discovery worker checks archive/account coverage, takes the usual bounded samples
+The candidate worker checks archive/account coverage, takes the usual bounded samples
 and runs the normal Luna grader. It does not spider out to other sites. Results
 join Candidates with the ordinary evidence, sources, grade and capture-scope
 review. Missing sources or invalid grades remain unapproved.
@@ -502,15 +503,22 @@ local-path requests are not filesystem quotas. Back it up separately from the
 public archive using SQLite's backup API plus manifest-listed captures. Preserve
 publication/indexing state on restore and keep private state/keys outside Git.
 
-One replica uses `Recreate` and an exclusive process lease covering two worker
-threads: capture/discovery and publication/indexing. Atomic SQLite claims prevent
-two operations from using the same worker; API actions and retries check only
-their own worker. `/api/queue` includes uncapped `workers.capture` and
-`workers.indexing` activity independently of its recent-operations list. Health
-requires both threads, and shutdown retains the lease while either has an
-in-flight request. Restart retains payloads, approvals and progress and requires
-explicit resume for interrupted operations in either queue. A one-time init copies
-only the pilot database and listed captures from a read-only mount, excluding
+One replica uses `Recreate` and an exclusive process lease covering three worker
+threads: candidate gathering (discovery, manual sites and evidence grading), capture,
+and publication/indexing. Atomic SQLite claims prevent two operations from using the same worker; API actions and retries check only
+their own worker. `/api/queue` includes uncapped `workers.candidates`,
+`workers.capture` and `workers.indexing` activity independently of its recent-operations
+list. Capture and candidate gathering take fair turns on one persistent Wayback
+connection, one bounded downloader command at a time. Request delay, bandwidth
+throttling and rate-limit backoff remain shared. Each operation keeps its own
+cumulative request/byte/time budget; waiting counts toward its original deadline.
+A large file may delay the next sample, but an entire site cannot monopolize the
+connection. Closing a downloader session leaves the shared connection available.
+Health requires all three threads and the shared transport; shutdown retains the
+lease while any worker has an in-flight request. Restart retains payloads,
+approvals and progress and requires explicit resume for interrupted operations in any queue. Lost transport responses
+conservatively retain the outstanding HTTP allowance, rather than resetting usage.
+A one-time init copies only the pilot database and listed captures from a read-only mount, excluding
 its tree reader, screenshots and orphan downloads. Both archive checkouts,
 existing ingestion Jobs and the model service stay untouched. Rollback applies
 the preceding compatible immutable curation digest and retains the PVC. After
@@ -529,7 +537,9 @@ kubectl kustomize elastic-indexer-stack/curation/k8s >/dev/null
 
 The image build runs Python 3.13 API/state/scope/source/campaign/publication/import
 pytest, including simultaneous capture/publication, indexing reconciliation during
-capture, both-worker health/recovery, an over-50-item queue and Undo/worker claim races. The runtime
+capture and candidate gathering, three-worker health/recovery, shared-connection
+fairness and budget isolation, an over-50-item queue and Undo/worker claim races.
+The runtime
 defines a Unix account for UID/GID 10001: OpenSSH requires the passwd entry even
 when the private key and destination are supplied explicitly. The container
 smoke check exercises SSH configuration offline as that non-root user. CI also uses
