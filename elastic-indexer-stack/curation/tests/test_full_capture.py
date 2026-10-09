@@ -184,6 +184,110 @@ def test_external_supporting_files_follow_verified_html_and_css_only(candidate):
         check_manifest(root, result)
 
 
+def test_ad_subdomains_are_skipped_without_losing_normal_assets_or_creating_retries(candidate):
+    root, row = candidate
+    site = {**manifest_for(row)['sites'][0], 'capture_policy': POLICY}
+    seed = site['captures'][0]
+    blocked = ['http://ad.network.example/banner.gif', 'https://ADS.network.example:443/banner.js']
+    kept = ['https://adventure.example/banner.gif', 'https://cdn.example/ads/banner.gif']
+    body = ('<p>EverQuest</p>' + ''.join(f'<img src="{url}">' for url in blocked + kept)).encode()
+    (root / seed['path']).write_bytes(body)
+    seed.update(bytes=len(body), sha256=digest(body))
+    calls, reports = [], []
+    class Downloader:
+        def __init__(self, *args): pass
+        def call(self, job):
+            calls.append(job)
+            if job['op'] == 'scope_list':
+                return {'captures': [] if job['match'] == 'prefix' else
+                        [{'url': job['url'], 'timestamp': '20000101000000'}]}
+            Path(job['destination']).write_bytes(b'image')
+            return {'url': job['url'], 'timestamp': job['timestamp'], 'bytes': 5,
+                    'sha256': digest(b'image'), 'content_type': 'image/gif'}
+        def close(self): pass
+    result = capture_sites(root, '5' * 32, [site], Downloader, reports.append)
+    assert not any('network.example' in job['url'] for job in calls)
+    assert {c['url'] for c in result['captures']} == {seed['url'], *kept}
+    assert result['capture_retry'] == {'files': 0, 'lookups': 0}
+    assert result['capture_coverage'][site['id']]['state'] == 'complete'
+    assert result['capture_coverage'][site['id']]['excluded_urls'] == 2
+    assert reports[-1]['excluded_urls'] == 2 and reports[-1]['failed_lookups'] == 0
+    assert len(result['notes']) == 2 and all(note['kind'] == 'excluded' for note in result['notes'])
+    check_manifest(root, result)
+
+
+def test_resuming_old_capture_skips_ad_replays_and_failed_lookups_but_keeps_saved_files(candidate, monkeypatch):
+    from common import Store
+    from source_assets import references
+    root, row = candidate
+    site = {**manifest_for(row)['sites'][0], 'capture_policy': POLICY}
+    seed = site['captures'][0]
+    urls = [f'http://ads.network.example/{name}.gif' for name in ('0saved', '1missing', '2blocked', '3pending', '4later')]
+    body = ('<p>EverQuest</p>' + ''.join(f'<img src="{url}">' for url in urls)).encode()
+    (root / seed['path']).write_bytes(body)
+    seed.update(bytes=len(body), sha256=digest(body))
+    monkeypatch.setattr('source_assets.references', lambda *args: sorted(references(*args)))
+    calls = []
+    class Downloader:
+        def __init__(self, *args): pass
+        def call(self, job):
+            calls.append(job)
+            if job['op'] == 'scope_list':
+                if '2blocked' in job['url']: raise CrawlError('Wayback HTTP 403')
+                return {'captures': [] if job['match'] == 'prefix' else
+                        [{'url': job['url'], 'timestamp': '20000101000000'}]}
+            if '1missing' in job['url']: raise CrawlError('Wayback HTTP 404')
+            if '3pending' in job['url']: raise CrawlError('Wayback HTTP 503')
+            Path(job['destination']).write_bytes(b'image')
+            return {'url': job['url'], 'timestamp': job['timestamp'], 'bytes': 5,
+                    'sha256': digest(b'image'), 'content_type': 'image/gif'}
+        def close(self): pass
+    with monkeypatch.context() as old:
+        old.setattr('full_capture.capture_exclusion', lambda url: None, raising=False)
+        with pytest.raises(CrawlError, match='503'):
+            capture_sites(root, '6' * 32, [site], Downloader)
+    checkpoint = Store(root / 'batches' / ('6' * 32) / 'complete')
+    # Existing checkpoints lack the new exclusion table. Migration must retain
+    # both the successful file and its immutable receipt/source verification.
+    checkpoint.db.execute('DROP TABLE IF EXISTS full_exclusions')
+    saved = json.loads(checkpoint.db.execute("SELECT capture FROM full_records WHERE url=?", (urls[0],)).fetchone()[0])
+    checkpoint.db.commit(); checkpoint.close()
+    before = len(calls)
+    result = capture_sites(root, '6' * 32, [site], Downloader)
+    assert len(calls) == before
+    assert saved in result['captures'] and len(result['captures']) == 2
+    assert result['capture_retry'] == {'files': 0, 'lookups': 0}
+    assert result['capture_coverage'][site['id']]['excluded_urls'] == 4
+    assert {note['url'] for note in result['notes']} == set(urls[1:])
+    check_manifest(root, result)
+
+
+def test_pending_ad_catalog_from_old_checkpoint_is_excluded_before_a_request(candidate, monkeypatch):
+    root, row = candidate
+    site = {**manifest_for(row)['sites'][0], 'capture_policy': POLICY}
+    seed = site['captures'][0]
+    body = b'<p>EQ history</p><img src="http://ad.example/banner.gif">'
+    (root / seed['path']).write_bytes(body)
+    seed.update(bytes=len(body), sha256=digest(body))
+    class Downloader:
+        def __init__(self, *args): pass
+        def call(self, job):
+            if job['url'].startswith('http://ad.'):
+                raise CrawlError('Wayback HTTP 503')
+            return {'captures': []}
+        def close(self): pass
+    with monkeypatch.context() as old:
+        old.setattr('full_capture.capture_exclusion', lambda url: None)
+        with pytest.raises(CrawlError, match='503'):
+            capture_sites(root, '7' * 32, [site], Downloader)
+    def no_transport(*args): raise AssertionError('Excluded catalog reopened transport')
+    result = capture_sites(root, '7' * 32, [site], no_transport)
+    assert len(result['captures']) == 1
+    assert result['capture_retry'] == {'files': 0, 'lookups': 0}
+    assert result['capture_coverage'][site['id']]['excluded_urls'] == 1
+    check_manifest(root, result)
+
+
 @pytest.mark.parametrize('failure', ['Wayback HTTP 403', 'Wayback HTTP 404', 'Wayback HTTP 410', 'Replay returned a different dated version; requested version remains unavailable'])
 def test_unavailable_versions_remain_explicit_gaps(candidate, failure):
     root, row = candidate

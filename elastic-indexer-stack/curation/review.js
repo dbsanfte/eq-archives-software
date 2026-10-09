@@ -98,10 +98,32 @@ async function request(path,value,signal) {
   let result;try { result=await response.json(); } catch (_) { throw new Error('The service is unavailable. Refresh to retry.'); }
   if (!response.ok) throw new Error(result.error || 'The action could not be completed.');return result;
 }
+function notification(id,text,repeat=true) {
+  const box=$(id);
+  if (!repeat && box.dataset.dismissed===text) return;
+  delete box.dataset.dismissed;
+  const content=node('div',undefined,'notification-content');content.append(node('span',text));
+  const close=control('×',()=>{if (box.contains(close)) {box.dataset.dismissed=text;box.hidden=true;}},'notification-close quiet');
+  // Mobile browsers can suppress a compatibility click immediately after a
+  // swipe/scroll. Accept a stationary touch release; cancelled drags do nothing.
+  let touch=null;
+  close.addEventListener('pointerdown',event=>{touch=event.isPrimary && event.pointerType==='touch' ? {id:event.pointerId,x:event.clientX,y:event.clientY} : null;});
+  close.addEventListener('pointermove',event=>{if (touch && Math.hypot(event.clientX-touch.x,event.clientY-touch.y)>=12) touch=null;});
+  close.addEventListener('pointercancel',()=>{touch=null;});
+  // Closing moves the content beneath the finger. Suppress the later synthetic
+  // click so it cannot activate a newly exposed decision button.
+  close.addEventListener('touchend',event=>event.preventDefault(),{passive:false});
+  close.addEventListener('pointerup',event=>{
+    const start=touch;touch=null;
+    if (start && start.id===event.pointerId && Math.hypot(event.clientX-start.x,event.clientY-start.y)<12) close.click();
+  });
+  close.setAttribute('aria-label','Close notification');close.title='Close notification';
+  box.replaceChildren(content,close);box.hidden=false;return content;
+}
 function message(text,undo,tone='') {
-  $('notice').replaceChildren(node('span',text));$('notice').hidden=false;
+  const content=notification('notice',text);
   $('notice').dataset.tone=tone;
-  if (undo) $('notice').append(mutation(undo.label || 'Undo approval',()=>request(undo.path || '/api/undo',undo.payload || undo),undo.confirmation || 'Returned to Candidates.'));
+  if (undo) content.append(mutation(undo.label || 'Undo approval',()=>request(undo.path || '/api/undo',undo.payload || undo),undo.confirmation || 'Returned to Candidates.'));
 }
 async function act(label,action,confirmation,{returnToCandidates=false,undo=null,quiet=false}={}) {
   if (busy) return;
@@ -125,14 +147,14 @@ async function act(label,action,confirmation,{returnToCandidates=false,undo=null
     else message(confirmed,typeof undo==='function' ? undo(outcome) : undo,outcome?.coverage?.complete===false ? 'attention' : '');
     workspaceSignature='';dockSignature='';
     await refresh(true);
-  } catch (error) { $('error').textContent=error.message;$('error').hidden=false; }
+  } catch (error) { notification('error',error.message); }
   finally { busy=false;for (const button of document.querySelectorAll('[data-mutation]')) button.disabled=button.dataset.blocked==='true';renderDock(true);renderDiscovery();renderReviewActions(); }
 }
 function mutation(text,action,confirmation,primary=false,disabled=false,options={}) {
   const button=control(text,()=>act(text,action,confirmation,options),primary ? 'primary' : '');
   button.dataset.mutation='';button.dataset.blocked=String(disabled);button.disabled=busy || disabled;return button;
 }
-async function refresh(navigated=false) {
+async function refresh(navigated=false,reportErrors=false) {
   const token=++generation,requested={...route};controller?.abort();controller=new AbortController();
   const signal=controller.signal;
   try {
@@ -154,13 +176,14 @@ async function refresh(navigated=false) {
       if (route.panel==='site') message(route.view==='history' && context.candidate.review_state==='indexed' ? 'Indexing complete. This site has retired to History.' : `This site moved to ${names[route.view]}.`);
       return refresh(true);
     }
+    delete $('error').dataset.dismissed;
     data=listing;detail=context;renderShell();renderList();renderWorkspace();renderDock();renderTools();
     $('version').textContent=`Build ${data.version}`;
     $('status').textContent=`${names[route.view]}: ${data.total} sites. ${detail ? statusLabel(detail.candidate) : ''}`;
     if (navigated) restorePosition();
   } catch (error) {
     if (error.name==='AbortError' || token!==generation) return;
-    $('error').textContent=error.message;$('error').hidden=false;
+    notification('error',error.message,navigated || reportErrors);
   }
 }
 function renderShell() {
@@ -645,6 +668,7 @@ function captureMeter(op,compact=false) {
     if (catalogs>0) meter.append(node('p',`${catalogs.toLocaleString()} archive listings still being checked.`,'meta'));
     if (progress?.unavailable>0) meter.append(node('p',`${progress.unavailable.toLocaleString()} unavailable captures will be listed as coverage gaps.`,'meta'));
     if (progress?.failed_lookups>0) meter.append(node('p',`${progress.failed_lookups.toLocaleString()} supporting-file lookups failed. Other files continue downloading; retry missing files from Review when capture finishes.`,'meta'));
+    if (progress?.excluded_urls>0) meter.append(node('p',`${progress.excluded_urls.toLocaleString()} advertising URLs intentionally skipped (ad.* and ads.*).`,'meta'));
   }
   return meter;
 }
@@ -982,7 +1006,7 @@ $('home').addEventListener('click',event=>{event.preventDefault();openStage('can
 for (const item of document.querySelectorAll('[data-view]')) item.addEventListener('click',()=>openStage(item.dataset.view));
 $('tools-open').addEventListener('click',()=>$('tools').showModal());$('tools-close').addEventListener('click',()=>$('tools').close());
 $('tools').addEventListener('click',event=>{if (event.target===$('tools') && (event.clientX<$('tools').getBoundingClientRect().left || event.clientX>$('tools').getBoundingClientRect().right)) $('tools').close();});
-$('refresh').addEventListener('click',()=>{if (!busy) refresh();});
+$('refresh').addEventListener('click',()=>{if (!busy) refresh(false,true);});
 $('discover').addEventListener('click',startDiscovery);
 $('minimum-grade').addEventListener('input',()=>{
   clearTimeout(gradeTimer);activeSwipe?.cancel();

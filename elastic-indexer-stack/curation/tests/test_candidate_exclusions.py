@@ -1,3 +1,5 @@
+import pytest
+
 from conftest import add_candidate
 from review import apply_decisions, record
 from server import create_app
@@ -5,6 +7,35 @@ from state import connect, enqueue
 from test_server import call
 
 AD='http://www.freeservers.com/cgi-bin/redirect?id=ezboard-r1'
+
+
+@pytest.mark.parametrize('url,excluded', [
+    ('http://ad.example.com/banner.gif', True),
+    ('https://ADS.example.com:443/eq/', True),
+    ('http://ad.example.com:8080/', True),
+    ('https://web.archive.org/web/20000101000000/http://ads.example.com/', True),
+    ('http://adventure.example.com/', False),
+    ('http://adds.example.com/', False),
+    ('http://www.example.com/ads/banner.gif?next=http://ad.example.com/', False),
+    ('http://www.ads.example.com/', False),
+])
+def test_ad_host_filter_matches_only_the_requested_hostname_prefix(url, excluded):
+    from common import candidate_exclusion
+    assert bool(candidate_exclusion(url)) == excluded
+
+
+@pytest.mark.parametrize('url', ['http://ad.example.com/', 'https://ads.example.com:443/'])
+def test_ad_sites_cannot_start_manual_paid_checks(tmp_path, url):
+    root = tmp_path/'state'
+    row = add_candidate(root, url=url, grade=None)
+    app = create_app(root, start_worker=False)
+    for path, payload in (('/api/submit-site', {'url': url, 'max_usd': 2}),
+                          ('/api/check-candidate', {'id': row['id'], 'manifest_sha256': row['manifest_sha256'], 'max_usd': 2})):
+        result = call(app, 'POST', path, payload)
+        assert result.status_code == 409 and 'Advertising subdomain' in result.json()['error']
+    with connect(root) as store:
+        assert not store.db.execute('SELECT 1 FROM operations').fetchone()
+        assert not store.db.execute('SELECT 1 FROM attempts').fetchone()
 
 
 def test_exclusion_is_limited_to_the_verified_signup_campaign():

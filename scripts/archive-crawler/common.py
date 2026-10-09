@@ -85,8 +85,18 @@ def original_url(value, base=None):
         return None
 
 
+def capture_exclusion(url):
+    """Operator-requested host exclusions, independent of paths and file types."""
+    value = original_url(url)
+    if value and urlsplit(value).hostname.startswith(('ad.', 'ads.')):
+        return 'Advertising subdomain (ad.* or ads.*); intentionally excluded from capture.'
+    return None
+
+
 def candidate_exclusion(url):
-    """Narrow, evidenced platform promotions; never exclude hosted accounts."""
+    """Advertising hosts and evidenced promotions; keep other hosted accounts."""
+    if reason := capture_exclusion(url):
+        return reason
     value = original_url(url)
     if not value:
         return None

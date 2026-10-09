@@ -83,6 +83,14 @@ class DiscoveryTests(unittest.TestCase):
         self.commit();discover(self.args(),self.store)
         self.assertEqual({row['url'] for row in self.store.candidates()},{hosted})
 
+    def test_ad_subdomains_do_not_enter_discovery_but_similar_names_and_paths_do(self):
+        urls = ['http://ad.example.com/', 'https://ADS.example.com:443/',
+                'http://adventure.example.com/', 'http://guild.example/ads/']
+        self.file('seed.example','20000101000000','index.html',
+                  '<title>EverQuest links</title>' + ''.join(f'<a href="{url}">EQ guild</a>' for url in urls))
+        self.commit(); discover(self.args(),self.store)
+        self.assertEqual({row['url'] for row in self.store.candidates()},set(urls[2:]))
+
     def test_inclusive_tiers_and_shared_host_scope(self):
         for date in ("19990101000000", "20011231235959"):
             self.assertEqual(tier(date), 1)

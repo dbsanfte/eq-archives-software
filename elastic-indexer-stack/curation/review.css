@@ -301,7 +301,10 @@ progress { width:100%; display:block; margin:18px 0; accent-color:var(--forest);
 .dock-buttons > button { flex:1; }
 .page-position { flex:1; text-align:center; font-size:12px; white-space:nowrap; }
 #notice { position:sticky; top:8px; z-index:20; padding:12px 14px; margin-bottom:18px; background:var(--success-bg); border:1px solid var(--success-line); border-radius:9px; font-size:14px; line-height:1.6; overflow-wrap:anywhere; box-shadow:0 3px 12px #123b3110; }
-#notice button { margin:8px 8px 0 0; }
+#notice,#error { display:grid; grid-template-columns:minmax(0,1fr) 44px; gap:12px; align-items:start; }
+.notification-content { min-width:0; overflow-wrap:anywhere; }
+.notification-content > button { display:block; margin:8px 0 0; }
+#notice .notification-close,#error .notification-close { width:44px; min-height:44px; height:44px; padding:0; margin:0; font-size:26px; line-height:1; touch-action:manipulation; }
 #notice[data-tone=attention] { background:var(--warning-bg); border-color:var(--warning-line); color:var(--warning); }
 #error { position:sticky; top:8px; z-index:21; background:var(--danger-bg); color:var(--danger); padding:14px; border:1px solid var(--danger-line); border-radius:9px; }
 #stage-activity .panel { background:var(--discovery); }

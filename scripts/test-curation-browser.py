@@ -647,7 +647,7 @@ async def capture_progress_flow(browser,base,width):
     meter=page.locator('#stage-live .capture-meter')
     await expect(meter).to_contain_text('36 captures left')
     await expect(meter).to_contain_text('Counts cover the files listed so far')
-    progress.update(files=5000,versions_found=20000,versions_pending=15000,catalogs_pending=2,failed_lookups=1,
+    progress.update(files=5000,versions_found=20000,versions_pending=15000,catalogs_pending=2,failed_lookups=1,excluded_urls=3,
         completion={'total':20000,'completed':5000,'remaining':15000,'eta_seconds':5400,'updated_at':datetime.now(timezone.utc).isoformat()})
     await page.evaluate('refresh()');await settled(page)
     await expect(meter).to_contain_text('15,000 captures left')
@@ -655,6 +655,7 @@ async def capture_progress_flow(browser,base,width):
     await expect(meter.get_by_role('progressbar')).to_have_attribute('max','20000')
     await expect(meter).to_contain_text('2 archive listings still being checked.')
     await expect(meter).to_contain_text('1 supporting-file lookups failed. Other files continue downloading')
+    await expect(meter).to_contain_text('3 advertising URLs intentionally skipped (ad.* and ads.*).')
     await page.reload();await settled(page)
     await expect(meter).to_contain_text('15,000 captures left')
     await expect(meter.locator('.capture-eta')).to_contain_text('ETA: about')
@@ -1021,6 +1022,25 @@ async def capture_approval_navigation(browser,base,width):
     await context.close()
 
 
+async def close_notification(page,width,selector='#notice'):
+    box=page.locator(selector);close=box.get_by_role('button',name='Close notification',exact=True)
+    await close.scroll_into_view_if_needed()
+    bounds=await close.bounding_box();content=await box.locator('.notification-content').bounding_box()
+    assert bounds['width']>=44 and bounds['height']>=44
+    assert content['x']+content['width']<=bounds['x'] and bounds['x']+bounds['width']<=width
+    assert await close.evaluate('(el)=>{const r=el.getBoundingClientRect();return el.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));}')
+    location=page.url;posts=[]
+    def posted(request):
+        if request.method=='POST':posts.append(request.url)
+    page.on('request',posted)
+    if width<1000:await close.tap()
+    else:await close.focus();await page.keyboard.press('Enter')
+    await expect(box).to_be_hidden()
+    await page.evaluate('refresh()');await settled(page)
+    assert await box.is_hidden() and page.url==location and not posts, {'hidden':await box.is_hidden(),'url':page.url,'expected':location,'posts':posts}
+    page.remove_listener('request',posted)
+
+
 async def candidate_quick_actions(browser,base,width):
     context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<1000,has_touch=width<1000)
     page=await context.new_page()
@@ -1145,12 +1165,26 @@ async def candidate_quick_actions(browser,base,width):
     assert 'candidate=' not in page.url and 'view=candidates' in page.url
     undo=page.locator('#notice').get_by_role('button',name='Undo dismissal',exact=True)
     assert await undo.is_visible()
+    # Closing the popup dismisses only its message. The rejection survives
+    # polling, and remains reversible through the site's History workspace.
+    await close_notification(page,width)
+    assert rows[0]['stage']=='history' and not await tile(0).count()
+    await stage(page,'history');await open_site(page,'swipe-0.example/eq/')
+    await page.get_by_role('button',name='Restore to Candidates',exact=True).click();await settled(page)
+    await page.get_by_role('button',name='Dark mode',exact=True).click()
+    assert await page.locator('#notice button[data-mutation]').count()==0
+    await close_notification(page,width)  # success message without Undo, dark palette
+    await stage(page,'candidates');await tile(0).wait_for();await settled(page)
+    # Exercise the equivalent button here; the earlier swipe already tested
+    # touch dismissal. Navigation can legitimately cancel an in-flight gesture.
+    await page.get_by_role('button',name='Dismiss: swipe-0.example/eq/',exact=True).click();await settled(page)
     await undo.click();await tile(0).wait_for();await settled(page)
     assert posts[-1][0]=='/api/restore' and rows[0]['stage']=='candidates'
     await decide(0,True)
     await page.locator('#error').filter(has_text='Coverage changed').wait_for()
     assert await tile(0).count() and rows[0]['stage']=='candidates'
     assert 'candidate=' not in page.url
+    await close_notification(page,width,'#error')
     await decide(0,True);await asyncio.wait_for(submitted.wait(),timeout=3)
     count=len(posts)
     assert await page.get_by_role('button',name='Approve capture: swipe-0.example/eq/',exact=True).is_disabled()
@@ -1185,6 +1219,18 @@ async def candidate_quick_actions(browser,base,width):
         await page.evaluate('refresh()')
         await cdp.send('Input.dispatchTouchEvent',{'type':'touchEnd','touchPoints':[]})
         assert len(posts)==count
+    # Closing a recurring polling error stays closed until an explicit retry
+    # or a new failure. It must not reappear on every five-second update.
+    async def failed_refresh(route):
+        await route.fulfill(status=503,json={'error':'Fixture refresh is temporarily unavailable.'})
+    await page.route('**/api/queue?**',failed_refresh)
+    await page.locator('#refresh').click()
+    await expect(page.locator('#error')).to_contain_text('Fixture refresh is temporarily unavailable.')
+    await close_notification(page,width,'#error')
+    await page.locator('#refresh').click()
+    await expect(page.locator('#error')).to_be_visible()
+    await close_notification(page,width,'#error')
+    await page.unroute('**/api/queue?**',failed_refresh)
     assert not errors,errors
     await context.close()
 

@@ -47,12 +47,15 @@ def detail(app, row):
     return call(app, 'GET', '/api/candidate?id=' + row['id']).json()
 
 
-def test_retry_failed_files_retains_review_and_retries_only_gaps(tmp_path, monkeypatch):
+@pytest.mark.parametrize('with_exclusion', [False, True])
+def test_retry_failed_files_retains_review_and_retries_only_gaps(tmp_path, monkeypatch, with_exclusion):
     root = tmp_path / 'state'
     row, legacy_manifest = legacy(root, count=1)
     site = {**legacy_manifest['sites'][0], 'capture_policy': POLICY}
     seed = site['captures'][0]
     body = b'<p>EQ</p><img src="http://counter.example/i.gif">'
+    if with_exclusion:
+        body += b'<img src="http://ads.example/banner.gif">'
     (root / seed['path']).write_bytes(body)
     seed.update(bytes=len(body), sha256=digest(body))
     failing = True
@@ -60,6 +63,7 @@ def test_retry_failed_files_retains_review_and_retries_only_gaps(tmp_path, monke
     class Downloader:
         def __init__(self, store, args): self.store = store
         def call(self, job):
+            assert 'ads.example' not in job['url']
             calls.append((job['op'], job['url']))
             previous = self.store.get('wayback_transport', {})
             self.store.set('wayback_transport', {**previous, 'requests': previous.get('requests', 0) + 1})
@@ -110,7 +114,9 @@ def test_retry_failed_files_retains_review_and_retries_only_gaps(tmp_path, monke
                 saved = unpack(store.db.execute('SELECT * FROM batches WHERE id=?', (before['batch_id'],)).fetchone())
                 assert saved['manifest'] == before and saved['state'] == 'capture_continued'
                 assert not store.db.execute("SELECT 1 FROM operations WHERE kind='publish'").fetchone()
-        assert len(result['captures']) == 4 and result['notes'] == []
+        assert len(result['captures']) == 4
+        assert result['notes'] == [note for note in original['notes'] if note.get('kind') == 'excluded']
+        assert result['capture_coverage'][row['id']]['excluded_urls'] == int(with_exclusion)
         assert result['capture_coverage'][row['id']]['state'] == 'complete'
         assert regenerate(app, result).status_code == 409
     finally:
