@@ -12,6 +12,17 @@ immutable digest with [deploy-curation.sh](../../scripts/deploy-curation.sh).
 The same image contains [index_captures.py](../indexer/src/index_captures.py).
 Legacy finder/worker/broad reindex Jobs retain their separate lifecycles.
 
+**Pipeline activity** stays available above every stage and site workspace.
+Discovery, Capture and Indexing each show their current phase or waiting reason;
+the current stage opens its details by default. In Queue, this includes the active
+capture's saved files, listing/download progress, ETA and waiting count. Automatic
+discovery shows its qualifying/checked totals, spending, last result and an actual
+countdown to the next frontier check or daily budget reset, outside the disabled
+manual Discover pane. Indexing exposes the existing Job it is waiting for.
+Recent outcomes come from bounded SQLite metadata reads, independent of paginated
+sites and capped operation/batch lists. Polling every five seconds reports lost
+updates explicitly, preserves open details and drafts, and never starts paid work.
+
 ## Continuous automatic mode
 
 **Candidates → Automatic mode → Configure automatic mode** is an explicit opt-in.

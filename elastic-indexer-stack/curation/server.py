@@ -31,6 +31,7 @@ from candidate_checks import attach_checks, require_finished, start as start_can
 from automatic_indexing import retry as retry_preparation
 from grading import criteria
 import automation
+import activity
 from review_actions import (preview as review_preview, decide_all as decide_all_reviews,
                             apply_decision as apply_site_decision, validate_decision as validate_site_decision,
                             undo_dismissal as undo_review_dismissal)
@@ -173,6 +174,7 @@ def create_app(root=None, origin=None, start_worker=True):
                                  "all_count": len(all_rows), "approved": sum(row['stage'] == Stage.QUEUED for row in all_rows),
                                  "recommended": sum(row['state'] in ('approval_pending','deferred') and (row['rating'] or {}).get('grade',-1)>=2 for row in all_rows),
                                  "operations": operations, "workers": workers, "batches": batches, "limits": LIMITS, "undo_seconds": UNDO_SECONDS,
+                                 "activity": activity.snapshot(store, getattr(app.state, 'worker', None)),
                                  "capturing": sum(row['state']=='capturing' for row in all_rows),
                                  "captured": sum(row['state'] in CAPTURED_STATES for row in all_rows),
                                  "awaiting_site_review": store.db.execute("SELECT COUNT(*) FROM batches WHERE state='awaiting_review'").fetchone()[0],
