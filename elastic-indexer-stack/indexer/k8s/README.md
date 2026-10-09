@@ -60,6 +60,13 @@ multi-day run. A retry scans remaining versions; failures are counted, upstream
 payloads are not logged, and the Job exits nonzero if records failed. This is a
 live-index scan, not a snapshot. Keep other ingestion jobs separate during it.
 
+Chunking budgets unknown WordPiece spans by their UTF-8 byte lengths. The local
+tokenizer otherwise collapses words longer than 100 characters into one token,
+while the Nomic server can expand those strings beyond its 512-token limit.
+Conservative offsets keep the complete source and the 480-token request budget.
+This counting repair retains the existing checkpoint version, so completed
+records stay completed when resuming with the corrected image.
+
 Website text includes the reconstructed `Page URL` and, when different, its
 `Alternate Page URL` in the stored Markdown header. The alternate drops a final
 `/index.html`, which the downloader can add locally for extensionless pages; it
@@ -102,6 +109,11 @@ that tag before applying; keep the rendered manifest out of Git. Run a probe wit
 using the same image, mount and secret references. Verify the document and its
 metadata through the public reader before launching the broad Job.
 
+The legacy image enforces 90% coverage for worker/reindex code. The separate
+curation image enforces its own required 90% gate for `index_captures.py` and
+`indexer/capture_enrichment.py`, using their curation tests and crawler dependencies;
+those two modules are outside the legacy coverage denominator.
+
 ```bash
 docker build --tag eqarchives-indexer:reindex-<commit-sha> elastic-indexer-stack/indexer
 docker save eqarchives-indexer:reindex-<commit-sha> | sudo -n k3s ctr -n k8s.io images import -
@@ -113,7 +125,12 @@ sudo -n kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml -n eqarchives-es \
 
 The workload is serial, throttled by `EMBEDDING_REQUEST_PAUSE=0.2`, and uses the
 existing 768-dimensional Nomic model and credentials. Logs report processed,
-updated, unchanged, unavailable-source and failed counts. Delete/recreate only
-this Job to resume a failed attempt; retain the dedicated source cache. Recheck
+updated, unchanged, unavailable-source and failed counts. To resume a failed run,
+create a replacement Job with a new name and retain the previous Jobs and logs.
+Reuse the dedicated source cache read-only, without repeating source preparation;
+remove generated Job selectors/controller labels when copying the pod template.
+Retry previously failing exact IDs first, and verify their saved checkpoints
+before starting the unrestricted replacement. A healthy embedding endpoint alone
+does not prove that formerly failing document chunks are accepted. Recheck
 public search/reader/MCP health while it runs. A triggered Job is not a completed
 reindex; report its actual phase and progress separately.
