@@ -21,6 +21,14 @@ class PersistentWayback
            (@origin.scheme == 'http' && ['127.0.0.1', 'localhost'].include?(@origin.host))
       raise CaptureFailure, 'Only Wayback or a loopback test fixture is allowed'
     end
+    limits(config)
+    @last = nil
+    @cooldown = nil
+  end
+
+  # Switch per-command budgets without resetting the connection or shared
+  # throttle/backoff. The Python turn queue is serial across all portal workers.
+  def limits(config)
     @delay = Float(config.fetch('delay', 3))
     @rate = Integer(config.fetch('bytes_per_second', 131072))
     @maximum = Integer(config.fetch('max_requests', 240))
@@ -33,7 +41,6 @@ class PersistentWayback
       raise CaptureFailure, 'Invalid transport bounds'
     end
     @requests = @bytes = @connections = 0
-    @last = nil
   end
 
   def clock
@@ -72,6 +79,7 @@ class PersistentWayback
     attempts = 0
     loop do
       raise CaptureFailure, 'Wayback request budget reached' if @requests >= @maximum
+      pause([@cooldown - clock, 0].max) if @cooldown
       pause(@last ? [@delay - (clock - @last), 0].max : 0)
       @last = clock
       @requests += 1
@@ -133,10 +141,11 @@ class PersistentWayback
       end
       status = response.code.to_i
       if [422, 429, 500, 502, 503, 504].include?(status)
-        raise CaptureFailure, "Wayback HTTP #{status} after bounded retries" if attempts >= 3
         # Keep the established connection; back off every request, including CDX.
         retry_after = response['retry-after'].to_s
         wait = retry_after.match?(/^\d+$/) ? [[retry_after.to_i, 5].max, 45].min : 5 * (2 ** (attempts - 1))
+        @cooldown = clock + wait
+        raise CaptureFailure, "Wayback HTTP #{status} after bounded retries" if attempts >= 3
         pause(wait)
         next
       end
@@ -421,6 +430,13 @@ if $PROGRAM_NAME == __FILE__
         transport = PersistentWayback.new(job)
         result = { 'configured' => true }
       else
+        if job['transport']
+          if transport
+            transport.limits(job['transport'])
+          else
+            transport = PersistentWayback.new(job['transport'])
+          end
+        end
         raise CaptureFailure, 'Configure transport first' unless transport
         downloader = BoundedDownloader.new(job, transport)
         result = case job['op']

@@ -7,7 +7,7 @@ from common import CrawlError, digest
 from conftest import add_candidate
 from review import checked_sources
 from server import create_app
-from state import connect, unpack
+from state import Lane, connect, unpack
 from test_coverage_check import archive
 from test_server import call
 from worker import Worker
@@ -32,7 +32,7 @@ def test_regrading_uses_original_budget_frozen_criteria_and_source_bound_caches(
         with patch('grading.Luna') as client, patch('candidate_checks.sample') as download:
             client.return_value.request.return_value = response()
             operation = call(app, 'POST', '/api/check-candidate', payload).json()['operation']
-            worker.operation()
+            worker.operation(Lane.CANDIDATES)
             current = call(app, 'GET', '/api/candidate?id=' + row['id']).json()['candidate']
             original_hash = current['manifest_sha256']
             regrade = {**payload, 'manifest_sha256': original_hash, 'max_usd': 2,
@@ -46,7 +46,7 @@ def test_regrading_uses_original_budget_frozen_criteria_and_source_bound_caches(
             approval = call(app, 'POST', '/api/decisions', [{'id': row['id'], 'manifest_sha256': original_hash, 'decision': 'approve'}])
             assert approval.status_code == 409 and 'grading check' in approval.json()['error']
             assert call(app, 'POST', '/api/check-candidate', {**regrade, 'max_usd': 1}).json()['operation'] == operation
-            worker.operation()
+            worker.operation(Lane.CANDIDATES)
             assert client.return_value.request.call_count == 2
             assert json.loads(client.return_value.request.call_args.args[0]['input'])['grading_criteria'] == 'Guild sites\nwith raiding stories'
             current = call(app, 'GET', '/api/candidate?id=' + row['id']).json()['candidate']
@@ -55,7 +55,7 @@ def test_regrading_uses_original_budget_frozen_criteria_and_source_bound_caches(
             # Returning to an already paid assessment reuses it without another charge.
             result = call(app, 'POST', '/api/check-candidate', {**regrade, 'manifest_sha256': current['manifest_sha256'], 'grading_criteria': ''})
             assert result.json()['operation'] == operation
-            worker.operation()
+            worker.operation(Lane.CANDIDATES)
             assert client.return_value.request.call_count == 2
             current = call(app, 'GET', '/api/candidate?id=' + row['id']).json()['candidate']
             assert current['rating']['grading_criteria'] == '' and current['manifest_sha256'] == original_hash
@@ -73,11 +73,11 @@ def test_received_invalid_grade_is_cached_and_retry_keeps_criteria(tmp_path, mon
     try:
         with patch('grading.Luna') as client:
             client.return_value.request.return_value = {'status': 'incomplete', 'usage': {'input_tokens': 40, 'output_tokens': 40}}
-            worker.operation()
+            worker.operation(Lane.CANDIDATES)
             current = call(app, 'GET', '/api/candidate?id=' + row['id']).json()['candidate']
             assert current['state'] == 'grade_error'
             assert call(app, 'POST', '/api/check-candidate', {**payload, 'manifest_sha256': current['manifest_sha256']}).json()['operation'] == operation
-            worker.operation()
+            worker.operation(Lane.CANDIDATES)
             assert client.return_value.request.call_count == 1
             assert json.loads(client.return_value.request.call_args.args[0]['input'])['grading_criteria'] == 'Cleric sites'
         with connect(root / 'runs' / operation) as store:
@@ -96,10 +96,10 @@ def test_legacy_paid_grade_can_be_restored_after_custom_regrade(tmp_path, monkey
         with patch('grading.Luna') as client:
             client.return_value.request.return_value = response()
             assert call(app, 'POST', '/api/check-candidate', {**payload, 'manifest_sha256': current['manifest_sha256'], 'grading_criteria': 'Guild sites'}).status_code == 202
-            worker.operation()
+            worker.operation(Lane.CANDIDATES)
             current = call(app, 'GET', '/api/candidate?id=' + row['id']).json()['candidate']
             assert call(app, 'POST', '/api/check-candidate', {**payload, 'manifest_sha256': current['manifest_sha256'], 'grading_criteria': ''}).status_code == 202
-            worker.operation()
+            worker.operation(Lane.CANDIDATES)
             assert client.return_value.request.call_count == 1
             current = call(app, 'GET', '/api/candidate?id=' + row['id']).json()['candidate']
             assert not current['rating'].get('grading_criteria') and current['rating']['grade'] == 3
@@ -139,7 +139,7 @@ def test_saved_samples_are_graded_without_redownload_and_budget_is_deduplicated(
     try:
         with patch('grading.Luna') as client, patch('candidate_checks.sample') as download:
             client.return_value.request.return_value = response()
-            worker.operation()
+            worker.operation(Lane.CANDIDATES)
             download.assert_not_called()
             assert client.return_value.request.call_count == 1
         current = call(app, 'GET', '/api/candidate?id=' + row['id']).json()['candidate']
@@ -177,14 +177,14 @@ def test_sampling_failure_is_visible_and_retry_preserves_operation_and_transport
     try:
         with patch('grading.Luna') as client:
             client.return_value.request.return_value = response()
-            worker.operation()
+            worker.operation(Lane.CANDIDATES)
             client.assert_not_called()
             current = call(app, 'GET', '/api/candidate?id=' + row['id']).json()['candidate']
             assert current['state'] == 'unavailable' and current['candidate_check']['state'] == 'interrupted'
             assert 'No exact HTML' in current['candidate_check']['error']
             retry = call(app, 'POST', '/api/check-candidate', {**payload, 'manifest_sha256': current['manifest_sha256'], 'max_usd': 2})
             assert retry.json()['operation'] == operation and retry.json()['max_usd'] == .25
-            worker.operation()
+            worker.operation(Lane.CANDIDATES)
             assert client.return_value.request.call_count == 1
         current = call(app, 'GET', '/api/candidate?id=' + row['id']).json()['candidate']
         assert current['rating']['grade'] == 3 and current['state'] == 'approval_pending'
@@ -210,11 +210,11 @@ def test_failed_merge_reuses_paid_grade_and_dismissal_wins_over_running_check(tm
         with patch('grading.Luna') as client:
             client.return_value.request.return_value = response()
             monkeypatch.setattr(candidate_checks, 'current', fail_merge)
-            worker.operation()
+            worker.operation(Lane.CANDIDATES)
             assert client.return_value.request.call_count == 1
             monkeypatch.setattr(candidate_checks, 'current', original)
             assert call(app, 'POST', '/api/check-candidate', payload).json()['operation'] == operation
-            worker.operation()
+            worker.operation(Lane.CANDIDATES)
             assert client.return_value.request.call_count == 1
         # Replayed completion neither grades again nor creates capture work.
         with connect(root) as store:
@@ -234,7 +234,7 @@ def test_dismissal_during_paid_response_is_not_overwritten(tmp_path, monkeypatch
     try:
         with patch('grading.Luna') as client:
             client.return_value.request.side_effect = paid
-            worker.operation()
+            worker.operation(Lane.CANDIDATES)
         current = call(app, 'GET', '/api/candidate?id=' + row['id']).json()['candidate']
         assert current['state'] == 'rejected' and current['rating'] is None
         assert current['candidate_check']['state'] == 'interrupted'
@@ -253,7 +253,7 @@ def test_unverified_coverage_and_stale_inputs_never_trigger_downloads_or_payment
     worker = Worker(root)
     try:
         with patch('candidate_checks.sample') as download, patch('candidate_checks.grade') as paid:
-            worker.operation()
+            worker.operation(Lane.CANDIDATES)
             download.assert_not_called(); paid.assert_not_called()
         with connect(root) as store:
             assert unpack(store.db.execute('SELECT * FROM operations WHERE id=?', (operation,)).fetchone())['state'] == 'interrupted'
@@ -269,7 +269,7 @@ def test_rejected_paid_responses_retain_reservations_on_retry(tmp_path, monkeypa
         with patch('grading.Luna') as client:
             client.return_value.request.side_effect = CrawlError('Luna request outcome uncertain')
             for _ in range(2):
-                worker.operation()
+                worker.operation(Lane.CANDIDATES)
                 current = call(app, 'GET', '/api/candidate?id=' + row['id']).json()['candidate']
                 assert current['state'] == 'grade_error'
                 assert call(app, 'POST', '/api/check-candidate', {**payload, 'manifest_sha256': current['manifest_sha256']}).json()['operation'] == operation
@@ -279,7 +279,7 @@ def test_rejected_paid_responses_retain_reservations_on_retry(tmp_path, monkeypa
             store.db.execute('UPDATE attempts SET reserved=.125')
             store.db.commit()
         with patch('grading.Luna') as client:
-            worker.operation()
+            worker.operation(Lane.CANDIDATES)
             client.return_value.request.assert_not_called()
         current = call(app, 'GET', '/api/candidate?id=' + row['id']).json()['candidate']
         assert 'budget reached' in current['candidate_check']['error']
@@ -296,7 +296,7 @@ def test_changed_sources_stop_evidence_recovery_before_any_paid_request(tmp_path
     worker = Worker(root)
     try:
         with patch('grading.Luna') as client, patch('candidate_checks.sample') as download:
-            worker.operation()
+            worker.operation(Lane.CANDIDATES)
             client.assert_not_called(); download.assert_not_called()
         current = call(app, 'GET', '/api/candidate?id=' + row['id']).json()['candidate']
         assert current['rating'] is None and current['candidate_check']['state'] == 'interrupted'
@@ -320,12 +320,12 @@ def test_changed_scope_can_retry_cached_grade_with_original_budget(tmp_path, mon
     try:
         with patch('grading.Luna') as client:
             client.return_value.request.side_effect = paid
-            worker.operation()
+            worker.operation(Lane.CANDIDATES)
             current = call(app, 'GET', '/api/candidate?id=' + row['id']).json()['candidate']
             assert current['candidate_check']['state'] == 'interrupted' and current['rating'] is None
             retry = call(app, 'POST', '/api/check-candidate', {**payload, 'manifest_sha256': current['manifest_sha256'], 'max_usd': 2})
             assert retry.json()['operation'] == operation and retry.json()['max_usd'] == .25
-            worker.operation()
+            worker.operation(Lane.CANDIDATES)
             assert client.return_value.request.call_count == 1
         current = call(app, 'GET', '/api/candidate?id=' + row['id']).json()['candidate']
         assert current['scope'] == 'http://guild.example/research/' and current['rating']['grade'] == 3
@@ -347,12 +347,12 @@ def test_evidence_retry_uses_current_scope_and_keeps_transport_ledger(tmp_path, 
     worker = Worker(root)
     try:
         with patch('candidate_checks.sample', side_effect=sample), patch('grading.Luna') as luna:
-            worker.operation()
+            worker.operation(Lane.CANDIDATES)
             current = call(app, 'GET', '/api/candidate?id='+row['id']).json()['candidate']
             assert call(app, 'POST', '/api/scope', {'id': row['id'], 'manifest_sha256': current['manifest_sha256'], 'mode': 'site'}).status_code == 200
             current = call(app, 'GET', '/api/candidate?id='+row['id']).json()['candidate']
             assert call(app, 'POST', '/api/check-candidate', {**payload, 'manifest_sha256': current['manifest_sha256']}).json()['operation'] == operation
-            worker.operation()
+            worker.operation(Lane.CANDIDATES)
             luna.assert_not_called()
         assert seen == [('http://guild.example/eq/', 'directory', None), ('http://guild.example/', 'site', {'requests': 17})]
     finally:

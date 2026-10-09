@@ -15,7 +15,7 @@ from manual import prepare
 from review import apply_decisions, checked_sources, record
 from server import create_app
 from site_inventory import SiteInventory
-from state import connect, unpack
+from state import Lane, connect, unpack
 from test_coverage_check import archive
 from test_server import call
 from worker import Worker
@@ -192,7 +192,7 @@ def test_manual_message_on_another_shard_reuses_existing_board_without_luna(tmp_
     worker=Worker(root)
     try:
         with patch('worker.Downloader',ResolverDownloader), patch('worker.grade') as paid, patch('worker.sample') as sample:
-            worker.operation(); paid.assert_not_called(); sample.assert_not_called()
+            worker.operation(Lane.CANDIDATES); paid.assert_not_called(); sample.assert_not_called()
         with connect(root) as store:
             operation=unpack(store.db.execute('SELECT * FROM operations').fetchone())
             assert operation['state']=='completed', operation

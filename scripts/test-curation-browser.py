@@ -763,13 +763,13 @@ async def discovery_flow(browser,base,width):
             posts.append((path,route.request.post_data_json))
             assert path in ('/api/discover','/api/resume'),path
             if reject:
-                operations=[{'id':'c'*32,'kind':'capture','state':'running','payload':{}}]
-                await route.fulfill(status=409,json={'error':'Capture has already started.'});return
+                operations=[{'id':'c'*32,'kind':'candidate_check','state':'running','payload':{}}]
+                await route.fulfill(status=409,json={'error':'An evidence check has already started.'});return
             submitted.set();await release_action.wait()
             if path=='/api/discover':
                 assert route.request.post_data_json=={'max_candidates':50,'max_usd':2,'min_grade':2}
                 operations=[{'id':'b'*32,'kind':'discover','state':'queued','payload':route.request.post_data_json},
-                            *[op for op in operations if op['kind']=='publish']]
+                            *[op for op in operations if op['kind'] in ('publish','capture')]]
             else:
                 assert route.request.post_data_json=={'id':'b'*32}
                 operations[0]['state']='queued'
@@ -786,7 +786,7 @@ async def discovery_flow(browser,base,width):
     assert await page.locator('#stage-list #discover').is_visible(),'Discovery must be on Candidates, outside More'
     assert await button.is_disabled(),'Availability must be checked before enabling a paid action'
     release_listing.set();await settled(page)
-    await status.filter(has_text='Ready. Publication and indexing run separately.').wait_for()
+    await status.filter(has_text='Ready. Capture and indexing run separately.').wait_for()
     assert await button.is_enabled() and not posts
     await page.locator('#manual-url').fill('http://typed-while-busy.example/')
     assert await page.locator('#manual-submit').is_enabled()
@@ -806,21 +806,29 @@ async def discovery_flow(browser,base,width):
         assert await button.is_hidden(),name
     await stage(page,'candidates')
     assert await button.is_visible()
-    # Only another acquisition blocks the serial Wayback worker.
-    for kind,state,text in (('capture','running','Capture is running.'),('discover','running','Discovery is running.')):
+    # Captures, even paused ones holding their own queue, cannot block candidate
+    # discovery or manual submissions. Only another candidate task occupies it.
+    for state in ('queued','running','interrupted'):
+        operations=[{'id':'a'*32,'kind':'capture','state':state,'payload':{}}]
+        await page.locator('#refresh').click();await settled(page)
+        assert await button.is_enabled() and await page.locator('#manual-submit').is_enabled()
+        assert 'Ready. Capture and indexing run separately.' in await status.inner_text()
+    await page.screenshot(path=f'/tmp/curation-discovery-during-capture-{width}.png',full_page=True)
+    for kind,state,text in (('candidate_check','running','Evidence & grading is running.'),('discover','running','Discovery is running.')):
         operations=[{'id':'a'*32,'kind':kind,'state':state,'payload':{'max_candidates':50,'max_usd':2}}]
         await page.locator('#refresh').click()
         await status.filter(has_text=text).wait_for()
         assert await button.is_disabled()
     # Worker availability must survive a long publication backlog that fills
     # the capped recent-operations list.
-    workers={'capture':operations[0],'indexing':None}
+    workers={'candidates':operations[0],'capture':None,'indexing':None}
     operations=[{'id':f'{i:032x}','kind':'publish','state':'queued','payload':{}} for i in range(20)]
     await page.locator('#refresh').click();await settled(page)
     assert await button.is_disabled()
     assert 'Discovery is running.' in await status.inner_text()
     workers=None
-    operations=[{'id':'a'*32,'kind':'publish','state':'queued','payload':{}}]
+    operations=[{'id':'a'*32,'kind':'publish','state':'queued','payload':{}},
+                {'id':'c'*32,'kind':'capture','state':'running','payload':{}}]
     # The ordinary poll releases the button; it must never start a paid run itself.
     await page.wait_for_function('()=>!document.getElementById("discover").disabled',timeout=8000)
     assert not posts
@@ -865,9 +873,9 @@ async def discovery_flow(browser,base,width):
     await page.reload();await settled(page)
     assert await button.is_enabled()
     await button.click()
-    await page.locator('#error').filter(has_text='Capture has already started.').wait_for()
+    await page.locator('#error').filter(has_text='An evidence check has already started.').wait_for()
     # A worker claim between polling and clicking refreshes the visible blocker.
-    await status.filter(has_text='Capture is running.').wait_for()
+    await status.filter(has_text='Evidence & grading is running.').wait_for()
     assert await button.is_disabled() and await page.locator('#notice').is_hidden()
     assert len(posts)==3 and not errors,(posts,errors)
     await context.close()
@@ -1717,12 +1725,14 @@ async def advanced_grading_flow(browser,base,width):
     regrade=page.get_by_role('button',name='Regrade with these criteria',exact=True)
     assert await local.input_value()=='' and await regrade.is_disabled()
     await local.press_sequentially('Cleric sites',delay=10)
-    # Publication leaves grading available; a capture still blocks it. Both
-    # status changes must preserve the criteria draft during workspace updates.
+    # Capture and publication leave grading available. Only another candidate
+    # task blocks it; every status update must preserve the criteria draft.
     operations.append({'id':'c'*32,'kind':'publish','state':'running','payload':{}})
     await page.evaluate('refresh()')
     assert await local.input_value()=='Cleric sites' and await regrade.is_enabled()
     operations[0]['kind']='capture';await page.evaluate('refresh()')
+    assert await local.input_value()=='Cleric sites' and await regrade.is_enabled()
+    operations[0]['kind']='candidate_check';await page.evaluate('refresh()')
     assert await local.input_value()=='Cleric sites' and await regrade.is_disabled()
     operations[0]['kind']='publish';await page.evaluate('refresh()')
     assert await regrade.is_enabled()

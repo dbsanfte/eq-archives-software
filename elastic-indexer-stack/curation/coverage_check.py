@@ -88,10 +88,17 @@ def refresh(root, candidate_id=None, force=False):
             if state != row['state']:
                 if row['state'] != 'coverage_unverified':
                     coverage.setdefault('previous_state', row['state'])
-                store.db.execute('INSERT INTO events(candidate,action,detail,created) VALUES (?,?,?,?)',
-                                 (row['id'], 'site_coverage_changed', json.dumps({'previous_state': row['state'], 'state': state, 'coverage': site_check}), now()))
             if coverage != json.loads(row['coverage'] or '{}') or state != row['state'] or scope != row['scope']:
-                store.db.execute('UPDATE candidates SET coverage=?,state=?,scope=?,decision=? WHERE id=?', (json.dumps(coverage), state, scope, decision, row['id']))
+                # Git metadata checks can overlap a worker claim or a human
+                # decision. Never replace newer state with this earlier snapshot.
+                changed = store.db.execute('''UPDATE candidates SET coverage=?,state=?,scope=?,decision=?
+                    WHERE id=? AND state IS ? AND coverage IS ? AND scope IS ? AND decision IS ?
+                    AND captures IS ? AND rating IS ?''',
+                    (json.dumps(coverage), state, scope, decision, row['id'], row['state'], row['coverage'],
+                     row['scope'], row['decision'], row['captures'], row['rating']))
+                if changed.rowcount and state != row['state']:
+                    store.db.execute('INSERT INTO events(candidate,action,detail,created) VALUES (?,?,?,?)',
+                                     (row['id'], 'site_coverage_changed', json.dumps({'previous_state': row['state'], 'state': state, 'coverage': site_check}), now()))
         store.db.commit()
 
 

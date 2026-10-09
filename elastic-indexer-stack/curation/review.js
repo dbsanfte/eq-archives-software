@@ -413,7 +413,7 @@ function recoveryControls(row) {
   button.setAttribute('aria-label',`${label}: ${siteName(row)}`);box.append(button);
   box.append(node('p',active ? 'This site is being checked. Approval becomes available after readable samples receive a grade.' :
     `${check ? 'Original' : 'One site ·'} $${check?.max_usd ?? 2} cap for Luna. ${row.captures?.length ? 'Uses the saved source samples.' : 'Finds exact Wayback samples from 1999–2006 before grading.'}`,'meta'));
-  if (!active && hasOperation()) box.append(node('p','Capture, discovery or another evidence check is using the download worker. This action becomes available when it finishes.','meta'));
+  if (!active && hasOperation()) box.append(node('p','Discovery or another evidence check is using the candidate worker. This action becomes available when it finishes. Capture and indexing run separately.','meta'));
   box.append(node('p',`Grading focus: ${focus || 'General EverQuest relevance'}`,'meta'));
   return box;
 }
@@ -698,8 +698,8 @@ function renderLive() {
     const until=node('p',undefined,'grace-period');until.dataset.until=row.decision?.capture_after || '';box.append(until);
     if (detail.capture_queue_error) box.append(node('p',detail.capture_queue_error));
     const blocker=detail.queue_blocker;
-    if (blocker) box.append(node('p',blocker.state==='interrupted' ? 'Waiting for a paused capture to be resumed.' : `Waiting for the current ${blocker.kind==='discover' ? 'discovery' : blocker.kind==='candidate_check' ? 'evidence check' : 'capture'} operation to finish.`,'meta'));
-    box.append(node('p','You can undo until capture starts. Publication and indexing run separately. The queue has no item-count limit.','meta'));host.append(box);updateCountdown();
+    if (blocker) box.append(node('p',blocker.state==='interrupted' ? 'Waiting for a paused capture to be resumed.' : 'Waiting for the current capture to finish.','meta'));
+    box.append(node('p','You can undo until capture starts. Candidate gathering and indexing run separately. The queue has no item-count limit.','meta'));host.append(box);updateCountdown();
   } else if (row.stage==='capturing') {
     const paused=op?.state==='interrupted',progress=op?.result?.progress;
     const box=panel(paused ? 'Capture paused' : 'Capture in progress',paused ? (progress?.capture_policy==='complete-files-v1' ? 'Saved files and catalog progress are retained. Resume continues pending files and extends an exhausted transport allowance without resetting usage.' : 'Staged files are retained. Resume within the original capture budget.') : 'This screen updates automatically as URLs are checked and downloaded.',paused ? 'attention' : '');
@@ -825,7 +825,7 @@ function scrollButtons(target,name) {
 function renderDock(force=false) {
   if (!detail || !route.candidate || detail.candidate.id!==route.candidate) { $('action-dock').hidden=true;measureDock();return; }
   const row=detail.candidate,review=detail.review,draft=getDraft(row),op=detail.capture_operation;
-  const signature=JSON.stringify([row.id,row.state,row.stage,row.manifest_sha256,row.candidate_check,review?.state,review?.operation?.state,review?.job,op?.id,op?.state,hasOperation(),hasOperation('indexing'),route.panel,route.page,route.slot,draft.dirty,busy]);
+  const signature=JSON.stringify([row.id,row.state,row.stage,row.manifest_sha256,row.candidate_check,review?.state,review?.operation?.state,review?.job,op?.id,op?.state,hasOperation(),hasOperation('capture'),hasOperation('indexing'),route.panel,route.page,route.slot,draft.dirty,busy]);
   if (!force && signature===dockSignature) return;
   const dock=$('action-dock'),inner=node('div',undefined,'dock-inner'),buttons=node('div',undefined,'dock-buttons');let hint='';
   if (route.panel==='reader') {
@@ -845,7 +845,7 @@ function renderDock(force=false) {
     buttons.append(mutation(undoCaptureLabel(row),()=>undoApproval(row),continuing ? 'Capture retry cancelled. Original capture status restored.' : 'Returned to Candidates.',true));
   } else if (row.stage==='capturing' && op?.state==='interrupted') {
     hint=op?.result?.progress?.capture_policy==='complete-files-v1' ? 'Continue pending files; extend an exhausted transport allowance.' : 'Resume the interrupted worker batch within its original budget.';
-    buttons.append(mutation('Resume capture',()=>request('/api/resume',{id:op.id}),'Capture resumed.',true,hasOperation()));
+    buttons.append(mutation('Resume capture',()=>request('/api/resume',{id:op.id}),'Capture resumed.',true,hasOperation('capture')));
   } else if (row.stage==='indexing' && needsRegeneration(review) && ['awaiting_review','index_preflight_failed'].includes(review.state)) {
     hint='All files · 1999–2006 · reuse saved captures';
     buttons.append(mutation('Regenerate full capture',()=>request('/api/continue-capture',{id:review.id,manifest_sha256:review.manifest_sha256}),'Full capture queued. Undo is available until it starts.',true));
@@ -865,10 +865,10 @@ function renderDock(force=false) {
   if (hint || busy) inner.append(node('p',busy ? 'Saving your decision…' : hint,'dock-hint'));inner.append(buttons);dock.replaceChildren(inner);dock.hidden=!buttons.childElementCount;dockSignature=signature;measureDock();
 }
 function measureDock() { document.documentElement.style.setProperty('--dock',`${$('action-dock').hidden ? 0 : $('action-dock').getBoundingClientRect().height}px`); }
-function activeOperation(lane='capture') {
-  return data?.workers?.[lane] || data?.operations.find(op=>['queued','running'].includes(op.state) && (op.kind==='publish' ? 'indexing' : 'capture')===lane);
+function activeOperation(lane='candidates') {
+  return data?.workers?.[lane] || data?.operations.find(op=>['queued','running'].includes(op.state) && (op.kind==='publish' ? 'indexing' : op.kind==='capture' ? 'capture' : 'candidates')===lane);
 }
-function hasOperation(lane='capture') { return Boolean(activeOperation(lane)); }
+function hasOperation(lane='candidates') { return Boolean(activeOperation(lane)); }
 function currentDiscovery() { const active=activeOperation();return active?.kind==='discover' ? active : data?.operations.find(op=>op.kind==='discover' && ['queued','running','interrupted'].includes(op.state)); }
 function operationLabel(op) { return op.kind==='discover' && op.payload.target ? 'Site check' : {publish:'Archive publication',capture:'Capture',discover:'Discovery',candidate_check:'Evidence & grading'}[op.kind] || 'Another task'; }
 function renderDiscovery() {
@@ -891,7 +891,7 @@ function renderDiscovery() {
   const status=!data ? 'Checking worker availability…' : busy ? 'Submitting your request…' : active ?
     `${operationLabel(active)} is ${active.state}. ${active.kind==='discover' ? 'Results will appear here for your capture approval.' : 'Discovery becomes available when current work finishes.'}` : paused ?
     `${operationLabel(discovery)} paused. Resume within the original limits; previous spending still counts.${discovery.error ? ' '+discovery.error : ''}` :
-    'Ready. Publication and indexing run separately. Results still need your capture approval.';
+    'Ready. Capture and indexing run separately. Wayback requests take turns. Results still need your capture approval.';
   if ($('discovery-status').textContent!==status) $('discovery-status').textContent=status;
   $('manual-submit').disabled=!data || busy || Boolean(active) || !$('manual-url').value.trim();
   renderDiscoveryProgress();renderManualResult();

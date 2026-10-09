@@ -263,14 +263,18 @@ one oldest eligible site immediately before starting it. Keep later sites queued
 and undoable until they start; the explicit operator API retains its five-site
 batch limit and existing claimed work remains unchanged. Preserve typed transitions,
 atomic Undo/claim locking and durable progress in the appropriate stage. A paused
-capture requires explicit resume and holds the capture queue. Capture/discovery
-and publication/indexing have independent serial workers under one process lease;
+capture requires explicit resume and holds the capture queue. Candidate gathering,
+capture, and publication/indexing have independent serial workers under one process lease;
 slow downloads, Git publication and waiting imports must not block the other
-worker. Scope busy checks, claims and explicit resume to the relevant worker.
-Retain serial Wayback requests across capture, discovery and evidence checks,
-and serial publication with the existing unfinished-Job guard for imports.
-Expose worker availability independently of capped operation lists, require both
-workers for health and retain the lease until both stop. Preserve operations,
+workers. Scope busy checks, claims and explicit resume to the relevant worker.
+Share one persistent Wayback client across capture, discovery and evidence checks,
+with fair turns per bounded command, shared throttling/backoff and separate durable
+operation budgets. Waiting counts toward the original deadline; closing a session
+must not close another worker’s connection. Keep serial publication with the
+existing unfinished-Job guard for imports.
+Expose worker availability independently of capped operation lists, require all
+workers and the shared transport for health and retain the lease until all stop.
+Preserve operations,
 approvals and progress across restart; interrupted work needs explicit resume.
 Source reading and scope drafts must not prevent progress polling or lose edits.
 Download completion creates an independent manifest per site and automatically
@@ -328,7 +332,7 @@ Use bounded, cached, read-only metadata queries; never walk sources or archive G
 Incomplete accounting must be visible rather than displayed as zero.
 Failures cannot advance it or return to the list. Discover & grade is a primary action
 on Candidates, with its explicit 50-site target, one-hour/$2-total limits and a
-visible capture/discovery-worker blocker. Publication and indexing do not disable
+visible candidate-worker blocker. Capture, publication and indexing do not disable
 discovery, manual submissions or evidence grading. Persist each completed candidate as it arrives and poll every five seconds
 while visible, displaying qualified/checked counts, phase, time, spend and stop
 reason. Polling may enable it but must never start a paid run. Paused discovery

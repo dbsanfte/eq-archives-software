@@ -1,4 +1,4 @@
-"""Independent resumable capture and publication/indexing workers."""
+"""Independent resumable candidate, capture and publication/indexing workers."""
 
 import json
 import os
@@ -14,6 +14,7 @@ from capture_queue import claim
 from crawler import parser
 from discovery import discover
 from acquisition import Downloader, sample
+from wayback_transport import SharedWayback
 from grading import grade
 from graph import staged_links
 from captures import capture_sites
@@ -127,6 +128,7 @@ class Worker:
         self.root, self.kube = Path(root), kube
         self.stop = threading.Event()
         self.lease = worker_lease(self.root)
+        self.transport = SharedWayback(self.stop)
         from ezboard_portal import consolidate
         consolidate(self.root)
         refresh(self.root)
@@ -142,7 +144,8 @@ class Worker:
                     grant['capture_after'] = (datetime.fromisoformat(now()) + timedelta(seconds=UNDO_SECONDS)).isoformat()
                     store.db.execute('UPDATE candidates SET decision=? WHERE id=?', (json.dumps(grant), row['id']))
             store.db.commit()
-        # One process lease owns both workers. Existing operation kinds select
+        # One process lease owns all workers and the shared Wayback connection.
+        # Existing operation kinds select
         # their queue, without migrating payloads, checkpoints or approvals.
         self.threads = {lane: threading.Thread(target=self.run, args=(lane,),
                         name=f"curation-{lane.value}", daemon=True) for lane in Lane}
@@ -152,10 +155,11 @@ class Worker:
             thread.start()
 
     def healthy(self):
-        return not self.stop.is_set() and all(thread.is_alive() for thread in self.threads.values())
+        return not self.stop.is_set() and self.transport.healthy() and all(thread.is_alive() for thread in self.threads.values())
 
     def close(self):
         self.stop.set()
+        self.transport.wake()
         deadline = time.monotonic() + 100
         for thread in self.threads.values():
             if thread.ident is not None:
@@ -163,6 +167,7 @@ class Worker:
         # Never hand ownership to another process while a download or Git
         # request is still in flight. Process exit releases a retained lease.
         if not any(thread.is_alive() for thread in self.threads.values()):
+            self.transport.close()
             self.lease.close()
 
     def capture_queue(self):
@@ -315,6 +320,10 @@ class Worker:
                 store.db.commit()
 
     def run(self, lane):
+        with self.transport.bind():
+            self.run_lane(lane)
+
+    def run_lane(self, lane):
         while not self.stop.is_set():
             if lane == Lane.INDEXING:
                 prepare_next(self.root)
