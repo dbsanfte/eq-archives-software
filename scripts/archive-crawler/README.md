@@ -70,7 +70,7 @@ exposes this through Advanced, with a fixed original budget for each site check.
 | Wayback samples | At most 2 exact-page captures per candidate |
 | Wayback requests | 240 cumulatively, including CDX, redirects and retries |
 | Wayback bytes / time | 1 MiB per response; 24 MiB and 900 seconds cumulatively |
-| Request spacing / transfer rate | At least 3 seconds / at most 128 KiB per second |
+| Request spacing / transfer rate | No fixed delay / unlimited bandwidth (serial persistent connection) |
 | Complete extracted source for Luna | 120,000 characters per candidate; larger sources stay unjudged |
 | Luna spend | Explicit `--max-usd`; durable reservations precede requests |
 
@@ -167,16 +167,19 @@ The MIT-licensed public [Wayback Machine Downloader](https://github.com/hartator
 is vendored unmodified at `653b94ba128cd209d0d4b345e4bff6e714e833fc`
 (version 2.3.1, checked 2026-10-06). The vendor `UPSTREAM.json` records hashes.
 `downloader.rb` subclasses its timestamp-preserving list/download interfaces,
-adds one serial persistent HTTP client, pacing, transfer limits and bounded
+adds one serial persistent HTTP client, cumulative transfer budgets and bounded
 422/429/5xx retries, and avoids URL-unescaping collisions and swallowed download
 failures. A server-closed connection can reconnect within limits; only one is
 active at a time. Wayback is the sole production destination.
 
 Upstream [PR #280](https://github.com/hartator/wayback-machine-downloader/pull/280)
-proposes persistent Net::HTTP connections for rate limiting;
-[issue #275](https://github.com/hartator/wayback-machine-downloader/issues/275)
-also discusses spacing. These reports informed the adapter and do not establish
-that every HTTP 422 has the same cause. The
+is still open as of 2026-10-09 (head `b81381396827521b4a1fa88b40fc4c27b3ec31e2`).
+The adapter follows its persistent Net::HTTP approach with no fixed request delay
+and no bandwidth cap. It retains explicit bounded backoff for actual 422/429/5xx
+responses and the existing cumulative request/byte/time budgets. Standalone
+operators may still request pacing with `--delay` or `--bytes-per-second`; both
+default to `0` (disabled). Portal workers share this unpaced connection policy,
+including resumed plans, without changing saved budgets or source manifests. The
 [CDX guide](https://github.com/internetarchive/wayback/tree/master/wayback-cdx-server)
 documents inclusive date filters, digest collapsing, limits and resume markers.
 

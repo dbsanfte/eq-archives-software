@@ -67,7 +67,7 @@ remembers an explicit choice in this browser across visits.
    Publication and indexing have an independent worker. They continue during a
    long capture, and a slow archive commit or waiting import cannot hold up
    downloads. Each worker processes its own durable queue serially; capture,
-   discovery and evidence checks still share one throttled Wayback client at a time.
+   discovery and evidence checks still share one persistent Wayback client at a time.
    Publication makes one fast-forward archive commit per site, including
    `crawl-manifests/<batch-id>.json`. Import waits for every other unfinished,
    unsuspended Job in `eqarchives-es`, including pending/retrying Jobs with
@@ -220,7 +220,7 @@ An existing ungraded candidate has **Find samples & grade** or **Grade source
 evidence** on its card and workspace. This explicitly checks one site with a
 maximum $2 Luna budget, rechecks coverage before spending, and uses existing
 hash-verified source files when present. Otherwise it requests exact Wayback
-samples through the same serial, throttled downloader and date tiers. Sampling
+samples through the same serial, persistent downloader and date tiers. Sampling
 failures and unresolved URL identity are shown directly, instead of the generic
 "graded source evidence required" message. The card shows queued/coverage/sampling/
 grading progress. **Retry evidence & grading** resumes that operation's original
@@ -284,8 +284,8 @@ a nearest-date replacement is reported as a coverage gap, never relabelled.
 The new ordinary capture path has no page/file-count cutoff. SQLite checkpoints
 each catalog page and file, and binary downloads and publication hashes stream
 from disk. Its cumulative transport allowance is 100,000 requests, 50 GiB and
-seven days of active acquisition, with three-second request spacing, 128 KiB/s
-throttling and bounded 422/429/server backoff. A 256 MiB free-space reserve and
+seven days of active acquisition, with no fixed request delay or bandwidth cap
+and bounded 422/429/server backoff. A 256 MiB free-space reserve and
 per-request disk-space checks protect staging. Limits or transport failures keep
 the site paused in **Capturing**, never move an unfinished inventory into Indexing.
 Explicit **Resume** extends an exhausted transport allowance while retaining
@@ -370,8 +370,8 @@ visible completion reason; transport/authentication failures pause explicitly.
 Original deadlines survive restarts and resume, including downtime. Sites already
 found count toward the target even if reviewed while discovery continues. Old
 operations without the fill policy keep their fixed original shortlist.
-Wayback keeps one serial persistent downloader, a three-second delay, 128 KiB/s,
-1 MiB responses, and cumulative ceilings of 1,200 requests/128 MiB within the
+Wayback keeps one serial persistent downloader, no fixed request delay or
+bandwidth cap, 1 MiB responses, and cumulative ceilings of 1,200 requests/128 MiB within the
 remaining hour. Seed/staging source reads retain their existing 66-read/16 MiB
 limits, with cached local inventories and links reused across runs.
 Each requested run owns its own durable cap; there are no scheduled paid runs
@@ -509,8 +509,12 @@ and publication/indexing. Atomic SQLite claims prevent two operations from using
 their own worker. `/api/queue` includes uncapped `workers.candidates`,
 `workers.capture` and `workers.indexing` activity independently of its recent-operations
 list. Capture and candidate gathering take fair turns on one persistent Wayback
-connection, one bounded downloader command at a time. Request delay, bandwidth
-throttling and rate-limit backoff remain shared. Each operation keeps its own
+connection, one bounded downloader command at a time. Following upstream
+[PR #280](https://github.com/hartator/wayback-machine-downloader/pull/280), the
+Net::HTTP session stays open with no fixed request delay or bandwidth cap;
+rate-limit backoff remains shared. This connection policy also applies to resumed
+legacy capture plans, without rewriting saved manifests or changing cumulative
+limits. Each operation keeps its own
 cumulative request/byte/time budget; waiting counts toward its original deadline.
 A large file may delay the next sample, but an entire site cannot monopolize the
 connection. Closing a downloader session leaves the shared connection available.

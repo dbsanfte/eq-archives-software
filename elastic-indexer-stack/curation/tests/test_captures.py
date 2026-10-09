@@ -53,7 +53,7 @@ def test_traversal_uses_one_downloader_and_does_not_leave_approved_directory(can
         def close(self): events.append(('close',))
     manifest=capture_sites(root,'a'*32,manifest_for(row)['sites'],FakeDownloader)
     assert sum(event[0]=='open' for event in events) == 1
-    assert events[0] == ('open',3,131072)
+    assert events[0] == ('open',0,0)
     assert not any('unrelated' in event[1] or 'other.example' in event[1] for event in events if event[0] in ('capture_list','capture'))
     assert any(capture['url'].endswith('/eq/guide.html') for capture in manifest['captures'])
     assert all(capture['archive_path'].startswith('websites/guild.example/') for capture in manifest['captures'])

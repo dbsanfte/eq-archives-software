@@ -75,7 +75,7 @@ metadata and source path. It refuses ambiguous path/content collisions.
 | HTTP requests, including retries and redirects | 4,000 |
 | Response size / total transfer | 1 MiB / 256 MiB |
 | Active downloader time across resumes | 3,600 seconds |
-| Request spacing / transfer rate | 3 seconds / 128 KiB/s |
+| Request spacing / transfer rate | No fixed delay / unlimited bandwidth (serial persistent connection) |
 
 New captures cover **1999-01-01 through 2006-12-31 inclusive UTC**, retaining all
 available dated versions in both **1999–2001** and **2002–2006**, even when the

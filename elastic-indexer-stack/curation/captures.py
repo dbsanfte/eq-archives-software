@@ -263,7 +263,7 @@ def capture_sites(root, batch_id, sites, downloader_factory=Downloader, progress
                       "versions_found": checked + pending, "versions_pending": pending,
                       "catalogs_pending": sum(not c['end'] for c in catalogs.values())})
     report('preparing')
-    args = SimpleNamespace(delay=3, bytes_per_second=131072, max_requests=LIMITS["requests"],
+    args = SimpleNamespace(delay=0, bytes_per_second=0, max_requests=LIMITS["requests"],
                            max_page_bytes=LIMITS["page_bytes"], max_bytes=LIMITS["bytes"], max_seconds=LIMITS["seconds"])
     def acquire(job):
         try:

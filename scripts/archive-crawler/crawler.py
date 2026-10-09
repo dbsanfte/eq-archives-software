@@ -20,6 +20,13 @@ def positive(value):
     return value
 
 
+def nonnegative(value):
+    value = int(value)
+    if value < 0:
+        raise argparse.ArgumentTypeError('Must be nonnegative; zero means unlimited bandwidth')
+    return value
+
+
 def parser():
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("--work-dir", required=True, help="Private durable directory outside both repositories")
@@ -39,8 +46,8 @@ def parser():
     command = commands.add_parser("sample", help="Use serial persistent Wayback Machine Downloader to stage exact samples")
     command.add_argument("--max-candidates", type=positive, default=50)
     command.add_argument("--samples-per-candidate", type=int, choices=[1, 2], default=2)
-    command.add_argument("--delay", type=float, default=3)
-    command.add_argument("--bytes-per-second", type=positive, default=131072)
+    command.add_argument("--delay", type=float, default=0, help='Optional operator request spacing in seconds; 0 means no fixed delay (default)')
+    command.add_argument("--bytes-per-second", type=nonnegative, default=0, help='Optional operator transfer cap; 0 means unlimited (default)')
     command.add_argument("--max-requests", type=positive, default=240)
     command.add_argument("--max-page-bytes", type=positive, default=1048576)
     command.add_argument("--max-bytes", type=positive, default=25165824)

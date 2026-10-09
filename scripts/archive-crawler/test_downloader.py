@@ -27,6 +27,7 @@ class FixtureServer(ThreadingHTTPServer):
         self.catalogs = {}
         self.replays = {}
         self.memento = "Sat, 01 Jan 2000 00:00:00 GMT"
+        self.chunk_delay = 0
         super().__init__(("127.0.0.1", 0), Handler)
 
     def get_request(self):
@@ -40,6 +41,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def log_message(self, *args):
         pass
+
+    def handle(self):
+        try:
+            super().handle()
+        except ConnectionResetError:
+            pass  # Budget checks intentionally abort partially read responses.
 
     def do_GET(self):
         server = self.server
@@ -66,7 +73,13 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Memento-Datetime", server.memento)
         self.end_headers()
         try:
-            self.wfile.write(data)
+            if server.chunk_delay and not is_catalog:
+                for offset in range(0, len(data), 16):
+                    self.wfile.write(data[offset:offset + 16])
+                    self.wfile.flush()
+                    time.sleep(server.chunk_delay)
+            else:
+                self.wfile.write(data)
         except (BrokenPipeError, ConnectionResetError):
             pass
 
@@ -134,6 +147,18 @@ class DownloaderTests(unittest.TestCase):
         self.assertGreaterEqual(time.monotonic() - start, 5)
         self.assertEqual(self.server.connections, 1)
         self.assertEqual(result["transport"]["requests"], 2)
+
+    def test_default_upstream_pacing_keeps_cdx_and_replays_on_one_connection(self):
+        # No explicit rate/delay: production defaults must not add fixed sleeps.
+        configured = self.call({'op': 'configure', 'origin': 'http://127.0.0.1:' + str(self.server.server_port)})
+        self.assertTrue(configured['ok'], configured)
+        for operation in ('list', 'capture_file', 'list'):
+            result = self.call(self.job(operation))
+            self.assertTrue(result['ok'], result)
+        self.assertEqual(self.server.connections, 1)
+        self.assertEqual(result['transport']['requests'], 3)
+        self.assertLess(self.server.requests[-1][1] - self.server.requests[0][1], 1.5)
+        self.assertEqual(self.destination.read_bytes(), self.server.body)
 
     def test_empty_html_listing_reports_archived_redirects_and_errors(self):
         root = 'http://www.solusekro.com/'
@@ -339,6 +364,33 @@ class DownloaderTests(unittest.TestCase):
         self.assertFalse(result["ok"])
         self.assertIn("outside", result["error"])
         self.assertFalse(self.destination.exists())
+
+    def test_unlimited_bandwidth_streams_large_files_and_still_enforces_byte_limits(self):
+        self.server.body = b'x' * (2 * 1024**2)
+        self.configure(bytes_per_second=0, max_response_bytes=3 * 1024**2,
+                       max_total_bytes=5 * 1024**2, max_seconds=3)
+        result = self.call(self.job('capture_file'))
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(self.destination.read_bytes(), self.server.body)
+        self.assertEqual(result['transport']['bytes'], len(self.server.body))
+        self.destination.unlink()
+        self.configure(bytes_per_second=0, max_response_bytes=3 * 1024**2, max_total_bytes=1024)
+        result = self.call(self.job('capture_file'))
+        self.assertFalse(result['ok'])
+        self.assertIn('total byte budget', result['error'])
+        self.assertFalse(self.destination.exists())
+        self.assertFalse(Path(str(self.destination) + '.part').exists())
+
+    def test_unlimited_stream_checks_wall_clock_even_when_chunks_beat_read_timeout(self):
+        self.server.body = b'x' * 2048
+        self.server.chunk_delay = .01
+        self.configure(bytes_per_second=0, max_seconds=.3)
+        result = self.call(self.job('capture_file'))
+        self.assertFalse(result['ok'])
+        self.assertIn('wall-clock budget', result['error'])
+        self.assertGreater(result['transport']['bytes'], 0)
+        self.assertFalse(self.destination.exists())
+        self.assertFalse(Path(str(self.destination) + '.part').exists())
 
     def test_off_archive_redirect_is_rejected_without_following(self):
         self.server.redirect = "https://different.example/"

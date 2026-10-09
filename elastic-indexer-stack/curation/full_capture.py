@@ -226,7 +226,7 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
                 raise CrawlError('Staging disk is nearly full; free space and resume. Completed files are retained.')
             if downloader is None:
                 limits = config['limits']
-                args = SimpleNamespace(delay=3, bytes_per_second=131072, max_requests=limits['requests'],
+                args = SimpleNamespace(delay=0, bytes_per_second=0, max_requests=limits['requests'],
                     max_bytes=limits['bytes'], max_seconds=limits['seconds'],
                     max_page_bytes=min(limits['bytes'], shutil.disk_usage(directory).free - DISK_RESERVE))
                 downloader = downloader_factory(store, args)

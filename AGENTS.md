@@ -211,7 +211,9 @@ runs both. Keep state, captured sources, judgments, decisions and keys outside
 both repositories. Discovery uses a remote-free Git reader and bounded cached
 tree inventories; do not enable implicit promisor fetches on older Git or walk
 the archive checkout. Wayback requests are serial through a persistent client,
-with cumulative request/byte/time budgets, throttling and bounded 422/429 backoff.
+using the persistent Net::HTTP approach from upstream PR #280: no fixed request
+delay or bandwidth cap, with cumulative request/byte/time budgets and bounded
+422/429 backoff.
 Paid Luna grading is explicit and separately budgeted; model judgments are not
 human approval. Preserve complete evidence, exact URL/date identity, source
 hash checks and stale-decision rejection. The pilot stages bounded page samples,
@@ -268,8 +270,10 @@ capture, and publication/indexing have independent serial workers under one proc
 slow downloads, Git publication and waiting imports must not block the other
 workers. Scope busy checks, claims and explicit resume to the relevant worker.
 Share one persistent Wayback client across capture, discovery and evidence checks,
-with fair turns per bounded command, shared throttling/backoff and separate durable
-operation budgets. Waiting counts toward the original deadline; closing a session
+with fair turns per bounded command, no fixed request delay or bandwidth cap,
+shared backoff and separate durable operation budgets. Apply this connection policy
+to resumed portal work without rewriting saved source manifests or cumulative
+limits. Waiting counts toward the original deadline; closing a session
 must not close another worker’s connection. Keep serial publication with the
 existing unfinished-Job guard for imports.
 Expose worker availability independently of capped operation lists, require all

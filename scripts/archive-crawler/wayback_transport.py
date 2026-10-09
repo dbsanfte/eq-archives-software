@@ -61,6 +61,10 @@ class SharedWayback:
 
     def request(self, job):
         """Called only by the turn holder; limits and accounting belong to it."""
+        # Match upstream PR #280: persistent serial requests, no fixed sleeps.
+        # The portal's connection policy also applies to resumed legacy plans.
+        # Their saved cumulative budgets and source approvals remain unchanged.
+        job = {**job, 'transport': {**job['transport'], 'delay': 0, 'bytes_per_second': 0}}
         try:
             if self.process is None:
                 self.process = subprocess.Popen(['ruby', str(Path(__file__).with_name('downloader.rb'))],

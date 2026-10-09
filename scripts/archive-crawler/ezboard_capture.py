@@ -18,7 +18,7 @@ import ezboard
 
 DEFAULT_LIMITS = {'max_captures': 2000, 'max_catalog_rows': 100000, 'max_hosts': 512,
                   'max_requests': 4000, 'max_bytes': 256 * 1024 * 1024, 'max_seconds': 3600,
-                  'max_page_bytes': 1024 * 1024, 'delay': 3, 'bytes_per_second': 131072}
+                  'max_page_bytes': 1024 * 1024, 'delay': 0, 'bytes_per_second': 0}
 
 
 class BoundReached(CrawlError):
@@ -86,10 +86,9 @@ class Capture:
     def validate_limits(limits):
         for key in DEFAULT_LIMITS:
             value = limits[key]
-            if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
-                raise CrawlError('Capture limits must be positive integers')
-        if limits['delay'] < 3 or limits['bytes_per_second'] > 131072:
-            raise CrawlError('Keep at least three seconds between requests and at most 128 KiB/s')
+            minimum = 0 if key in {'delay', 'bytes_per_second'} else 1
+            if not isinstance(value, int) or isinstance(value, bool) or value < minimum:
+                raise CrawlError('Capture limits must be positive integers; delay and transfer rate may be zero to disable pacing')
         if limits['max_page_bytes'] > 32 * 1024 * 1024 or limits['max_hosts'] > 512:
             raise CrawlError('Page/host limits exceed the supported bounds')
 
