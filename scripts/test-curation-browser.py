@@ -1725,12 +1725,14 @@ async def advanced_grading_flow(browser,base,width):
     regrade=page.get_by_role('button',name='Regrade with these criteria',exact=True)
     assert await local.input_value()=='' and await regrade.is_disabled()
     await local.press_sequentially('Cleric sites',delay=10)
-    # Publication leaves grading available; a capture still blocks it. Both
-    # status changes must preserve the criteria draft during workspace updates.
+    # Capture and publication leave grading available. Only another candidate
+    # task blocks it; every status update must preserve the criteria draft.
     operations.append({'id':'c'*32,'kind':'publish','state':'running','payload':{}})
     await page.evaluate('refresh()')
     assert await local.input_value()=='Cleric sites' and await regrade.is_enabled()
     operations[0]['kind']='capture';await page.evaluate('refresh()')
+    assert await local.input_value()=='Cleric sites' and await regrade.is_enabled()
+    operations[0]['kind']='candidate_check';await page.evaluate('refresh()')
     assert await local.input_value()=='Cleric sites' and await regrade.is_disabled()
     operations[0]['kind']='publish';await page.evaluate('refresh()')
     assert await regrade.is_enabled()
