@@ -297,3 +297,27 @@ def test_preparation_resumes_partial_coverage_metadata_without_archive_walks(tmp
     prepare_next(root)
     current = detail(app, row)
     assert current['review']['state'] == 'publication_requested', current['review']['error']
+
+
+def test_published_file_retry_survives_coverage_refresh_and_still_blocks_alias_duplicates(tmp_path, monkeypatch):
+    from coverage_check import require_new
+    from test_coverage_check import archive
+    root = tmp_path / 'state'
+    row, manifest = completed(root, gaps=True)
+    published(root, manifest)
+    repo = archive(tmp_path, ['guild.example/20000101000000/index.html'])
+    monkeypatch.setenv('ARCHIVE_REPO', str(repo))
+    app = create_app(root, start_worker=False)
+    assert regenerate(app, manifest).status_code == 202
+    make_due(root)
+    worker = Worker(root)
+    try:
+        worker.capture_queue()
+        assert detail(app, row)['candidate']['stage'] == 'capturing'
+    finally: worker.close()
+    # Even a stale archive snapshot must remember this site's published batch
+    # while its candidate is temporarily back in the capture pipeline.
+    with patch('coverage_check.SiteInventory') as inventory:
+        inventory.return_value.check.return_value = {'status': 'new_site'}
+        with connect(root) as store, pytest.raises(CrawlError, match='already published'):
+            require_new(store, 'https://www.guild.example/')

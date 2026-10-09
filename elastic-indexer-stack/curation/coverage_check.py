@@ -13,6 +13,18 @@ EDITABLE = {'approval_pending', 'approved_waiting_batch', 'deferred', 'rejected'
             'already_archived', 'duplicate_candidate', 'coverage_unverified', 'grade_error'}
 
 
+def published_sites(store, rows):
+    known = {site_identity(row['url'], store): row['id'] for row in rows if row['state'] in ('published', 'indexed')}
+    # A missing-file retry temporarily moves the candidate out of Published.
+    # Its immutable publication still excludes new aliases of the same site.
+    for row in store.db.execute("""SELECT json_extract(site.value,'$.url') AS url,
+            json_extract(site.value,'$.id') AS id FROM batches,
+            json_each(batches.manifest,'$.sites') AS site
+            WHERE json_extract(batches.publication,'$.commit') IS NOT NULL"""):
+        known[site_identity(row['url'], store)] = row['id']
+    return known
+
+
 def refresh(root, candidate_id=None, force=False):
     from candidate_actions import retire_excluded
     retire_excluded(root)
@@ -26,7 +38,7 @@ def refresh(root, candidate_id=None, force=False):
         inventory = SiteInventory(archive)
         rows = store.candidates()
         owners = {}
-        published = {site_identity(row['url'], store): row['id'] for row in rows if row['state'] in ('published', 'indexed')}
+        published = published_sites(store, rows)
         for row in sorted(rows, key=lambda row: row['state'] in EDITABLE):
             if row['state'] == 'duplicate_candidate':
                 continue
@@ -34,13 +46,18 @@ def refresh(root, candidate_id=None, force=False):
         for row in rows:
             if row['state'] not in EDITABLE or candidate_id and row['id'] != candidate_id:
                 continue
+            coverage = json.loads(row['coverage'] or '{}')
+            if row['state'] == 'approved_waiting_batch' and coverage.get('capture', {}).get('continuation', {}).get('published'):
+                # This explicitly requested retry is expected to be archived.
+                # Claiming and acquisition validate its exact predecessor/scope;
+                # discovery refresh must not retire it as a new-site duplicate.
+                continue
             from ezboard import candidate_url
             checked_url = candidate_url(store, row['url']) or row['url']
             site_check = inventory.check(checked_url, force=force, timestamps=[capture['timestamp'] for capture in json.loads(row['captures'] or '[]')])
             if site_identity(row['url'], store) in published:
                 site_check = {**site_check, 'status': 'already_archived', 'complete': True,
                               'published_candidate': published[site_identity(row['url'], store)]}
-            coverage = json.loads(row['coverage'] or '{}')
             coverage['site_check'] = site_check
             state = row['state']
             scope = row['scope']
@@ -79,7 +96,7 @@ def refresh(root, candidate_id=None, force=False):
 
 
 def require_new(store, url, force=False):
-    if any(row['state'] in ('published', 'indexed') and site_identity(row['url'], store) == site_identity(url, store) for row in store.candidates()):
+    if site_identity(url, store) in published_sites(store, store.candidates()):
         raise CrawlError('Website/account was already published by another batch')
     repository = os.environ.get('ARCHIVE_REPO')
     if not repository:
