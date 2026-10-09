@@ -1175,7 +1175,9 @@ async def candidate_quick_actions(browser,base,width):
     assert await page.locator('#notice button[data-mutation]').count()==0
     await close_notification(page,width)  # success message without Undo, dark palette
     await stage(page,'candidates');await tile(0).wait_for();await settled(page)
-    await decide(0,False);await settled(page)
+    # Exercise the equivalent button here; the earlier swipe already tested
+    # touch dismissal. Navigation can legitimately cancel an in-flight gesture.
+    await page.get_by_role('button',name='Dismiss: swipe-0.example/eq/',exact=True).click();await settled(page)
     await undo.click();await tile(0).wait_for();await settled(page)
     assert posts[-1][0]=='/api/restore' and rows[0]['stage']=='candidates'
     await decide(0,True)
