@@ -218,12 +218,14 @@ The production [intranet curation service](elastic-indexer-stack/curation/README
 serves the persistent queue at **http://192.168.50.100:8090/**, restricted to actual
 LAN clients in `192.168.0.0/16`, without authentication or public ingress.
 Deep-link directory scopes and whole-site/account alternatives are explicit.
-Approved sites receive bounded captures in the existing `websites/` layout;
-a second approval selects files for one publication commit and targeted
-create-only indexing with Luna enrichment by default and a separate $2 batch
-cap. Import Jobs wait for existing ingestion Jobs to finish.
+Approved sites capture all available files and dated versions in 1999–2006
+within their chosen scope, preserving the existing `websites/` layout. Completed
+captures publish and index automatically under that original approval, with
+create-only imports, default Luna enrichment and a $2 total cap per site.
+Capture and indexing have independent workers. Import Jobs wait for existing
+ingestion Jobs to finish; completed sites retire to portal History.
 Paid discovery is manual, up to 50 new candidates and $2 per explicit run;
-deployment makes no paid calls.
+deployment never starts paid discovery.
 
 The [broad text reindex Job](elastic-indexer-stack/indexer/k8s/README.md#broad-text-reindex)
 repairs existing extracted text and rebuilds Nomic chunks in place. It preserves

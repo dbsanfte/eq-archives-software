@@ -373,6 +373,8 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
                                       'lookups': len(failed_queries) + len(missing)},
                     'transport': store.get('wayback_transport', {}),
                     'indexing': dict((retained or base_manifest or {}).get('indexing', DEFAULT_POLICY)), 'visited': []}
+        if retained and (sites[0].get('continued_from', {}).get('published') or retained.get('enrichment_budget_id')):
+            manifest['enrichment_budget_id'] = retained.get('enrichment_budget_id', retained['batch_id'])
         check_manifest(root, manifest)
         save(result_path, manifest)
         report('ready_for_review')

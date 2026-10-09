@@ -387,7 +387,7 @@ def capture_sites(root, batch_id, sites, downloader_factory=Downloader, progress
         draft["transport"] = transport_store.get("wayback_transport", {})
         save(draft_path, draft)
         transport_store.close()
-    # Each site's captured pages need a second, explicit indexing approval.
+    # Completed production captures enter source-bound automatic indexing.
     manifest = {key: value for key, value in draft.items() if key != 'catalogs'}
     check_manifest(root, manifest)
     report('ready_for_review')

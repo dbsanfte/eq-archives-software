@@ -218,7 +218,7 @@ hash checks and stale-decision rejection. The pilot stages bounded page samples,
 exports explicit approved batches, and cannot publish archive Git changes or
 write production index documents. The production service in
 `elastic-indexer-stack/curation` adds persistent LAN review, explicit page/directory/
-site-account scopes, bounded acquisition, whole-site publication/indexing approval and
+site-account scopes, bounded acquisition, automatic publication/indexing after capture approval and
 create-only imports. Use its guide, Dockerfile pytest and `scripts/smoke-curation.sh`
 browser/TCP checks for changes. Preserve the exact Linux
 `websites/<host>/<timestamp>/<decoded path>` convention and refuse unsafe names or
@@ -248,8 +248,8 @@ per-tree ceiling that prevents resumable checks from starting. Custom
 capture folders are absolute URL paths within the site's account; saving a new
 scope invalidates the previous approval and must persist across reloads.
 
-The mobile portal has five exclusive active stages: Candidates, Capture queue,
-Capturing, Review capture and Indexing. Production approval moves a candidate to
+The mobile portal has four exclusive active stages: Candidates, Capture queue,
+Capturing and Indexing. Production approval moves a candidate to
 Capture queue. Indexed sites retire automatically to secondary History; declined,
 dismissed and duplicate sites also stay there. Deferred sites live in Saved for
 later. Restore can return only deferred/dismissed candidates to Candidates, without
@@ -272,18 +272,19 @@ and serial publication with the existing unfinished-Job guard for imports.
 Expose worker availability independently of capped operation lists, require both
 workers for health and retain the lease until both stop. Preserve operations,
 approvals and progress across restart; interrupted work needs explicit resume.
-Source
-reading and scope drafts must not prevent progress polling or lose edits. Download
-completion creates an independent review for each site. Review and approve all
-captured pages within one site's chosen scope at a time, with dated Wayback links
-and complete sources. Preserve independent approve/decline/reconsider decisions,
-manifest-bound approvals and metadata-only migration of unapproved mixed capture
-groups; never copy sources or replay already approved publication/import work.
-Review's Approve all and Dismiss all confirm every Review-stage site, including
-filtered and paginated rows. Preflight all manifests, coverage and sources before
-atomically queuing separate whole-site publications; display the combined $2/site
-enrichment cap. Never partially approve a stale snapshot. Dismiss all retains
-sources in History with atomic Undo that rejects intervening decisions.
+Source reading and scope drafts must not prevent progress polling or lose edits.
+Download completion creates an independent manifest per site and automatically
+queues whole-site publication/indexing under the original capture approval.
+There is no Review tab or second approval. Show the automatic flow and $2/site
+AI enrichment cap before capture approval, including mobile quick actions.
+Preflight original approval, current scope/hash, coverage, policy and every saved
+source before atomically queuing publication once. Persist failures as
+index_preflight_failed in Indexing, requiring explicit manifest-bound retry;
+polling cannot retry or pay. Preserve dated source/asset browsing in Indexing and
+History, plus metadata-only migration of unapproved mixed capture groups. Never
+copy sources, replay approved work or reactivate declined/dismissed/indexed sites.
+Legacy Review URLs alias to Indexing. Keep operator review APIs compatible;
+explicit reconsider of a declined site resumes automatic preparation.
 Keep publication status and explicit retry on the affected site. Preserve the
 selected view/site across reloads and the open source page during status updates.
 The header light/dark toggle follows the device initially and persists an explicit
@@ -294,8 +295,8 @@ Design for phones first: bottom stage navigation, compact site lists, focused si
 workspaces and a reachable action bar. Confirmed capture approval returns to the
 Candidates list, retaining search/pagination/position without an approval popup.
 Undo approval lives directly on each Queue entry and its workspace until capture
-starts, including after the grace period. Publication/indexing approval follows
-the site into Indexing.
+starts, including after the grace period. Capture completion moves the site
+into Indexing automatically.
 Candidates support direct mobile swipe-right approval and swipe-left dismissal,
 with equivalent accessible buttons, saved scope shown, and Undo. Preserve vertical
 scrolling and tap-to-open; short, cancelled, reversed or stale gestures cannot
@@ -391,13 +392,21 @@ already saved sources and immutable completed manifests, including their source
 reference verification. Apply the same host filter to discovery/manual candidates.
 A transport/storage/ownership bound keeps
 new work paused in Capturing; only exhausted catalogs and pending records reach
-Review, with missing/substituted replays explicitly listed as gaps. Individual
+Indexing, with missing/substituted replays explicitly listed as gaps. Individual
 file HTTP 403/404/410 responses and exact supporting-file lookup failures are
 durable gaps that do not block other files. Primary scope inventory failures and
 service/rate-limit errors still pause. Completed ordinary sites offer Retry failed
 files: queue only missing versions/lookups, copy private checkpoint metadata,
-reuse successful sources, keep usage cumulative and previous reviews immutable.
-Undo remains available until claiming; stale or published reviews cannot retry.
+reuse successful sources, keep usage cumulative and previous manifests immutable.
+Undo remains available until claiming; stale manifests cannot retry. Published
+sites may retry only their saved missing files under the identical approved scope
+and hash-bound published predecessor. Retain existing Jobs and published manifests;
+older import completion cannot retire newer acquisition. Retry manifests share
+the original site's enrichment_budget_id, paid response cache and $2 total cap,
+with diagnostics still bound to each current manifest/Job. Validate that lineage
+before publication or any paid import. A pending published-file retry must finish
+publication before another missing-file retry. Show these controls in Indexing
+and History; no second approval is needed when retry finishes.
 Explicit resume
 may extend exhausted capture transport allowances without resetting cumulative
 usage, paid limits or discovery deadlines. Retain all already claimed legacy work,
@@ -406,7 +415,7 @@ legacy reviews offer explicit Regenerate full capture, returning to the unlimite
 queue with the original scope, source reuse and cumulative transport usage. Retain
 the old immutable manifest and create a separate full inventory on claim; a retained
 source set never replaces the CDX scope inventory. Undo regeneration restores the
-original review until claim, using the same atomic lock. Block individual, bulk and
+original capture status until claim, using the same atomic lock. Block individual, bulk and
 legacy-API publication of these legacy subsets until regeneration completes. Never
 automatically regenerate on deployment/polling or replay already approved work.
 Mobile review separates

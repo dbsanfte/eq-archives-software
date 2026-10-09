@@ -19,6 +19,7 @@ import httpx
 
 from common import CrawlError, decode, digest, now
 from captures import check_manifest, indexable, verified_source
+from capture_budget import budget_identity
 from indexer.chunking import CHUNKING_VERSION, DOCUMENT_PREFIX, chunk_source
 from indexer.html_extraction import WEBSITE_EXTRACTION_VERSION, website_markdown
 from indexer.capture_enrichment import Enricher, policy
@@ -182,8 +183,12 @@ def main():
     try:
         batch = read_batch(args.root, args.batch, args.manifest_sha256)
         settings = policy(batch["manifest"])
+        if not re.fullmatch(r'[a-f0-9]{32}', batch['manifest']['batch_id']):
+            raise CrawlError('Invalid import batch identity')
         directory = args.enrichment_root / batch['manifest']['batch_id']
-        enricher = Enricher(directory, "/run/secrets/luna_api_key",
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+        budget_id = budget_identity(args.root, batch['manifest'])
+        enricher = Enricher(args.enrichment_root / budget_id, "/run/secrets/luna_api_key",
                             maximum=settings["max_enrichment_usd"])
         report('running')
         services = Services(enricher=enricher)

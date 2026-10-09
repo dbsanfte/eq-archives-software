@@ -101,7 +101,7 @@ def test_retry_failed_files_retains_review_and_retries_only_gaps(tmp_path, monke
             failing = not recovered;calls.clear()
             worker.operation()
             after = detail(app, row)
-            assert after['candidate']['stage'] == 'review', after['capture_operation']
+            assert after['candidate']['stage'] == 'indexing', after['capture_operation']
             result = after['review']['manifest']
             retained = {c['url']: c for c in result['captures']}
             assert [retained[c['url']] for c in original['captures']] == original['captures']
@@ -163,7 +163,7 @@ def test_regeneration_reuses_100_sources_but_inventories_all_files_and_carries_u
         worker.lease.close()
     current = detail(app, row)
     assert current['capture_operation']['state'] == 'completed', current['capture_operation'].get('error')
-    assert current['candidate']['stage'] == 'review'
+    assert current['candidate']['stage'] == 'indexing'
     manifest = current['review']['manifest']
     assert manifest['capture_policy'] == POLICY and len(manifest['captures']) == 101
     assert manifest['transport'] == original['transport']
@@ -227,7 +227,7 @@ def test_retry_from_a_multi_site_capture_keeps_other_review_and_inventory_untouc
     finally:
         worker.lease.close()
     result=detail(app, first)
-    assert result['candidate']['stage']=='review',result['capture_operation']
+    assert result['candidate']['stage']=='indexing',result['capture_operation']
     assert result['review']['manifest']['capture_retry']=={'files':0,'lookups':0}
     assert len(result['review']['manifest']['captures'])==3
     assert all(capture['candidate_id']==first['id'] for capture in result['review']['manifest']['captures'])
@@ -252,7 +252,7 @@ def test_small_legacy_complete_capture_can_be_regenerated_and_undone_after_grace
     make_due(root)
     assert call(app, 'POST', '/api/undo', payload).status_code == 200
     restored = detail(create_app(root, start_worker=False), row)
-    assert restored['candidate']['stage'] == 'review'
+    assert restored['candidate']['stage'] == 'indexing'
     assert restored['candidate']['decision'] == before['candidate']['decision']
     assert restored['review']['manifest'] == before['review']['manifest']
     assert regenerate(app, manifest).status_code == 202
@@ -360,7 +360,7 @@ def test_old_mixed_batch_regeneration_keeps_other_site_review_and_parent_immutab
     assert regenerate(app, first_review['manifest']).status_code == 202
     assert detail(app, first)['candidate']['stage'] == 'queued'
     after = detail(create_app(root, start_worker=False), second)
-    assert after['candidate']['stage'] == 'review' and after['review']['manifest'] == before['review']['manifest']
+    assert after['candidate']['stage'] == 'indexing' and after['review']['manifest'] == before['review']['manifest']
     assert after['candidate']['coverage']['capture']['batch_id'] == parent['batch_id']
     with connect(root) as store:
         saved = unpack(store.db.execute('SELECT * FROM batches WHERE id=?', (parent['batch_id'],)).fetchone())
@@ -389,7 +389,7 @@ def test_regeneration_undo_and_claim_have_one_atomic_winner(tmp_path):
             code = undone.result()
             claimed.result()
         current = detail(app, row)
-        assert (code, current['candidate']['stage']) in [(200, 'review'), (409, 'capturing')]
+        assert (code, current['candidate']['stage']) in [(200, 'indexing'), (409, 'capturing')]
     finally:
         worker.lease.close()
 

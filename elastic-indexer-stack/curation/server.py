@@ -28,6 +28,7 @@ from manual import existing_site, site_url
 from spending import Spending
 from candidate_actions import dismiss_all, undo_dismissal
 from candidate_checks import attach_checks, require_finished, start as start_candidate_check
+from automatic_indexing import retry as retry_preparation
 from grading import criteria
 from review_actions import (preview as review_preview, decide_all as decide_all_reviews,
                             apply_decision as apply_site_decision, validate_decision as validate_site_decision,
@@ -132,7 +133,7 @@ def create_app(root=None, origin=None, start_worker=True):
         with connect(root) as store:
             all_rows = attach_checks(store, decorate(store, queue(store)))
             selected = request.query_params.get("filter", "recommended")
-            if selected not in ("recommended", "pending", "approved", "captured", "all", *Stage):
+            if selected not in ("recommended", "pending", "approved", "captured", "review", "all", *Stage):
                 raise CrawlError("Invalid queue filter")
             search = request.query_params.get('search', '').strip()
             if len(search) > 200:
@@ -142,6 +143,7 @@ def create_app(root=None, origin=None, start_worker=True):
                     and (row["rating"] or {}).get("grade", -1) >= 2 or
                     selected == "pending" and row["state"] in ("approval_pending", "deferred") or
                     selected == "approved" and row["state"] == 'approved_waiting_batch' or
+                    selected == "review" and row.get('review_state') == 'awaiting_review' or
                     selected == "captured" and row['state'] in CAPTURED_STATES]
             if selected == 'candidates':
                 if request.query_params.get('needs_grade', '0') not in ('0', '1'):
@@ -376,6 +378,14 @@ def create_app(root=None, origin=None, start_worker=True):
             store.db.commit()
         return JSONResponse({'state':'published_waiting_index','attempt':job['attempt']},status_code=202)
 
+    async def prepare_retry(request):
+        payload = await body(request)
+        if (not isinstance(payload, dict) or set(payload) != {'id', 'manifest_sha256'}
+                or not all(isinstance(value, str) for value in payload.values())):
+            raise CrawlError('Preparation retry requires the captured site ID and manifest hash')
+        result = await run_in_threadpool(retry_preparation, root, payload['id'], payload['manifest_sha256'])
+        return JSONResponse(result, status_code=202)
+
     async def undo(request):
         payload = await body(request)
         if (not isinstance(payload, dict) or set(payload) != {'id','manifest_sha256'}
@@ -558,6 +568,7 @@ def create_app(root=None, origin=None, start_worker=True):
                             Route('/api/review-decisions',review_decisions,methods=['POST']),
                             Route('/api/undo-review-dismissal',undo_review_decisions,methods=['POST']),
                             Route('/api/index-retry',index_retry,methods=['POST']),
+                            Route('/api/prepare-indexing',prepare_retry,methods=['POST']),
                             Route("/api/decisions", decide, methods=["POST"]),
                             Route('/api/dismiss-candidates', dismiss_candidates, methods=['POST']),
                             Route('/api/undo-dismissal', undo_candidates, methods=['POST']),

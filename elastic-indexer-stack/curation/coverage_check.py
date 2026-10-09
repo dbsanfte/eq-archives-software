@@ -78,12 +78,12 @@ def refresh(root, candidate_id=None, force=False):
         store.db.commit()
 
 
-def require_new(store, url):
+def require_new(store, url, force=False):
     if any(row['state'] in ('published', 'indexed') and site_identity(row['url'], store) == site_identity(url, store) for row in store.candidates()):
         raise CrawlError('Website/account was already published by another batch')
     repository = os.environ.get('ARCHIVE_REPO')
     if not repository:
         return
-    result = SiteInventory(Archive(repository, store)).check(url)
+    result = SiteInventory(Archive(repository, store)).check(url, force=force)
     if result['status'] != 'new_site':
         raise CrawlError('Website/account is already archived or its coverage is unverified; refresh the queue')

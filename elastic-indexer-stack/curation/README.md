@@ -12,7 +12,7 @@ immutable digest with [deploy-curation.sh](../../scripts/deploy-curation.sh).
 The same image contains [index_captures.py](../indexer/src/index_captures.py).
 Legacy finder/worker/broad reindex Jobs retain their separate lifecycles.
 
-## Review flow
+## Curation flow
 
 Use the light/dark toggle in the header to change the entire portal, including
 source readers and dialogs. It initially follows the device's appearance and
@@ -20,7 +20,8 @@ remembers an explicit choice in this browser across visits.
 
 1. Review Luna's grade, reason, verbatim evidence and complete extracted source.
    Archived scripts, HTML and images never execute in this screen.
-2. Choose scope and **Approve site for capture**. This queues the site automatically,
+2. Choose scope and **Approve site for capture**. This authorizes capture, publication
+   and AI-enriched indexing, with a $2 enrichment cap per site. It queues the site,
    removes it from **Candidates**, and moves it into **Capture queue**.
    The screen returns to the Candidates list with its search and position retained,
    without a capture approval popup. **Undo approval** lives directly on each
@@ -55,36 +56,42 @@ remembers an explicit choice in this browser across visits.
    exact supporting-file lookups, become visible coverage gaps while the rest
    continues. Failure to inventory the approved site, service/rate-limit errors,
    and transport/storage limits still pause acquisition with its checkpoint.
-4. Completed items move into **Review capture**, newest first. Open a site to browse
-   its captured pages and dated Wayback links, including
-   complete extracted source and multiple versions of the same page.
-   **Approve site & index** approves every captured page within that
-   site's chosen scope. This second approval binds to its complete manifest and
-   actual source hashes. Import includes AI enrichment by default, with a separate
-   $2 maximum shown for that site before approval. **Decline indexing** keeps its
-   files in staging without publication or indexing; **Reconsider indexing**
-   returns a declined site to review. Decisions are independent for each site.
+4. Completed captures move directly into **Indexing**. There is no second approval.
+   The indexing worker verifies the saved manifest, complete file set, archive
+   coverage and original capture approval before queuing publication once.
+   **Preparing automatic indexing** shows this preflight. Failures stay visible
+   on the site as **Indexing preparation paused**, with an explicit retry after
+   the underlying issue is corrected; polling never retries failed preparation.
+   Browse all captured pages, dated Wayback links and supporting files from this
+   workspace, including complete extracted source and multiple dated versions.
    Publication and indexing have an independent worker. They continue during a
    long capture, and a slow archive commit or waiting import cannot hold up
    downloads. Each worker processes its own durable queue serially; capture,
    discovery and evidence checks still share one throttled Wayback client at a time.
-   For a completed ordinary site with gaps, **Retry failed files** queues only
-   missing versions and supporting-file lookups, retaining every successful file.
-   **Undo file retry** returns its unchanged review until the worker starts.
-   Retries copy private SQLite catalog metadata, retain cumulative transport
-   usage, and produce a new review without publishing or indexing anything.
-   Prior manifests stay immutable; successful catalogs are not requested again.
-5. Publication makes one fast-forward archive commit per approved site, including
+   Publication makes one fast-forward archive commit per site, including
    `crawl-manifests/<batch-id>.json`. Import waits for every other unfinished,
    unsuspended Job in `eqarchives-es`, including pending/retrying Jobs with
    `active=0`. The controller cannot patch, suspend or delete Jobs.
+   AI enrichment uses Luna by default, within the site's $2 total budget.
+   Indexed sites retire to **History** automatically.
+
+Completed ordinary sites with gaps offer **Retry failed files** in Indexing or
+History after publication (also on a first capture's failed preparation). This
+queues only missing versions/lookups, retains successful files, and supports
+**Undo file retry** until acquisition starts. Retries copy private SQLite catalog
+metadata and retain cumulative transport usage. The resulting manifest publishes
+and indexes automatically; prior manifests, publications and Jobs stay immutable.
+A retry of published files inherits its original site's enrichment ledger and
+cached responses, so it cannot renew the $2 cap. Existing document IDs are skipped
+without paid calls. Pending imports remain serial behind existing Jobs. An older
+import finishing cannot retire a site with newer acquisition still in progress.
 
 Confirmation and error messages have a **×** close button. Closing a message
 only hides it; it does not undo the decision or submit another request. Undo
 remains a separate action, and polling does not reopen a closed message.
 
-The portal has five active stages: **Candidates**, **Capture queue**, **Capturing**,
-**Review capture**, and **Indexing**. Each candidate belongs to exactly one stage,
+The portal has four active stages: **Candidates**, **Capture queue**, **Capturing**,
+and **Indexing**. Each candidate belongs to exactly one stage,
 using its durable review status where available. Indexed sites retire automatically
 to **History** and leave every active count; declined, dismissed, already archived,
 and duplicate sites also stay in History. Deferred candidates are in **Saved for
@@ -98,14 +105,10 @@ without readable samples or a validated grade. Stage searches, grade filters and
 The operator API remains unfiltered unless `min_grade=0..3` or `needs_grade=1` is
 supplied to `GET /api/queue?filter=candidates`.
 
-**Review capture** has **Approve all** and **Dismiss all** controls outside the
-reader. Their confirmation includes every awaiting-review site, even when search
-or pagination hides it, and an expandable site list. Approval validates all
-sources/manifests/coverage before atomically queuing independent whole-site
-publications and moving to Indexing; the dialog shows the combined AI enrichment
-maximum ($2 per site). A stale or invalid site blocks the entire approval.
-Dismissal declines indexing, retains sources in History, and offers atomic Undo
-unless a later decision changed a site. No other stage is affected.
+Legacy Review bookmarks open Indexing. Previously declined sites remain in
+History; **Resume automatic indexing** explicitly returns one to preparation.
+Existing operator site-decision and bulk-review APIs remain compatible, but the
+portal has no Review tab or second approval controls.
 
 **Dismiss all candidates** confirms the full remaining count, including sites hidden
 by grade/search filters and other pages, then moves those sites to History. It
@@ -116,7 +119,7 @@ individual History restores remain available if a later decision prevents bulk U
 On phones, bottom navigation opens compact stage lists. A site opens a focused
 workspace showing its evidence/scope, queue position, capture progress, captured
 subset, or publication/indexing status as appropriate. Capture approval returns to
-Candidates; publication/indexing approval follows the site into Indexing. Undo
+Candidates; completed captures advance to Indexing automatically. Undo
 remains available until the atomic worker claim. A failed action cannot advance
 the site or return to the list. Background updates refresh counts
 without navigating away from another selected site. Next site and the stage list
@@ -249,13 +252,13 @@ operation and queue context, even when it is outside the current list page.
 Legacy queue filters remain available to existing operator clients.
 
 Capture batches are acquisition records. Each completed site receives an
-independent review manifest referencing the existing staged files, so pages from
-different sites or shared-host accounts never share a review decision. Existing
+independent site manifest referencing the existing staged files, so each site or
+shared-host account has its own publication, indexing progress and enrichment budget. Existing
 unapproved mixed batches are split idempotently on startup, without copying or
 downloading files. Original capture manifests and hashes remain as provenance.
 Previously approved publication/import records retain their original identities.
 The legacy file-subset API remains available for single-site operator requests;
-the review screen and site-decision API always approve the complete captured site.
+automatic publication always includes the complete captured site.
 
 Newly claimed captures use [complete-files-v1](full_capture.py). Ordinary site,
 account and directory scopes use 200-row, uncollapsed CDX **prefix** inventories;
@@ -283,14 +286,15 @@ from disk. Its cumulative transport allowance is 100,000 requests, 50 GiB and
 seven days of active acquisition, with three-second request spacing, 128 KiB/s
 throttling and bounded 422/429/server backoff. A 256 MiB free-space reserve and
 per-request disk-space checks protect staging. Limits or transport failures keep
-the site paused in **Capturing**, never move a truncated subset into Review.
+the site paused in **Capturing**, never move an unfinished inventory into Indexing.
 Explicit **Resume** extends an exhausted transport allowance while retaining
 all consumed requests/bytes/time and completed checkpoints. It cannot renew a
 Luna/discovery budget. Board catalog/file safety ceilings are 10 million/1 million
 records for new portal work and can extend on explicit resume; board source
 ownership parsing is bounded to 32 MiB per HTML page.
 
-Review appears only after every catalog and pending version has been checked.
+Automatic indexing preparation begins only after every catalog and pending version
+has been checked.
 Missing or substituted replays and supporting URLs with no captures remain
 visible as dated coverage gaps. This describes what Wayback makes available,
 not proof that it archived every original file. Images, CSS, scripts, archives
@@ -302,9 +306,9 @@ HTML/plain-text pages (up to 32 MiB with nonempty text) receive default AI enric
 and indexing, while supporting/binary files remain preserved without Luna calls.
 
 Existing claimed captures and publication/indexing manifests retain their saved
-policy. Unapproved ordinary-site legacy reviews offer **Regenerate full capture**:
+policy. Incomplete ordinary-site legacy captures in Indexing offer **Regenerate full capture**:
 they return to the unlimited capture queue with the same approved scope and a
-60-second grace period. **Undo regeneration** returns the original review until
+60-second grace period. **Undo regeneration** restores the original capture status until
 the worker actually claims it. Each site gets an independent `complete-files-v1`
 acquisition, reusing source-verified files and carrying the original cumulative
 transport usage. The original manifest remains immutable; no sources are copied,
@@ -312,7 +316,9 @@ and a fresh full-scope CDX inventory is required even when the legacy traversal
 claimed completion. This also repairs two-sample sites from older mixed batches,
 whose earlier sites could consume the shared 100-file allowance. Individual,
 bulk and legacy-API indexing approvals reject these incomplete legacy captures.
-Publication/indexing approval is required after full acquisition completes.
+Automatic indexing preparation resumes after full acquisition completes.
+`POST /api/prepare-indexing` retries a failed preparation with the exact site
+`id` and `manifest_sha256`; it cannot retry a running/published or changed site.
 The source/hash-bound `POST /api/continue-capture` takes the review `id` and
 `manifest_sha256`; polling and deployment never queue regeneration automatically.
 
@@ -589,7 +595,7 @@ verifies the BoardID against each discussion source. Other boards and posting/ad
 actions are excluded. Newly claimed work adds verified supporting-file references
 and uses the complete-file policy above; existing claimed work retains its
 2,000-capture/256-MiB/one-hour policy. Each board has its own review. Existing exact-page
-approvals do not widen. Publication and default AI-enriched indexing still require
-the usual whole-site review approval. See the
+approvals do not widen. Completed approved boards publish and index automatically, with default
+AI enrichment under the original capture approval. See the
 [SitePowerUp guide](../../scripts/archive-crawler/SITEPOWERUP.md) for format
 evidence, operator commands, supported views and limitations.
