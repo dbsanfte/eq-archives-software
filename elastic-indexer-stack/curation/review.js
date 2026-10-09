@@ -1044,7 +1044,9 @@ function renderPipelineActivity() {
   const info=data.activity || {},auto=data.automation,enabled=Boolean(auto?.settings.enabled);
   $('pipeline-mode').textContent=enabled ? 'Automatic on' : 'Manual discovery';
   const selected={candidates:'candidates',queued:'capture',capturing:'capture',indexing:'indexing'}[route.view];
-  const laneChanged=activityView!==route.view;activityView=route.view;
+  // Retirement can change a reader's stage in the background. Keep its panel
+  // geometry (and Back positions); default expansion only on list navigation.
+  const laneChanged=activityView===null || activityView!==route.view && !route.candidate;activityView=route.view;
   const discovery=activeOperation('candidates'),capture=activeOperation('capture'),publication=activeOperation('indexing');
   for (const [lane,title] of [['candidates','Discovery'],['capture','Capture'],['indexing','Indexing']]) {
     let card=$(`activity-${lane}`);
