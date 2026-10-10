@@ -678,7 +678,11 @@ ChatGPT/Claude or Deep Research validation after actually performing it.
   shared request limit, ten-minute/64-entry summary cache and safe errors. Phrase
   samples are bounded to 100 captures/12,000 characters each, deduplicate original
   pages and repeated text, and expose sampling/vocabulary limits. Retain exact
-  sampled page counts when ranking phrases or scaling clouds. Equal counts use
+  sampled page counts when ranking phrases or scaling clouds. The bundled English
+  frequency reference filters generic standalone words; retain its attribution,
+  offline loading, capped rarity bonus and shared vocabulary bound. Common words
+  remain eligible inside specific source phrases; long menu runs cannot be their
+  only evidence. Ranking never changes page counts or minimum support. Equal counts use
   equal sizes; disclose relative scaling and keep zero-based bars in List. Never walk
   archive Git, write index documents or call AI for exploration. Test routes with
   `scripts/check-explore.py` in container integration and deployment; preserve

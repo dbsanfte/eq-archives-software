@@ -207,8 +207,29 @@ of the sample and phrases containing them are omitted, so shared template labels
 do not dominate. Repeated multiword labels are also omitted when at least 80% of
 their support comes from domains where they appear on at least three pages and
 60% of sampled pages, matching the repeated-line threshold. Counts for this check
-share the existing vocabulary bound. Up to 40 terms are ranked by page frequency times phrase length;
-returned page counts remain unweighted. Phrases retain contiguous source words: removed markup,
+share the existing vocabulary bound.
+
+Up to 40 terms are ranked using a pinned, offline
+[English usage reference](eqarchives_mcp/data/README.md) from wordfreq 3.1.1
+(Robyn Speer, CC BY-SA 4.0), with no runtime dependency or network lookup.
+Standalone words at Zipf frequency 4.6 or higher are omitted; common words may
+still occur inside phrases such as "fire resist". Ranking multiplies page support
+by squared average rarity (`max(0, 5 - zipf)`), phrase length to the power 1.5,
+and cohesion (phrase page count / most frequent constituent's page count).
+Missing or rare English words share a 3.0 frequency floor. Minimum support remains
+two pages for samples of eight or more, one otherwise; rarity cannot promote
+one-off typos in a larger sample. Zero-rarity terms are omitted. This is a
+heuristic for distinctive source terms, not an EQ whitelist or semantic classifier.
+Straight and curly apostrophes share stop-word/frequency lookups while offered
+terms retain their literal source spelling for search.
+Multiword terms also need at least one occurrence in a contiguous run of at most
+four content words, to exclude fragments supported only by long unpunctuated
+menus. This eligibility check shares the vocabulary bound and does not discount
+page counts for otherwise eligible phrases. Token runs are processed in linear
+time. Returned page counts remain unweighted, and words can still be selected
+even when their containing menu fragments are excluded.
+
+Phrases retain contiguous source words: removed markup,
 numbers and punctuation cannot join unrelated words into an unsearchable phrase.
 Vocabulary is capped at 50,000 terms and reaching it is disclosed. Sampling is
 not statistically representative and can change as the live index changes.

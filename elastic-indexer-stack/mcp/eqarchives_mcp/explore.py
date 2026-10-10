@@ -4,7 +4,9 @@ import asyncio
 from collections import Counter, OrderedDict
 from datetime import date, datetime, timezone
 import hashlib
+import json
 import math
+from pathlib import Path
 import re
 import time
 from urllib.parse import urlsplit, urlunsplit
@@ -19,6 +21,11 @@ EXCERPT_CHARS = 12000
 CACHE_SECONDS = 600
 CACHE_ENTRIES = 64
 MAX_VOCABULARY = 50000
+# Pinned English usage reference, loaded once without a runtime dependency or
+# network request. Attribution and reproducible derivation live beside the data.
+ENGLISH_FREQUENCY = {word: float(zipf) for zipf, words in json.loads(
+    Path(__file__).with_name('data').joinpath('english-frequency.json').read_text(encoding='utf-8')
+).items() for word in words.split()}
 STOP = set("""a about above after again against all also am an and any are as at be because been
 before being below between both but by can could did do does doing down during each few for
 from further get got had has have having he her here hers herself him himself his how i if in
@@ -165,29 +172,50 @@ def extract_phrases(hits, site_selected=False):
     global_lines = Counter(line for _, lines in pages for line in set(lines))
     frequency = Counter()
     domain_frequency = {domain: Counter() for domain in domains}
+    bounded_phrases = set()
     vocabulary_limited = False
     for domain, lines in pages:
         phrases = set()
+        bounded = set()
         for line in lines:
             if (domains[domain] >= 3 and repeated[domain, line] >= max(3, math.ceil(domains[domain] * .6))) or (len(line) < 200 and global_lines[line] >= max(5, math.ceil(len(pages) * .05))):
                 continue
             for sentence in re.split(r"[.!?;|\[\]{}<>]+", line):
                 matches = list(TOKEN.finditer(sentence))
                 tokens = [match[0] for match in matches]
+                content = [3 <= len(w) <= 24 and w.replace('’', "'") not in STOP for w in tokens]
+                # A long unpunctuated menu/list is not a compound topic. Compute
+                # run lengths in linear time, even for a 12,000-character row.
+                runs = []
+                run = []
+                for i, token in enumerate(tokens):
+                    if (not content[i] or
+                            (run and not sentence[matches[i-1].end():matches[i].start()].isspace())):
+                        runs.append(run)
+                        run = []
+                    if content[i]:
+                        run.append(i)
+                runs.append(run)
+                short_run = {i for run in runs if len(run) <= 4 for i in run}
                 for start, token in enumerate(tokens):
-                    if token in STOP or not 3 <= len(token) <= 24:
+                    if not content[start]:
                         continue
                     phrases.add(token)
                     for length in (2, 3):
                         words = tokens[start:start + length]
                         adjacent = all(sentence[a.end():b.start()].isspace()
                             for a, b in zip(matches[start:start + length - 1], matches[start + 1:start + length]))
-                        if len(words) == length and adjacent and all(3 <= len(w) <= 24 and w not in STOP for w in words):
-                            phrases.add(" ".join(words))
+                        if len(words) == length and adjacent and all(content[start:start + length]):
+                            phrase = " ".join(words)
+                            phrases.add(phrase)
+                            if start in short_run:
+                                bounded.add(phrase)
         for phrase in sorted(phrases):
             if phrase in frequency or len(frequency) < MAX_VOCABULARY:
                 frequency[phrase] += 1
                 domain_frequency[domain][phrase] += 1
+                if phrase in bounded:
+                    bounded_phrases.add(phrase)
             else:
                 vocabulary_limited = True
     minimum = 2 if len(pages) >= 8 else 1
@@ -206,9 +234,26 @@ def extract_phrases(hits, site_selected=False):
         for phrase, n in counts.items():
             if ' ' in phrase and n >= threshold:
                 template_frequency[phrase] += n
-    ranked = sorted((p for p, n in frequency.items()
-        if n >= minimum and not ubiquitous.intersection(p.split()) and template_frequency[p] < n * .8),
-        key=lambda p: (-frequency[p] * (1 + p.count(" ")), p))
+    scores = {}
+    for phrase, n in frequency.items():
+        words = phrase.split()
+        if n < minimum or ubiquitous.intersection(words) or template_frequency[phrase] >= n * .8:
+            continue
+        # English frequencies use log10(occurrences per billion words). Common
+        # standalone words are poor topics, but keep them inside literal phrases
+        # such as "fire resist". Missing/rare words share a floor: typos cannot
+        # earn an unlimited rarity bonus or bypass minimum sampled page support.
+        english = [ENGLISH_FREQUENCY.get(w.replace('’', "'"), 3.0) for w in words]
+        if (len(words) == 1 and english[0] >= 4.6) or (len(words) > 1 and phrase not in bounded_phrases):
+            continue
+        rarity = sum(max(0, 5 - z) for z in english) / len(words)
+        if not rarity:
+            continue
+        # Discount accidental combinations of independently frequent words.
+        # Missing constituent counts can occur at the shared vocabulary bound.
+        cohesion = n / max(frequency.get(w, n) for w in words)
+        scores[phrase] = n * rarity ** 2 * len(words) ** 1.5 * cohesion
+    ranked = sorted(scores, key=lambda p: (-scores[p], p))
     chosen = []
     for phrase in ranked:
         if any(f" {phrase} " in f" {other} " and frequency[phrase] == frequency[other] for other in chosen):
