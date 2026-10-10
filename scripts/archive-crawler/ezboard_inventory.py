@@ -8,13 +8,13 @@ import re
 from urllib.parse import urlsplit
 
 from common import CrawlError, tier
-from ezboard import address, board_name, shard
+from ezboard import address, board_name
 
 
 def check_board(inventory, url, timestamps=()):
     from site_inventory import InventoryPause
     archive, store = inventory.archive, inventory.archive.store
-    hosts = {row['host']: dict(row) for row in store.db.execute('SELECT * FROM hosts') if shard(row['host'])}
+    hosts = inventory.ezboard_hosts
     name = board_name(url)
     key = 'ezboard_archive_inventory:v1:' + archive.sha
     state = store.get(key) or {'host': 0, 'date': 0, 'checked': 0, 'preferred_dates': list(timestamps),

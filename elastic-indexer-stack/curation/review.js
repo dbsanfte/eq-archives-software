@@ -15,6 +15,7 @@ const labels = {approval_pending:'Needs a capture decision',coverage_unverified:
 let route = readRoute(), data = null, detail = null, busy = false, generation = 0, controller = null;
 let listSignature = '', workspaceSignature = '', dockSignature = '', liveSignature = '', sourceGeneration = 0;
 let searchTimer,gradeTimer,dismissSnapshot=null;
+let pendingRefreshes=0;
 let manualResult=null,manualSignature='';
 let activeSwipe=null;
 const drafts = new Map(), positions = new Map(), pageQueries = new Map(), sourceCache = new Map(), pageOffsets = new Map();
@@ -157,6 +158,7 @@ function mutation(text,action,confirmation,primary=false,disabled=false,options=
 async function refresh(navigated=false,reportErrors=false) {
   const token=++generation,requested={...route};controller?.abort();controller=new AbortController();
   const signal=controller.signal;
+  ++pendingRefreshes;
   try {
     const [listing,context]=await Promise.all([
       request(`/api/queue?compact=1&filter=${requested.view}&offset=${requested.offset}&search=${encodeURIComponent(requested.query)}${requested.view==='candidates' ? `&min_grade=${requested.minGrade}&needs_grade=${requested.needsGrade ? 1 : 0}` : ''}`,undefined,signal),
@@ -186,7 +188,7 @@ async function refresh(navigated=false,reportErrors=false) {
     if (error.name==='AbortError' || token!==generation) return;
     activityDisconnected=true;updateActivityClocks();
     notification('error',error.message,navigated || reportErrors);
-  }
+  } finally { --pendingRefreshes; }
 }
 function renderShell() {
   renderPipelineActivity();
@@ -1242,5 +1244,5 @@ window.addEventListener('resize',()=>{activeSwipe?.cancel();measureDock();if (de
 window.addEventListener('pointerdown',event=>{if (!event.isPrimary) activeSwipe?.cancel();},true);
 new ResizeObserver(measureDock).observe($('action-dock'));
 renderShell();writeRoute(true);refresh(true);
-setInterval(()=>{if (!busy && !document.hidden) refresh();},5000);
+setInterval(()=>{if (!busy && !pendingRefreshes && !document.hidden) refresh();},5000);
 setInterval(()=>{updateCountdown();updateCaptureEta();updateCaptureActivity();updateActivityClocks();},1000);

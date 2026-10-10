@@ -50,6 +50,28 @@ def test_forum_only_archive_is_not_wrongly_reported_as_new(tmp_path):
         assert result['status'] == 'inventory_partial' and result['reason'] == 'ezboard_owner_unverified'
 
 
+def test_many_board_checks_share_one_host_snapshot(tmp_path):
+    repo = archive(tmp_path, ['PUB110.ezboard.com/20020419220745/beqasylum/index.html',
+                              'server3.ezboard.com/20000101000000/bother/index.html'])
+    with connect(tmp_path/'state') as store:
+        reader = Archive(repo, store)
+        statements = []
+        store.db.set_trace_callback(statements.append)
+        inventory = SiteInventory(reader)
+        assert inventory.check(BOARD)['archive_host'] == 'PUB110.ezboard.com'
+        assert inventory.check('http://pub9.ezboard.com/bother')['status'] == 'already_archived'
+        for number in range(100):
+            assert inventory.check(f'http://pub9.ezboard.com/bnew{number}')['status'] == 'new_site'
+        assert inventory.check(BOARD)['status'] == 'already_archived'
+        host_reads = [sql for sql in statements if sql.strip().upper().startswith('SELECT')
+                      and 'FROM HOSTS' in sql.upper()]
+        assert len(host_reads) == 1, 'A coverage pass must not rescan every host for each board'
+        # A later pass still takes a fresh snapshot; exact archive folder case survives.
+        statements.clear()
+        assert SiteInventory(reader, max_trees=0).check(BOARD)['archive_host'] == 'PUB110.ezboard.com'
+        assert sum('FROM HOSTS' in sql.upper() for sql in statements) == 1
+
+
 def test_existing_deep_suggestions_consolidate_without_copying_sources_or_reapproving(tmp_path,monkeypatch):
     root = tmp_path/'state'
     one = add_candidate(root, url=FORUM, body=html(BOARD))

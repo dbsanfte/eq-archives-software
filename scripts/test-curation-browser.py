@@ -2249,11 +2249,69 @@ async def pipeline_activity_flow(browser,base,width):
     await context.close()
 
 
+async def slow_polling_flow(browser,base,width):
+    context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
+    page=await context.new_page();errors=[];calls=[];holds={};failed=False;total=41
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    snapshot=await (await context.request.get(base+'/api/queue?filter=candidates')).json()
+    async def fixture(route):
+        assert route.request.method=='GET', 'Status polling must never start work'
+        view=parse_qs(urlsplit(route.request.url).query)['filter'][0]
+        calls.append(view)
+        if view in holds:
+            arrived,release=holds[view]
+            arrived.set();await release.wait()
+        if failed:
+            await route.fulfill(status=503,json={'error':'Fixture polling failure'})
+        else:
+            await route.fulfill(json={**snapshot,'total':total if view=='candidates' else 0,
+                                      'candidates':snapshot['candidates'] if view=='candidates' else []})
+    await page.route('**/api/queue?**',fixture)
+    await page.clock.install()
+    try:
+        await page.goto(base);await settled(page)
+        await expect(page.locator('#status')).to_contain_text('Candidates: 41 sites.')
+        arrived,release=asyncio.Event(),asyncio.Event();holds['candidates']=(arrived,release)
+        await page.clock.run_for(5000);await asyncio.wait_for(arrived.wait(),5)
+        before=len(calls)
+        # Several timer ticks must neither abort a slow request nor start more work.
+        await page.clock.run_for(15000)
+        assert len(calls)==before, 'Automatic polling overlapped an unfinished request'
+        total=42;holds.clear();release.set()
+        await expect(page.locator('#status')).to_contain_text('Candidates: 42 sites.')
+        failed=True
+        await page.clock.run_for(5000)
+        await expect(page.locator('#pipeline-connection')).to_contain_text('Updates unavailable')
+        failed=False
+        await page.clock.run_for(5000)
+        await expect(page.locator('#pipeline-connection')).to_contain_text('Checked')
+        # Explicit navigation can supersede a slow poll. Its aborted request must
+        # not unlock polling while the replacement request is still pending.
+        holds['candidates']=(asyncio.Event(),asyncio.Event())
+        holds['queued']=(asyncio.Event(),asyncio.Event())
+        await page.clock.run_for(5000);await asyncio.wait_for(holds['candidates'][0].wait(),5)
+        await page.locator('#stages [data-view="queued"]').click()
+        await asyncio.wait_for(holds['queued'][0].wait(),5)
+        holds['candidates'][1].set();before=len(calls)
+        await page.clock.run_for(15000)
+        assert len(calls)==before, 'An aborted poll unlocked polling during navigation'
+        holds['queued'][1].set();holds.clear()
+        await expect(page.locator('#status')).to_contain_text('Capture queue: 0 sites.')
+        await page.clock.run_for(5000)
+        await expect(page.locator('#status')).to_contain_text('Capture queue: 0 sites.')
+        assert len(calls)==before+1 and calls[-1]=='queued'
+        assert not errors,errors
+    finally:
+        for _,release in holds.values():release.set()
+        await context.close()
+
+
 async def check(base):
     async with async_playwright() as playwright:
         browser=await playwright.chromium.launch()
         try:
             for width in (320,390,430,768,1280):
+                if width in (390,1280):await slow_polling_flow(browser,base,width)
                 await pipeline_activity_flow(browser,base,width)
                 await continuous_mode_flow(browser,base,width)
                 await theme_flow(browser,base,width)
