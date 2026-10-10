@@ -27,6 +27,8 @@ test('links timeline, themes, source phrases and sites and keeps a native search
   render(<Explore />);
   expect(screen.getByText('Loading charts…')).toBeVisible();
   await ready();
+  expect(screen.getByText(/Distinctive source terms, with everyday English filtered out/)).toBeVisible();
+  expect(screen.getByRole('link', { name: 'wordfreq by Robyn Speer', hidden: true })).toHaveAttribute('href', 'https://github.com/rspeer/wordfreq');
   expect(screen.getByRole('link', { name: 'Explore', exact: true })).toHaveAttribute('aria-current', 'page');
   expect(screen.getByText('12,000')).toBeVisible();
   expect(screen.getByText('50%')).toBeVisible();

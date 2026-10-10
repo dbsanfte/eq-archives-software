@@ -118,6 +118,54 @@ def test_cloud_surfaces_specific_topics_instead_of_repeated_template_labels():
     assert {'text': 'ancient cyclops', 'pages': 1} in small['phrases']
 
 
+def test_common_english_does_not_displace_less_frequent_source_topics():
+    # Common words vary across pages, so neither duplicate-text removal nor the
+    # 80% template rule can solve this. Repetition is not topical significance.
+    everyday = ['keep', 'life', 'type', 'general', 'found', 'need', 'think', 'sure',
+                'current', 'high', 'size', 'required', 'people', 'look', 'used']
+    hits = [hit(str(i), '. '.join(everyday[i % 5:]) + f'. Record {i}.\n{i}: ' +
+                ('An ancient cyclops is roaming the desert.' if i < 5 else
+                 'A shaman is in Norrath.' if i < 9 else
+                 'Firiona Vie is visited by adventurers.' if i < 12 else
+                 'A singular qzxvtypo is here.' if i == 12 else 'Other notes.'),
+                domain=f'site{i}.org') for i in range(20)]
+    result = extract_phrases(hits)
+    phrases = {p['text']: p['pages'] for p in result['phrases']}
+    assert not set(everyday) & phrases.keys()
+    assert phrases['ancient cyclops'] == 5
+    assert phrases['shaman'] == 4 and phrases['norrath'] == 4
+    assert phrases['firiona vie'] == 3
+    assert 'qzxvtypo' not in phrases  # Rarity never removes minimum page support.
+
+
+def test_english_words_can_still_form_specific_searchable_phrases():
+    result = extract_phrases([hit(text='Fire resist. Rare platinum. Massive strength.')])
+    phrases = {p['text']: p['pages'] for p in result['phrases']}
+    assert not {'fire', 'massive', 'strength'} & phrases.keys()
+    assert phrases['fire resist'] == phrases['rare platinum'] == phrases['massive strength'] == 1
+
+
+def test_distinctiveness_changes_order_without_changing_counts_or_backfilling_junk():
+    hits = [hit(str(i), f'Record {i}: ' + ('decent. ' if i < 15 else '') +
+                ('shaman. ' if i < 4 else 'notes.'), domain=f'site{i}.org') for i in range(20)]
+    terms = extract_phrases(hits)['phrases']
+    assert terms.index({'text': 'shaman', 'pages': 4}) < terms.index({'text': 'decent', 'pages': 15})
+    assert extract_phrases([hit(text='Keep life. Type. People. Current.')])['phrases'] == []
+
+
+def test_menu_runs_do_not_invent_compound_topics_or_discount_real_phrase_counts():
+    menu = 'Berserker Beastlord Ranger Paladin Shadowknight Bard Monk Rogue Warrior'
+    hits = [hit(str(i), f'{menu}.\nFiriona Vie Luclin Kunark Velious. Record {i}.',
+                domain=f'site{i}.org') for i in range(3)]
+    hits += [hit('story', 'Firiona Vie is a city. An ancient cyclops is nearby.')]
+    phrases = {p['text']: p['pages'] for p in extract_phrases(hits)['phrases']}
+    assert 'paladin shadowknight bard' not in phrases
+    assert 'firiona vie luclin' not in phrases
+    # One short, independently bounded occurrence qualifies a phrase; count all
+    # sampled pages containing it, including the occurrences in longer runs.
+    assert phrases['firiona vie'] == 4
+
+
 def test_cloud_bounds_removes_repeated_boilerplate_without_creating_cross_line_phrases():
     hits = [hit(str(i), f'Mysterious branding\nAncient cyclops drops\nRare platinum rings {chr(97+i)}') for i in range(12)]
     hits += [hit('blank', ''), hit('nottext', 42), hit('huge', 'abcdefghijkl ' * 2000, 'big.org')]

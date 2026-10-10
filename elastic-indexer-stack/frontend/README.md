@@ -90,7 +90,13 @@ characters per capture. It removes duplicate original pages, identical excerpts,
 repeated navigation lines, repeated phrases concentrated in a site's templates,
 and stop words. In samples of at least eight pages,
 words present on 80% or more of the sample (and phrases containing them) are
-omitted to expose more specific topics. Phrase selection favours longer phrases.
+omitted to expose more specific topics. An offline, attributed wordfreq English
+reference filters common standalone words and favours distinctive source terms.
+Ranking combines page support, capped English rarity, phrase length and word
+co-occurrence; phrases need evidence outside long unpunctuated lists. Common
+words can remain inside useful phrases such as "fire resist". Display counts
+stay unweighted. This English heuristic is not an EQ dictionary or AI judgment;
+the method and reference attribution are available in the UI.
 Cloud sizes linearly stretch the displayed count range from 1 to 2.75 rem;
 equal counts remain equal, with a medium size when every count is tied. The
 visible range legend and List view retain exact sampled page counts, with

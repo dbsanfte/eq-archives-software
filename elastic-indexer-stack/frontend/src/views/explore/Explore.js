@@ -180,7 +180,7 @@ export default function Explore() {
           </>}
         </section>
         <section id="explore-words" data-selected={panel === 'words'} className="explore-panel" aria-labelledby="phrases-title" aria-busy={phrases.loading}>
-          <div className="explore-panel-heading"><div><h2 id="phrases-title">Words from the pages</h2><p>Tap a word or phrase to narrow every view.</p></div>
+          <div className="explore-panel-heading"><div><h2 id="phrases-title">Words from the pages</h2><p>Distinctive source terms, with everyday English filtered out. Tap to explore.</p></div>
             <div className="explore-switch" aria-label="Phrase display"><button aria-pressed={cloud} onClick={() => setCloud(true)}>Cloud</button><button aria-pressed={!cloud} onClick={() => setCloud(false)}>List</button></div>
           </div>
           <RequestStatus resource={phrases} label="phrases" retry={() => setPhraseRevision(v => v + 1)} />
@@ -205,7 +205,9 @@ export default function Explore() {
             {!words.phrases.length && <p className="explore-empty">No distinctive source phrases in this selection. Try a broader range or another site.</p>}
             <p className="explore-note">Sample: {number(words.sampled_pages)} distinct pages across {number(words.sampled_sites)} domains.</p>
             <details className="explore-method"><summary>How this sample works</summary>
-              <p>Up to {words.sample_limit} captures, spread across domains, using the first {number(words.excerpt_chars)} characters per page. Repeated pages, identical excerpts, common navigation and stop words are removed, including repeated multiword labels concentrated in one site's pages. In samples of at least eight pages, words shared by 80% or more of the sample are omitted to surface more specific topics. Phrases get preference over single words when choosing terms.</p>
+              <p>Up to {words.sample_limit} captures, spread across domains, using the first {number(words.excerpt_chars)} characters per page. Repeated pages, identical excerpts, common navigation and stop words are removed, including repeated multiword labels concentrated in one site's pages. In samples of at least eight pages, words shared by 80% or more of the sample are omitted.</p>
+              <p>Everyday English words are filtered as standalone terms, but can still appear in specific phrases such as “fire resist”. Terms rank by sampled page frequency, rarity in general English and how consistently their words occur together. Phrases need an occurrence outside long lists; rare spellings receive no extra bonus. This favours distinctive names and topics without a fixed EverQuest dictionary. English-only filtering may miss other languages.</p>
+              <p>The bundled English frequency reference comes from <a href="https://github.com/rspeer/wordfreq">wordfreq by Robyn Speer</a> (<a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>).</p>
               <p>Font sizes stretch the frequency range of the displayed terms; equal counts have equal sizes. List bars start at zero and show exact sampled page counts. This is a discovery sample, not a complete or statistically representative word count.</p>
               <p>{words.duplicate_captures} duplicate captures excluded; {words.clipped_pages} excerpts reached the length limit. Summaries are cached for up to ten minutes. No AI is used to generate these phrases.</p>
               {words.vocabulary_limited && <p>This sample reached the 50,000-term vocabulary limit; additional terms were omitted.</p>}
