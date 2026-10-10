@@ -112,6 +112,7 @@
   .explore-panel-nav button { padding-inline: 6px; font-size: .8rem; }
   .explore-panel-nav button[aria-pressed="true"] { color: var(--archive-surface); background: var(--archive-ink); border-color: var(--archive-ink); }
   .archive-explore .explore-panel[data-selected="false"] { display: none; }
+  .archive-explore .explore-panel { scroll-margin-top: 78px; }
   .explore-date-settings > summary span { display: block; margin: 6px 0 0 18px; }
 }
 @media (max-width: 600px) {

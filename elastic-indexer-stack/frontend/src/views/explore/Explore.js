@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import HeaderContent from '../HeaderContent';
 import ArchiveStatusBar from '../ArchiveStatusBar';
 import { DEFAULT_SELECTION, readSelection, validSelection, selectionParams, exploreSearchUrl, fetchExplore } from './ExploreService';
@@ -43,12 +43,19 @@ export default function Explore() {
   const [phraseRevision, setPhraseRevision] = useState(0);
   const [metric, setMetric] = useState('records');
   const [panel, setPanel] = useState('timeline');
+  const previousPanel = useRef(panel);
   const [cloud, setCloud] = useState(true);
   const [share, setShare] = useState('');
   const overview = useExplore('overview', selection, revision);
   const phrases = useExplore('phrases', selection, phraseRevision);
   const data = overview.data;
   const words = phrases.data;
+
+  useEffect(() => {
+    if (previousPanel.current === panel) return;
+    previousPanel.current = panel;
+    if (window.innerWidth <= 900) document.getElementById(`explore-${panel}`)?.scrollIntoView?.({ block: 'start' });
+  }, [panel]);
 
   useEffect(() => {
     const pop = () => { setRoute(readSelection(window.location.search)); setShare(''); };

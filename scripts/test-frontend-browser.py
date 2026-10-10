@@ -191,6 +191,11 @@ class FrontendBrowserTests(unittest.TestCase):
                     def chart(name):
                         if width <= 900:
                             page.get_by_role('navigation', name='Explore charts').get_by_role('button', name=name, exact=True).click()
+                            titles = {'Timeline': 'Through the years', 'Themes': 'Follow a theme', 'Words': 'Words from the pages', 'Sites': 'Explore the sites'}
+                            heading = page.get_by_role('heading', name=titles[name], exact=True)
+                            expect(heading).to_be_visible()
+                            nav = page.get_by_role('navigation', name='Explore charts').bounding_box()
+                            self.assertGreaterEqual(heading.bounding_box()['y'], nav['y'] + nav['height'])
 
                     def dates():
                         if not page.locator('.explore-date-settings').get_attribute('open') == '':

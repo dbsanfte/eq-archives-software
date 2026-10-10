@@ -38,7 +38,7 @@ oct nov dec january february march april june july august september october nove
 navigation advertisement advertisements advertising loading continued content table contents
 url image images img registered site sites name names list lists time times inc ezboard jump add
 info information start total see use using used said says say httpurl htmlurl wwwurl today yesterday
-anyone someone make made want way things thing number date free
+anyone someone make made want way things thing number date free filter settings displayed setting
 one two three may must well even still really many every something anything don't doesn't didn't
 isn't can't won't i'm i've you're it's that's there's please thanks thank faq help poweredby
 everquest eq sony verant entertainment allakhazam castersrealm alla zam google yahoo

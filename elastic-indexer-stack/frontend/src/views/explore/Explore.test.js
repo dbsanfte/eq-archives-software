@@ -179,9 +179,12 @@ test('phone chart navigation changes the selected panel without changing filters
     render(<Explore />); await ready();
     expect(document.querySelector('.explore-date-settings')).not.toHaveAttribute('open');
     const calls = fetchExplore.mock.calls.length;
+    const scroll = jest.fn();
+    document.getElementById('explore-words').scrollIntoView = scroll;
     fireEvent.click(within(screen.getByRole('navigation', { name: 'Explore charts' })).getByRole('button', { name: 'Words' }));
     expect(document.getElementById('explore-words')).toHaveAttribute('data-selected', 'true');
     expect(document.getElementById('explore-timeline')).toHaveAttribute('data-selected', 'false');
     expect(fetchExplore).toHaveBeenCalledTimes(calls);
+    expect(scroll).toHaveBeenCalledWith({ block: 'start' });
   } finally { window.innerWidth = oldWidth; }
 });
