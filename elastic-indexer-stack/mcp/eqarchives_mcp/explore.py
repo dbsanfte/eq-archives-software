@@ -183,28 +183,29 @@ def extract_phrases(hits, site_selected=False):
             for sentence in re.split(r"[.!?;|\[\]{}<>]+", line):
                 matches = list(TOKEN.finditer(sentence))
                 tokens = [match[0] for match in matches]
+                content = [3 <= len(w) <= 24 and w.replace('’', "'") not in STOP for w in tokens]
                 # A long unpunctuated menu/list is not a compound topic. Compute
                 # run lengths in linear time, even for a 12,000-character row.
                 runs = []
                 run = []
                 for i, token in enumerate(tokens):
-                    if (token in STOP or not 3 <= len(token) <= 24 or
+                    if (not content[i] or
                             (run and not sentence[matches[i-1].end():matches[i].start()].isspace())):
                         runs.append(run)
                         run = []
-                    if token not in STOP and 3 <= len(token) <= 24:
+                    if content[i]:
                         run.append(i)
                 runs.append(run)
                 short_run = {i for run in runs if len(run) <= 4 for i in run}
                 for start, token in enumerate(tokens):
-                    if token in STOP or not 3 <= len(token) <= 24:
+                    if not content[start]:
                         continue
                     phrases.add(token)
                     for length in (2, 3):
                         words = tokens[start:start + length]
                         adjacent = all(sentence[a.end():b.start()].isspace()
                             for a, b in zip(matches[start:start + length - 1], matches[start + 1:start + length]))
-                        if len(words) == length and adjacent and all(3 <= len(w) <= 24 and w not in STOP for w in words):
+                        if len(words) == length and adjacent and all(content[start:start + length]):
                             phrase = " ".join(words)
                             phrases.add(phrase)
                             if start in short_run:
@@ -242,7 +243,7 @@ def extract_phrases(hits, site_selected=False):
         # standalone words are poor topics, but keep them inside literal phrases
         # such as "fire resist". Missing/rare words share a floor: typos cannot
         # earn an unlimited rarity bonus or bypass minimum sampled page support.
-        english = [ENGLISH_FREQUENCY.get(w, 3.0) for w in words]
+        english = [ENGLISH_FREQUENCY.get(w.replace('’', "'"), 3.0) for w in words]
         if (len(words) == 1 and english[0] >= 4.6) or (len(words) > 1 and phrase not in bounded_phrases):
             continue
         rarity = sum(max(0, 5 - z) for z in english) / len(words)

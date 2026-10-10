@@ -145,6 +145,14 @@ def test_english_words_can_still_form_specific_searchable_phrases():
     assert phrases['fire resist'] == phrases['rare platinum'] == phrases['massive strength'] == 1
 
 
+def test_typographic_contractions_are_not_rare_topics_and_source_spelling_is_retained():
+    source = 'I’m here. You’re a shaman. Don’t worry. Didn’t we visit Lanys T’Vyl?'
+    phrases = {p['text'] for p in extract_phrases([hit(text=source)])['phrases']}
+    assert not any(set(p.split()) & {'i’m', 'you’re', 'don’t', 'didn’t'} for p in phrases)
+    assert 'shaman' in phrases and 'lanys t’vyl' in phrases
+    assert all(p in source.lower() for p in phrases)
+
+
 def test_distinctiveness_changes_order_without_changing_counts_or_backfilling_junk():
     hits = [hit(str(i), f'Record {i}: ' + ('decent. ' if i < 15 else '') +
                 ('shaman. ' if i < 4 else 'notes.'), domain=f'site{i}.org') for i in range(20)]

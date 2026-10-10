@@ -220,6 +220,8 @@ Missing or rare English words share a 3.0 frequency floor. Minimum support remai
 two pages for samples of eight or more, one otherwise; rarity cannot promote
 one-off typos in a larger sample. Zero-rarity terms are omitted. This is a
 heuristic for distinctive source terms, not an EQ whitelist or semantic classifier.
+Straight and curly apostrophes share stop-word/frequency lookups while offered
+terms retain their literal source spelling for search.
 Multiword terms also need at least one occurrence in a contiguous run of at most
 four content words, to exclude fragments supported only by long unpunctuated
 menus. This eligibility check shares the vocabulary bound and does not discount
