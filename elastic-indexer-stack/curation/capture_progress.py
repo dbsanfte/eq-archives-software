@@ -22,7 +22,7 @@ class CaptureProgress:
         if board:
             counts = board.get('counts', {})
             total = sum(counts.values())
-            remaining = counts.get('pending', 0) + counts.get('downloaded', 0)
+            remaining = counts.get('pending', 0) + counts.get('downloaded', 0) + counts.get('retry', 0)
         known = (type(total) is int and type(remaining) is int and 0 <= remaining <= total)
         completed = total - remaining if known else None
         estimate = {'total': total if known else None, 'remaining': remaining if known else None,

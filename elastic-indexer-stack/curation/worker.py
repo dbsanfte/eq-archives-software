@@ -141,9 +141,12 @@ class Worker:
         refresh(self.root)
         migrate(self.root)
         with connect(self.root) as store:
-            # A terminated paid/download request has uncertain outcome. Require
-            # an explicit resume; retained dollar and HTTP reservations still apply.
-            store.db.execute("UPDATE operations SET state='interrupted',error='Worker stopped; resume explicitly',updated=? WHERE state='running'", (now(),))
+            # Approved downloads recover on a timer. Interrupted paid discovery
+            # and publication retain their existing resume rules/reservations.
+            from capture_failures import WORKER_INTERRUPTED
+            store.db.execute("""UPDATE operations SET state='interrupted',
+                error=CASE WHEN kind='capture' THEN ? ELSE 'Worker stopped; resume explicitly' END,
+                updated=? WHERE state='running'""", (WORKER_INTERRUPTED, now()))
             # Give legacy approvals the same opportunity to undo on first rollout.
             for row in store.db.execute("SELECT id,decision FROM candidates WHERE state='approved_waiting_batch'").fetchall():
                 grant = json.loads(row['decision'])
@@ -178,6 +181,8 @@ class Worker:
             self.lease.close()
 
     def capture_queue(self):
+        from capture_recovery import schedule
+        schedule(self.root)
         with connect(self.root) as store:
             due = next_entry(store, now())
             if not due:
@@ -292,6 +297,9 @@ class Worker:
             automation.finished(self.root, operation, result)
         except Exception as error:
             detail = str(error) if isinstance(error, CrawlError) else f"Operation failed ({type(error).__name__}); staged evidence retained"
+            if operation['kind'] == 'capture' and detail == 'Worker stopped; resume explicitly':
+                from capture_failures import WORKER_INTERRUPTED
+                detail = WORKER_INTERRUPTED
             with connect(self.root) as store:
                 previous = store.db.execute('SELECT result FROM operations WHERE id=?', (operation['id'],)).fetchone()
                 result = json.loads(previous['result'] or '{}')
@@ -299,6 +307,9 @@ class Worker:
                 if pause := automation.pause_detail(error, operation):
                     result['automatic_pause'] = pause
                 store.db.execute("UPDATE operations SET state='interrupted',error=?,result=?,updated=? WHERE id=?", (detail, json.dumps(result), now(), operation["id"]))
+                if operation['kind'] == 'capture':
+                    from capture_recovery import register
+                    register(store, operation, detail)
                 store.db.commit()
         finally:
             automatic_request.reset(auto_token)

@@ -44,6 +44,7 @@ def decorate(store, rows):
     # Read status metadata without copying manifests or inspecting archive files.
     from capture_queue import held
     failures = held(store)
+    retries = {row['operation']: dict(row) for row in store.db.execute('SELECT * FROM capture_retries')}
     states = dict(store.db.execute('SELECT id,state FROM batches'))
     captures = {row['candidate']: row for row in store.db.execute("""SELECT json_extract(site.value,'$.id') candidate,
         operations.id,operations.state,operations.error FROM operations,json_each(operations.payload,'$.sites') site
@@ -63,6 +64,7 @@ def decorate(store, rows):
             row['capture_operation_id'] = captures[row['id']]['id']
             row['capture_state'] = captures[row['id']]['state']
             row['capture_error'] = captures[row['id']]['error']
+            row['capture_retry'] = retries.get(captures[row['id']]['id'])
     return rows
 
 

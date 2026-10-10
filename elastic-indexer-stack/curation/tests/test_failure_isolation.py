@@ -58,7 +58,9 @@ def test_guildsay_failure_retains_checkpoint_while_next_site_starts(tmp_path, mo
         assert detail['queue_blocker'] is None
         assert detail['capture_operation']['result']['progress']['files'] == 8493
         listing = call(app, 'GET', '/api/queue?compact=1&filter=capturing').json()
-        assert listing['capture_attention']['interrupted'] == 1
+        assert listing['capture_attention']['interrupted'] == 0
+        assert listing['capture_attention']['retrying'] == 1
+        assert listing['activity']['next_retry']['id'] == guildsay['id']
         assert failed['id'] not in [operation['id'] for operation in listing['operations']]
         assert listing['candidates'][0]['capture_state'] == 'interrupted'
     finally:

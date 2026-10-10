@@ -2,7 +2,7 @@
 
 SQLite checkpoints each catalog page and each exact URL/date. No archive walk,
 HTML-only spider, digest collapse, file-count ceiling or growing JSON rewrite.
-Runtime limits pause acquisition; only an exhausted inventory reaches Review.
+Runtime limits pause acquisition; only an exhausted inventory reaches Indexing.
 """
 import json
 from pathlib import Path
@@ -12,6 +12,7 @@ from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 from archive_layout import archive_path
+from capture_failures import FileRetries
 from common import CAPTURE_WINDOW, CrawlError, Store, capture_exclusion, digest, in_capture_window, now, original_url, save, within_capture_scope
 from indexer.capture_enrichment import policy_for_sites
 
@@ -20,7 +21,6 @@ POLICY = 'complete-files-v1'
 # files. Explicit resume can extend an exhausted allowance, retaining all usage.
 ALLOWANCE = {'requests': 100000, 'bytes': 50 * 1024**3, 'seconds': 7 * 86400}
 DISK_RESERVE = 256 * 1024**2
-FILE_UNAVAILABLE = {'Wayback HTTP 403', 'Wayback HTTP 404', 'Wayback HTTP 410'}
 
 
 def seed_retry(root, store, retained):
@@ -94,6 +94,18 @@ def allowed(url, site):
     return within_capture_scope(value, site['scope'])
 
 
+def verify_board_file(root, capture, site, retained):
+    """A failed board replay must still prove ownership before joining a retry."""
+    from captures import verified_source
+    import ezboard
+    import sitepowerup
+    platform = ezboard if site['scope_mode'] == 'ezboard' else sitepowerup
+    board = platform.board_name(site['scope'])
+    page, _ = platform.source_page(verified_source(root, capture), capture['url'], capture.get('content_type') or '')
+    forums = [row['token'] for row in retained.get('ezboard', {}).get('forums', [])]
+    return not platform.source_problem(page) and platform.belongs(page, capture['url'], board, forums)
+
+
 def capture(root, batch_id, sites, downloader_factory, progress=None, base_manifest=None):
     from captures import check_manifest, describe_source, verified_path
     retained = None
@@ -107,6 +119,7 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
     store = Store(directory)
     db = store.db
     downloader = None
+    retries = FileRetries(store)
     signature = digest(sites)
     try:
         db.executescript('''
@@ -157,9 +170,14 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
             result = json.loads(result_path.read_text())
             check_manifest(root, result)
             return result
+        # A later worker turn retries deferred URLs, retaining attempts and all
+        # successful sources. Never reopen a completed immutable manifest.
+        db.execute("UPDATE full_records SET state='pending' WHERE state='retry'")
+        db.execute('UPDATE full_queries SET done=0 WHERE done=-1')
+        db.commit()
         used = store.get('wayback_transport', {})
-        # A manual pause needs /api/resume. Enabled automatic mode may continue
-        # its own capture under the original approval; neither resets usage.
+        # An exhausted allowance needs explicit resume; scheduled transport
+        # retries retain the original approval and cumulative usage.
         extended = [key for key in ALLOWANCE if store.get('extend_transport_on_resume') or used.get(key, 0) >= config['limits'][key]]
         if extended:
             for key in extended:
@@ -206,13 +224,25 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
                     db.execute('INSERT INTO full_records(id,site,url,timestamp,record) VALUES (?,?,?,?,?)',
                                (key, site['id'], source['url'], source['timestamp'], '{}'))
                     commit_capture({**source, 'candidate_id': site['id']}, key)
+            if site['scope_mode'] in ('ezboard', 'sitepowerup'):
+                for note in (base_manifest or retained or {}).get('notes', []):
+                    if note.get('state') != 'unavailable' and not note.get('board_file'):
+                        continue
+                    stamp = note.get('stamp') or note.get('timestamp')
+                    if not in_capture_window(stamp):
+                        raise CrawlError('Saved board gap has an invalid capture date')
+                    db.execute('''INSERT OR IGNORE INTO full_records(id,site,url,timestamp,record,state,note)
+                        VALUES (?,?,?,?,?,?,?)''', (record_key(site['id'], note['url'], stamp), site['id'], note['url'], stamp,
+                        json.dumps({'board_gap': True}), 'pending' if retained else 'unavailable', note.get('note') or note.get('reason')))
+                db.commit()
         def report(phase, url=None):
             if progress:
                 counts = {row['state']: row['n'] for row in db.execute('SELECT state,COUNT(*) n FROM full_records GROUP BY state')}
-                catalogs = db.execute('SELECT COUNT(*),COALESCE(SUM(done),0) FROM full_queries').fetchone()
+                catalogs = db.execute('SELECT COUNT(*),COALESCE(SUM(done=1),0) FROM full_queries').fetchone()
                 size = db.execute("SELECT COALESCE(SUM(json_extract(capture,'$.bytes')),0) FROM full_records WHERE state='captured'").fetchone()[0]
                 progress({'phase': phase, 'files': counts.get('captured', 0), 'bytes': size,
-                          'versions_found': sum(counts.values()), 'versions_pending': counts.get('pending', 0),
+                          'versions_found': sum(counts.values()), 'versions_pending': counts.get('pending', 0) + counts.get('retry', 0),
+                          'retry_pending': counts.get('retry', 0),
                           'unavailable': counts.get('unavailable', 0),
                           'failed_lookups': db.execute('SELECT COUNT(*) FROM full_queries WHERE note IS NOT NULL').fetchone()[0],
                           'excluded_urls': db.execute('SELECT COUNT(*) FROM full_exclusions').fetchone()[0],
@@ -272,19 +302,26 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
                         # supporting-file gap, never grounds to abandon the site.
                         # The primary scope inventory and service failures still
                         # pause: they cannot establish complete site coverage.
-                        if (str(error) not in FILE_UNAVAILABLE or query['match'] != 'exact'
-                                or (query['url'], query['site']) not in dependencies):
+                        state = retries.failed(query['id'], error) if query['match'] == 'exact' and (query['url'], query['site']) in dependencies else None
+                        if not state:
                             raise
-                        db.execute('UPDATE full_queries SET done=1,note=? WHERE id=?', (str(error), query['id']))
+                        db.execute('UPDATE full_queries SET done=?,note=? WHERE id=?', (-1 if state == 'retry' else 1, str(error), query['id']))
                         db.commit()
+                        if retries.streak >= 3 and state == 'retry':
+                            raise
                         break
+                    retries.succeeded()
                     continuation = listing.get('resume_key')
                     if continuation and continuation == resume:
                         raise CrawlError('Wayback repeated its catalog continuation; full coverage remains unresolved')
                     found = 0
                     for record in listing['captures']:
                         if not in_capture_window(record['timestamp']):
-                            raise CrawlError('Wayback inventory returned a version outside 1999–2006')
+                            db.execute('''INSERT OR IGNORE INTO full_records(id,site,url,timestamp,record,state,note)
+                                VALUES (?,?,?,?,?,'excluded','Outside the approved 1999–2006 capture window')''',
+                                (record_key(query['site'], record['url'], record['timestamp']), query['site'], record['url'],
+                                 record['timestamp'], json.dumps(record)))
+                            continue
                         dependency = dependencies.get((original_url(record['url']), query['site']))
                         if not allowed(record['url'], site_map[query['site']]) and not (
                                 dependency and original_url(record['url']) == query['url']):
@@ -297,7 +334,7 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
                         db.execute('INSERT OR IGNORE INTO full_records(id,site,url,timestamp,record) VALUES (?,?,?,?,?)',
                                    (record_key(query['site'], record['url'], record['timestamp']), query['site'], record['url'],
                                     record['timestamp'], json.dumps(record)))
-                    db.execute('UPDATE full_queries SET resume=?,done=?,found=found+? WHERE id=?', (continuation, not continuation, found, query['id']))
+                    db.execute('UPDATE full_queries SET resume=?,done=?,found=found+?,note=NULL WHERE id=?', (continuation, not continuation, found, query['id']))
                     db.commit()
                     if not continuation:
                         break
@@ -332,19 +369,37 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
                     save(receipt, captured)
                 if captured['url'] != row['url'] or captured['timestamp'] != row['timestamp']:
                     raise CrawlError('Downloaded file did not retain its exact catalog URL and date')
+                if record.get('board_gap') and not verify_board_file(root, captured, site_map[row['site']], retained):
+                    db.execute("UPDATE full_records SET state='unavailable',note=? WHERE id=?",
+                               ('Returned page does not verify the approved board; saved as a gap.', row['id']))
+                    db.commit()
+                    continue
                 commit_capture(captured, row['id'])
+                retries.succeeded()
             except CrawlError as error:
-                if str(error) not in FILE_UNAVAILABLE and not str(error).startswith(
-                        ('Replay returned a different original URL', 'Replay returned a different dated version')):
+                state = retries.failed(row['id'], error)
+                if not state:
                     raise
-                db.execute("UPDATE full_records SET state='unavailable',note=? WHERE id=?", (str(error), row['id']))
+                db.execute('UPDATE full_records SET state=?,note=? WHERE id=?', (state, str(error), row['id']))
                 db.commit()
+                if retries.streak >= 3 and state == 'retry':
+                    raise
+        waiting = db.execute("SELECT note FROM full_records WHERE state='retry' UNION ALL SELECT note FROM full_queries WHERE done=-1 LIMIT 1").fetchone()
+        if waiting:
+            report('retry_wait')
+            raise CrawlError(waiting['note'])
         captures = [json.loads(row[0]) for row in db.execute("SELECT capture FROM full_records WHERE state='captured' ORDER BY rowid")]
         if not captures:
             raise CrawlError('No files could be recovered in the approved scope for 1999–2006. Sources and catalog progress are retained.')
-        notes = list(base_manifest.get('notes', [])) if base_manifest else []
-        notes += [{'candidate_id': row['site'], 'url': row['url'], 'timestamp': row['timestamp'], 'note': row['note']}
-                 for row in db.execute("SELECT site,url,timestamp,note FROM full_records WHERE state='unavailable' ORDER BY rowid")]
+        board_manifest = base_manifest or (retained if any(s['scope_mode'] in ('ezboard', 'sitepowerup') for s in sites) else None)
+        notes = [note for note in (board_manifest or {}).get('notes', [])
+                 if note.get('state') != 'unavailable' and not note.get('board_file') and 'candidate_id' not in note]
+        notes += [{'candidate_id': row['site'], 'url': row['url'], 'timestamp': row['timestamp'], 'note': row['note'],
+                   **({'board_file': True} if json.loads(row['record']).get('board_gap') else {})}
+                 for row in db.execute("SELECT site,url,timestamp,record,note FROM full_records WHERE state='unavailable' ORDER BY rowid")]
+        notes += [{'candidate_id': row['site'], 'url': row['url'], 'timestamp': row['timestamp'],
+                   'kind': 'outside_date_window', 'note': row['note']}
+                  for row in db.execute("SELECT site,url,timestamp,note FROM full_records WHERE state='excluded' AND note='Outside the approved 1999–2006 capture window'")]
         failed_queries = [dict(row) for row in db.execute('SELECT url,site,note FROM full_queries WHERE note IS NOT NULL')]
         notes += [{'candidate_id': row['site'], 'url': row['url'], 'note': 'Supporting-file lookup failed: ' + row['note']} for row in failed_queries]
         exclusions = [dict(row) for row in db.execute('SELECT * FROM full_exclusions ORDER BY site,url')]
@@ -359,22 +414,28 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
             gaps = sum(row['site'] == site['id'] for row in db.execute("SELECT site FROM full_records WHERE state='unavailable'"))
             retry = {'files': gaps, 'lookups': sum(row['site'] == site['id'] for row in missing + failed_queries)}
             gaps += retry['lookups']
-            if base_manifest:
-                board = base_manifest.get('ezboard') or base_manifest.get('sitepowerup') or {}
+            if board_manifest:
+                board = board_manifest.get('ezboard') or board_manifest.get('sitepowerup') or {}
                 counts = board.get('coverage', {}).get('counts', {})
-                gaps += counts.get('unavailable', 0) + counts.get('excluded', 0)
+                gaps += counts.get('excluded', 0)
             coverage[site['id']] = {'state': 'complete_with_gaps' if gaps else 'complete', 'unavailable': gaps, 'retry': retry,
                 'excluded_urls': excluded_urls,
                 'reason': 'The site inventory and listed versions were processed for 1999–2006. ' +
                           (f'{excluded_urls} advertising-subdomain URLs were intentionally excluded. ' if excluded_urls else '') +
                           (f'{gaps} file versions or supporting-file lookups remain unavailable; see the URLs, known dates and reasons below.' if gaps else 'Wayback may not have archived every original file.')}
-        manifest = {**(base_manifest or {}), 'schema': 1, 'batch_id': batch_id, 'created_at': config['created_at'], 'capture_policy': POLICY,
+        manifest = {**(board_manifest or {}), 'schema': 1, 'batch_id': batch_id, 'created_at': config['created_at'], 'capture_policy': POLICY,
                     'capture_window': dict(CAPTURE_WINDOW), 'sites': sites, 'captures': captures,
                     'capture_coverage': coverage, 'notes': notes, 'limits': config['limits'],
                     'capture_retry': {'files': db.execute("SELECT COUNT(*) FROM full_records WHERE state='unavailable'").fetchone()[0],
                                       'lookups': len(failed_queries) + len(missing)},
                     'transport': store.get('wayback_transport', {}),
                     'indexing': dict((retained or base_manifest or {}).get('indexing', policy_for_sites(sites))), 'visited': []}
+        for platform in ('ezboard', 'sitepowerup'):
+            if platform in manifest:
+                board = json.loads(json.dumps(manifest[platform]))
+                board['coverage']['counts']['unavailable'] = db.execute("SELECT COUNT(*) FROM full_records WHERE state='unavailable' AND json_extract(record,'$.board_gap')=1").fetchone()[0]
+                board['coverage']['counts']['captured'] = sum(not c.get('supporting_source') for c in captures)
+                manifest[platform] = board
         if retained and (sites[0].get('continued_from', {}).get('published') or retained.get('enrichment_budget_id')):
             manifest['enrichment_budget_id'] = retained.get('enrichment_budget_id', retained['batch_id'])
         check_manifest(root, manifest)

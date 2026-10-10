@@ -64,6 +64,8 @@ def connect(directory):
                 manifest_sha256 TEXT, publication TEXT, job TEXT, error TEXT, created TEXT, updated TEXT);
             CREATE TABLE IF NOT EXISTS capture_queue_failures(candidate TEXT PRIMARY KEY,
                 decision TEXT NOT NULL, error TEXT NOT NULL, created TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS capture_retries(operation TEXT PRIMARY KEY,
+                attempts INTEGER NOT NULL, retry_at TEXT, paused INTEGER NOT NULL DEFAULT 0);
             CREATE INDEX IF NOT EXISTS operation_activity ON operations(updated DESC);
             CREATE INDEX IF NOT EXISTS batch_activity ON batches(updated DESC);
         """)

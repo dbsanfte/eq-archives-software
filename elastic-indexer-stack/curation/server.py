@@ -32,6 +32,7 @@ from automatic_indexing import retry as retry_preparation
 from grading import criteria
 import automation
 import activity
+import capture_recovery
 from review_actions import (preview as review_preview, decide_all as decide_all_reviews,
                             apply_decision as apply_site_decision, validate_decision as validate_site_decision,
                             undo_dismissal as undo_review_dismissal)
@@ -198,7 +199,7 @@ def create_app(root=None, origin=None, start_worker=True):
             ids = queue_order(store)
             blocker = active_operation(store)
             return JSONResponse({'candidate': candidate, 'review': review,
-                'capture_operation': unpack(operation) if operation else None,
+                'capture_operation': {**unpack(operation), 'retry': capture_recovery.detail(store, operation['id'])} if operation else None,
                 'queue_position': ids.index(candidate['id']) + 1 if candidate['id'] in ids else None,
                 'queue_blocker': {key: blocker[key] for key in ('id', 'kind', 'state')} if blocker else None,
                 'capture_queue_error': store.get('capture_queue_error')})
@@ -581,6 +582,17 @@ def create_app(root=None, origin=None, start_worker=True):
             store.db.commit()
         return JSONResponse({'state': 'interrupted'})
 
+    async def pause_capture_retries(request):
+        from capture_recovery import pause
+        payload = await body(request)
+        if not isinstance(payload, dict) or set(payload) != {'id'}:
+            raise CrawlError('Pause retries requires the capture operation ID')
+        with connect(root) as store:
+            store.db.execute('BEGIN IMMEDIATE')
+            pause(store, valid_id(payload['id']))
+            store.db.commit()
+        return JSONResponse({'state': 'interrupted'})
+
     async def problem(request, error):
         return JSONResponse({"error": str(error)}, status_code=409)
 
@@ -594,6 +606,7 @@ def create_app(root=None, origin=None, start_worker=True):
 
     app = Starlette(routes=[Route("/", screen), Route("/assets/{name}", asset), Route("/healthz", health),
                             Route('/api/cancel-resume', cancel_capture_resume, methods=['POST']),
+                            Route('/api/pause-capture-retries', pause_capture_retries, methods=['POST']),
                             Route("/api/queue", listing), Route("/api/source", source),
                             Route('/api/automation', automatic_settings, methods=['POST']),
                             Route('/api/candidate',candidate_detail), Route('/api/restore',restore_candidate,methods=['POST']),

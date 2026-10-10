@@ -205,11 +205,19 @@ def test_automatic_capture_claim_retains_undo_grace_and_marks_only_owned_work(ca
             operation = unpack(store.db.execute('SELECT * FROM operations').fetchone())
             assert operation['payload']['automatic'] is True
             assert operation['payload']['sites'][0]['decision']['automatic']['min_grade'] == 2
-        # Restart recovery applies only to automation-owned operations.
+        # Capture restart recovery waits and rejoins the same FIFO as other
+        # approved work, instead of bypassing queued sites.
         with connect(root) as store:
             store.db.execute("UPDATE operations SET state='interrupted',error='Worker stopped; resume explicitly'")
             store.db.commit()
         automation.resume_owned(root, Lane.CAPTURE, account)
+        worker.capture_queue()
+        with connect(root) as store:
+            assert store.db.execute('SELECT state FROM operations').fetchone()[0] == 'interrupted'
+            assert store.db.execute('SELECT retry_at FROM capture_retries').fetchone()[0]
+            store.db.execute("UPDATE capture_retries SET retry_at='1999'")
+            store.db.commit()
+        worker.capture_queue()
         with connect(root) as store: assert store.db.execute('SELECT state FROM operations').fetchone()[0] == 'queued'
     finally: worker.close()
 

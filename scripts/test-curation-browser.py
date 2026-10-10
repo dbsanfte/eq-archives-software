@@ -645,7 +645,7 @@ async def capture_failure_isolation_flow(browser,base,width):
     await page.goto(base+'/?view=capturing');await settled(page)
     await expect(page.get_by_role('button',name='Open www.guildsay.com',exact=True)).to_contain_text('Capture paused')
     await page.get_by_role('button',name='Open www.guildsay.com',exact=True).click();await settled(page)
-    await expect(page.locator('#stage-live')).to_contain_text('does not block the queue')
+    await expect(page.locator('#stage-live')).to_contain_text('Other approved sites continue.')
     await expect(page.locator('#stage-live')).to_contain_text('8,493 files saved')
     await expect(page.get_by_role('button',name='Resume capture',exact=True)).to_be_enabled()
     await page.evaluate('refresh()');await settled(page)
@@ -2176,6 +2176,7 @@ async def pipeline_activity_flow(browser,base,width):
         else:await route.continue_()
     await page.route('**/api/**',fixture)
     await page.goto(base);await settled(page)
+    await page.locator('#pipeline-activity > summary').click()
     await expect(page.locator('#activity-candidates > summary')).to_contain_text('Grading with Luna')
     await expect(page.locator('#activity-candidates')).to_contain_text('7/50 Grade 3+ sites · 23 checked')
     await expect(page.locator('#activity-candidates')).to_contain_text('http://new-guild.example/')
@@ -2210,6 +2211,7 @@ async def pipeline_activity_flow(browser,base,width):
     await expect(page.locator('#pipeline-events')).to_contain_text('Automatically queued for capture')
     await page.evaluate('refresh()');assert await page.locator('#pipeline-recent').get_attribute('open') is not None
     await stage(page,'queued')
+    await page.locator('#pipeline-activity > summary').click()
     await expect(page.locator('#activity-capture > summary')).to_contain_text('Checking archive listings')
     await expect(page.locator('#activity-capture')).to_contain_text('451 of 660 archive listings checked · 209 left')
     await expect(page.locator('#activity-capture')).to_contain_text('16 sites waiting')
@@ -2246,6 +2248,78 @@ async def pipeline_activity_flow(browser,base,width):
     await expect(page.locator('#activity-capture > summary')).to_contain_text('Queued sites need attention')
     assert not errors,errors
     assert not posts,posts
+    await context.close()
+
+
+async def collapsed_pipeline_flow(browser,base,width):
+    context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
+    page=await context.new_page();posts=[]
+    page.on('request',lambda request:posts.append(request.url) if request.method=='POST' else None)
+    await page.goto(base);await settled(page)
+    for view in ('candidates','queued','capturing','indexing'):
+        await stage(page,view)
+        panel=page.locator('#pipeline-activity');summary=panel.locator(':scope > summary')
+        assert await panel.get_attribute('open') is None
+        await expect(page.locator('#pipeline-workers')).not_to_be_visible()
+        assert (await panel.bounding_box())['height'] < 140, 'Collapsed status crowds out the mobile site list'
+        assert (await page.locator('#view-title').bounding_box())['y'] < 430
+        assert (await summary.bounding_box())['height'] >= 44
+        await summary.click()
+        await expect(page.locator('#pipeline-workers')).to_be_visible()
+        await page.evaluate('refresh()');await settled(page)
+        assert await panel.get_attribute('open') is not None, 'Polling collapsed the user-opened status'
+        await summary.focus();await page.keyboard.press('Enter')
+        await expect(page.locator('#pipeline-workers')).not_to_be_visible()
+        await summary.click()  # Advancing to the next stage must collapse it again.
+    await page.reload();await settled(page)
+    assert await page.locator('#pipeline-activity').get_attribute('open') is None
+    for theme in ('dark','light'):
+        await page.emulate_media(color_scheme=theme)
+        await safe_layout(page,width)
+        await page.screenshot(path=f'/tmp/curation-collapsed-status-{width}-{theme}.png',full_page=True)
+    assert not posts, 'Expanding status must never start work'
+    await context.close()
+
+
+async def capture_retry_flow(browser,base,width):
+    context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
+    page=await context.new_page();posts=[];errors=[]
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    snapshot=await (await context.request.get(base+'/api/queue?filter=candidates')).json()
+    site=copy.deepcopy(snapshot['candidates'][0])
+    retry={'attempts':1,'retry_at':datetime.fromtimestamp(datetime.now(timezone.utc).timestamp()+300,timezone.utc).isoformat(),'paused':0}
+    site.update(stage='capturing',state='capturing',capture_state='interrupted',capture_retry=retry)
+    op={'id':'a'*32,'kind':'capture','state':'interrupted','error':'Wayback connection failed after bounded retries',
+        'retry':retry,'payload':{'sites':[site]},'result':{'progress':{'files':18,'phase':'retry_wait','sites_total':1}}}
+    async def fixture(route):
+        path=urlsplit(route.request.url).path
+        if route.request.method=='POST':
+            posts.append(path)
+            if path=='/api/pause-capture-retries':retry['paused']=1
+            elif path=='/api/resume':
+                retry.update(paused=0,retry_at=None);op['state']='resume_queued'
+                site.update(stage='queued',state='capture_resume_queued',capture_state='resume_queued',capture_operation_id=op['id'])
+            else:raise AssertionError(path)
+            await route.fulfill(status=202,json={'state':op['state']});return
+        if path=='/api/queue':
+            await route.fulfill(json={**snapshot,'candidates':[site],'total':1,'operations':[op],'workers':{'capture':None},
+                'stage_counts':{name:int(name==site['stage']) for name in ('candidates','queued','capturing','indexing','history','saved')}})
+        elif path=='/api/candidate':await route.fulfill(json={'candidate':site,'capture_operation':op,'review':None,'queue_position':1})
+        else:await route.continue_()
+    await page.route('**/api/**',fixture)
+    await page.goto(base+'/?view=capturing&candidate='+site['id']);await settled(page)
+    await expect(page.get_by_role('heading',name='Automatic retry scheduled')).to_be_visible()
+    await expect(page.locator('#site-workspace')).to_contain_text('Next capture retry in')
+    await expect(page.locator('#site-workspace')).to_contain_text('three attempts')
+    await page.evaluate('refresh()');await settled(page)
+    assert not posts, 'Status reads started a retry'
+    await page.get_by_role('button',name='Pause retries',exact=True).click();await settled(page)
+    await expect(page.get_by_role('button',name='Resume capture',exact=True)).to_be_visible()
+    retry['paused']=0;await page.evaluate('refresh()');await settled(page)
+    await page.get_by_role('button',name='Retry now',exact=True).click();await settled(page)
+    await expect(page.get_by_role('button',name='Cancel queued resume',exact=True)).to_be_visible()
+    await safe_layout(page,width)
+    assert posts==['/api/pause-capture-retries','/api/resume'] and not errors
     await context.close()
 
 
@@ -2311,6 +2385,8 @@ async def check(base):
         browser=await playwright.chromium.launch()
         try:
             for width in (320,390,430,768,1280):
+                await collapsed_pipeline_flow(browser,base,width)
+                if width in (390,1280):await capture_retry_flow(browser,base,width)
                 if width in (390,1280):await slow_polling_flow(browser,base,width)
                 await pipeline_activity_flow(browser,base,width)
                 await continuous_mode_flow(browser,base,width)

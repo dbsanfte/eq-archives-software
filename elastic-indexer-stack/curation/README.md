@@ -12,7 +12,10 @@ immutable digest with [deploy-curation.sh](../../scripts/deploy-curation.sh).
 The same image contains [index_captures.py](../indexer/src/index_captures.py).
 Legacy finder/worker/broad reindex Jobs retain their separate lifecycles.
 
-**Pipeline activity** stays available above every stage and site workspace.
+**Pipeline status** is a compact, collapsed disclosure above every stage and site workspace.
+Expand it to see workers and recent events. Opening another stage collapses it;
+polling preserves an explicitly opened panel. The compact summary keeps worker,
+queue and retry counts plus connection health visible, including on phones.
 Discovery, Capture and Indexing each show their current phase or waiting reason;
 the current stage opens its details by default. In Queue, this includes the active
 capture's saved files, listing/download progress, ETA and waiting count. Automatic
@@ -88,11 +91,12 @@ approvals keep their original $2/site cap as well as any configured daily limit.
 Failed-file retries retain the original site's policy and enrichment budget/cache.
 Turning automatic mode off stops new automatic discovery and approvals; already
 approved captures and imports continue under the configured daily limit. Turning
-it back on resumes retained automatic work. Failed sites remain visible with their
-errors, sources and checkpoints for an explicit operator decision. They never hold
-discovery, capture or publication/indexing queues: other eligible sites continue in
-both manual and automatic mode. Budget waits and automation-owned restart interruptions
-can resume automatically; failed transport/publication requests require explicit retry.
+it back on resumes retained automatic work. Approved captures retry temporary
+Wayback failures and worker interruptions independently of this discovery setting.
+Retries join the same FIFO after 5 minutes, then 15 minutes, then hourly for
+continued site-wide failures. Saved files, approvals and cumulative usage remain.
+Other sites run during each wait; no failed site holds a worker queue. Publication
+and unknown/integrity failures still require an explicit correction or retry.
 Exhausted discovery links are rechecked after five minutes, without
 regrading remembered sites or opening additional Wayback connections.
 
@@ -157,9 +161,12 @@ remembers an explicit choice in this browser across visits.
    sites in Queue and available to Undo. The explicit operator batch API still
    accepts up to five sites; existing claimed batches keep their saved work.
    Existing approvals receive a one-time grace period on migration;
-   restarting does not reset it. Failed captures remain in **Capturing**, with their
-   error and saved progress, until you choose Resume. The next queued site can start
-   immediately without resuming or discarding the failure. A preflight failure stays
+   restarting does not reset it. Temporary capture failures remain in **Capturing**,
+   showing their error, saved progress and the next automatic retry time. The next
+   queued site can start immediately. **Retry now** rejoins the FIFO immediately;
+   **Pause retries** and cancelling a queued resume prevent automatic restart until
+   you explicitly resume. Approval, scope, integrity and unknown failures still
+   require correction, rather than silently changing the approved capture. A preflight failure stays
    in Queue with **Capture needs attention** and Undo; other entries pass it. Undo
    the failed approval to review and approve it again. Items move into **Capturing** when claimed.
    **Resume capture** moves a paused capture back to **Capture queue**, including
@@ -174,10 +181,16 @@ remembers an explicit choice in this browser across visits.
    orphan pages, images, CSS, scripts and downloads, using the pinned downloader
    with a serial persistent client. Supporting files referenced by HTML/CSS are
    checked at their exact URLs, including on external asset hosts.
-   Individual file replays returning HTTP 403/404/410, and those responses from
-   exact supporting-file lookups, become visible coverage gaps while the rest
-   continues. Failure to inventory the approved site, service/rate-limit errors,
-   and transport/storage limits still pause acquisition with its checkpoint.
+   Unrecoverable file responses (including HTTP 403/404/410) become visible
+   coverage gaps while the rest continues, including on Ezboard and SitePowerUp.
+   Temporary replay failures and exact supporting-file lookup failures are deferred
+   while other URLs run, with at most three durable attempts across worker turns.
+   Each attempt retains the downloader’s bounded connection/status retries. After
+   the third failed attempt the URL becomes a gap; saved files proceed to indexing
+   automatically. Three consecutive temporary failures yield the worker to other
+   sites. Rate limits and primary scope inventory failures retry periodically
+   without treating an incomplete inventory as complete. Transport/storage limits
+   and source/approval problems retain their safeguards.
 4. Completed captures move directly into **Indexing**. There is no second approval.
    The indexing worker verifies the saved manifest, complete file set, archive
    coverage and original capture approval before queuing publication once.
@@ -197,11 +210,12 @@ remembers an explicit choice in this browser across visits.
    AI enrichment uses Luna by default, within the saved daily or manual $2/site policy.
    Indexed sites retire to **History** automatically.
 
-Completed ordinary sites with gaps offer **Retry failed files** in Indexing or
+Completed ordinary sites and boards with gaps offer **Retry failed files** in Indexing or
 History after publication (also on a first capture's failed preparation). This
 queues only missing versions/lookups, retains successful files, and supports
 **Undo file retry** until acquisition starts. Retries copy private SQLite catalog
-metadata and retain cumulative transport usage. The resulting manifest publishes
+metadata and retain cumulative transport usage. Board retries request only missing
+exact URL/date versions and revalidate board ownership before saving them. The resulting manifest publishes
 and indexes automatically; prior manifests, publications and Jobs stay immutable.
 A retry of published files inherits its original site's enrichment ledger and
 cached responses, so it cannot renew a manual $2 cap or change the automatic daily policy. Existing document IDs are skipped

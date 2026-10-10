@@ -8,6 +8,7 @@ EVENTS = {
     'discovery_result': 'Candidate check saved',
     'automatic_settings': 'Automatic settings saved',
     'queue_capture_resume': 'Capture resume queued',
+    'automatic_capture_retry': 'Automatic capture retry queued',
     'cancel_capture_resume': 'Capture resume cancelled',
 }
 KINDS = {'discover': 'Discovery', 'candidate_check': 'Evidence & grading',
@@ -36,6 +37,9 @@ def snapshot(store, worker=None):
         WHERE kind IN ('discover','candidate_check') ORDER BY updated DESC,rowid DESC LIMIT 1""").fetchone())
     next_capture = store.db.execute(f"""SELECT q.id,c.url,q.ready FROM ({QUEUE}) q
         JOIN candidates c ON c.id=q.id WHERE q.held=0 ORDER BY ready,ordinal LIMIT 1""").fetchone()
+    retry = store.db.execute("""SELECT r.operation,r.attempts,r.retry_at,c.id,c.url FROM capture_retries r
+        JOIN operations o ON o.id=r.operation JOIN candidates c ON c.id=json_extract(o.payload,'$.sites[0].id')
+        WHERE o.state='interrupted' AND r.paused=0 AND r.retry_at IS NOT NULL ORDER BY r.retry_at LIMIT 1""").fetchone()
     # Publication has its own uncapped active operation. A publication_requested
     # batch may instead be paused, so it is not evidence of a busy worker.
     index = store.db.execute("""SELECT id,state,job,error,updated FROM batches
@@ -67,5 +71,6 @@ def snapshot(store, worker=None):
         runtime = {lane.value: thread.is_alive() and not worker.stop.is_set() for lane, thread in worker.threads.items()}
         runtime['wayback'] = worker.transport.healthy() and not worker.stop.is_set()
     return {'discovery': discovery, 'next_capture': dict(next_capture) if next_capture else None,
+            'next_retry': dict(retry) if retry else None,
             'indexing': index, 'runtime': runtime,
             'recent': sorted(recent, key=lambda event: event['at'], reverse=True)[:8]}
