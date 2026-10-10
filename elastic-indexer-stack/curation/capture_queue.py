@@ -18,7 +18,11 @@ def held(store):
 
 def attention(store):
     return {'preflight': len(held(store)), 'interrupted': store.db.execute(
-        "SELECT COUNT(*) FROM operations WHERE kind='capture' AND state='interrupted'").fetchone()[0]}
+        """SELECT COUNT(*) FROM operations o LEFT JOIN capture_retries r ON r.operation=o.id
+        WHERE o.kind='capture' AND o.state='interrupted'
+        AND (r.retry_at IS NULL OR r.paused=1)""").fetchone()[0],
+        'retrying': store.db.execute("""SELECT COUNT(*) FROM operations o JOIN capture_retries r ON r.operation=o.id
+        WHERE o.kind='capture' AND o.state='interrupted' AND r.retry_at IS NOT NULL AND r.paused=0""").fetchone()[0]}
 
 
 QUEUE = """SELECT c.id,c.decision,c.rowid ordinal,
@@ -69,12 +73,14 @@ def move_resume(store, operation, action, state):
     # clears the error only when it starts; cancellation restores the same pause.
 
 
-def queue_resume(store, operation):
-    move_resume(store, operation, Action.QUEUE_RESUME, 'resume_queued')
+def queue_resume(store, operation, *, automatic=False):
+    move_resume(store, operation, Action.AUTO_QUEUE_RESUME if automatic else Action.QUEUE_RESUME, 'resume_queued')
+    store.db.execute('UPDATE capture_retries SET retry_at=NULL,paused=0 WHERE operation=?', (operation['id'],))
 
 
 def cancel_resume(store, operation):
     move_resume(store, operation, Action.CANCEL_RESUME, 'interrupted')
+    store.db.execute('UPDATE capture_retries SET paused=1 WHERE operation=?', (operation['id'],))
 
 
 def claim_resume(store, identifier):

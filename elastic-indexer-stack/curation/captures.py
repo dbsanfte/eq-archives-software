@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 from acquisition import Downloader
+from capture_failures import FileRetries
 from archive_layout import archive_path
 from common import CAPTURE_WINDOW, CrawlError, Page, Store, decode, digest, in_capture_window, now, original_url, save, tier, within_scope
 from discovery import SKIP
@@ -197,6 +198,9 @@ def check_manifest(root, manifest):
 
 
 def capture_sites(root, batch_id, sites, downloader_factory=Downloader, progress=None):
+    if len(sites) == 1 and sites[0].get('scope_mode') in ('ezboard', 'sitepowerup') and sites[0].get('continued_from', {}).get('mode') == 'retry_failed':
+        from full_capture import capture
+        return capture(root, batch_id, sites, downloader_factory, progress)
     if any(site.get('scope_mode') == 'sitepowerup' for site in sites):
         if len(sites) != 1:
             raise CrawlError('Capture each whole SitePowerUp board independently')
@@ -247,6 +251,7 @@ def capture_sites(root, batch_id, sites, downloader_factory=Downloader, progress
     coverage = draft['capture_coverage']
     # Each batch owns a separate durable, cumulative HTTP budget.
     transport_store = Store(directory)
+    retries = FileRetries(transport_store)
     downloader = None
     seen = {(c["candidate_id"], original_url(c["url"]), c['timestamp']) for c in draft["captures"]}
     visited = {tuple(entry) for entry in draft["visited"]}
@@ -267,9 +272,13 @@ def capture_sites(root, batch_id, sites, downloader_factory=Downloader, progress
                            max_page_bytes=LIMITS["page_bytes"], max_bytes=LIMITS["bytes"], max_seconds=LIMITS["seconds"])
     def acquire(job):
         try:
-            return downloader.call(job)
+            result = downloader.call(job)
+            retries.succeeded()
+            return result
         except CrawlError as error:
-            if job['op'] == 'capture' and str(error).startswith(("Wayback HTTP 404", "Wayback HTTP 410", "Response exceeds byte limit", "Expanded response exceeds byte limit")):
+            failed = retries.failed(digest([job['url'], job.get('timestamp')]), error) if job['op'] == 'capture' else None
+            transport_store.db.commit()
+            if job['op'] == 'capture' and (failed == 'unavailable' or str(error).startswith(("Response exceeds byte limit", "Expanded response exceeds byte limit"))):
                 note(job['url'], 'Capture ' + job['timestamp'] + ': ' + str(error) + '; version excluded')
                 return None
             raise

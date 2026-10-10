@@ -28,6 +28,7 @@ class Action(str, Enum):
     UNDO = 'undo'
     START = 'start_capture'
     QUEUE_RESUME = 'queue_capture_resume'
+    AUTO_QUEUE_RESUME = 'automatic_capture_retry'
     RESUME = 'resume_capture'
     CANCEL_RESUME = 'cancel_capture_resume'
     COMPLETE = 'capture_complete'
@@ -54,6 +55,7 @@ TRANSITIONS = {
     Action.UNDO: ({CandidateState.AWAITING_CAPTURE}, CandidateState.SUGGESTED),
     Action.START: ({CandidateState.AWAITING_CAPTURE}, CandidateState.CAPTURING),
     Action.QUEUE_RESUME: ({CandidateState.CAPTURING}, CandidateState.RESUME_QUEUED),
+    Action.AUTO_QUEUE_RESUME: ({CandidateState.CAPTURING}, CandidateState.RESUME_QUEUED),
     Action.RESUME: ({CandidateState.RESUME_QUEUED}, CandidateState.CAPTURING),
     Action.CANCEL_RESUME: ({CandidateState.RESUME_QUEUED}, CandidateState.CAPTURING),
     Action.COMPLETE: ({CandidateState.CAPTURING}, CandidateState.CAPTURED),

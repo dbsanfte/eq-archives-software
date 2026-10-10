@@ -222,6 +222,8 @@ def pause_detail(error, operation=None):
 
 
 def resume_owned(root, lane, account):
+    if lane == Lane.CAPTURE:
+        return  # Capture recovery uses the shared FIFO, regardless of discovery mode.
     snapshot = account.snapshot()
     if not snapshot['settings']['enabled']:
         return

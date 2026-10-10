@@ -20,12 +20,11 @@
   <main id="main">
     <div id="error" role="alert" hidden></div><div id="notice" role="status" aria-live="polite" hidden></div>
     <p id="status" class="sr-only" role="status" aria-live="polite">Loading sites…</p>
-    <section id="pipeline-activity" aria-labelledby="pipeline-title">
-      <div class="activity-heading"><h2 id="pipeline-title">Pipeline activity</h2><span id="pipeline-mode" class="badge">Loading</span></div>
-      <p id="pipeline-connection" class="meta" role="status">Connecting to workers…</p>
+    <details id="pipeline-activity">
+      <summary class="activity-heading"><span id="pipeline-title">Pipeline status</span><span id="pipeline-mode" class="badge">Loading</span><span id="pipeline-overview" class="meta"></span><span id="pipeline-connection" class="meta" role="status">Connecting to workers…</span></summary>
       <div id="pipeline-workers"></div>
       <details id="pipeline-recent"><summary>Recent activity</summary><ol id="pipeline-events"></ol></details>
-    </section>
+    </details>
     <section id="stage-list" aria-labelledby="view-title">
       <div class="view-heading"><div><p class="eyebrow" id="view-step"></p><h1 id="view-title">Candidates</h1></div><span id="view-total" class="total"></span></div>
       <p id="view-description" class="description"></p>

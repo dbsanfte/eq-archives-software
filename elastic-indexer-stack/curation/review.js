@@ -36,11 +36,12 @@ function external(url, text=url) {
   return item;
 }
 function badge(text,tone='') { const item=node('span',text,'badge');item.dataset.tone=tone;return item; }
+function retryPending(retry) { return Boolean(retry?.retry_at && !retry.paused); }
 function tone(row) { return row.capture_queue_error || row.capture_state==='interrupted' || candidateIssue(row) || ['index_failed','index_preflight_failed'].includes(row.review_state) || row.state==='coverage_unverified' ? 'attention' : (row.review_state || row.state)==='indexed' ? 'complete' : ['queued','capturing','indexing'].includes(row.stage) ? 'active' : ''; }
 function siteName(row) { if (row.sitepowerup) return `SitePowerUp · Board ${row.sitepowerup}`;const url=new URL(row.scope);return url.host+(url.pathname==='/' ? '' : url.pathname); }
 function statusLabel(row) {
   if (row.capture_queue_error) return 'Capture needs attention';
-  if (row.capture_state==='interrupted') return 'Capture paused';
+  if (row.capture_state==='interrupted') return retryPending(row.capture_retry) ? 'Retry scheduled' : 'Capture paused';
   const check=row.candidate_check;
   if (row.stage==='candidates' && check && ['queued','running'].includes(check.state)) return {coverage:'Checking coverage',sampling:'Finding Wayback samples',grading:'Grading with Luna'}[check.phase] || 'Evidence check queued';
   const issue=candidateIssue(row);if (issue) return issue.title;
@@ -230,6 +231,7 @@ function renderList() {
         row.stage==='indexing' ? (['index_failed','index_preflight_failed'].includes(row.review_state) ? 'Sources are retained. Open this site to retry.' : 'Publication and AI-enriched indexing are automatic.') :
         row.stage==='saved' ? row.decision?.automatic ? `Saved by automatic mode: Grade ${row.decision.automatic.grade} is below ${row.decision.automatic.min_grade}. Restore to review and approve it yourself.` : 'Set aside for a later decision.' : capture ? `${capture.pages} pages · ${capture.files} dated captures${row.stage==='indexing' && capture.needs_regeneration ? ' · Full capture needed' : ''}` : 'Saved decision and source evidence.');
       if (description) item.append(node('p',description));
+      if (row.capture_state==='interrupted' && retryPending(row.capture_retry)) activityDeadline(item,row.capture_retry.retry_at,'Automatic retry');
       if (row.stage==='capturing') {
         const op=[data.workers?.capture,...data.operations].find(op=>op?.kind==='capture' && op.payload.sites?.some(site=>site.id===row.id));
         item.append(captureMeter(op,true));
@@ -615,8 +617,9 @@ function undoCaptureMessage(row) {
 }
 function canRetryFiles(review) {
   const manifest=review?.manifest,retry=manifest?.capture_retry;
+  const boardGaps=(manifest?.ezboard || manifest?.sitepowerup)?.coverage?.counts?.unavailable || 0;
   return ['published_waiting_index','indexing','index_failed','indexed','index_preflight_failed'].includes(review?.state) && !(review.state==='index_preflight_failed' && manifest?.enrichment_budget_id) && manifest?.capture_policy==='complete-files-v1' && manifest.sites.length===1 &&
-    ['page','directory','site','custom'].includes(manifest.sites[0].scope_mode) && (retry?.files || retry?.lookups);
+    ['page','directory','site','custom','ezboard','sitepowerup'].includes(manifest.sites[0].scope_mode) && (retry?.files || retry?.lookups || boardGaps);
 }
 function needsRegeneration(review) {
   const manifest=review?.manifest,site=manifest?.sites?.[0];
@@ -660,7 +663,7 @@ function captureMeter(op,compact=false) {
   const listing=progress?.phase==='checking_wayback' || catalogs>0 && known && remaining===0;
   const catalogTotal=progress?.catalogs_total ?? board?.catalogs_total;
   const catalogsKnown=Number.isInteger(catalogTotal) && catalogTotal>0 && Number.isInteger(catalogs) && catalogs>=0 && catalogs<=catalogTotal;
-  const phases={preparing:'Preparing sources',checking_wayback:progress?.ezboard ? 'Checking Ezboard archive listings' : progress?.sitepowerup ? 'Checking board archive listings' : 'Checking Wayback archive listings',downloading:'Downloading a capture',ready_for_review:'Preparing automatic indexing'};
+  const phases={preparing:'Preparing sources',checking_wayback:progress?.ezboard ? 'Checking Ezboard archive listings' : progress?.sitepowerup ? 'Checking board archive listings' : 'Checking Wayback archive listings',downloading:'Downloading a capture',retry_wait:'Waiting to retry unavailable files',ready_for_review:'Preparing automatic indexing'};
   const meter=node('div',undefined,'capture-meter');meter.dataset.paused=String(paused);
   meter.append(node('p',`${paused ? 'Paused · ' : ''}${phases[progress?.phase] || 'Working through the approved scope'}`,'capture-phase'));
   if (op?.payload?.sites?.length>1) meter.append(node('p',`Batch of ${op.payload.sites.length} sites · Current site: ${progress?.site_url || 'preparing'}`,'meta'));
@@ -756,10 +759,11 @@ function renderLive() {
     if (blocker && !row.capture_queue_error) box.append(node('p','Waiting for the current capture to finish.','meta'));
     box.append(node('p',`${resuming ? 'You can cancel this resume' : 'You can undo'} until capture starts. Candidate gathering and indexing run separately. The queue has no item-count limit.`,'meta'));host.append(box);updateCountdown();
   } else if (row.stage==='capturing') {
-    const paused=op?.state==='interrupted',progress=op?.result?.progress;
-    const box=panel(paused ? 'Capture paused' : 'Capture in progress',paused ? (progress?.capture_policy==='complete-files-v1' ? 'Saved files and catalog progress are retained. Resume continues pending files and extends an exhausted transport allowance without resetting usage.' : 'Staged files are retained. Resume within the original capture budget.') : 'This screen updates automatically as URLs are checked and downloaded.',paused ? 'attention' : '');
+    const paused=op?.state==='interrupted',progress=op?.result?.progress,retrying=paused && retryPending(op.retry);
+    const box=panel(retrying ? 'Automatic retry scheduled' : paused ? 'Capture paused' : 'Capture in progress',retrying ? 'Saved files and catalog progress are retained. Temporary file failures get up to three attempts; remaining gaps proceed to indexing and can be retried from History.' : paused ? (progress?.capture_policy==='complete-files-v1' ? 'Saved files and catalog progress are retained. Resume continues pending files and extends an exhausted transport allowance without resetting usage.' : 'Staged files are retained. Resume within the original capture budget.') : 'This screen updates automatically as URLs are checked and downloaded.',paused ? 'attention' : '');
     if (op?.error) box.append(node('p',op.error));
-    if (paused) box.append(node('p','This site is waiting for your decision. Other approved sites continue; this failure does not block the queue.','meta'));
+    if (retrying) {activityDeadline(box,op.retry.retry_at,'Next capture retry');box.append(node('p','Other queued sites continue during this wait. No action is needed.','meta'));}
+    else if (paused) box.append(node('p','This site needs a decision or correction. Other approved sites continue.','meta'));
     if (progress) {
       box.append(captureMeter(op));
       if (progress.site_url) box.append(node('p',`Current site: ${progress.site_url}`,'meta'));
@@ -879,7 +883,7 @@ function scrollButtons(target,name) {
 function renderDock(force=false) {
   if (!detail || !route.candidate || detail.candidate.id!==route.candidate) { $('action-dock').hidden=true;measureDock();return; }
   const row=detail.candidate,review=detail.review,draft=getDraft(row),op=detail.capture_operation;
-  const signature=JSON.stringify([row.id,row.state,row.stage,row.manifest_sha256,row.candidate_check,review?.state,review?.operation?.state,review?.job,op?.id,op?.state,hasOperation(),hasOperation('capture'),hasOperation('indexing'),route.panel,route.page,route.slot,draft.dirty,busy]);
+  const signature=JSON.stringify([row.id,row.state,row.stage,row.manifest_sha256,row.candidate_check,review?.state,review?.operation?.state,review?.job,op?.id,op?.state,op?.retry,hasOperation(),hasOperation('capture'),hasOperation('indexing'),route.panel,route.page,route.slot,draft.dirty,busy]);
   if (!force && signature===dockSignature) return;
   const dock=$('action-dock'),inner=node('div',undefined,'dock-inner'),buttons=node('div',undefined,'dock-buttons');let hint='';
   if (route.panel==='reader') {
@@ -897,8 +901,10 @@ function renderDock(force=false) {
     hint=row.state==='capture_resume_queued' ? 'Resume is queued. Cancel until the worker starts it.' : 'Your approval is saved. Capture starts automatically.';
     buttons.append(mutation(undoCaptureLabel(row),()=>undoApproval(row),undoCaptureMessage(row),true));
   } else if (row.stage==='capturing' && op?.state==='interrupted') {
-    hint='Add this capture to the queue. Saved files and progress are retained; automatic mode can stay on.';
-    buttons.append(mutation('Resume capture',()=>request('/api/resume',{id:op.id}),'Resume added to the capture queue. Cancel it there until capture starts.',true));
+    const retrying=retryPending(op.retry);
+    hint=retrying ? 'Retry is scheduled automatically. Saved files are retained.' : 'Add this capture to the queue. Saved files and progress are retained; automatic mode can stay on.';
+    buttons.append(mutation(retrying ? 'Retry now' : 'Resume capture',()=>request('/api/resume',{id:op.id}),'Resume added to the capture queue. Cancel it there until capture starts.',true));
+    if (retrying) buttons.append(mutation('Pause retries',()=>request('/api/pause-capture-retries',{id:op.id}),'Automatic retries paused. Resume capture when ready.'));
   } else if (row.stage==='indexing' && needsRegeneration(review) && ['awaiting_review','index_preflight_failed'].includes(review.state)) {
     hint='All files · 1999–2006 · reuse saved captures';
     buttons.append(mutation('Regenerate full capture',()=>request('/api/continue-capture',{id:review.id,manifest_sha256:review.manifest_sha256}),'Full capture queued. Undo is available until it starts.',true));
@@ -1049,7 +1055,11 @@ function renderPipelineActivity() {
   // Retirement can change a reader's stage in the background. Keep its panel
   // geometry (and Back positions); default expansion only on list navigation.
   const laneChanged=activityView===null || activityView!==route.view && !route.candidate;activityView=route.view;
+  if (laneChanged) $('pipeline-activity').open=false;
   const discovery=activeOperation('candidates'),capture=activeOperation('capture'),publication=activeOperation('indexing');
+  const unavailable=Object.values(info.runtime || {}).some(healthy=>healthy===false);
+  $('pipeline-overview').dataset.attention=String(unavailable);
+  $('pipeline-overview').textContent=`${unavailable ? 'Worker needs attention' : `${[discovery,capture,publication].filter(Boolean).length} workers active`} · ${data.stage_counts.queued || 0} sites queued${data.capture_attention?.retrying ? ` · ${data.capture_attention.retrying} retries scheduled` : ''}`;
   for (const [lane,title] of [['candidates','Discovery'],['capture','Capture'],['indexing','Indexing']]) {
     let card=$(`activity-${lane}`);
     if (!card) {
@@ -1057,7 +1067,7 @@ function renderPipelineActivity() {
       card.append(node('summary'),node('div',undefined,'activity-body'));$('pipeline-workers').append(card);
     }
     if (laneChanged) card.open=selected===lane;
-    const signature=JSON.stringify([lane==='candidates' ? [discovery,info.discovery,auto] : lane==='capture' ? [capture,info.next_capture,data.capture_attention,data.capture_queue_error] : [publication,info.indexing,auto?.resets_at],info.runtime,data.stage_counts]);
+    const signature=JSON.stringify([lane==='candidates' ? [discovery,info.discovery,auto] : lane==='capture' ? [capture,info.next_capture,info.next_retry,data.capture_attention,data.capture_queue_error] : [publication,info.indexing,auto?.resets_at],info.runtime,data.stage_counts]);
     if (card.dataset.signature===signature) continue;card.dataset.signature=signature;
     const body=node('div',undefined,'activity-body');let status='',tone='idle';
     if (lane==='candidates') {
@@ -1105,8 +1115,10 @@ function renderPipelineActivity() {
         body.append(node('p',`${waiting} sites waiting. The next eligible site starts after this capture finishes or pauses.`, 'meta'));
       } else if (data.capture_queue_error) {status='Queue needs attention';tone='attention';body.append(node('p',data.capture_queue_error,'activity-warning'));}
       else if (next) {status='Waiting to start next site';tone='waiting';activitySite(body,next);activityDeadline(body,next.ready,'Next capture eligible');}
+      else if (info.next_retry) {status='Waiting for automatic retry';tone='waiting';activitySite(body,info.next_retry);activityDeadline(body,info.next_retry.retry_at,'Next capture retry');}
       else if (waiting) {status='Queued sites need attention';tone='attention';body.append(node('p','No queued site is eligible to start. Open its entry to resolve the approval or preparation error.'));}
-      else {status='No sites waiting';body.append(node('p','Approved sites enter the queue. Failed captures need an explicit Resume; other sites continue.'));}
+      else {status='No sites waiting';body.append(node('p','Approved sites enter the queue. Temporary failures retry automatically; individual unavailable files become gaps.'));}
+      if (attention.retrying) body.append(node('p',`${attention.retrying} captures have an automatic retry scheduled. Other sites continue.`,'meta'));
       if (attention.interrupted || attention.preflight) body.append(node('p',`${attention.interrupted || 0} paused captures · ${attention.preflight || 0} approval errors. These sites wait for your decision while eligible sites continue.`,'activity-warning'));
     } else {
       const index=info.indexing;

@@ -106,7 +106,7 @@ def capture_board(root, batch_id, site, downloader_factory, progress=None):
             if progress:
                 progress({'phase': status.get('phase', 'capturing'), 'files': status['counts'].get('captured', 0),
                           'bytes': status['transport'].get('bytes', 0),
-                          'urls_checked': sum(status['counts'].values()) - status['counts'].get('pending', 0),
+                          'urls_checked': sum(status['counts'].values()) - status['counts'].get('pending', 0) - status['counts'].get('retry', 0),
                           'sites_done': 0, 'sites_total': 1, 'site_url': site['url'],
                           'ezboard': status, 'current_url': status.get('current_url')})
         result = runner.run(downloader_factory, report)

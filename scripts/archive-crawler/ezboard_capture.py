@@ -11,6 +11,7 @@ import sys
 from types import SimpleNamespace
 
 from acquisition import Downloader
+from capture_failures import FileRetries
 from archive_layout import archive_path
 from common import LEGACY_TIERS, CrawlError, Store, TIERS, digest, in_capture_window, now, original_url, save, tier
 from discovery import Archive
@@ -45,6 +46,7 @@ class Capture:
             CREATE TABLE IF NOT EXISTS ez_hosts (host TEXT PRIMARY KEY, evidence TEXT);
         ''')
         self.config = store.get(self.name + '_config')
+        self.retries = FileRetries(store)
 
     def date_tiers(self):
         # A saved operator plan keeps its original date policy on resume.
@@ -244,13 +246,17 @@ class Capture:
             except CrawlError as error:
                 if self.config.get('complete_files') and 'byte limit' in str(error):
                     raise  # an oversized page is not a completed board
-                if str(error) not in ('Wayback HTTP 404', 'Wayback HTTP 410', 'Replay returned a different original URL',
-                                     'Wayback returned a capture outside the requested tier',
-                                     'Replay returned a different dated version; requested version remains unavailable') and 'Response exceeds byte limit' not in str(error):
+                state = self.retries.failed(row['id'], error)
+                if not state and 'Response exceeds byte limit' in str(error):
+                    state = 'unavailable'
+                if not state:
                     raise
-                self.db.execute("UPDATE ez_records SET state='unavailable',reason=? WHERE id=?", (str(error), row['id']))
+                self.db.execute('UPDATE ez_records SET state=?,reason=? WHERE id=?', (state, str(error), row['id']))
                 self.db.commit()
+                if self.retries.streak >= 3 and state == 'retry':
+                    raise
                 return
+            self.retries.succeeded()
             # Save the replay's actual URL/date/hash before interpreting HTML or
             # moving it. Resume this receipt without paying for another replay.
             self.db.execute("UPDATE ez_records SET state='downloaded',metadata=? WHERE id=?", (json.dumps(result), row['id']))
@@ -325,6 +331,9 @@ class Capture:
 
     def run(self, downloader_factory=Downloader, progress=None):
         self.require_plan()
+        self.retries.streak = 0
+        self.db.execute("UPDATE ez_records SET state='pending' WHERE state='retry'")
+        self.db.commit()
         downloader = None
         self.set_status('capturing', 'Reading saved board catalogs and captures')
         try:
@@ -339,6 +348,9 @@ class Capture:
                     THEN 1 ELSE 0 END,q.tier,q.kind,q.host LIMIT 1""").fetchone()
                 row = self.db.execute("SELECT * FROM ez_records WHERE state IN ('pending','downloaded') ORDER BY tier,kind,stamp,url LIMIT 1").fetchone()
                 if not query and not row:
+                    waiting = self.db.execute("SELECT reason FROM ez_records WHERE state='retry' LIMIT 1").fetchone()
+                    if waiting:
+                        raise CrawlError(waiting['reason'])
                     self.set_status('complete', 'Saved catalogs exhausted for known hosts; Wayback may have uncaptured or unknown-host pages')
                     break
                 if not downloader:
@@ -354,6 +366,7 @@ class Capture:
                     self.stage(downloader, row)
                 else:
                     self.catalog(downloader, query)
+                    self.retries.succeeded()
                 if progress:
                     progress({**self.status(), **activity})
         except CrawlError as error:

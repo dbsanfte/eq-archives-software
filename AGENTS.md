@@ -263,9 +263,11 @@ Automatic promotion requires verified grading and coverage, preserves board/shar
 account boundaries, and uses whole-site scopes only for pristine suggestions.
 Keep lower grades in Saved for later and exclude their identities from discovery.
 Restore, Undo and manual scope edits must prevent automatic reapproval. Preserve
-explicit human decisions. Exhausted link frontiers wait five minutes. Only owned
-budget/disabled/restart interruptions resume automatically; failed sites retain
-their errors and checkpoints for an explicit user decision while other sites advance.
+explicit human decisions. Exhausted link frontiers wait five minutes. Candidate and publication recovery retain their existing explicit/owned rules.
+Approved captures independently retry recognized Wayback failures and worker
+interruptions after 5 minutes, 15 minutes, then hourly, preserving checkpoints and
+cumulative usage. Unknown errors and approval/scope/integrity failures require a
+correction. Preserve explicit pauses and cancelled resumes while other sites advance.
 Never let one failed site hold a worker queue, in either manual or automatic mode.
 Each explicit Discover run targets
 50 new sites meeting its saved minimum grade (default 2), continuing past low grades and unavailable samples, until the target,
@@ -304,8 +306,9 @@ The queue has no count cap; after a 60-second grace period the automatic worker 
 one oldest eligible site immediately before starting it. Keep later sites queued
 and undoable until they start; the explicit operator API retains its five-site
 batch limit and existing claimed work remains unchanged. Preserve typed transitions,
-atomic Undo/claim locking and durable progress in the appropriate stage. A failed
-capture requires explicit resume but never holds the capture queue. Explicit capture
+atomic Undo/claim locking and durable progress in the appropriate stage. A temporary
+capture failure automatically rejoins the FIFO when its saved retry time is due;
+unknown or integrity failures need explicit resume and never hold the capture queue. Explicit capture
 resume joins the uncapped FIFO queue, even while another capture runs or automatic
 mode is on. Retain the operation, batch, approval, sources and cumulative budgets;
 claim only when the capture worker is free. Cancel queued resume restores the pause
@@ -328,13 +331,18 @@ must not close another worker’s connection. Keep serial publication with the
 existing unfinished-Job guard for imports.
 Expose worker availability independently of capped operation lists, require all
 workers and the shared transport for health and retain the lease until all stop.
-Keep pipeline activity visible on every stage and site workspace, outside disabled
-manual discovery controls. Show current phases, capture progress from Queue,
+Keep pipeline status as a compact collapsed disclosure on each stage and site
+workspace, outside disabled manual discovery controls. Navigation to another
+stage collapses it; polling preserves the user-opened state. Show worker/queue/
+retry counts and stale connection status in its summary; expanded details retain
+the full pipeline activity. Show current phases, capture progress from Queue,
 automatic retry/reset countdowns, Job blockers and bounded recent outcomes from
 SQLite metadata independently of list caps. Report stale or failed polling instead
 of implying fresh progress; status reads never start work or lose browser drafts.
 Preserve operations,
-approvals and progress across restart; interrupted manual work needs explicit resume.
+approvals and progress across restart; approved capture transport interruptions
+retry independently of automatic discovery mode. Manual discovery/publication
+interruptions retain their explicit resume semantics.
 Source reading and scope drafts must not prevent progress polling or lose edits.
 Download completion creates an independent manifest per site and automatically
 queues whole-site publication/indexing under the original capture approval.
@@ -457,11 +465,15 @@ reference verification. Apply the same host filter to discovery/manual candidate
 A transport/storage/ownership bound keeps
 new work paused in Capturing; only exhausted catalogs and pending records reach
 Indexing, with missing/substituted replays explicitly listed as gaps. Individual
-file HTTP 403/404/410 responses and exact supporting-file lookup failures are
-durable gaps that do not block other files. Primary scope inventory failures and
-service/rate-limit errors still pause. Completed ordinary sites offer Retry failed
+file HTTP 403/404/410 responses are durable gaps that do not block other files,
+including board pages. Temporary file and exact supporting-file lookup failures
+get three durable attempts across worker turns; process other URLs before
+retrying, then advance the site to indexing with explicit gaps. Yield after
+three consecutive temporary failures. Rate limits and primary scope inventory
+failures retry periodically without being mislabeled as complete coverage.
+Expose retry countdowns, Retry now and Pause retries; honour cancellation atomically. Completed ordinary sites and boards offer Retry failed
 files: queue only missing versions/lookups, copy private checkpoint metadata,
-reuse successful sources, keep usage cumulative and previous manifests immutable.
+reuse successful sources, revalidate ownership of retried board pages, keep usage cumulative and previous manifests immutable.
 Undo remains available until claiming; stale manifests cannot retry. Published
 sites may retry only their saved missing files under the identical approved scope
 and hash-bound published predecessor. Retain existing Jobs and published manifests;

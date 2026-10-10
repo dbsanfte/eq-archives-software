@@ -258,10 +258,11 @@ def test_resuming_old_capture_skips_ad_replays_and_failed_lookups_but_keeps_save
     before = len(calls)
     result = capture_sites(root, '6' * 32, [site], Downloader)
     assert len(calls) == before
-    assert saved in result['captures'] and len(result['captures']) == 2
+    # The later good file is now saved before the temporary failure pauses.
+    assert saved in result['captures'] and len(result['captures']) == 3
     assert result['capture_retry'] == {'files': 0, 'lookups': 0}
-    assert result['capture_coverage'][site['id']]['excluded_urls'] == 4
-    assert {note['url'] for note in result['notes']} == set(urls[1:])
+    assert result['capture_coverage'][site['id']]['excluded_urls'] == 3
+    assert {note['url'] for note in result['notes']} == set(urls[1:4])
     check_manifest(root, result)
 
 

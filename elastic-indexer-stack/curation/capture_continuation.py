@@ -55,9 +55,10 @@ def incomplete(manifest):
 def retryable(manifest):
     sites = manifest.get('sites', [])
     gaps = manifest.get('capture_retry', {})
+    board_gaps = (manifest.get('ezboard') or manifest.get('sitepowerup') or {}).get('coverage', {}).get('counts', {}).get('unavailable', 0)
     return (manifest.get('capture_policy') == POLICY and len(sites) == 1
-            and sites[0].get('scope_mode') in ('page', 'directory', 'site', 'custom')
-            and sum(gaps.get(key, 0) for key in ('files', 'lookups')) > 0)
+            and sites[0].get('scope_mode') in ('page', 'directory', 'site', 'custom', 'ezboard', 'sitepowerup')
+            and (sum(gaps.get(key, 0) for key in ('files', 'lookups')) > 0 or board_gaps > 0))
 
 
 def require_complete(manifest):
