@@ -155,6 +155,20 @@ spec:
                 name: eqarchives-mcp
                 port:
                   name: http
+          - path: /api/explore/overview
+            pathType: Exact
+            backend:
+              service:
+                name: eqarchives-mcp
+                port:
+                  name: http
+          - path: /api/explore/phrases
+            pathType: Exact
+            backend:
+              service:
+                name: eqarchives-mcp
+                port:
+                  name: http
   tls:
     - hosts: [search.eqarchives.org]
       secretName: search.eqarchives.org-tls

@@ -132,6 +132,8 @@ bash scripts/smoke-embeddings.sh eqarchives-frontend:local
   this suite for browser-dependent bugs. Recently indexed site regressions cover
   the metadata-only `/sites` list, mobile tap targets and exact domain filters
   through semantic/quoted searches, sorting, pagination, readers and URL history.
+  Explore regressions cover linked charts, phrase/cloud lists, date drafts,
+  share/history state, delayed responses, mobile touch targets and search scopes.
   `PLAYWRIGHT_CHROMIUM_EXECUTABLE` can
   select an existing local Chromium binary; the default uses Playwright's install.
 - [smoke-embeddings.sh](scripts/smoke-embeddings.sh) downloads the pinned model,
@@ -663,8 +665,21 @@ ChatGPT/Claude or Deep Research validation after actually performing it.
   `REACT_APP_*` values are public browser configuration. They must contain no
   upstream credentials. The development server alone does not provide API proxies.
 - Browser APIs stay on the same origin: `/elasticsearch/eq-archive/_search`,
-  `/elasticsearch/eq-archive/_count`, and `/openai/v1/embeddings`. NGINX adds the
-  upstream authorization headers from runtime secret files.
+  `/elasticsearch/eq-archive/_count`, `/openai/v1/embeddings`, and the two
+  `/api/explore/` routes. NGINX adds search/embedding authorization headers from
+  runtime secret files; Explore uses the MCP service's read-only ES client.
+- `/explore` links date/theme/site/source-phrase selections in URL state. Preserve
+  explicit date drafts, stale-response cancellation, retry isolation, visible
+  tagging/sample coverage, capture versus estimated-date semantics and mobile
+  44px controls. Search links retain the website collection and every constraint.
+  `/api/explore/overview` and `/api/explore/phrases` are exact public routes to the
+  read-only MCP service. Keep the fixed query bounds, serial analytics execution,
+  shared request limit, ten-minute/64-entry summary cache and safe errors. Phrase
+  samples are bounded to 100 captures/12,000 characters each, deduplicate original
+  pages and repeated text, and expose sampling/vocabulary limits. Never walk
+  archive Git, write index documents or call AI for exploration. Test routes with
+  `scripts/check-explore.py` in container integration and deployment; preserve
+  the MCP tool contract and existing indexing Jobs.
 - Nomic queries use the `search_query:` prefix, while the embedding cache is
   keyed by the original query. Preserve the configured model alias and
   **768-dimensional** vector compatibility with the indexed data. Changing the

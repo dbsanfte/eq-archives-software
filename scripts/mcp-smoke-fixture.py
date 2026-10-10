@@ -28,6 +28,21 @@ class Fixture(BaseHTTPRequestHandler):
         expected = "Basic " + base64.b64encode(b"ci-readonly:ci-password-never-a-real-secret").decode()
         assert self.headers.get("Authorization") == expected
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if 'sites_count' in body.get('aggs', {}):
+            result = {'hits': {'hits': [], 'total': {'value': 26, 'relation': 'eq'}}, 'aggregations': {
+                'sites_count': {'value': 2}, 'tagged': {'doc_count': 12},
+                'themes': {'buckets': [{'key': 'quest', 'doc_count': 12, 'doc_count_error_upper_bound': 0}]},
+                'sites': {'buckets': [{'key': 'alpha.example.org', 'doc_count': 12, 'doc_count_error_upper_bound': 0}]},
+                'timeline': {'buckets': [{'key_as_string': '1999', 'doc_count': 26, 'sites': {'value': 2}}]},
+            }}
+            return self.reply(result)
+        if 'sample' in body.get('aggs', {}):
+            assert body['aggs']['sample']['aggs']['pages']['top_hits']['size'] <= 100
+            return self.reply({'hits': {'hits': []}, 'aggregations': {'sample': {'pages': {'hits': {'hits': [{
+                '_id': 'websites/alpha.example.org/19991105192111/cyclops.html',
+                '_source': {'domain_name': 'alpha.example.org'},
+                'fields': {'excerpt': ['An ancient cyclops wanders the desert. Platinum rings reward patient hunters.']},
+            }]}}}}})
         hits = list(DOCUMENTS)
         if "ids" in body["query"]:
             hits = [d for d in hits if d["_id"] in body["query"]["ids"]["values"]]
@@ -63,6 +78,9 @@ class Fixture(BaseHTTPRequestHandler):
         else:
             start = body.get("from", 0)
             result["hits"]["hits"] = hits[start:start + body["size"]]
+        self.reply(result)
+
+    def reply(self, result):
         response = json.dumps(result).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")

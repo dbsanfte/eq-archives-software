@@ -12,7 +12,7 @@ test('offers the MCP connection screen with an accessible icon beside the archiv
   expect(screen.getByRole('link', { name: 'EQ Archives home' })).toHaveAttribute('href', '/');
 });
 
-test.each(['/', '/sites', '/document'])('offers clear primary navigation on %s', path => {
+test.each(['/', '/sites', '/explore', '/document'])('offers clear primary navigation on %s', path => {
   window.history.replaceState({}, '', path);
   try {
     render(<HeaderContent compact />);
@@ -21,6 +21,7 @@ test.each(['/', '/sites', '/document'])('offers clear primary navigation on %s',
     expect(nav.getByRole('link', { name: 'Recently indexed' })).toHaveAttribute('href', '/sites');
     if (path === '/') expect(nav.getByRole('link', { name: 'Search' })).toHaveAttribute('aria-current', 'page');
     else if (path === '/sites') expect(nav.getByRole('link', { name: 'Recently indexed' })).toHaveAttribute('aria-current', 'page');
+    else if (path === '/explore') expect(nav.getByRole('link', { name: 'Explore' })).toHaveAttribute('aria-current', 'page');
     else expect(nav.queryByRole('link', { current: 'page' })).not.toBeInTheDocument();
   } finally { window.history.replaceState({}, '', '/'); }
 });

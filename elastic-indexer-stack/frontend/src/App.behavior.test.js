@@ -29,6 +29,7 @@ jest.mock('./views/ArchiveStatusBar', () => () => <span>Archive status</span>);
 jest.mock('./views/HeaderContent', () => () => <h1>Search archives</h1>);
 jest.mock('./views/result/CustomResultView', () => () => null);
 jest.mock('./views/search/EnhancedSearchBox', () => () => <input aria-label="Search archives" />);
+jest.mock('./views/explore/Explore', () => () => <h1>Explore early EverQuest.</h1>);
 jest.mock('./views/sites/RecentSites', () => () => <h1>Recently indexed sites</h1>);
 jest.mock('./views/search/SyntaxExamples', () => () => <span>Query syntax help</span>);
 jest.mock('./views/search/DateRangeFacet', () => ({ label }) => <span>{label}</span>);
@@ -118,4 +119,14 @@ test('makes the applied domain filter visible above search and offers removal', 
   expect(screen.getByRole('region', { name: 'Site search scope' })).toHaveTextContent('eq.example.org');
   fireEvent.click(screen.getByRole('button', { name: 'Search all sites' }));
   expect(mockSearchState.removeFilter).toHaveBeenCalledWith('domain_name');
+});
+
+
+test('opens Explore without constructing a search connector or embeddings', () => {
+  window.history.replaceState({}, '', '/explore/');
+  try {
+    render(<App />);
+    expect(screen.getByRole('heading', { name: 'Explore early EverQuest.' })).toBeVisible();
+    expect(getSearchConfig).not.toHaveBeenCalled();
+  } finally { window.history.replaceState({}, '', '/'); }
 });

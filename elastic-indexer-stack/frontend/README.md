@@ -16,7 +16,8 @@ yarn start
 The development server listens at `http://localhost:3000`. It serves the UI, but
 it does not provide the API proxy. For working search, use the NGINX container
 below or a local reverse proxy that sends `/elasticsearch/` and `/openai/` to
-that container while forwarding other requests to the development server.
+that container while forwarding other requests to the development server. For Explore, also route
+`/api/explore/` to the MCP service on port 8080.
 Keep upstream credentials in NGINX, outside the browser.
 
 ```bash
@@ -59,6 +60,43 @@ preserves those filters for quoted/operator queries and all semantic kNN branche
 keyword matching remains required when a date filter is present. Jest and
 Chromium regressions cover delayed results, successive searches, both date fields,
 mobile filter toggling, URL history, complete-day bounds and timezone restoration.
+
+## Explore
+
+`/explore` links a yearly capture/site timeline, theme bars, a source phrase cloud
+(with a ranked-list alternative), and the 20 domains with most matching captures.
+Phones show one selected chart at a time with sticky Timeline/Themes/Words/Sites
+controls; custom dates are expandable. Desktop shows the charts together.
+The initial range is inclusive UTC 1999–2006. Visitors can apply custom dates,
+choose capture dates or model-estimated publication dates, and select a year,
+theme, phrase or site. Active filters, reload/back/forward and share links use URL
+state. Date drafts survive unrelated refreshes. Counts describe indexed captures,
+including repeated versions; distinct-domain counts are estimates. Theme coverage
+is visible, and records missing the chosen date are excluded.
+
+Search links carry native Search UI date/theme/domain filters and an archive ID
+range for the `websites/` collection. A phrase becomes a source-only quoted query.
+The website scope is visible and removable in search; semantic branches retain
+all filters after the visitor changes the query. Shared hosting domains are not
+presented as individual account identities.
+
+Same-origin `GET /api/explore/overview` and `/api/explore/phrases` are served by the
+existing read-only MCP container through exact Traefik routes, separately from the
+MCP tool protocol. Both take `start`, `end`, `basis`, `theme`, `site`, and `phrase`.
+The service caches bounded summaries for ten minutes, returns no source bodies,
+and makes no embedding or paid AI calls. The cloud uses up to 100 sampled captures,
+with at most eight per domain unless a site is selected, and the first 12,000
+characters per capture. It removes duplicate original pages, identical excerpts,
+repeated navigation lines and stop words. Phrase sizes count sampled pages;
+these are discovery samples, not representative corpus word frequencies. The
+sampling method, clipped excerpts and vocabulary limits are disclosed in the UI.
+
+Jest covers linked state, malformed replies, retries, timeouts and late responses.
+Chromium covers 320/390/768/1280 px tap targets, overflow, date drafts, filtering,
+search drill-down, history and delayed responses. Container integration checks
+both API routes through the actual ingress rules. `scripts/check-explore.py`
+verifies the live endpoints during normal deployment. No archive checkout,
+index mapping change, background reindex or new credentials are required.
 
 ## Recently indexed sites
 
