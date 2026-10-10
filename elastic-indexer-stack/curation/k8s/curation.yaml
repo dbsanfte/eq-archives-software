@@ -120,6 +120,8 @@ spec:
               value: eqarchives-curation:deploy-via-ci
             - name: ARCHIVE_REPO
               value: /archive
+            - name: ARCHIVE_OBJECT_DIRECTORIES
+              value: /archive-source-objects
             - name: KUBERNETES_CREDENTIALS_DIR
               value: /run/kubernetes
           securityContext:
@@ -156,6 +158,9 @@ spec:
             - name: archive
               mountPath: /archive
               readOnly: true
+            - name: archive-source-objects
+              mountPath: /archive-source-objects
+              readOnly: true
             - name: credentials
               mountPath: /run/secrets
               readOnly: true
@@ -173,6 +178,10 @@ spec:
         - name: archive
           hostPath:
             path: /mnt/samsung/eq-archives
+            type: Directory
+        - name: archive-source-objects
+          hostPath:
+            path: /mnt/samsung/eq-archives-html-reindex/.git/objects
             type: Directory
         - name: pilot
           hostPath:

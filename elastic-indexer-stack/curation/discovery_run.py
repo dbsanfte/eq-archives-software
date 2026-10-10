@@ -8,6 +8,7 @@ from common import CrawlError, capture_scope, now, site_identity
 from coverage_check import require_new
 from crawler import parser
 from discovery import discover
+from archive_frontier import advance as scan_archive
 from grading import Luna, grade
 from graph import staged_links
 from state import connect
@@ -125,6 +126,8 @@ def fill(root, operation, store):
                     'skipped': len(checkpoint['skipped']), 'started_at': checkpoint['started_at'],
                     'deadline': checkpoint['deadline'], 'remaining_seconds': max(0, checkpoint['deadline'] - time.time()),
                     'estimated_usd': spending[0], 'reserved_usd': spending[1], 'max_usd': payload['max_usd']}
+        if checkpoint.get('archive_scan'):
+            snapshot['archive_scan'] = checkpoint['archive_scan']
         store.set('fill_checkpoint', checkpoint)
         with connect(root) as main:
             main.db.execute('UPDATE operations SET result=?,updated=? WHERE id=?',
@@ -135,6 +138,11 @@ def fill(root, operation, store):
     def finish(reason):
         checkpoint['stop_reason'] = reason
         return progress('complete', reason)
+
+    def scan_progress(summary):
+        require_automatic()
+        checkpoint['archive_scan'] = summary
+        progress('finding_links')
 
     try:
         if checkpoint.get('stop_reason'):
@@ -159,7 +167,11 @@ def fill(root, operation, store):
                 store.set('fill_checkpoint', checkpoint)
                 args = options.parse_args(base + ['discover', '--archive-repo', os.environ.get('ARCHIVE_REPO', '/archive'),
                                                   '--max-candidates', str(len(store.candidates()) + 50)])
-                discover(args, store, cached_only=checkpoint['seed_scanned'], deadline=checkpoint['deadline'])
+                # The main database owns the source frontier, independently of
+                # this campaign's candidates and paid/transport allowances.
+                frontier = scan_archive(args, store, root=root, deadline=checkpoint['deadline'], notify=scan_progress)
+                checkpoint['archive_scan'] = frontier
+                discover(args, store, cached_only=True, deadline=checkpoint['deadline'])
                 checkpoint['seed_scanned'] = True
                 progress('finding_links')
                 pending = [row for row in store.candidates() if row['id'] not in checkpoint['done']]
@@ -180,7 +192,12 @@ def fill(root, operation, store):
                         if all(item['result'].get('retryable') for item in coverage_pending):
                             continue
                         raise CrawlError('Board archive coverage is unverified; saved metadata progress is retained. Recheck coverage before grading.')
-                    return finish('time_limit' if time.time() >= checkpoint['deadline'] else 'links_exhausted')
+                    if time.time() >= checkpoint['deadline']:
+                        return finish('time_limit')
+                    if frontier.get('remaining'):
+                        continue  # No links in this slice is not archive exhaustion.
+                    return finish('archive_unavailable' if frontier.get('sources_unavailable') or frontier.get('metadata_unavailable')
+                                  else 'links_exhausted')
             row = pending[0]
             progress('checking_coverage')
             try:

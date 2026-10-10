@@ -93,6 +93,34 @@ can resume automatically; failed transport/publication requests require explicit
 Exhausted discovery links are rechecked after five minutes, without
 regrading remembered sites or opening additional Wayback connections.
 
+Production discovery scans beyond the initial seed list. A durable Git-tree cursor
+for each archive host rotates through known sites, starting with the curated seeds
+and preferring early captures and link/index pages within each host. Previously
+scanned pages do not consume the next page allowance. Each slice limits directory
+entries, metadata bytes/time, source bytes and probes; it reads local Git objects
+without fetching or walking the checkout. The legacy 200,000-file inventory cap
+does not truncate this frontier. Cursors live in the main SQLite database, so a new
+campaign or an older resumed run cannot rewind them.
+
+An empty slice continues at the next position under the run's original hour and
+Luna budget. Pipeline activity shows cumulative pages read, hosts visited, the
+current host and unavailable sources. Missing or oversized sources advance the
+cursor while other sites continue. A completed pass containing gaps is retried
+after 24 hours; changed host trees restart immediately and reuse verified scans.
+If only unavailable local sources remain, the result says so instead of claiming
+the archive has no more links. The five-minute scheduler can still pick up new
+staged links. Source scanning itself does not call Luna.
+
+The deployed partial archive checkout supplies HEAD and website identities. Its
+missing contents can be read from the already populated reindex object cache,
+mounted read-only at `/archive-source-objects` via `ARCHIVE_OBJECT_DIRECTORIES`.
+Only Git's content-addressed objects are exposed: the reindex checkout/configuration
+and Jobs are neither loaded nor modified. This optional setting accepts absolute,
+colon-separated local object directories; absent objects never trigger a fetch.
+Keep the configured host directory available (see `k8s/curation.yaml`), or configure
+another local object cache before removing it after reindexing. Adding a cache
+reopens source passes with gaps immediately, retaining successful scan evidence.
+
 ## Curation flow
 
 Use the light/dark toggle in the header to change the entire portal, including

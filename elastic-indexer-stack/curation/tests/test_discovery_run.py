@@ -24,6 +24,7 @@ def run_fixture(tmp_path, monkeypatch):
     monkeypatch.setattr('discovery_run.Downloader', Mock(return_value=downloader))
     staged = Mock(return_value={'staged_source_reads': 0, 'staged_source_bytes': 0})
     monkeypatch.setattr('discovery_run.staged_links', staged)
+    monkeypatch.setattr('discovery_run.scan_archive', Mock(return_value={'remaining': 0}))
     saved = {}
     discovered = []
     configuration = {'available': 150, 'bad_grades': 0, 'unavailable': 0, 'seconds': 1}
@@ -81,6 +82,56 @@ def test_status_names_the_site_during_sampling_and_grading_then_clears_it(run_fi
     assert result['current_url'] is None
 
 
+def test_empty_source_slices_continue_until_a_new_site_is_found(run_fixture, monkeypatch):
+    import discovery_run
+    root, clock, client, downloader, settings, operation, observed, discovered = run_fixture
+    original = discovery_run.discover
+    slices = []
+    def scan(args, store, **kwargs):
+        slices.append(len(slices))
+        summary = {'remaining': 1, 'pages_scanned': len(slices) * 6,
+                   'sources_unavailable': 32, 'current_host': 'next-guild.example'}
+        kwargs['notify'](summary)
+        with connect(root) as main:
+            saved = unpack(main.db.execute('SELECT * FROM operations').fetchone())['result']['progress']
+        assert saved['phase'] == 'finding_links'
+        assert saved['archive_scan'] == summary
+        return summary
+    def delayed(args, store, **kwargs):
+        if len(slices) >= 3:
+            original(args, store, **kwargs)
+    monkeypatch.setattr(discovery_run, 'scan_archive', scan)
+    monkeypatch.setattr(discovery_run, 'discover', delayed)
+    result = campaign(root, operation(target=1))['progress']
+    assert len(slices) == 3 and result['accepted'] == 1
+    assert result['stop_reason'] == 'target_reached'
+    assert result['archive_scan']['pages_scanned'] == 18
+    assert client.request.call_count == 1
+
+
+def test_unavailable_archive_sources_are_not_reported_as_exhausted_links(run_fixture, monkeypatch):
+    root, clock, client, downloader, settings, operation, observed, discovered = run_fixture
+    settings['available'] = 0
+    monkeypatch.setattr('discovery_run.scan_archive', Mock(return_value={
+        'remaining': 0, 'sources_unavailable': 660, 'metadata_unavailable': 1, 'pages_scanned': 0}))
+    result = campaign(root, operation())['progress']
+    assert result['stop_reason'] == 'archive_unavailable'
+    assert result['archive_scan']['sources_unavailable'] == 660
+    client.request.assert_not_called()
+
+
+def test_source_scanning_keeps_the_original_deadline(run_fixture, monkeypatch):
+    root, clock, client, downloader, settings, operation, observed, discovered = run_fixture
+    settings['available'] = 0
+    def scan(*args, **kwargs):
+        clock[0] += 3601
+        return {'remaining': 1}
+    monkeypatch.setattr('discovery_run.scan_archive', scan)
+    result = campaign(root, operation())['progress']
+    assert result['stop_reason'] == 'time_limit'
+    client.request.assert_not_called()
+
+
 def test_fill_continues_past_low_grades_and_publishes_each_result_while_running(run_fixture):
     root, clock, client, downloader, settings, operation, observed, discovered = run_fixture
     settings.update(bad_grades=10, unavailable=2)
@@ -89,7 +140,7 @@ def test_fill_continues_past_low_grades_and_publishes_each_result_while_running(
     assert result['accepted'] == 50 and result['checked'] == 60 and result['stop_reason'] == 'target_reached'
     assert client.request.call_count == 58
     assert observed[:3] == [0, 1, 2] and observed[-1] == 59  # Live before completion.
-    assert discovered[0][1]['cached_only'] is False and discovered[1][1]['cached_only'] is True
+    assert all(call[1]['cached_only'] for call in discovered)
     assert downloader.close.call_count == client.close.call_count == 1
     with connect(root) as main:
         assert len(main.candidates()) == 60

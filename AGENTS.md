@@ -210,7 +210,13 @@ Run `python3 -m unittest discover -s scripts/archive-crawler -v` and its
 runs both. Keep state, captured sources, judgments, decisions and keys outside
 both repositories. Discovery uses a remote-free Git reader and bounded cached
 tree inventories; do not enable implicit promisor fetches on older Git or walk
-the archive checkout. Wayback requests are serial through a persistent client,
+the archive checkout. Production source discovery keeps per-host Git-tree cursors
+in the main SQLite database, independently of capped pilot file inventories and
+campaign snapshots. Rotate across known hosts, prefer curated seeds/early pages,
+and advance past cached or unavailable sources. Empty slices must continue while
+the frontier has work under the original deadline/spend cap. Preserve metadata,
+source-byte/time and probe bounds, report unavailable sources separately from
+exhaustion, and never let an old resumed campaign rewind shared cursors. Wayback requests are serial through a persistent client,
 using the persistent Net::HTTP approach from upstream PR #280: no fixed request
 delay or bandwidth cap, with cumulative request/byte/time budgets and bounded
 422/429 backoff.

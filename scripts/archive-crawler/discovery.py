@@ -27,6 +27,14 @@ class Archive:
         self.env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_NO_LAZY_FETCH": "1",
                     "GIT_OBJECT_DIRECTORY": str(self.objects), "GIT_CONFIG_GLOBAL": os.devnull,
                     "GIT_CONFIG_SYSTEM": os.devnull}
+        # Explicit local object caches only; never load another checkout's Git
+        # configuration or contact its promisor remote for absent content.
+        additional = os.environ.get('ARCHIVE_OBJECT_DIRECTORIES', '')
+        if additional:
+            directories = [Path(path) for path in additional.split(os.pathsep)]
+            if any(not path.is_absolute() for path in directories):
+                raise CrawlError('Additional archive object directories must be absolute paths')
+            self.env['GIT_ALTERNATE_OBJECT_DIRECTORIES'] = os.pathsep.join(str(path.resolve()) for path in directories)
         if not self.reader.exists():
             subprocess.run(["git", "init", "--bare", "--template=", "-q", str(self.reader)],
                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -171,7 +179,6 @@ def discover(args, store, *, cached_only=False, deadline=None):
         source = f"websites/{host}/{timestamp}/{path}"
         cached = store.db.execute("SELECT evidence FROM scans WHERE blob=? AND source=?", (blob, source)).fetchone()
         if cached:
-            by_host[host] = by_host.get(host, 0) + 1
             continue
         if read_bytes >= args.max_seed_bytes or reads >= args.max_seed_captures or probes >= args.max_seed_probes:
             break
@@ -184,30 +191,7 @@ def discover(args, store, *, cached_only=False, deadline=None):
         reads += 1
         by_host[host] = by_host.get(host, 0) + 1
         read_bytes += len(data)
-        if b"<" not in data[:4096]:
-            store.db.execute("INSERT INTO scans VALUES (?,?,?)", (blob, source, json.dumps({"links": 0})))
-            store.db.commit()
-            continue
-        url = original_url("http://" + host + "/" + path)
-        if not url:
-            continue
-        text, encoding = decode(data)
-        page = Page(url)
-        page.feed(text)
-        from ezboard import remember_page
-        remember_page(store, page, {'url': url, 'timestamp': timestamp, 'sha256': digest(data)})
-        for link in page.links:
-            target = link["url"]
-            if SKIP.search(urlsplit(target).path) or urlsplit(target).hostname == "web.archive.org":
-                continue
-            if urlsplit(target).netloc == host:
-                continue  # First pilot discovers outward links, not local navigation.
-            evidence = {**link, "source": source, "source_url": url,
-                        "source_category": category, "source_timestamp": timestamp, "blob": blob,
-                        "source_archive_sha": archive.sha}
-            store.db.execute("INSERT OR IGNORE INTO links VALUES (?,?,?)", (target, source, json.dumps(evidence)))
-        store.db.execute("INSERT INTO scans VALUES (?,?,?)", (blob, source, json.dumps({"links": len(page.links), "encoding": encoding})))
-        store.db.commit()
+        record_source(store, host, timestamp, path, blob, category, data, archive.sha)
     rows = list(store.db.execute("SELECT url,evidence FROM links ORDER BY url"))
     grouped = {}
     for row in rows:
@@ -291,3 +275,28 @@ def discover(args, store, *, cached_only=False, deadline=None):
     store.set("discovery_result", {"seed_reads": reads, "seed_bytes": read_bytes, "seed_failures": failures, "seed_probes": probes,
                                    "distinct_linked_urls": len(grouped), "candidates": len(store.candidates())})
     print(json.dumps(store.get("discovery_result")), flush=True)
+
+
+def record_source(store, host, timestamp, path, blob, category, data, archive_sha):
+    """Cache evidence from one exact Git source; no acquisition or grading."""
+    source = f'websites/{host}/{timestamp}/{path}'
+    url = original_url('http://' + host + '/' + path)
+    count, encoding = 0, None
+    if url and b'<' in data[:4096]:
+        text, encoding = decode(data)
+        page = Page(url)
+        page.feed(text)
+        from ezboard import remember_page
+        remember_page(store, page, {'url': url, 'timestamp': timestamp, 'sha256': digest(data)})
+        for link in page.links:
+            target = link['url']
+            if (SKIP.search(urlsplit(target).path) or urlsplit(target).hostname == 'web.archive.org'
+                    or site_identity(target) == site_identity(url)):
+                continue
+            evidence = {**link, 'source': source, 'source_url': url,
+                        'source_category': category, 'source_timestamp': timestamp, 'blob': blob,
+                        'source_archive_sha': archive_sha}
+            store.db.execute('INSERT OR IGNORE INTO links VALUES (?,?,?)', (target, source, json.dumps(evidence)))
+            count += 1
+    store.db.execute('INSERT OR IGNORE INTO scans VALUES (?,?,?)', (blob, source, json.dumps({'links': count, 'encoding': encoding})))
+    store.db.commit()

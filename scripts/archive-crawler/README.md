@@ -136,6 +136,21 @@ implicit promisor fetching even on older Git. No clone, pull, checkout, status,
 working-tree walk, archive commit or push is part of the tool. The inventory cap
 persists with the work directory, including older cached tree versions.
 
+The production portal additionally uses `archive_frontier.py`: bounded directory
+stacks rotate across all known archive hosts, with curated seeds first, without
+building a recursive page inventory. Main-database cursors persist across runs;
+cached scans and missing objects never pin the next run to the same shortlist.
+Empty slices continue until the frontier is exhausted or the original discovery
+deadline/spend cap is reached. Unavailable local sources are reported separately
+and completed passes with gaps are revisited after a day. No automatic Git fetch
+or archive checkout scan is added. The standalone pilot keeps its configured
+inventory/read bounds.
+
+`ARCHIVE_OBJECT_DIRECTORIES` optionally supplies absolute, colon-separated local
+Git object directories. The remote-free reader can reuse their content-addressed
+blobs without loading their repository configuration or writing/fetching objects.
+The portal mounts its existing full reindex object cache read-only for this purpose.
+
 Website/account novelty is checked separately from that capped page inventory.
 Existing ordinary hosts are excluded before sampling/grading, including `www`
 and default-port aliases stored as literal `:80`/`:443` or legacy `_80`/`_443`
