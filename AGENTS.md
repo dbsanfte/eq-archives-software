@@ -133,7 +133,8 @@ bash scripts/smoke-embeddings.sh eqarchives-frontend:local
   the metadata-only `/sites` list, mobile tap targets and exact domain filters
   through semantic/quoted searches, sorting, pagination, readers and URL history.
   Explore regressions cover linked charts, phrase/cloud lists, date drafts,
-  share/history state, delayed responses, mobile touch targets and search scopes.
+  share/history state, delayed responses, mobile touch targets, cloud size
+  separation/equal counts and search scopes.
   `PLAYWRIGHT_CHROMIUM_EXECUTABLE` can
   select an existing local Chromium binary; the default uses Playwright's install.
 - [smoke-embeddings.sh](scripts/smoke-embeddings.sh) downloads the pinned model,
@@ -676,7 +677,9 @@ ChatGPT/Claude or Deep Research validation after actually performing it.
   read-only MCP service. Keep the fixed query bounds, serial analytics execution,
   shared request limit, ten-minute/64-entry summary cache and safe errors. Phrase
   samples are bounded to 100 captures/12,000 characters each, deduplicate original
-  pages and repeated text, and expose sampling/vocabulary limits. Never walk
+  pages and repeated text, and expose sampling/vocabulary limits. Retain exact
+  sampled page counts when ranking phrases or scaling clouds. Equal counts use
+  equal sizes; disclose relative scaling and keep zero-based bars in List. Never walk
   archive Git, write index documents or call AI for exploration. Test routes with
   `scripts/check-explore.py` in container integration and deployment; preserve
   the MCP tool contract and existing indexing Jobs.

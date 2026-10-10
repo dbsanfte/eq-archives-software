@@ -41,6 +41,7 @@ anyone someone make made want way things thing number date free filter settings 
 one two three may must well even still really many every something anything don't doesn't didn't
 isn't can't won't i'm i've you're it's that's there's please thanks thank faq help poweredby
 everquest eq sony verant entertainment allakhazam castersrealm alla zam google yahoo
+comment comments e-mail glossary stats subject submitted know best good great
 """.split())
 TOKEN = re.compile(r"(?<!\w)[a-z]+(?:['’-][a-z]+)*(?!\w)", re.I)
 REPLAY = re.compile(r"^https?://web\.archive\.org/web/\d{14}(?:[a-z]+_)?/(https?://.+)$", re.I)
@@ -163,6 +164,7 @@ def extract_phrases(hits, site_selected=False):
     repeated = Counter((domain, line) for domain, lines in pages for line in set(lines))
     global_lines = Counter(line for _, lines in pages for line in set(lines))
     frequency = Counter()
+    domain_frequency = {domain: Counter() for domain in domains}
     vocabulary_limited = False
     for domain, lines in pages:
         phrases = set()
@@ -185,11 +187,28 @@ def extract_phrases(hits, site_selected=False):
         for phrase in sorted(phrases):
             if phrase in frequency or len(frequency) < MAX_VOCABULARY:
                 frequency[phrase] += 1
+                domain_frequency[domain][phrase] += 1
             else:
                 vocabulary_limited = True
     minimum = 2 if len(pages) >= 8 else 1
-    ranked = sorted((p for p, n in frequency.items() if n >= minimum),
-        key=lambda p: (-frequency[p] * (1 + .45 * p.count(" ")), p))
+    # Repeated field labels can survive line removal when each row also contains
+    # a changing item ID/value. Suppress words shared by almost the entire sample,
+    # including phrases made from those labels, while retaining true page counts.
+    ubiquitous = {p for p, n in frequency.items()
+        if ' ' not in p and len(pages) >= 8 and n >= math.ceil(len(pages) * .8)}
+    # Inline navigation changes as a whole when any ID/value changes. Detect
+    # repeated phrases within those rows, using the same per-domain threshold
+    # as repeated lines. Require most support to come from such template repeats,
+    # so a topic discussed independently across sources remains eligible.
+    template_frequency = Counter()
+    for domain, counts in domain_frequency.items():
+        threshold = max(3, math.ceil(domains[domain] * .6))
+        for phrase, n in counts.items():
+            if ' ' in phrase and n >= threshold:
+                template_frequency[phrase] += n
+    ranked = sorted((p for p, n in frequency.items()
+        if n >= minimum and not ubiquitous.intersection(p.split()) and template_frequency[p] < n * .8),
+        key=lambda p: (-frequency[p] * (1 + p.count(" ")), p))
     chosen = []
     for phrase in ranked:
         if any(f" {phrase} " in f" {other} " and frequency[phrase] == frequency[other] for other in chosen):

@@ -105,6 +105,29 @@ test('cloud/list modes, toggled selections, sharing and clipboard fallback are a
   expect(input.selectionEnd).toBe(input.value.length);
 });
 
+test('cloud separates close frequencies, keeps ties equal, and exposes unchanged page counts', async () => {
+  let terms = [{ text: 'ancient cyclops', pages: 20 }, { text: 'cleric', pages: 19 }, { text: 'necromancer', pages: 20 }];
+  fetchExplore.mockImplementation((kind, selection) => Promise.resolve(kind === 'overview' ? overview(selection)
+    : { ...phrases(selection), phrases: terms }));
+  render(<Explore />); await ready();
+  const buttons = () => within(screen.getByRole('list', { name: 'Source phrases' })).getAllByRole('button');
+  expect(parseFloat(buttons()[0].style.fontSize) / parseFloat(buttons()[1].style.fontSize)).toBeGreaterThan(2.4);
+  expect(buttons()[0].style.fontSize).toBe(buttons()[2].style.fontSize);
+  expect(screen.getByText(/Relative frequency: 19–20 sampled pages/)).toBeVisible();
+  fireEvent.click(screen.getByRole('button', { name: 'List', exact: true }));
+  expect(screen.getAllByText('20 pages')).toHaveLength(2);
+  expect(screen.getByText('19 pages')).toBeVisible();
+  expect(buttons()[1]).toHaveAccessibleName('cleric: 19 sampled pages');
+  fireEvent.click(screen.getByRole('button', { name: 'Cloud', exact: true }));
+  terms = terms.map(term => ({ ...term, pages: 20 }));
+  fireEvent.click(screen.getByRole('button', { name: 'Check for updates' }));
+  expect(await screen.findByText(/Equal frequency: every term appears on 20 sampled pages/)).toBeVisible();
+  expect(new Set(buttons().map(button => button.style.fontSize)).size).toBe(1);
+  terms = [{ text: 'ancient cyclops', pages: 1 }];
+  fireEvent.click(screen.getByRole('button', { name: 'Check for updates' }));
+  expect(await screen.findByText(/every term appears on 1 sampled page\./)).toBeVisible();
+});
+
 test('shows invalid links, empty charts and missing phrase evidence honestly', async () => {
   window.history.replaceState({}, '', '/explore?start=invalid');
   fetchExplore.mockImplementation((kind, selection) => Promise.resolve(kind === 'overview' ? {
@@ -113,7 +136,7 @@ test('shows invalid links, empty charts and missing phrase evidence honestly', a
   render(<Explore />);
   expect(screen.getByRole('alert')).toHaveTextContent('invalid filters');
   expect(await screen.findByText(/No indexed website captures/)).toBeVisible();
-  expect(screen.getByText(/Not enough source text/)).toBeVisible();
+  expect(screen.getByText(/No distinctive source phrases/)).toBeVisible();
   expect(screen.getByText(/No theme tags/)).toBeVisible();
   expect(screen.getByText(/No sites match/)).toBeVisible();
 });

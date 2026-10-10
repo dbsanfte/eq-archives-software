@@ -52,13 +52,16 @@
 .explore-bars button { display: flex; position: relative; isolation: isolate; width: 100%; justify-content: space-between; gap: 12px; text-align: left; overflow: hidden; }
 .explore-bar-fill { position: absolute; inset: 0 auto 0 0; z-index: -1; background: #edf1e7; }
 .explore-bars button[aria-pressed="true"], .explore-sites button[aria-pressed="true"] { border-color: var(--archive-ink); box-shadow: inset 3px 0 var(--archive-ink); }
-.explore-cloud { display: flex; flex-wrap: wrap; gap: 4px 8px; justify-content: center; align-content: center; min-height: 230px; margin-bottom: 20px; }
+.explore-cloud { display: flex; flex-wrap: wrap; gap: 6px 10px; justify-content: center; align-items: center; align-content: center; min-height: 230px; margin-bottom: 20px; }
 .explore-cloud li { max-width: 100%; }
-.explore-cloud button { font-family: Georgia, serif; border-color: transparent; padding: 5px 8px; max-width: 100%; overflow-wrap: anywhere; }
+.explore-cloud button { font-family: Georgia, serif; line-height: 1.15; border-color: transparent; padding: 5px 8px; max-width: 100%; overflow-wrap: anywhere; }
 .explore-cloud button[aria-pressed="true"] { border-color: var(--archive-gold); background: var(--archive-paper); }
 .explore-phrase-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .explore-phrase-list button { display: flex; flex-direction: column; gap: 4px; width: 100%; height: 100%; text-align: left; overflow-wrap: anywhere; }
 .explore-phrase-list button > span { color: var(--archive-muted); font-size: .75rem; }
+.explore-phrase-meter { display: block; width: 100%; height: 4px; margin-top: 4px; border-radius: 2px; background: var(--archive-sage); overflow: hidden; }
+.explore-phrase-meter > span { display: block; height: 100%; background: #52765b; }
+.explore-cloud-scale { border-top: 1px solid var(--archive-border); padding-top: 10px; }
 .explore-method { border-top: 1px solid var(--archive-border); font-size: .8rem; color: var(--archive-muted); line-height: 1.6; }
 .explore-method summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; color: var(--archive-ink); gap: 8px; }
 .explore-method summary::before { content: '+'; font-size: 1.2rem; }
