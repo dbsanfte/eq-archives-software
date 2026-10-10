@@ -22,6 +22,9 @@ manual Discover pane. Indexing exposes the existing Job it is waiting for.
 Recent outcomes come from bounded SQLite metadata reads, independent of paginated
 sites and capped operation/batch lists. Polling every five seconds reports lost
 updates explicitly, preserves open details and drafts, and never starts paid work.
+Automatic polls wait for the previous refresh to finish, including slow responses;
+explicit navigation can still supersede it. Coverage checks share one archive-host
+snapshot across all Ezboards in a pass, including cached board results.
 
 ## Continuous automatic mode
 

@@ -20,7 +20,15 @@ class InventoryPause(CrawlError):
 class SiteInventory:
     def __init__(self, archive, max_trees=4096, max_bytes=32 * 1024 * 1024, max_seconds=15):
         self.archive = archive
-        self.hosts = {row['host'].lower(): dict(row) for row in archive.store.db.execute('SELECT * FROM hosts')}
+        from ezboard import shard
+        self.hosts, self.ezboard_hosts = {}, {}
+        # A coverage pass checks many boards. Read and classify the host table
+        # once, retaining exact archive folder names for board tree traversal.
+        for row in archive.store.db.execute('SELECT * FROM hosts'):
+            host = dict(row)
+            self.hosts[row['host'].lower()] = host
+            if shard(row['host']):
+                self.ezboard_hosts[row['host']] = host
         self.trees, self.process = {}, None
         self.maximum, self.byte_limit, self.seconds = max_trees, max_bytes, max_seconds
         self.bytes, self.started, self.probes = 0, time.monotonic(), 0
