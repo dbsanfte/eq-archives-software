@@ -4,7 +4,6 @@ import asyncio
 from collections import Counter, OrderedDict
 from datetime import date, datetime, timezone
 import hashlib
-import html
 import math
 import re
 import time
@@ -43,7 +42,7 @@ one two three may must well even still really many every something anything don'
 isn't can't won't i'm i've you're it's that's there's please thanks thank faq help poweredby
 everquest eq sony verant entertainment allakhazam castersrealm alla zam google yahoo
 """.split())
-TOKEN = re.compile(r"[a-z]+(?:['’-][a-z]+)*", re.I)
+TOKEN = re.compile(r"(?<!\w)[a-z]+(?:['’-][a-z]+)*(?!\w)", re.I)
 REPLAY = re.compile(r"^https?://web\.archive\.org/web/\d{14}(?:[a-z]+_)?/(https?://.+)$", re.I)
 ARCHIVE_ID = re.compile(r"^websites/([^/]+)/\d{14}/(.*)$")
 
@@ -149,8 +148,14 @@ def extract_phrases(hits, site_selected=False):
         seen_text.add(fingerprint)
         domains[domain] += 1
         clipped += len(text) == EXCERPT_CHARS
-        text = html.unescape(re.sub(r"<[^>]*>", " ", text)).lower()
-        text = re.sub(r"(?:https?://|www\.)\S+|\b\S+@\S+\b", " ", text)
+        # text_full contains Markdown. Link destinations (including relative
+        # archive paths) are not source prose. Keep boundaries when removing
+        # markup, URLs and entities so phrases still occur in the indexed text.
+        text = text.lower()
+        text = re.sub(r"(?m)^[ \t]{0,3}\[[^\]\n]+\]:[^\n]*", "\n", text)
+        text = re.sub(r"(?<=\])\([^\n]*?\)", "\n", text)
+        text = re.sub(r"<[^>]*>|&(?:\#\d+|\#x[0-9a-f]+|[a-z]+);", "\n", text)
+        text = re.sub(r"(?:https?://|www\.)\S+|\b\S+@\S+\b", "\n", text)
         # Retain sentence boundaries: never invent a phrase across unrelated lines.
         lines = [" ".join(line.split()) for line in text.splitlines() if line.strip()]
         pages.append((domain, lines))
@@ -165,14 +170,17 @@ def extract_phrases(hits, site_selected=False):
             if (domains[domain] >= 3 and repeated[domain, line] >= max(3, math.ceil(domains[domain] * .6))) or (len(line) < 200 and global_lines[line] >= max(5, math.ceil(len(pages) * .05))):
                 continue
             for sentence in re.split(r"[.!?;|\[\]{}<>]+", line):
-                tokens = TOKEN.findall(sentence)
+                matches = list(TOKEN.finditer(sentence))
+                tokens = [match[0] for match in matches]
                 for start, token in enumerate(tokens):
                     if token in STOP or not 3 <= len(token) <= 24:
                         continue
                     phrases.add(token)
                     for length in (2, 3):
                         words = tokens[start:start + length]
-                        if len(words) == length and all(3 <= len(w) <= 24 and w not in STOP for w in words):
+                        adjacent = all(sentence[a.end():b.start()].isspace()
+                            for a, b in zip(matches[start:start + length - 1], matches[start + 1:start + length]))
+                        if len(words) == length and adjacent and all(3 <= len(w) <= 24 and w not in STOP for w in words):
                             phrases.add(" ".join(words))
         for phrase in sorted(phrases):
             if phrase in frequency or len(frequency) < MAX_VOCABULARY:

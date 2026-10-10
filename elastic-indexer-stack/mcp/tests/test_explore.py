@@ -114,6 +114,31 @@ def test_cloud_bounds_removes_repeated_boilerplate_without_creating_cross_line_p
     assert bounded['sampled_pages'] == 100 and len(bounded['phrases']) == 40
 
 
+def test_cloud_uses_searchable_source_words_without_markdown_destinations_or_joined_fragments():
+    source = '''[Old Fashion...](/equipment/fashion/Fashion_Table.html)
+[Luclin Fashion...](/equipment/fashion.html)
+[Ancient cyclops](../bestiary/secret_slug?search=hidden_keyword) guards the desert.
+[Rare platinum](https://example.org/invisible/path) rings.
+[1]: /hidden_reference/lookup
+Bronze 123 shield. Copper/sword. Silver_armor. Mithril99.
+Golden, dragon. Weapon<b>damage</b>. Rune https://example.org/spells sorcery.
+Diamond &amp; emerald. Massive strength. Guard's steel.
+'''
+    result = extract_phrases([hit(text=source)])
+    phrases = {p['text'] for p in result['phrases']}
+    assert {'ancient cyclops', 'rare platinum', 'massive strength', "guard's steel"} <= phrases
+    assert not any(p in phrases for p in (
+        'equipment fashion fashion', 'fashion', 'table', 'bestiary', 'secret', 'slug',
+        'hidden', 'keyword', 'invisible', 'path', 'reference', 'lookup', 'amp',
+        'bronze shield', 'copper sword', 'silver armor', 'mithril', 'golden dragon',
+        'weapon damage', 'rune sorcery', 'diamond emerald',
+    ))
+    # Every offered phrase occurs literally in the source (apart from case and
+    # whitespace), so source phrase filters do not lead to invented matches.
+    normalized = ' '.join(source.lower().split())
+    assert all(p in normalized for p in phrases)
+
+
 def test_overview_requires_complete_counts_and_marks_approximate_terms():
     result = parse_overview(overview())
     assert result['records'] == 12 and result['tagged'] == 6
