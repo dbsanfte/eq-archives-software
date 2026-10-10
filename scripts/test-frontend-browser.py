@@ -194,8 +194,16 @@ class FrontendBrowserTests(unittest.TestCase):
                             titles = {'Timeline': 'Through the years', 'Themes': 'Follow a theme', 'Words': 'Words from the pages', 'Sites': 'Explore the sites'}
                             heading = page.get_by_role('heading', name=titles[name], exact=True)
                             expect(heading).to_be_visible()
-                            nav = page.get_by_role('navigation', name='Explore charts').bounding_box()
-                            self.assertGreaterEqual(heading.bounding_box()['y'], nav['y'] + nav['height'])
+                            # React's scroll effect can run between two protocol
+                            # reads. Measure both surfaces in one animation frame,
+                            # and wait until scrolling has revealed the heading.
+                            page.wait_for_function('''title => {
+                                const heading = [...document.querySelectorAll('.explore-panel h2')].find(e => e.textContent === title);
+                                const nav = document.querySelector('.explore-panel-nav').getBoundingClientRect();
+                                const rect = heading.getBoundingClientRect();
+                                const painted = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+                                return rect.top >= nav.bottom && rect.bottom <= innerHeight && heading.contains(painted);
+                            }''', arg=titles[name])
 
                     def dates():
                         if not page.locator('.explore-date-settings').get_attribute('open') == '':
