@@ -129,7 +129,10 @@ bash scripts/smoke-embeddings.sh eqarchives-frontend:local
   search toggle/keyword-query behavior at mobile and desktop widths. Grouped-capture
   regressions cover duplicates spanning raw batches, unique results across pages,
   the all-captures toggle and exact dated previews. Extend
-  this suite for browser-dependent bugs. `PLAYWRIGHT_CHROMIUM_EXECUTABLE` can
+  this suite for browser-dependent bugs. Recently indexed site regressions cover
+  the metadata-only `/sites` list, mobile tap targets and exact domain filters
+  through semantic/quoted searches, sorting, pagination, readers and URL history.
+  `PLAYWRIGHT_CHROMIUM_EXECUTABLE` can
   select an existing local Chromium binary; the default uses Playwright's install.
 - [smoke-embeddings.sh](scripts/smoke-embeddings.sh) downloads the pinned model,
   verifies its hash and offline cache reuse, and runs the real server on CPU. It

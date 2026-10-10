@@ -137,6 +137,166 @@ class FrontendBrowserTests(unittest.TestCase):
                 with self.subTest(width=width, filled_dates=filled_dates):
                     self.check_sort_menu(width, filled_dates)
 
+    def test_recent_sites_open_a_persistent_focused_search(self):
+        for width in (320, 390, 768, 1280):
+            with self.subTest(width=width):
+                context = self.browser.new_context(
+                    viewport={'width': width, 'height': 900},
+                    is_mobile=width <= 800, has_touch=width <= 800,
+                )
+                try:
+                    page = context.new_page()
+                    searches, lists, embeddings, errors = [], [], [], []
+                    fail_list = False
+                    domain = 'www.guild.example.org:8080'
+                    records = [{'_id': f'websites/{domain}/20000101000000/page{i}.html', '_score': 1,
+                        '_source': {'title': f'Guild page {i}', 'domain_name': domain,
+                                    'url': f'https://web.archive.org/web/20000101000000/http://{domain}/page{i}.html',
+                                    'text_full': '# Original guild page\n\nCleric and paladin spells.',
+                                    'capture_date': '2000-01-01T00:00:00Z'}} for i in range(26)]
+                    facets = {field: {'buckets': []} for field in (
+                        'domain_name', 'llm_content_flavour', 'file_type', 'mime_type', 'mailing_list_name', 'llm_tags'
+                    )}
+                    facets['domain_name'] = {'buckets': [{'key': domain, 'doc_count': len(records)}]}
+                    facets['last_indexed'] = {'buckets': {}}
+
+                    def archive(route):
+                        if route.request.url.endswith('/_count'):
+                            return route.fulfill(json={'count': len(records)})
+                        body = route.request.post_data_json
+                        if 'sites' in body.get('aggs', {}):
+                            lists.append(body)
+                            self.assertEqual(body['size'], 0)
+                            self.assertEqual(body['aggs']['sites']['terms']['size'], 50)
+                            if fail_list:
+                                return route.fulfill(status=503, json={'error': 'test outage'})
+                            return route.fulfill(json={'_shards': {'total': 1, 'failed': 0}, 'aggregations': {'sites': {'buckets': [
+                                {'key': name, 'doc_count': 123, 'latest_indexed': {'value': 1791624219290 - i * 1000},
+                                 'first_capture': {'value': 946684800000}, 'last_capture': {'value': 1167609599000}}
+                                for i, name in enumerate([domain, 'a-very-long-historical-everquest-guild-site.example.org', 'older.example.org'])
+                            ]}}})
+                        if 'ids' in body.get('query', {}):
+                            return route.fulfill(json={'hits': {'hits': [record for record in records
+                                if record['_id'] in body['query']['ids']['values']]}})
+                        searches.append(body)
+                        start = body.get('from', 0)
+                        hits = [{**record, '_source': {key: value for key, value in record['_source'].items() if key != 'text_full'}}
+                                for record in records[start:start + body['size']]]
+                        route.fulfill(json={'hits': {'total': {'value': len(records), 'relation': 'eq'}, 'hits': hits},
+                            'aggregations': {'facet_bucket_all': {'doc_count': len(records), **facets}}})
+
+                    def embed(route):
+                        embeddings.append(route.request.post_data_json)
+                        route.fulfill(json={'data': [{'embedding': [0.1] * 768}]})
+
+                    def domain_values(value):
+                        found = []
+                        if isinstance(value, dict):
+                            for key in ('term', 'terms'):
+                                item = value.get(key, {}).get('domain_name')
+                                if item is not None:
+                                    found.extend(item if isinstance(item, list) else [item])
+                            for child in value.values():
+                                found.extend(domain_values(child))
+                        elif isinstance(value, list):
+                            for child in value:
+                                found.extend(domain_values(child))
+                        return found
+
+                    def check_scope():
+                        body = searches[-1]
+                        self.assertIn(domain, domain_values([body.get('query'), body.get('post_filter')]))
+                        for branch in body.get('knn', []):
+                            self.assertIn(domain, domain_values(branch.get('filter')))
+
+                    page.on('pageerror', lambda error: errors.append(str(error)))
+                    page.route('**/elasticsearch/**', archive)
+                    page.route('**/openai/v1/embeddings', embed)
+                    page.goto(self.base_url, wait_until='networkidle')
+                    page.get_by_role('link', name='Recently indexed', exact=True).click()
+                    expect(page.get_by_role('heading', name='Recently indexed sites', exact=True)).to_be_visible()
+                    expect(page.locator('.site-card')).to_have_count(3)
+                    expect(page.get_by_role('link', name='Recently indexed', exact=True)).to_have_attribute('aria-current', 'page')
+                    expect(page.get_by_role('status')).to_contain_text('List updated')
+                    self.assertEqual(embeddings, [])
+                    self.assertEqual(len(lists), 1)
+                    self.assertLessEqual(page.evaluate('document.documentElement.scrollWidth'), width)
+                    for selector in ('.archive-primary-navigation a', '.sites-refresh', '.site-card'):
+                        for height in page.locator(selector).evaluate_all('elements => elements.map(e => e.getBoundingClientRect().height)'):
+                            self.assertGreaterEqual(height, 44)
+
+                    fail_list = True
+                    page.get_by_role('button', name='Refresh list').click()
+                    expect(page.get_by_role('alert')).to_contain_text('previous list is still shown')
+                    expect(page.locator('.site-card')).to_have_count(3)
+                    fail_list = False
+                    page.get_by_role('button', name='Refresh list').click()
+                    expect(page.get_by_role('alert')).to_have_count(0)
+                    link = page.get_by_role('link', name=f'Search captures from {domain}', exact=True)
+                    if width <= 800:
+                        link.tap()
+                    else:
+                        link.click()
+                    scope = page.get_by_role('region', name='Site search scope')
+                    expect(scope).to_contain_text(domain)
+                    expect(page.get_by_role('heading', name=domain, exact=True)).to_be_visible()
+                    expect(page.get_by_role('heading', name='Rediscover early EverQuest.', exact=True)).to_have_count(0)
+                    expect(page.locator('.sui-result')).to_have_count(20)
+                    check_scope()
+
+                    search = page.locator('.sui-search-box__text-input')
+                    search.fill('cleric')
+                    search.fill('cleric healing')
+                    with page.expect_response(lambda response: response.url.endswith('/_search')):
+                        search.press('Enter')
+                    check_scope()
+                    self.assertTrue(searches[-1]['knn'])
+                    with page.expect_response(lambda response: response.url.endswith('/_search')):
+                        search.fill('"paladin spells"')
+                        search.press('Enter')
+                    check_scope()
+                    self.assertNotIn('knn', searches[-1])
+                    page.get_by_role('button', name='Next', exact=True).click()
+                    expect(page.locator('.sui-result')).to_have_count(6)
+                    expect(scope).to_contain_text(domain)
+                    page.get_by_role('button', name='Previous', exact=True).click()
+                    expect(page.locator('.sui-result')).to_have_count(20)
+                    show_filters = page.get_by_role('button', name='Show Filters', exact=True)
+                    if show_filters.is_visible():
+                        show_filters.click()
+                    page.locator('.sui-sorting .sui-select__control').click()
+                    with page.expect_response(lambda response: response.url.endswith('/_search')):
+                        page.get_by_role('option', name='Captured date (Descending)', exact=True).click()
+                    check_scope()
+                    save_filters = page.get_by_role('button', name='Save Filters', exact=True)
+                    if save_filters.is_visible():
+                        save_filters.click()
+
+                    page.wait_for_url(lambda url: 'sort' in str(url))
+                    focused_url = page.url
+                    page.locator('.sui-result').first.get_by_role('link', name='Read document', exact=True).click()
+                    expect(page.get_by_role('heading', name='Guild page 0', exact=True)).to_be_visible()
+                    page.get_by_role('link', name='← Back to results', exact=True).click()
+                    expect(scope).to_contain_text(domain)
+                    page.reload(wait_until='networkidle')
+                    check_scope()
+                    expect(search).to_have_value('"paladin spells"')
+                    self.assertEqual(page.url, focused_url)
+                    with page.expect_response(lambda response: response.url.endswith('/_search')):
+                        page.get_by_role('button', name='Search all sites', exact=True).click()
+                    expect(scope).to_have_count(0)
+                    self.assertNotIn(domain, domain_values([searches[-1].get('query'), searches[-1].get('post_filter')]))
+                    expect(search).to_have_value('"paladin spells"')
+                    page.wait_for_url(lambda url: 'domain_name' not in str(url))
+                    with page.expect_response(lambda response: response.url.endswith('/_search')):
+                        page.go_back(wait_until='networkidle')
+                    expect(scope).to_contain_text(domain)
+                    check_scope()
+                    self.assertLessEqual(page.evaluate('document.documentElement.scrollWidth'), width)
+                    self.assertEqual(errors, [])
+                finally:
+                    context.close()
+
     def test_date_ranges_persist_across_results_searches_reload_and_history(self):
         for width, timezone in ((390, 'America/Los_Angeles'), (1280, 'Pacific/Auckland')):
             with self.subTest(width=width, timezone=timezone):

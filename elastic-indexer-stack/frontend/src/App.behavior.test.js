@@ -29,6 +29,7 @@ jest.mock('./views/ArchiveStatusBar', () => () => <span>Archive status</span>);
 jest.mock('./views/HeaderContent', () => () => <h1>Search archives</h1>);
 jest.mock('./views/result/CustomResultView', () => () => null);
 jest.mock('./views/search/EnhancedSearchBox', () => () => <input aria-label="Search archives" />);
+jest.mock('./views/sites/RecentSites', () => () => <h1>Recently indexed sites</h1>);
 jest.mock('./views/search/SyntaxExamples', () => () => <span>Query syntax help</span>);
 jest.mock('./views/search/DateRangeFacet', () => ({ label }) => <span>{label}</span>);
 jest.mock('./views/search/SearchParameters', () => ({ onChange }) =>
@@ -99,4 +100,22 @@ test('opens a direct reader link without constructing a search connector', () =>
     expect(screen.getByRole('alert')).toHaveTextContent('missing a document ID');
     expect(getSearchConfig).not.toHaveBeenCalled();
   } finally { window.history.replaceState({}, '', '/'); }
+});
+
+test.each(['/sites', '/sites/'])('opens the site list at %s without starting search or embeddings', path => {
+  window.history.replaceState({}, '', path);
+  try {
+    render(<App />);
+    expect(screen.getByRole('heading', { name: 'Recently indexed sites' })).toBeVisible();
+    expect(getSearchConfig).not.toHaveBeenCalled();
+  } finally { window.history.replaceState({}, '', '/'); }
+});
+
+test('makes the applied domain filter visible above search and offers removal', () => {
+  mockSearchState.filters = [{ field: 'domain_name', values: ['eq.example.org'], type: 'any' }];
+  mockSearchState.removeFilter = jest.fn();
+  render(<App />);
+  expect(screen.getByRole('region', { name: 'Site search scope' })).toHaveTextContent('eq.example.org');
+  fireEvent.click(screen.getByRole('button', { name: 'Search all sites' }));
+  expect(mockSearchState.removeFilter).toHaveBeenCalledWith('domain_name');
 });

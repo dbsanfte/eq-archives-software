@@ -60,6 +60,36 @@ keyword matching remains required when a date filter is present. Jest and
 Chromium regressions cover delayed results, successive searches, both date fields,
 mobile filter toggling, URL history, complete-day bounds and timezone restoration.
 
+## Recently indexed sites
+
+**Recently indexed** in the primary navigation opens `/sites`, a phone-friendly
+list of the 50 domains with the most recent `last_indexed` activity. It includes
+newly added records and refreshed records from reindexing, and does not imply
+that a whole site's indexing Job has completed. Capture dates remain separate
+from indexing dates. Records count dated versions, not unique pages; shared
+hosting domains may contain multiple sites.
+
+Each card opens the ordinary search with an exact `domain_name` facet encoded
+in the URL. The visible **Searching within** banner follows the actual filters.
+Typing, quoted queries, semantic queries, sorting, pagination, reloads and
+reader return links retain the scope. **Search all sites** removes only the
+domain facet and retains the query and other filters.
+
+The view uses a size-zero website-only aggregation through the existing
+read-only Elasticsearch proxy, ordered by descending maximum `last_indexed`.
+It never samples a page of search results to infer the newest sites, retrieves
+no document bodies or vectors, and starts no embeddings or indexing work.
+The list loads on entry and explicit **Refresh list** only. Requests have an
+8-second server timeout and a 15-second browser timeout; errors and partial
+responses are visible and leave the last successful list available. Counts are
+labelled as lower bounds and capture ranges omitted when multiple index shards
+could supply incomplete term counts. No mapping change or reindex is required.
+
+Jest covers metadata validation, exact filter links, loading, empty/error/retry
+states, cancellation, timeouts and scope removal. Chromium exercises the
+navigation and search/reader/reload/history flow at 320, 390, 768 and 1280 px,
+including touch targets, long domain names and horizontal overflow.
+
 ## Grouped captures
 
 Search results group repeated website captures by original page by default. The
