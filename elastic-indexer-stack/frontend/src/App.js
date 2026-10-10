@@ -34,6 +34,8 @@ import { CapturePaging, CaptureSummary } from "./views/search/CapturePaging";
 import DocumentReader from "./views/reader/DocumentReader";
 import { ReaderSearchContext, searchPhrase } from "./views/reader/reader-utils";
 import fieldLabels from "./config/field-labels";
+import RecentSites from "./views/sites/RecentSites";
+import SiteSearchScope, { scopedDomains } from "./views/search/SiteSearchScope";
 import "./views/ArchiveTheme.css";
 
 function SearchApp() {
@@ -74,9 +76,9 @@ function SearchApp() {
   return (
       <SearchProvider config={config}>
         <WithSearch
-          mapContextToProps={({ wasSearched, isLoading, executeSearch, setCurrent, totalResults, pagingStart, pagingEnd, rawResponse, resultSearchTerm }) => ({ wasSearched, isLoading, executeSearch, setCurrent, totalResults, pagingStart, pagingEnd, rawResponse, resultSearchTerm })}
+          mapContextToProps={({ wasSearched, isLoading, executeSearch, setCurrent, totalResults, pagingStart, pagingEnd, rawResponse, resultSearchTerm, filters, removeFilter }) => ({ wasSearched, isLoading, executeSearch, setCurrent, totalResults, pagingStart, pagingEnd, rawResponse, resultSearchTerm, filters, removeFilter })}
         >
-          {({ wasSearched, isLoading, executeSearch, setCurrent, resultSearchTerm, ...searchState }) => (
+          {({ wasSearched, isLoading, executeSearch, setCurrent, resultSearchTerm, filters, removeFilter, ...searchState }) => (
             <div className="App" style={{ position: "relative" }} data-testid="app-container">
               {isLoading && (
                 <Box
@@ -95,7 +97,8 @@ function SearchApp() {
                 header={
                   <>
                     <ArchiveStatusBar />
-                    <HeaderContent />
+                    <HeaderContent compact={scopedDomains(filters).length > 0} />
+                    <SiteSearchScope filters={filters} removeFilter={removeFilter} />
                     <EnhancedSearchBox searchAsYouType={true} enableSemanticSearch={knnParams.enableSemanticSearch} /> {/* We'll handle automatic searches ourselves */}
                     <Button
                       className="archive-search-option"
@@ -208,6 +211,7 @@ function SearchApp() {
 
 export default function App() {
   return <ThemeProvider theme={archiveTheme}><CssBaseline />
-    {/^\/document\/?$/.test(window.location.pathname) ? <DocumentReader /> : <SearchApp />}
+    {/^\/document\/?$/.test(window.location.pathname) ? <DocumentReader /> :
+      /^\/sites\/?$/.test(window.location.pathname) ? <RecentSites /> : <SearchApp />}
   </ThemeProvider>;
 }

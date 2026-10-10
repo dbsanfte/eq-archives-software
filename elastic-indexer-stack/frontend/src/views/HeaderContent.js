@@ -1,5 +1,6 @@
 import React from "react";
 import "./ArchiveHeader.css";
+import "./sites/Sites.css";
 
 export default function HeaderContent({ compact = false }) {
   return (
@@ -38,6 +39,10 @@ export default function HeaderContent({ compact = false }) {
           <img src="/images/mcp.svg" width="24" height="24" alt="" />
         </a>
       </div>
+      <nav className="archive-primary-navigation" aria-label="Archive views">
+        <a href="/" aria-current={window.location.pathname === '/' ? 'page' : undefined}>Search</a>
+        <a href="/sites" aria-current={/^\/sites\/?$/.test(window.location.pathname) ? 'page' : undefined}>Recently indexed</a>
+      </nav>
       {!compact && <div className="archive-introduction">
         <div className="archive-introduction__copy">
           <p className="archive-eyebrow">The EverQuest collection</p>
