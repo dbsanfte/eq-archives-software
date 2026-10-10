@@ -201,8 +201,10 @@ Overview reads bounded metadata aggregations. Phrases use a deterministic-seed
 diversified sample of up to 100 captures, limited to eight per domain per shard
 and again after retrieval; a selected domain allows 100. A fixed fetch script
 clips text to 12,000 characters before transport. URL/date versions and identical
-excerpts are deduplicated, navigation lines and stop words removed, and up to
-40 words/phrases ranked by page frequency with a modest phrase-length weight.
+excerpts are deduplicated, navigation lines, Markdown link destinations and stop
+words removed, and up to 40 words/phrases ranked by page frequency with a modest
+phrase-length weight. Phrases retain contiguous source words: removed markup,
+numbers and punctuation cannot join unrelated words into an unsearchable phrase.
 Vocabulary is capped at 50,000 terms and reaching it is disclosed. Sampling is
 not statistically representative and can change as the live index changes.
 Only aggregate terms and coverage metadata reach browsers, never sampled text.
