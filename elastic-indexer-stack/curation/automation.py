@@ -176,7 +176,7 @@ def schedule(root, account):
             # is not a lane lock; continue checking other sites/discovering.
         # Exhausted link frontiers sleep, instead of creating empty campaigns
         # every ten seconds or resampling remembered low-scoring websites.
-        if (activity.get('phase') == 'links_exhausted' and activity.get('retry_at', '') > now()
+        if (activity.get('phase') in ('links_exhausted', 'archive_unavailable') and activity.get('retry_at', '') > now()
                 and activity.get('revision') == config['revision']):
             return
         rows = decorate(store, [record(store, row) for row in store.db.execute("""SELECT * FROM candidates
@@ -209,7 +209,8 @@ def finished(root, operation, result):
         config = budget(root).settings()
         store.set('automatic_activity', {'phase': reason or 'ready', 'operation': operation['id'],
                   'revision': config['revision'],
-                  'retry_at': (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat() if reason == 'links_exhausted' else now()})
+                  'retry_at': (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
+                      if reason in ('links_exhausted', 'archive_unavailable') else now()})
 
 
 def pause_detail(error, operation=None):

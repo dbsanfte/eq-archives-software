@@ -129,6 +129,18 @@ class DiscoveryTests(unittest.TestCase):
         self.assertEqual(self.git("rev-parse", "HEAD"), head)
         self.assertEqual(self.git("status", "--porcelain"), "")
 
+    def test_cached_pages_do_not_consume_the_next_scan_allowance(self):
+        for index in range(3):
+            self.file('seed.example', '20000101000000', f'links{index}.html',
+                      f'<a href="http://guild{index}.example/">EQ guild</a>')
+        self.commit()
+        args = self.args()
+        args.max_per_seed = 1
+        discover(args, self.store)
+        discover(args, self.store)
+        self.assertEqual(len(self.store.candidates()), 2)
+        self.assertEqual(self.store.get('discovery_result')['seed_reads'], 1)
+
     def test_coverage_distinguishes_missing_tier_and_legacy_identity(self):
         self.file("known.example", "20000101000000", "Guide.html", "first")
         self.file("known.example", "20030101000000", "later.html", "second")

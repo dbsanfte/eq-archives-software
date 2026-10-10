@@ -2181,6 +2181,14 @@ async def pipeline_activity_flow(browser,base,width):
     await expect(page.locator('#activity-candidates')).to_contain_text('http://new-guild.example/')
     await expect(page.locator('#discover')).to_be_disabled()
     assert await page.locator('#pipeline-activity').evaluate('(el)=>!el.closest("fieldset")')
+    discovery['result']['progress'].update(phase='finding_links',archive_scan={
+        'pages_scanned':138,'hosts_visited':24,'hosts_total':1753,'sources_unavailable':660,
+        'metadata_unavailable':2,'current_host':'www.fohguild.org'})
+    await page.evaluate('refresh()');await settled(page)
+    await expect(page.locator('#activity-candidates > summary')).to_contain_text('Finding linked sites')
+    await expect(page.locator('#activity-candidates')).to_contain_text('138 pages read · 24 of 1,753 hosts visited')
+    await expect(page.locator('#activity-candidates')).to_contain_text('Scanning www.fohguild.org')
+    await expect(page.locator('#activity-candidates')).to_contain_text('660 sources unavailable or too large')
     await page.locator('#automation-settings > summary').click()
     await page.locator('#automation-daily').fill('5.50')
     # The last automatic result remains available even when omitted from operations.
@@ -2190,6 +2198,13 @@ async def pipeline_activity_flow(browser,base,width):
     await expect(page.locator('#activity-candidates > summary')).to_contain_text('Waiting for new links')
     await expect(page.locator('#activity-candidates')).to_contain_text('Next discovery check in')
     await expect(page.locator('#activity-candidates')).to_contain_text('Last run: 7/50')
+    await expect(page.locator('#automation-daily')).to_have_value('5.50')
+    discovery['result']['progress']['stop_reason']='archive_unavailable'
+    auto['activity']['phase']='archive_unavailable'
+    await page.evaluate('refresh()');await settled(page)
+    await expect(page.locator('#activity-candidates > summary')).to_contain_text('Archive sources unavailable')
+    await expect(page.locator('#activity-candidates')).to_contain_text('Some files or metadata are missing locally')
+    await expect(page.locator('#activity-candidates')).not_to_contain_text('No new links remain')
     await expect(page.locator('#automation-daily')).to_have_value('5.50')
     await page.locator('#pipeline-recent > summary').click()
     await expect(page.locator('#pipeline-events')).to_contain_text('Automatically queued for capture')

@@ -130,7 +130,8 @@ def test_enabling_waits_for_legacy_paid_job_without_modifying_jobs(candidate):
     assert automation.configure(root, settings(account, enabled=True), Kube())['settings']['enabled']
 
 
-def test_continuous_runs_replenish_and_exhausted_frontier_backs_off_without_forgetting_sites(tmp_path):
+@pytest.mark.parametrize('reason', ['links_exhausted', 'archive_unavailable'])
+def test_continuous_runs_replenish_and_exhausted_frontier_backs_off_without_forgetting_sites(tmp_path, reason):
     root = tmp_path/'state'
     with connect(root): pass
     account = enable(root, min_grade=3, grading_criteria='Guilds')
@@ -145,11 +146,11 @@ def test_continuous_runs_replenish_and_exhausted_frontier_backs_off_without_forg
         assert store.db.execute('SELECT COUNT(*) FROM operations').fetchone()[0] == 1
         store.db.execute("UPDATE operations SET state='completed'")
         store.db.commit()
-    automation.finished(root, operation, {'progress': {'stop_reason': 'links_exhausted'}})
+    automation.finished(root, operation, {'progress': {'stop_reason': reason}})
     automation.schedule(root, account)
     with connect(root) as store:
         assert store.db.execute('SELECT COUNT(*) FROM operations').fetchone()[0] == 1
-        store.set('automatic_activity', {'phase': 'links_exhausted', 'retry_at': '2000', 'revision': 1})
+        store.set('automatic_activity', {'phase': reason, 'retry_at': '2000', 'revision': 1})
     automation.schedule(root, account)
     with connect(root) as store: assert store.db.execute('SELECT COUNT(*) FROM operations').fetchone()[0] == 2
 

@@ -958,7 +958,7 @@ function renderDiscoveryProgress() {
   if (!progress) return;
   $('discovery-meter').max=progress.target;$('discovery-meter').value=progress.accepted;
   const phases={finding_links:'Finding linked sites',resolving_ezboard:'Identifying the parent Ezboard',checking_coverage:'Checking archive coverage',sampling:'Reading Wayback samples',grading:'Grading with Luna',paused:'Paused'};
-  const reasons={target_reached:'Target reached',time_limit:'One-hour limit reached',spend_limit:'Luna budget reached',links_exhausted:'No more new sites in the available link graph'};
+  const reasons={target_reached:'Target reached',time_limit:'One-hour limit reached',spend_limit:'Luna budget reached',links_exhausted:'Available archive pages and links checked',archive_unavailable:'Some archive sources are unavailable locally'};
   const remaining=Math.max(0,Math.ceil((progress.deadline-Date.now()/1000)/60));
   const state=operation.state==='interrupted' ? 'Paused — resume within the original limits' : reasons[progress.stop_reason] || phases[progress.phase] || 'Waiting for the worker';
   $('discovery-progress-text').textContent=`${progress.accepted}/${progress.target} new Grade ${progress.min_grade}+ sites · ${progress.checked} checked. ${state}. ${operation.state==='running' ? `${remaining} min left. ` : ''}Luna: ${usd(progress.estimated_usd)} estimated; ${usd(progress.reserved_usd)} reserved of $${progress.max_usd}. Results refresh every 5 seconds while this page is open.`;
@@ -1013,7 +1013,7 @@ function renderTools() {
 }
 let activityReceived=0,activityDisconnected=false,activityView=null;
 const discoveryPhases={finding_links:'Finding linked sites',resolving_ezboard:'Identifying the parent Ezboard',checking_coverage:'Checking archive coverage',coverage:'Checking archive coverage',sampling:'Reading Wayback samples',grading:'Grading with Luna',paused:'Paused'};
-const discoveryStops={target_reached:'Target reached',time_limit:'One-hour limit reached',spend_limit:'Run spending limit reached',links_exhausted:'No new links remain in this run'};
+const discoveryStops={target_reached:'Target reached',time_limit:'One-hour limit reached',spend_limit:'Run spending limit reached',links_exhausted:'Available archive pages and links checked',archive_unavailable:'Some archive sources are unavailable locally'};
 function activitySite(host,site) {
   if (!site?.id) return;
   const link=node('a',site.url || 'Open site','activity-site');link.href=`/?view=candidates&candidate=${encodeURIComponent(site.id)}`;
@@ -1072,15 +1072,21 @@ function renderPipelineActivity() {
           body.append(node('p',`$${Number(auto.remaining_usd).toFixed(4)} remaining today. Saved work resumes automatically when funded.`));
           activityDeadline(body,auto.resets_at,'Daily budget reset');
           if (auto.activity.required_usd>auto.settings.daily_usd) body.append(node('p','The next request exceeds the daily limit. Raise the limit in automatic settings to continue.','activity-warning'));
-        } else if (phase==='links_exhausted' || phase==='retry_wait') {
-          status=phase==='links_exhausted' ? 'Waiting for new links' : 'Waiting to retry';tone='waiting';
-          body.append(node('p',phase==='links_exhausted' ? 'All currently available new links have been checked. New captures can supply more links; remembered sites are kept.' : auto.activity.error || 'Saved progress is retained.'));
+        } else if (phase==='links_exhausted' || phase==='archive_unavailable' || phase==='retry_wait') {
+          status=phase==='links_exhausted' ? 'Waiting for new links' : phase==='archive_unavailable' ? 'Archive sources unavailable' : 'Waiting to retry';tone='waiting';
+          body.append(node('p',phase==='links_exhausted' ? 'The available archive pages and new links have been checked. New captures can supply more links; remembered sites are kept.' : phase==='archive_unavailable' ? 'Readable archive pages have been checked. Some files or metadata are missing locally or exceed the scan limits. Completed source passes with gaps are retried after a day; new staged links are checked below.' : auto.activity.error || 'Saved progress is retained.'));
           activityDeadline(body,auto.activity.retry_at,'Next discovery check');
         } else if (phase==='attention') {status='Needs attention';tone='attention';body.append(node('p',auto.activity.error || 'Automatic scheduling is paused.','activity-warning'));}
         else {status='Waiting for next automatic check';tone='waiting';body.append(node('p','The worker checks for eligible sites and new links every 10 seconds.'));}
       } else {status='Ready for manual discovery';body.append(node('p','Use Discover & grade or Add a site in Candidates. Approved capture and indexing work continues.'));}
       if (progress) {
         body.append(node('p',`${discovery ? 'This run' : 'Last run'}: ${progress.accepted}/${progress.target} Grade ${progress.min_grade ?? auto?.settings.min_grade ?? 2}+ sites · ${progress.checked} checked · ${progress.skipped || 0} skipped.`,'activity-counts'));
+        const scan=progress.archive_scan;
+        if (scan) {
+          body.append(node('p',`Archive scan: ${Number(scan.pages_scanned || 0).toLocaleString()} pages read · ${Number(scan.hosts_visited || 0).toLocaleString()} of ${Number(scan.hosts_total || 0).toLocaleString()} hosts visited. Positions are saved between runs.`,'activity-counts'));
+          if (scan.current_host && discovery) body.append(node('p',`Scanning ${scan.current_host}`,'address'));
+          if (scan.sources_unavailable || scan.metadata_unavailable) body.append(node('p',`${Number(scan.sources_unavailable || 0).toLocaleString()} sources unavailable or too large · ${Number(scan.metadata_unavailable || 0).toLocaleString()} hosts with unavailable metadata. Other hosts continue.`,'activity-warning'));
+        }
         if (discovery) {const bar=node('progress');bar.max=progress.target || 50;bar.value=progress.accepted || 0;bar.setAttribute('aria-label','Discovery qualifying sites');body.append(bar);}
         body.append(node('p',`${discoveryStops[progress.stop_reason] || ''}${progress.stop_reason ? '. ' : ''}Luna: ${usd(progress.estimated_usd || 0)} estimated + ${usd(progress.reserved_usd || 0)} reserved${progress.max_usd ? ` of $${progress.max_usd}` : ''}.`,'meta'));
         if (discovery && progress.deadline) activityDeadline(body,new Date(progress.deadline*1000).toISOString(),'Run deadline');
@@ -1155,6 +1161,7 @@ function renderAutomation() {
   if (settings.enabled && waiting) status=`Waiting for daily Luna funds. Discovery resumes automatically after the reset at ${reset}. Captures and approved work retain their progress.`;
   if (settings.enabled && waiting && auto.activity.required_usd>settings.daily_usd) status=`The next grading request needs a $${auto.activity.required_usd.toFixed(4)} reservation, exceeding the daily limit. Raise the limit below to continue. Progress is retained.`;
   if (settings.enabled && auto.activity?.phase==='links_exhausted') status='All currently known new links have been checked. Discovery checks again in five minutes; remembered sites are kept.';
+  if (settings.enabled && auto.activity?.phase==='archive_unavailable') status='Available source pages have been checked; some archive sources are unavailable locally. See Pipeline activity for scan progress and the next check.';
   if (settings.enabled && ['attention','retry_wait'].includes(auto.activity?.phase)) status=(auto.activity.phase==='retry_wait' ? `Retrying at ${new Date(auto.activity.retry_at).toUTCString()}. ` : 'Automatic discovery needs attention. ')+(auto.activity.error || 'See Recent activity.');
   $('automation-status').textContent=status;
   $('automation-budget').textContent=!settings.configured ? `Daily limit not configured. Default proposal: $${settings.daily_usd.toFixed(2)}/day. Saving settings includes today's earlier portal spending.` : `Today: $${auto.estimated_usd.toFixed(4)} estimated + $${auto.unresolved_usd.toFixed(4)} reserved · $${auto.remaining_usd.toFixed(4)} remaining of $${settings.daily_usd.toFixed(2)}. Resets at 00:00 UTC.`;
