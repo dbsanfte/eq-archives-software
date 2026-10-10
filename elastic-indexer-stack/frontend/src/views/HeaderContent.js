@@ -42,6 +42,7 @@ export default function HeaderContent({ compact = false }) {
       <nav className="archive-primary-navigation" aria-label="Archive views">
         <a href="/" aria-current={window.location.pathname === '/' ? 'page' : undefined}>Search</a>
         <a href="/sites" aria-current={/^\/sites\/?$/.test(window.location.pathname) ? 'page' : undefined}>Recently indexed</a>
+        <a href="/explore" aria-current={/^\/explore\/?$/.test(window.location.pathname) ? 'page' : undefined}>Explore</a>
       </nav>
       {!compact && <div className="archive-introduction">
         <div className="archive-introduction__copy">

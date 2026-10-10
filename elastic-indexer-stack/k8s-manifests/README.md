@@ -222,3 +222,12 @@ revert the change through a tested PR. It does not change frontend or model pods
 To confirm a repeat deployment is a no-op, compare the Deployment generation,
 revision annotation, and pod UIDs for all three deployments before and after invoking
 the script twice with the same two image digests and secret values.
+
+### Explore routing
+
+The existing `eqarchives-mcp` ingress also owns exact paths
+`/api/explore/overview` and `/api/explore/phrases`, under its Host/rate/in-flight
+limits. `/explore` itself remains a frontend SPA route. Deployment checks both
+JSON endpoints with `scripts/check-explore.py`; the isolated Traefik smoke test
+uses the same production manifest rules. This feature shares the read-only ES
+account and requires no new secrets, storage, mapping changes or indexing Jobs.

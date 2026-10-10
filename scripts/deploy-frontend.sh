@@ -130,4 +130,5 @@ python3 "$repo_dir/scripts/check-embeddings.py" \
   https://search.eqarchives.org/openai/v1/embeddings --model "$MODEL_ALIAS" \
   --search-url https://search.eqarchives.org/elasticsearch/eq-archive/_search
 python3 "$repo_dir/scripts/check-mcp.py" https://search.eqarchives.org/mcp
+python3 "$repo_dir/scripts/check-explore.py" https://search.eqarchives.org
 echo "Deployed and verified frontend $image and MCP $mcp_image"

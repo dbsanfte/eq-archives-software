@@ -6,11 +6,18 @@ export function scopedDomains(filters = []) {
     .flatMap(filter => filter.values).filter(value => typeof value === 'string');
 }
 
+export function websiteScope(filters = []) {
+  return filters.some(filter => filter.field === 'id' && filter.type === 'range' &&
+    filter.values?.some(value => value.from === 'websites/' && value.to === 'websites0'));
+}
+
 export default function SiteSearchScope({ filters, removeFilter }) {
   const domains = scopedDomains(filters);
-  if (!domains.length) return null;
+  const websites = websiteScope(filters);
+  if (!domains.length && !websites) return null;
   return <section className="site-search-scope" aria-label="Site search scope">
-    <div><span>Searching within</span><h1>{domains.join(', ')}</h1></div>
-    <button onClick={() => removeFilter('domain_name')}>Search all sites</button>
+    <div><span>Searching within{websites ? ' website captures' : ''}</span><h1>{domains.length ? domains.join(', ') : 'Archived websites'}</h1></div>
+    {domains.length > 0 && <button onClick={() => removeFilter('domain_name')}>Search all sites</button>}
+    {websites && <button onClick={() => removeFilter('id')}>Include other collections</button>}
   </section>;
 }

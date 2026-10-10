@@ -7,15 +7,18 @@ from typing import Annotated
 from mcp.server import MCPServer
 from mcp.server.transport_security import TransportSecurityMiddleware, TransportSecuritySettings
 from mcp_types import ToolAnnotations
-from pydantic import Field
-from starlette.responses import PlainTextResponse
+from mcp.server.mcpserver.exceptions import ToolError
+from pydantic import Field, ValidationError
+from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.routing import Route
 
 from .archive import Archive, Document, SearchResults, Settings
 from .research import MAX_RESEARCH_RESULTS, ResearchFilters, ResearchPage, SortOrder, SourcePage, SourceType
+from .explore import Explorer, Selection
 
 
 def create_app(archive: Archive | None = None):
+    explorer = None
     server = MCPServer(
         "EQ Archives", website_url="https://search.eqarchives.org", version="1.1.0",
         instructions=(
@@ -94,6 +97,27 @@ def create_app(archive: Archive | None = None):
         """
         return await archive.list_sources(source_type, query, filters, after, limit)
 
+    @server.custom_route("/api/explore/{kind}", methods=["GET"])
+    async def explore(request):
+        rejected = await TransportSecurityMiddleware(security).validate_request(request)
+        if rejected:
+            return rejected
+        headers = {"Cache-Control": "no-store"}
+        if request.path_params["kind"] not in ("overview", "phrases"):
+            return JSONResponse({"error": "Unknown exploration view."}, status_code=404, headers=headers)
+        try:
+            if len(request.url.query) > 2048 or len(request.query_params.multi_items()) != len(request.query_params):
+                raise ValueError("Invalid parameters")
+            selection = Selection.model_validate(dict(request.query_params))
+        except (ValidationError, ValueError):
+            return JSONResponse({"error": "Choose a valid date range and filters (maximum 50 years, 1990–2099)."},
+                                status_code=400, headers=headers)
+        try:
+            return JSONResponse(await explorer.get(request.path_params["kind"], selection), headers=headers)
+        except ToolError:
+            return JSONResponse({"error": "Exploration is temporarily unavailable. Please retry shortly."},
+                                status_code=503, headers={**headers, "Retry-After": "10"})
+
     @server.custom_route("/healthz", methods=["GET"])
     async def health(request):
         return PlainTextResponse("ok\n")
@@ -119,10 +143,11 @@ def create_app(archive: Archive | None = None):
 
     @asynccontextmanager
     async def lifespan(app):
-        nonlocal archive
+        nonlocal archive, explorer
         owned = archive is None
         if owned:
             archive = Archive.connect(Settings.from_env())
+        explorer = Explorer(archive)
         try:
             async with transport_lifespan(app):
                 yield

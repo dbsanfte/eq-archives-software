@@ -184,3 +184,38 @@ connect with `mcp.client.streamable_http.streamable_http_client` and `ClientSess
 Actual ChatGPT/Claude account availability and model behavior must be checked from
 an eligible account; a protocol smoke test does not certify these. The service is
 published directly at its HTTPS endpoint rather than through a provider directory.
+
+## Public Explore summaries
+
+The same read-only service hosts two browser JSON routes, without adding MCP
+tools: `GET /api/explore/overview` and `GET /api/explore/phrases`. Production
+Traefik routes these exact paths with the existing rate/in-flight limits. Host
+and Origin validation still applies; GET bodies, arbitrary DSL, unknown or
+duplicate query parameters cannot select upstream operations. The parameters
+are `start`/`end` (inclusive UTC dates, at most 50 calendar years within 1990–2099),
+`basis` (`capture_date` or `llm_guessed_date`), `theme` (80 characters), `site`
+(255 characters), and a literal source `phrase` (100 characters). Defaults are
+1999–2006, capture dates, all websites.
+
+Overview reads bounded metadata aggregations. Phrases use a deterministic-seed
+diversified sample of up to 100 captures, limited to eight per domain per shard
+and again after retrieval; a selected domain allows 100. A fixed fetch script
+clips text to 12,000 characters before transport. URL/date versions and identical
+excerpts are deduplicated, navigation lines and stop words removed, and up to
+40 words/phrases ranked by page frequency with a modest phrase-length weight.
+Vocabulary is capped at 50,000 terms and reaching it is disclosed. Sampling is
+not statistically representative and can change as the live index changes.
+Only aggregate terms and coverage metadata reach browsers, never sampled text.
+
+A single analytics query runs at a time under the existing four-request archive
+semaphore, with a 22-second total deadline, 8-second ES timeout and 8 MiB response
+bound. Equal concurrent selections reuse the first completed result. A bounded
+64-entry LRU stores successful summaries for ten minutes; failure is never cached.
+HTTP responses use `no-store` and safe 400/503 messages, so visitors can explicitly
+retry. Source extraction runs in a thread to keep MCP requests responsive. The
+service reads the existing index only: no archive filesystem, index writes, model
+calls, persistent credentials or indexing Jobs are involved.
+
+Run `python3 scripts/check-explore.py https://search.eqarchives.org` from the
+repository root to verify the deployed routes. CI exercises their actual
+production ingress paths in the isolated Traefik smoke test.

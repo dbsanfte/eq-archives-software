@@ -35,7 +35,8 @@ import DocumentReader from "./views/reader/DocumentReader";
 import { ReaderSearchContext, searchPhrase } from "./views/reader/reader-utils";
 import fieldLabels from "./config/field-labels";
 import RecentSites from "./views/sites/RecentSites";
-import SiteSearchScope, { scopedDomains } from "./views/search/SiteSearchScope";
+import Explore from "./views/explore/Explore";
+import SiteSearchScope, { scopedDomains, websiteScope } from "./views/search/SiteSearchScope";
 import "./views/ArchiveTheme.css";
 
 function SearchApp() {
@@ -97,7 +98,7 @@ function SearchApp() {
                 header={
                   <>
                     <ArchiveStatusBar />
-                    <HeaderContent compact={scopedDomains(filters).length > 0} />
+                    <HeaderContent compact={scopedDomains(filters).length > 0 || websiteScope(filters)} />
                     <SiteSearchScope filters={filters} removeFilter={removeFilter} />
                     <EnhancedSearchBox searchAsYouType={true} enableSemanticSearch={knnParams.enableSemanticSearch} /> {/* We'll handle automatic searches ourselves */}
                     <Button
@@ -212,6 +213,7 @@ function SearchApp() {
 export default function App() {
   return <ThemeProvider theme={archiveTheme}><CssBaseline />
     {/^\/document\/?$/.test(window.location.pathname) ? <DocumentReader /> :
-      /^\/sites\/?$/.test(window.location.pathname) ? <RecentSites /> : <SearchApp />}
+      /^\/sites\/?$/.test(window.location.pathname) ? <RecentSites /> :
+        /^\/explore\/?$/.test(window.location.pathname) ? <Explore /> : <SearchApp />}
   </ThemeProvider>;
 }

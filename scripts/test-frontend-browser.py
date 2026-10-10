@@ -137,6 +137,158 @@ class FrontendBrowserTests(unittest.TestCase):
                 with self.subTest(width=width, filled_dates=filled_dates):
                     self.check_sort_menu(width, filled_dates)
 
+    def test_explore_links_charts_dates_phrases_and_site_search(self):
+        for width in (320, 390, 768, 1280):
+            with self.subTest(width=width):
+                context = self.browser.new_context(viewport={'width': width, 'height': 900},
+                    is_mobile=width <= 800, has_touch=width <= 800)
+                try:
+                    page = context.new_page()
+                    page.set_default_timeout(15000)
+                    events, errors, searches, pending = [], [], [], []
+                    fail_phrases = False
+                    hold = False
+                    defaults = {'start': '1999-01-01', 'end': '2006-12-31', 'basis': 'capture_date', 'theme': '', 'site': '', 'phrase': ''}
+                    domain = 'www.a-very-long-everquest-guild-domain.example.org:8080'
+
+                    def response(kind, selection):
+                        base = {'selection': selection, 'generated_at': '2026-10-10T12:00:00Z'}
+                        if kind == 'phrases':
+                            return {**base, 'sampled_pages': 90, 'sampled_sites': 16, 'examined_captures': 100,
+                                'duplicate_captures': 10, 'clipped_pages': 4, 'excerpt_chars': 12000, 'sample_limit': 100,
+                                'phrases': [{'text': 'ancient cyclops', 'pages': 20}, {'text': 'cleric', 'pages': 12}]}
+                        years = range(int(selection['start'][:4]), int(selection['end'][:4]) + 1)
+                        return {**base, 'records': 12000, 'tagged': 3000, 'sites_count': 20,
+                            'timeline': [{'year': year, 'records': 500 * (i + 1), 'sites': i + 2} for i, year in enumerate(years)],
+                            'themes': [{'key': 'raid', 'count': 500, 'approximate': False}, {'key': 'lore', 'count': 200, 'approximate': False}],
+                            'sites': [{'key': domain, 'count': 1234, 'approximate': False}]}
+
+                    def explore(route):
+                        nonlocal hold
+                        params = parse_qs(urlparse(route.request.url).query)
+                        selection = {**defaults, **{key: values[0] for key, values in params.items()}}
+                        kind = urlparse(route.request.url).path.rsplit('/', 1)[1]
+                        events.append((kind, selection))
+                        if hold:
+                            pending.append((route, response(kind, selection)))
+                            return
+                        if fail_phrases and kind == 'phrases':
+                            return route.fulfill(status=503, json={'error': 'temporary'})
+                        route.fulfill(json=response(kind, selection))
+
+                    def archive(route):
+                        if route.request.url.endswith('/_search'):
+                            searches.append(route.request.post_data_json)
+                        return self.mock_elasticsearch(route)
+
+                    page.on('pageerror', lambda error: errors.append(str(error)))
+                    page.route('**/api/explore/**', explore)
+                    page.route('**/elasticsearch/**', archive)
+                    page.route('**/openai/v1/embeddings', lambda route: route.fulfill(json={'data': [{'embedding': [0.1] * 768}]}))
+                    page.goto(self.base_url + '/explore', wait_until='networkidle')
+                    expect(page.get_by_role('heading', name='Explore early EverQuest.')).to_be_visible()
+                    expect(page.get_by_role('link', name='Explore', exact=True)).to_have_attribute('aria-current', 'page')
+                    def chart(name):
+                        if width <= 900:
+                            page.get_by_role('navigation', name='Explore charts').get_by_role('button', name=name, exact=True).click()
+
+                    def dates():
+                        if not page.locator('.explore-date-settings').get_attribute('open') == '':
+                            page.locator('.explore-date-settings > summary').click()
+
+                    if width <= 900:
+                        expect(page.locator('.explore-date-settings')).not_to_have_attribute('open', '')
+                        expect(page.get_by_role('heading', name='Through the years')).to_be_visible()
+                        expect(page.get_by_role('heading', name='Words from the pages')).to_be_hidden()
+                    chart('Words')
+                    expect(page.get_by_role('button', name='ancient cyclops: 20 sampled pages')).to_be_visible()
+                    dates()
+                    self.assertEqual(searches, [])
+                    self.assertLessEqual(page.evaluate('document.documentElement.scrollWidth'), width)
+                    for selector in ('.archive-primary-navigation a', '.explore-controls input', '.explore-controls select', '.explore-actions a', '.explore-year', '.explore-cloud button'):
+                        for height in page.locator(selector).evaluate_all('els => els.filter(e => e.getClientRects().length).map(e => e.getBoundingClientRect().height)'):
+                            self.assertGreaterEqual(height, 44)
+                    page.get_by_role('button', name='List', exact=True).click()
+                    expect(page.get_by_text('20 pages', exact=True)).to_be_visible()
+                    page.get_by_role('button', name='Cloud', exact=True).click()
+                    chart('Timeline')
+                    page.get_by_role('button', name='Site count', exact=True).click()
+                    year = page.get_by_role('button', name='2000: 3 estimated domains. Explore this year')
+                    year.tap() if width <= 800 else year.click()
+                    expect(page.get_by_label('From', exact=True)).to_have_value('2000-01-01')
+                    expect(page.get_by_label('Through', exact=True)).to_have_value('2000-12-31')
+                    expect(page.locator('.explore-year')).to_have_count(1)
+                    chart('Themes')
+                    page.get_by_role('list', name='Themes').get_by_role('button', name='raid 500', exact=True).click()
+                    expect(page.get_by_role('button', name='Remove theme: raid')).to_be_visible()
+                    chart('Words')
+                    word = page.get_by_role('button', name='ancient cyclops: 20 sampled pages')
+                    expect(word).to_be_enabled()
+                    word.click()
+                    expect(page.get_by_role('button', name='Remove phrase: ancient cyclops')).to_be_visible()
+                    chart('Sites')
+                    site = page.get_by_role('list', name='Contributing sites').get_by_role('button')
+                    expect(site).to_be_enabled()
+                    site.click()
+                    expect(page.get_by_role('button', name=f'Remove site: {domain}')).to_be_visible()
+                    page.wait_for_load_state('networkidle')
+                    self.assertLessEqual(page.evaluate('document.documentElement.scrollWidth'), width)
+                    saved = page.url
+                    page.reload(wait_until='networkidle')
+                    dates()
+                    self.assertEqual(page.url, saved)
+                    expect(page.get_by_role('button', name=f'Remove site: {domain}')).to_be_visible()
+                    # Draft date edits survive an unrelated summary refresh or failure.
+                    page.get_by_label('From', exact=True).fill('2000-02-29')
+                    chart('Words')
+                    fail_phrases = True
+                    page.get_by_role('button', name='Check for updates').click()
+                    expect(page.get_by_role('alert')).to_contain_text('previous snapshot')
+                    expect(page.get_by_label('From', exact=True)).to_have_value('2000-02-29')
+                    fail_phrases = False
+                    page.get_by_role('button', name='Retry phrases').click()
+                    expect(page.get_by_role('alert')).to_have_count(0)
+                    page.get_by_label('Date meaning').select_option('llm_guessed_date')
+                    page.get_by_role('button', name='Apply dates').click()
+                    page.wait_for_load_state('networkidle')
+                    search_url = page.get_by_role('link', name='Search these pages', exact=False).get_attribute('href')
+                    params = parse_qs(urlparse(search_url).query)
+                    self.assertEqual(params['filters[0][field]'], ['llm_guessed_date'])
+                    self.assertEqual(params['filters[0][values][0][from]'], ['2000-02-29T00:00:00.000Z'])
+                    self.assertEqual(params['filters[0][values][0][to]'], ['2000-12-31T23:59:59.999Z'])
+                    self.assertEqual(params['filters[3][values][0]'], [domain])
+                    page.get_by_role('link', name='Search these pages', exact=False).click()
+                    page.wait_for_load_state('networkidle')
+                    expect(page.get_by_role('region', name='Site search scope')).to_contain_text(domain)
+                    self.assertTrue(searches)
+                    request = json.dumps(searches[-1])
+                    for value in (domain, 'llm_guessed_date', '2000-02-29T00:00:00.000Z', '2000-12-31T23:59:59.999Z', 'websites/', 'raid', 'text_full:'):
+                        self.assertIn(value, request)
+                    page.go_back(wait_until='networkidle')
+                    dates()
+                    expect(page.get_by_role('heading', name='Explore early EverQuest.')).to_be_visible()
+                    expect(page.get_by_role('button', name=f'Remove site: {domain}')).to_be_visible()
+                    # Superseded requests cannot paint stale counts under new filters.
+                    hold = True
+                    page.get_by_role('button', name='1999–2001', exact=True).click()
+                    page.wait_for_function("location.search.includes('end=2001-12-31')")
+                    page.wait_for_timeout(100)
+                    hold = False
+                    page.get_by_role('button', name='2002–2006', exact=True).click()
+                    expect(page.get_by_label('From', exact=True)).to_have_value('2002-01-01')
+                    expect(page.locator('.explore-year')).to_have_count(5)
+                    for route, payload in pending:
+                        if 'records' in payload:
+                            payload['records'] = 777777
+                        route.fulfill(json=payload)
+                    page.wait_for_timeout(150)
+                    expect(page.get_by_text('777,777', exact=True)).to_have_count(0)
+                    page.get_by_role('button', name='Reset exploration').click()
+                    expect(page.get_by_label('From', exact=True)).to_have_value('1999-01-01')
+                    self.assertEqual(errors, [])
+                finally:
+                    context.close()
+
     def test_recent_sites_open_a_persistent_focused_search(self):
         for width in (320, 390, 768, 1280):
             with self.subTest(width=width):

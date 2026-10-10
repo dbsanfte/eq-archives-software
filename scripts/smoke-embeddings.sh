@@ -132,7 +132,8 @@ if [[ -n "$mcp_image" ]]; then
   python3 "$repo_dir/scripts/check-mcp.py" "http://$traefik_address/mcp" --host search.eqarchives.org
   curl --fail --silent --show-error --max-time 5 -H 'Host: search.eqarchives.org' \
     "http://$traefik_address/" | grep -q 'id="root"'
-  echo 'Production ingress rules route MCP and frontend requests to their respective containers.'
+  python3 "$repo_dir/scripts/check-explore.py" "http://$traefik_address" --host search.eqarchives.org
+  echo 'Production ingress rules route MCP, Explore and frontend requests to their respective containers.'
 
   replacement_id=$(docker run --detach --network "$network" --network-alias search-eqarchives-next \
     --publish 127.0.0.1::80 --mount "type=bind,source=$work_dir/secrets,target=/run/secrets,readonly" \
