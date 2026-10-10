@@ -645,7 +645,7 @@ async def capture_failure_isolation_flow(browser,base,width):
     await page.goto(base+'/?view=capturing');await settled(page)
     await expect(page.get_by_role('button',name='Open www.guildsay.com',exact=True)).to_contain_text('Capture paused')
     await page.get_by_role('button',name='Open www.guildsay.com',exact=True).click();await settled(page)
-    await expect(page.locator('#stage-live')).to_contain_text('does not block the queue')
+    await expect(page.locator('#stage-live')).to_contain_text('Other approved sites continue.')
     await expect(page.locator('#stage-live')).to_contain_text('8,493 files saved')
     await expect(page.get_by_role('button',name='Resume capture',exact=True)).to_be_enabled()
     await page.evaluate('refresh()');await settled(page)
