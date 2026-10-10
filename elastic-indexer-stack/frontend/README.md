@@ -87,12 +87,20 @@ The service caches bounded summaries for ten minutes, returns no source bodies,
 and makes no embedding or paid AI calls. The cloud uses up to 100 sampled captures,
 with at most eight per domain unless a site is selected, and the first 12,000
 characters per capture. It removes duplicate original pages, identical excerpts,
-repeated navigation lines and stop words. Phrase sizes count sampled pages;
-these are discovery samples, not representative corpus word frequencies. The
+repeated navigation lines, repeated phrases concentrated in a site's templates,
+and stop words. In samples of at least eight pages,
+words present on 80% or more of the sample (and phrases containing them) are
+omitted to expose more specific topics. Phrase selection favours longer phrases.
+Cloud sizes linearly stretch the displayed count range from 1 to 2.75 rem;
+equal counts remain equal, with a medium size when every count is tied. The
+visible range legend and List view retain exact sampled page counts, with
+zero-based comparison bars in List. These are discovery samples, not
+representative corpus word frequencies. The
 sampling method, clipped excerpts and vocabulary limits are disclosed in the UI.
 
 Jest covers linked state, malformed replies, retries, timeouts and late responses.
-Chromium covers 320/390/768/1280 px tap targets, overflow, date drafts, filtering,
+Chromium covers 320/390/768/1280 px tap targets, overflow, cloud size separation
+and equal counts, date drafts, filtering,
 search drill-down, history and delayed responses. Container integration checks
 both API routes through the actual ingress rules. `scripts/check-explore.py`
 verifies the live endpoints during normal deployment. No archive checkout,

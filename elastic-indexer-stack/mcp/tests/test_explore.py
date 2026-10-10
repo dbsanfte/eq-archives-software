@@ -101,6 +101,23 @@ def test_cloud_counts_pages_not_word_repetitions_and_removes_duplicates_and_navi
     assert 'text_full' not in json.dumps(result) and 'Home' not in json.dumps(result)
 
 
+def test_cloud_surfaces_specific_topics_instead_of_repeated_template_labels():
+    topics = ['An ancient cyclops is guarding the desert.'] * 4 + ['Misty thicket is sheltering halflings.'] * 3
+    topics += ['Fire resist is protecting adventurers.'] * 3 + ['Rare platinum rings.'] * 2
+    hits = [hit(str(i), f'Comments stats lore item magic item slot zones quests {i}.\n{topic}')
+            for i, topic in enumerate(topics)]
+    result = extract_phrases(hits, site_selected=True)
+    phrases = {p['text']: p['pages'] for p in result['phrases']}
+    assert result['sampled_pages'] == 12
+    assert phrases['ancient cyclops'] == 4 and phrases['misty thicket'] == 3
+    assert phrases['fire resist'] == 3
+    assert not any(set(p.split()) & {'comments', 'stats', 'lore', 'item', 'magic', 'slot', 'zones', 'quests'} for p in phrases)
+    # Small samples still offer useful phrases; identical scores need no invented
+    # distinction or random ranking.
+    small = extract_phrases([hit(text='An ancient cyclops is guarding the desert.')])
+    assert {'text': 'ancient cyclops', 'pages': 1} in small['phrases']
+
+
 def test_cloud_bounds_removes_repeated_boilerplate_without_creating_cross_line_phrases():
     hits = [hit(str(i), f'Mysterious branding\nAncient cyclops drops\nRare platinum rings {chr(97+i)}') for i in range(12)]
     hits += [hit('blank', ''), hit('nottext', 42), hit('huge', 'abcdefghijkl ' * 2000, 'big.org')]
@@ -109,9 +126,22 @@ def test_cloud_bounds_removes_repeated_boilerplate_without_creating_cross_line_p
     assert all('mysterious' not in p['text'] and 'drops rare' not in p['text'] for p in result['phrases'])
     assert extract_phrases(hits, site_selected=True)['sampled_pages'] == 13
     assert extract_phrases([])['phrases'] == []
-    many = [hit(str(i), ' '.join(f'word{chr(97 + j // 26)}{chr(97 + j % 26)}' for j in range(100)) + str(i), f'd{i}.org') for i in range(110)]
+    many = [hit(str(i), ' '.join(f'word{chr(97 + j // 26)}{chr(97 + j % 26)}'
+        for j in range((i % 10) * 20, (i % 10) * 20 + 100)) + str(i), f'd{i}.org') for i in range(110)]
     bounded = extract_phrases(many)
     assert bounded['sampled_pages'] == 100 and len(bounded['phrases']) == 40
+
+
+def test_repeated_inline_menus_do_not_crowd_out_topics_from_independent_sources():
+    hits = [hit(str(i), f'ID {i}: galaxies final fantasy; discussion about an '
+        f'{"ancient cyclops" if i < 4 else "enchanted sword"} {i}.', 'menus.org') for i in range(6)]
+    hits += [hit(str(i), f'A tale about an {"ancient cyclops" if i < 3 else "elven archer"} {i}.', f'guild{i}.org') for i in range(6)]
+    result = extract_phrases(hits)
+    phrases = {p['text']: p['pages'] for p in result['phrases']}
+    # Cyclops also has independent sources; all menu evidence repeats within one
+    # source, even though the containing lines differ.
+    assert phrases['ancient cyclops'] == 7
+    assert 'galaxies final fantasy' not in phrases and 'final fantasy' not in phrases
 
 
 def test_cloud_uses_searchable_source_words_without_markdown_destinations_or_joined_fragments():

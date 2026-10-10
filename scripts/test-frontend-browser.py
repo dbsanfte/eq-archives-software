@@ -156,7 +156,8 @@ class FrontendBrowserTests(unittest.TestCase):
                         if kind == 'phrases':
                             return {**base, 'sampled_pages': 90, 'sampled_sites': 16, 'examined_captures': 100,
                                 'duplicate_captures': 10, 'clipped_pages': 4, 'excerpt_chars': 12000, 'sample_limit': 100,
-                                'phrases': [{'text': 'ancient cyclops', 'pages': 20}, {'text': 'cleric', 'pages': 12}]}
+                                'phrases': [{'text': 'ancient cyclops', 'pages': 20}, {'text': 'cleric', 'pages': 12},
+                                            {'text': 'necromancer', 'pages': 20}]}
                         years = range(int(selection['start'][:4]), int(selection['end'][:4]) + 1)
                         return {**base, 'records': 12000, 'tagged': 3000, 'sites_count': 20,
                             'timeline': [{'year': year, 'records': 500 * (i + 1), 'sites': i + 2} for i, year in enumerate(years)],
@@ -215,6 +216,9 @@ class FrontendBrowserTests(unittest.TestCase):
                         expect(page.get_by_role('heading', name='Words from the pages')).to_be_hidden()
                     chart('Words')
                     expect(page.get_by_role('button', name='ancient cyclops: 20 sampled pages')).to_be_visible()
+                    sizes = page.locator('.explore-cloud button').evaluate_all('els => els.map(e => parseFloat(getComputedStyle(e).fontSize))')
+                    self.assertGreaterEqual(max(sizes) / min(sizes), 2.4, 'Cloud frequencies should have a visible size hierarchy')
+                    self.assertEqual(sizes[0], sizes[2], 'Equal page counts must have equal sizes')
                     dates()
                     self.assertEqual(searches, [])
                     self.assertLessEqual(page.evaluate('document.documentElement.scrollWidth'), width)
@@ -222,7 +226,7 @@ class FrontendBrowserTests(unittest.TestCase):
                         for height in page.locator(selector).evaluate_all('els => els.filter(e => e.getClientRects().length).map(e => e.getBoundingClientRect().height)'):
                             self.assertGreaterEqual(height, 44)
                     page.get_by_role('button', name='List', exact=True).click()
-                    expect(page.get_by_text('20 pages', exact=True)).to_be_visible()
+                    expect(page.get_by_text('20 pages', exact=True).first).to_be_visible()
                     page.get_by_role('button', name='Cloud', exact=True).click()
                     chart('Timeline')
                     page.get_by_role('button', name='Site count', exact=True).click()

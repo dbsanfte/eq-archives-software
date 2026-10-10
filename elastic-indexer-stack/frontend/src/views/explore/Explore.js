@@ -80,6 +80,7 @@ export default function Explore() {
   const maxBar = Math.max(1, ...(data?.timeline.map(b => b[metric]) || []));
   const maxTheme = Math.max(1, ...(data?.themes.map(b => b.count) || []));
   const maxWord = Math.max(1, ...(words?.phrases.map(p => p.pages) || []));
+  const minWord = Math.min(maxWord, ...(words?.phrases.map(p => p.pages) || []));
   const busy = overview.loading;
 
   return <div className="archive-explore"><div className="sites-shell">
@@ -186,16 +187,26 @@ export default function Explore() {
           {words && <>
             <ul className={cloud ? 'explore-cloud' : 'explore-phrase-list'} aria-label="Source phrases">{words.phrases.map(p => <li key={p.text}>
               <button disabled={phrases.loading} aria-pressed={selection.phrase === p.text}
-                style={cloud ? { fontSize: `${.9 + .85 * Math.sqrt(p.pages / maxWord)}rem` } : undefined}
+                style={cloud ? {
+                  fontSize: `${1 + 1.75 * (maxWord > minWord ? (p.pages - minWord) / (maxWord - minWord) : .35)}rem`,
+                  fontWeight: p.pages === maxWord ? 600 : 400
+                } : undefined}
                 aria-label={`${p.text}: ${p.pages} sampled pages`}
+                title={`${p.pages} sampled pages`}
                 onClick={() => select({ phrase: selection.phrase === p.text ? '' : p.text })}>
-                {p.text}{!cloud && <span>{p.pages} pages</span>}
+                {p.text}{!cloud && <><span>{p.pages} pages</span>
+                  <span className="explore-phrase-meter" aria-hidden="true"><span style={{ width: `${p.pages / maxWord * 100}%` }} /></span>
+                </>}
               </button>
             </li>)}</ul>
-            {!words.phrases.length && <p className="explore-empty">Not enough source text for useful phrases in this selection. Try a broader range or another site.</p>}
-            <p className="explore-note">Sample: {number(words.sampled_pages)} distinct pages across {number(words.sampled_sites)} domains. Word size reflects pages mentioning a phrase, not overall popularity.</p>
+            {cloud && words.phrases.length > 0 && <p className="explore-note explore-cloud-scale">{maxWord > minWord
+              ? `Relative frequency: ${minWord}–${maxWord} sampled pages. See List for exact counts.`
+              : `Equal frequency: every term appears on ${maxWord} sampled ${maxWord === 1 ? 'page' : 'pages'}.`}</p>}
+            {!words.phrases.length && <p className="explore-empty">No distinctive source phrases in this selection. Try a broader range or another site.</p>}
+            <p className="explore-note">Sample: {number(words.sampled_pages)} distinct pages across {number(words.sampled_sites)} domains.</p>
             <details className="explore-method"><summary>How this sample works</summary>
-              <p>Up to {words.sample_limit} captures, spread across domains, using the first {number(words.excerpt_chars)} characters per page. Repeated pages, identical excerpts, common navigation and stop words are removed. This is a discovery sample, not a complete or statistically representative word count.</p>
+              <p>Up to {words.sample_limit} captures, spread across domains, using the first {number(words.excerpt_chars)} characters per page. Repeated pages, identical excerpts, common navigation and stop words are removed, including repeated multiword labels concentrated in one site's pages. In samples of at least eight pages, words shared by 80% or more of the sample are omitted to surface more specific topics. Phrases get preference over single words when choosing terms.</p>
+              <p>Font sizes stretch the frequency range of the displayed terms; equal counts have equal sizes. List bars start at zero and show exact sampled page counts. This is a discovery sample, not a complete or statistically representative word count.</p>
               <p>{words.duplicate_captures} duplicate captures excluded; {words.clipped_pages} excerpts reached the length limit. Summaries are cached for up to ten minutes. No AI is used to generate these phrases.</p>
               {words.vocabulary_limited && <p>This sample reached the 50,000-term vocabulary limit; additional terms were omitted.</p>}
             </details>

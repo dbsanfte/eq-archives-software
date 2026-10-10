@@ -202,8 +202,13 @@ diversified sample of up to 100 captures, limited to eight per domain per shard
 and again after retrieval; a selected domain allows 100. A fixed fetch script
 clips text to 12,000 characters before transport. URL/date versions and identical
 excerpts are deduplicated, navigation lines, Markdown link destinations and stop
-words removed, and up to 40 words/phrases ranked by page frequency with a modest
-phrase-length weight. Phrases retain contiguous source words: removed markup,
+words removed. For samples of at least eight pages, words present on 80% or more
+of the sample and phrases containing them are omitted, so shared template labels
+do not dominate. Repeated multiword labels are also omitted when at least 80% of
+their support comes from domains where they appear on at least three pages and
+60% of sampled pages, matching the repeated-line threshold. Counts for this check
+share the existing vocabulary bound. Up to 40 terms are ranked by page frequency times phrase length;
+returned page counts remain unweighted. Phrases retain contiguous source words: removed markup,
 numbers and punctuation cannot join unrelated words into an unsearchable phrase.
 Vocabulary is capped at 50,000 terms and reaching it is disclosed. Sampling is
 not statistically representative and can change as the live index changes.
