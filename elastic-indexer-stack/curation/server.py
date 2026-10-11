@@ -23,7 +23,7 @@ from capture_queue import claim, queue_order, queue_resume, cancel_resume, atten
 from capture_continuation import start as continue_capture, require_complete
 from site_reviews import get as get_site_review, migrate
 from jobs import import_attempt, import_name
-from portal import Stage, decorate, counts, search_matches, candidate_filter, dismissal_preview, grade_value
+from portal import Stage, decorate, counts, search_matches, candidate_filter, dismissal_preview, grade_value, listing_rows
 from manual import existing_site, site_url
 from spending import Spending
 from candidate_actions import dismiss_all, undo_dismissal
@@ -127,7 +127,12 @@ def create_app(root=None, origin=None, start_worker=True):
         return FileResponse(STATIC / filename, media_type="text/javascript" if filename.endswith("js") else "text/css")
 
     def listing(request):
-        refresh(root)
+        compact = request.query_params.get('compact') == '1'
+        # Portal polling is a read of saved state, not archive maintenance. The
+        # worker, explicit recheck and action preflights still refresh coverage.
+        # Preserve the original operator API's refresh behavior.
+        if not compact:
+            refresh(root)
         try:
             offset = int(request.query_params.get("offset", "0"))
             if offset < 0:
@@ -135,7 +140,10 @@ def create_app(root=None, origin=None, start_worker=True):
         except ValueError:
             raise CrawlError("Invalid queue offset") from None
         with connect(root) as store:
-            all_rows = attach_checks(store, decorate(store, queue(store)))
+            # A worker may claim a site while this request is being assembled.
+            # WAL readers neither block that claim nor mix two queue revisions.
+            store.db.execute('BEGIN')
+            all_rows = listing_rows(store) if compact else attach_checks(store, decorate(store, queue(store)))
             selected = request.query_params.get("filter", "recommended")
             if selected not in ("recommended", "pending", "approved", "captured", "review", "all", *Stage):
                 raise CrawlError("Invalid queue filter")
@@ -162,9 +170,12 @@ def create_app(root=None, origin=None, start_worker=True):
                 rows = [row for row in rows if search_matches(row, search)]
             operations = [unpack(row) for row in store.db.execute("SELECT * FROM operations ORDER BY CASE state WHEN 'running' THEN 0 WHEN 'queued' THEN 1 WHEN 'interrupted' THEN 2 ELSE 3 END,created DESC LIMIT 20")]
             workers = {lane.value: unpack(active) if (active := active_operation(store, lane)) else None for lane in Lane}
-            fields = 'id,state,manifest_sha256,publication,job,error,created,updated' if request.query_params.get('compact') == '1' else '*'
+            fields = 'id,state,manifest_sha256,publication,job,error,created,updated' if compact else '*'
             batches = [unpack(row) for row in store.db.execute(f"SELECT {fields} FROM batches WHERE state!='capture_group' ORDER BY created DESC LIMIT 100")]
             page_rows = rows[offset:offset + 50]
+            if compact:
+                page_rows = attach_checks(store, decorate(store, [record(store, store.db.execute(
+                    'SELECT * FROM candidates WHERE id=?', (row['id'],)).fetchone()) for row in page_rows]))
             return JSONResponse({"candidates": page_rows, "total": len(rows), "offset": offset,
                                  "stage_counts": counts(all_rows),
                                  "candidate_grades": {str(grade): sum(row['stage'] == Stage.CANDIDATES and grade_value(row) == grade for row in all_rows) for grade in range(-1, 4)},

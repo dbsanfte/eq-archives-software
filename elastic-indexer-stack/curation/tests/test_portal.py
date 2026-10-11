@@ -20,7 +20,8 @@ def save_review(root, row, state, candidate_state='published'):
     return manifest
 
 
-def test_portal_stages_are_exclusive_and_completed_sites_retire_even_with_legacy_candidate_states(tmp_path):
+@pytest.mark.parametrize('compact', ['', '&compact=1'])
+def test_portal_stages_are_exclusive_and_completed_sites_retire_even_with_legacy_candidate_states(tmp_path, compact):
     root=tmp_path/'state'
     expected={}
     for index,(state,stage,candidate_state) in enumerate([
@@ -42,7 +43,7 @@ def test_portal_stages_are_exclusive_and_completed_sites_retire_even_with_legacy
     app=create_app(root,start_worker=False)
     actual={}
     for stage in ('candidates','queued','capturing','indexing','saved','history'):
-        response=call(app,'GET',f'/api/queue?filter={stage}').json()
+        response=call(app,'GET',f'/api/queue?filter={stage}{compact}').json()
         assert response['stage_counts'][stage]==len(response['candidates'])
         for row in response['candidates']:
             assert row['id'] not in actual
@@ -52,7 +53,8 @@ def test_portal_stages_are_exclusive_and_completed_sites_retire_even_with_legacy
     assert sum(response['stage_counts'].values())==len(expected)
 
 
-def test_stages_and_counts_use_all_review_metadata_not_the_recent_batch_limit(tmp_path):
+@pytest.mark.parametrize('compact', ['', '&compact=1'])
+def test_stages_and_counts_use_all_review_metadata_not_the_recent_batch_limit(tmp_path, compact):
     root=tmp_path/'state'
     first=add_candidate(root)
     manifest=save_review(root,first,'indexed')
@@ -61,7 +63,7 @@ def test_stages_and_counts_use_all_review_metadata_not_the_recent_batch_limit(tm
             store.db.execute("INSERT INTO batches VALUES (?,'capturing',NULL,NULL,NULL,NULL,NULL,'later','later')",(f'{index:032x}',))
         store.db.commit()
     app=create_app(root,start_worker=False)
-    response=call(app,'GET','/api/queue?filter=indexing').json()
+    response=call(app,'GET','/api/queue?filter=indexing'+compact).json()
     assert response['total']==0 and response['stage_counts']['history']==1
     assert call(app,'GET',f"/api/candidate?id={first['id']}").json()['review']['id']==manifest['batch_id']
 

@@ -40,6 +40,20 @@ CANDIDATE_STAGES = {
 }
 
 
+def listing_rows(store):
+    """Stage/filter summaries; only the visible page needs full review records.
+
+    Keep counts and dismissal hashes over every candidate, without reading
+    discovery evidence or repeating source/scope validation for off-page sites.
+    The caller holds a read transaction so claims cannot split this snapshot.
+    """
+    from review import metadata, sort_key
+    rows = [metadata(row) for row in store.db.execute('''SELECT id,url,scope,priority,
+        coverage,NULL evidence,state,captures,rating,error,decision FROM candidates''')]
+    rows.sort(key=sort_key)
+    return decorate(store, rows)
+
+
 def decorate(store, rows):
     # Read status metadata without copying manifests or inspecting archive files.
     from capture_queue import held

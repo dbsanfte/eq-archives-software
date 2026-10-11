@@ -339,6 +339,11 @@ the full pipeline activity. Show current phases, capture progress from Queue,
 automatic retry/reset countdowns, Job blockers and bounded recent outcomes from
 SQLite metadata independently of list caps. Report stale or failed polling instead
 of implying fresh progress; status reads never start work or lose browser drafts.
+Portal list polls (`compact=1`) read saved SQLite metadata without archive
+maintenance and prepare full review records only for the visible page. Keep
+counts, filters and FIFO ordering complete and within one read snapshot so a
+concurrent worker claim cannot invalidate sorting. Workers and action preflights
+retain coverage validation; preserve the original operator API refresh behavior.
 Preserve operations,
 approvals and progress across restart; approved capture transport interruptions
 retry independently of automatic discovery mode. Manual discovery/publication
