@@ -123,8 +123,10 @@ sudo -n kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml -n eqarchives-es \
   logs -f job/reindex-text-html-20261005 -c indexer
 ```
 
-The workload is serial, throttled by `EMBEDDING_REQUEST_PAUSE=0.2`, and uses the
-existing 768-dimensional Nomic model and credentials. Logs report processed,
+The workload submits one embedding chunk at a time, without an intentional pause
+between requests, and uses the existing 768-dimensional Nomic model and credentials.
+`EMBEDDING_REQUEST_PAUSE` is no longer used; older Job templates that still set it
+cannot introduce a delay when running the updated image. Logs report processed,
 updated, unchanged, unavailable-source and failed counts. To resume a failed run,
 create a replacement Job with a new name and retain the previous Jobs and logs.
 Reuse the dedicated source cache read-only, without repeating source preparation;
@@ -134,3 +136,15 @@ before starting the unrestricted replacement. A healthy embedding endpoint alone
 does not prove that formerly failing document chunks are accepted. Recheck
 public search/reader/MCP health while it runs. A triggered Job is not a completed
 reindex; report its actual phase and progress separately.
+
+Applying a reindex performance change to a running process requires an explicitly
+requested operator handoff, separate from curation delivery. Build and probe the
+replacement image first, retain the old Job's manifest and logs, and prepare a new
+Job with the same read-only source checkout and version checkpoints, without the
+source-preparation init container. Create the replacement with `parallelism: 0`
+and without `suspend` before suspending the old Job, wait for the old pod to stop,
+then set the replacement's parallelism to one.
+This keeps an unfinished Job present for the import guard throughout the handoff.
+Completed version checkpoints are skipped; any interrupted record is retried.
+Keep the old Job suspended and retain its logs, verify new progress and public
+search/embedding health, and do not change other indexing Jobs or source checkouts.

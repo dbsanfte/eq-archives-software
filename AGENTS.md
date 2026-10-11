@@ -194,6 +194,10 @@ shortcut can undercount what the Nomic server processes. Retain completed versio
 checkpoints when repairing that counting bug. Resume failed broad runs in a new
 Job after probing the previously failing exact IDs; preserve old Jobs and the
 dedicated source checkout, and do not repeat source preparation.
+Nomic reindex requests remain serial, with no intentional sleep between chunks.
+Operator-requested reindex tuning uses a prepared, checkpoint-preserving handoff
+as documented in the Jobs guide; ordinary curation delivery still leaves existing
+indexing Jobs untouched.
 
 ### Search relevance evaluation
 

@@ -157,7 +157,6 @@ Configure the processes using environment variables:
 | `OPENAI_TEXT_MODEL_NAME`, `OPENAI_IMAGE_MODEL_NAME` | Models used for text and image enrichment |
 | `SKIP_LLM_ENRICHMENT` | Set to `true` to skip summaries, tags, and other enrichment; text indexing still generates embeddings |
 | `NOMIC_TOKENIZER_PATH` | Optional path to the checksum-pinned Nomic tokenizer; the image contains it at `/opt/eqarchives/nomic-tokenizer.json` |
-| `EMBEDDING_REQUEST_PAUSE` | Optional seconds between Nomic document requests; the broad reindex uses `0.2` for the shared single-slot server |
 | `SKIP_TEXT_FILES`, `SKIP_IMAGE_FILES`, `SKIP_OTHER_FILES` | Set individual flags to `true` to omit file types |
 | `REINDEXING_ENABLED`, `REINDEXING_INTERVAL` | Enable periodic reindexing and set the interval in seconds |
 | `LOG_LEVEL` | Logging level; defaults to `INFO` |

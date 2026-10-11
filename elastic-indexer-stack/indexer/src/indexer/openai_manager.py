@@ -7,7 +7,6 @@ import numpy as np
 from openai import OpenAI
 import requests
 import importlib.resources
-import time
 from langchain_openai.embeddings import OpenAIEmbeddings
 from langchain_core.documents import Document
 from langchain_experimental.text_splitter import SemanticChunker
@@ -417,7 +416,6 @@ class OpenAIManager:
                 if len(vector) != 768 or not np.isfinite(vector).all():
                     raise ValueError("Nomic must return 768 finite embedding dimensions")
                 chunks.append({"text_chunk": chunk.text, "vector": vector})
-                time.sleep(float(os.environ.get("EMBEDDING_REQUEST_PAUSE", "0")))
             return chunks
         # Chunk text intelligently
         chunks: list[Document] = []

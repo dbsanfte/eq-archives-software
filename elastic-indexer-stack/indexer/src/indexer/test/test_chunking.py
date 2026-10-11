@@ -85,14 +85,20 @@ def test_bad_budgets_are_rejected(max_tokens, overlap):
         chunk_source("source", max_tokens=max_tokens, overlap_tokens=overlap)
 
 
-def test_nomic_embeds_once_per_chunk_with_document_prefix_and_no_boundary_embeddings():
+@pytest.mark.parametrize("legacy_pause", [None, "0.2"])
+def test_nomic_embeds_once_per_chunk_without_sleep(monkeypatch, legacy_pause):
+    if legacy_pause is None:
+        monkeypatch.delenv("EMBEDDING_REQUEST_PAUSE", raising=False)
+    else:
+        monkeypatch.setenv("EMBEDDING_REQUEST_PAUSE", legacy_pause)
     manager = OpenAIManager.__new__(OpenAIManager)
     manager._embedding_model_name = "text-embedding-nomic-embed-text-v1.5@q8_0"
     text = "Serubane weapon damage. " * 500
-    with patch.object(manager, "embed_text", return_value=np.zeros(768)) as embed:
+    with patch.object(manager, "embed_text", return_value=np.zeros(768)) as embed, patch("time.sleep") as sleep:
         chunks = manager.get_chunks_and_embeddings(type("Document", (), {"page_content": text})())
     assert len(chunks) == len(chunk_source(text)) == embed.call_count
     assert [call.args[0] for call in embed.call_args_list] == [DOCUMENT_PREFIX + chunk["text_chunk"] for chunk in chunks]
+    sleep.assert_not_called()
 
 
 @pytest.mark.parametrize("vector", [[0] * 767, [float("nan")] * 768])
