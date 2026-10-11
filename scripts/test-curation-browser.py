@@ -424,7 +424,7 @@ async def search_and_queue(browser,base):
     page=await context.new_page()
     snapshot=await (await context.request.get(base+'/api/queue?filter=all')).json()
     template=snapshot['candidates'][0]
-    remaining=61
+    remaining=700
     async def listing(route):
         args=parse_qs(urlsplit(route.request.url).query)
         offset=int(args['offset'][0]);query=args.get('search',[''])[0]
@@ -435,9 +435,12 @@ async def search_and_queue(browser,base):
         await route.fulfill(status=200,json=body)
     await page.route('**/api/queue?**',listing)
     await page.goto(base+'/?view=queued')
-    await page.locator('#page').filter(has_text='1–50 of 61').wait_for()
+    await page.locator('#page').filter(has_text='1–50 of 700').wait_for()
+    assert await page.locator('.queue-card').count()==50
+    assert await page.locator('[data-count=queued]').inner_text()=='700'
+    assert await page.get_by_role('button',name='Undo approval: site-00.example',exact=True).is_enabled()
     await page.locator('#next').click()
-    await page.locator('#page').filter(has_text='51–61 of 61').wait_for()
+    await page.locator('#page').filter(has_text='51–100 of 700').wait_for()
     remaining=47
     await page.locator('#view-total').filter(has_text='47 sites').wait_for(timeout=8000)
     assert await page.locator('.site-tile').count()==47 and await page.locator('#pagination').is_hidden()

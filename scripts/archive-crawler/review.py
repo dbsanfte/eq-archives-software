@@ -18,11 +18,18 @@ def checked_sources(store, row):
     return documents
 
 
-def record(store, row):
+def metadata(row):
+    """Decode saved review metadata without revalidating URL/scope identities."""
     result = dict(row)
     for field in ("coverage", "evidence", "captures", "rating", "decision"):
         result[field] = json.loads(result[field]) if result[field] else None
     result["scope_mode"] = (result["coverage"] or {}).get("scope_mode", "directory")
+    result["manifest_sha256"] = digest({key: result[key] for key in ("id", "url", "scope", "scope_mode", "captures", "rating")})
+    return result
+
+
+def record(store, row):
+    result = metadata(row)
     result['scope_has_source'] = result['scope_mode'] in ('custom', 'ezboard', 'sitepowerup') or any(
         original_url(capture['url']) == original_url(result['url']) if result['scope_mode'] == 'page'
         else within_capture_scope(capture['url'], result['scope']) for capture in result['captures'])
@@ -31,17 +38,18 @@ def record(store, row):
     from sitepowerup import address
     board = address(result['url'])
     result['sitepowerup'] = board['board'] if board else None
-    result["manifest_sha256"] = digest({key: result[key] for key in ("id", "url", "scope", "scope_mode", "captures", "rating")})
     return result
+
+
+def sort_key(row):
+    rating = row["rating"] or {}
+    level = min((c["tier"] for c in row["captures"]), default=3)
+    return (rating.get("grade", -1) < 2, level, -rating.get("grade", -1), -row["priority"], row["url"])
 
 
 def queue(store):
     rows = [record(store, row) for row in store.candidates()]
-    def order(row):
-        rating = row["rating"] or {}
-        level = min((c["tier"] for c in row["captures"]), default=3)
-        return (rating.get("grade", -1) < 2, level, -rating.get("grade", -1), -row["priority"], row["url"])
-    rows.sort(key=order)
+    rows.sort(key=sort_key)
     return rows
 
 

@@ -28,6 +28,12 @@ updates explicitly, preserves open details and drafts, and never starts paid wor
 Automatic polls wait for the previous refresh to finish, including slow responses;
 explicit navigation can still supersede it. Coverage checks share one archive-host
 snapshot across all Ezboards in a pass, including cached board results.
+Portal lists (`compact=1`) read saved SQLite metadata without running archive
+maintenance. Counts, filtering and FIFO order cover the entire backlog, but only
+the visible 50 sites get full review records. Each response uses one database read
+snapshot so concurrent worker claims cannot break queue sorting. Archive coverage
+is still checked by workers, explicit rechecks and action preflights; the original
+operator API retains its coverage refresh behavior.
 
 ## Continuous automatic mode
 
