@@ -194,7 +194,14 @@ shortcut can undercount what the Nomic server processes. Retain completed versio
 checkpoints when repairing that counting bug. Resume failed broad runs in a new
 Job after probing the previously failing exact IDs; preserve old Jobs and the
 dedicated source checkout, and do not repeat source preparation.
-Nomic reindex requests remain serial, with no intentional sleep between chunks.
+Nomic reindex requests remain serial, with no intentional sleep between requests.
+The full reindex opts into at most two chunks per request through
+`NOMIC_EMBEDDING_BATCH_SIZE=2`; other indexers default to one. Preserve the 480-token
+chunk budget and source/vector identity, reject incomplete or invalid batch
+responses before saving a document, and retain checkpoint versions. The embedding
+server has two slots, 1,024-token aggregate capacity, a 512-token per-input cap,
+and Flash Attention. Keep real near-limit batch/serial compatibility and oversize
+recovery checks in the embedding smoke test when changing these settings.
 Operator-requested reindex tuning uses a prepared, checkpoint-preserving handoff
 as documented in the Jobs guide; ordinary curation delivery still leaves existing
 indexing Jobs untouched.

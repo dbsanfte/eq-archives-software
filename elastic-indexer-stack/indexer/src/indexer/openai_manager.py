@@ -407,15 +407,47 @@ class OpenAIManager:
             self._logger.error("Error fetching embedding (%s)", type(e).__name__)
             raise
         
+    def _embed_nomic_batch(self, texts: list[str]) -> list:
+        """Bind each returned vector to its input index before accepting a batch."""
+        try:
+            response = self._openai_embeddings.client.create(
+                input=texts, model=self._embedding_model_name, encoding_format="float")
+            payload = response if isinstance(response, dict) else response.model_dump()
+            rows = payload.get("data")
+            if not isinstance(rows, list) or len(rows) != len(texts):
+                raise ValueError("Nomic returned an incomplete embedding batch")
+            indices = [row.get("index") for row in rows if isinstance(row, dict)]
+            if (len(indices) != len(texts) or any(type(index) is not int for index in indices)
+                    or sorted(indices) != list(range(len(texts)))):
+                raise ValueError("Nomic returned invalid embedding indices")
+            if any("embedding" not in row for row in rows):
+                raise ValueError("Nomic returned a missing embedding vector")
+            return [row["embedding"] for row in sorted(rows, key=lambda row: row["index"])]
+        except Exception as error:
+            self._logger.error("Error fetching embedding batch (%s)", type(error).__name__)
+            raise
+
     def get_chunks_and_embeddings(self, document: Document) -> list[dict]:
         if "nomic-embed" in self._embedding_model_name:
+            # Opt in only for a server with tested batch capacity. Requests stay
+            # serial and bounded so bulk ingestion leaves room for public queries.
+            setting = os.environ.get("NOMIC_EMBEDDING_BATCH_SIZE", "1")
+            if setting not in ("1", "2"):
+                raise ValueError("NOMIC_EMBEDDING_BATCH_SIZE must be 1 or 2")
+            batch_size = int(setting)
             self.chunking_version = CHUNKING_VERSION
+            source = chunk_source(document.page_content)
             chunks = []
-            for chunk in chunk_source(document.page_content):
-                vector = self.embed_text(DOCUMENT_PREFIX + chunk.text)
-                if len(vector) != 768 or not np.isfinite(vector).all():
-                    raise ValueError("Nomic must return 768 finite embedding dimensions")
-                chunks.append({"text_chunk": chunk.text, "vector": vector})
+            for offset in range(0, len(source), batch_size):
+                batch = source[offset:offset + batch_size]
+                texts = [DOCUMENT_PREFIX + chunk.text for chunk in batch]
+                vectors = ([self.embed_text(texts[0])] if batch_size == 1
+                           else self._embed_nomic_batch(texts))
+                for chunk, values in zip(batch, vectors, strict=True):
+                    vector = np.asarray(values, dtype=np.float32)
+                    if vector.shape != (768,) or not np.isfinite(vector).all():
+                        raise ValueError("Nomic must return 768 finite embedding dimensions")
+                    chunks.append({"text_chunk": chunk.text, "vector": vector})
             return chunks
         # Chunk text intelligently
         chunks: list[Document] = []

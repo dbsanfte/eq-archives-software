@@ -94,7 +94,7 @@ python3 "$repo_dir/scripts/frontend-secrets.py" |
 "${kubectl[@]}" -n eqarchives-es rollout status deployment/nomic-embeddings --timeout=900s
 embedding_ip=$("${kubectl[@]}" -n eqarchives-es get service nomic-embeddings -o jsonpath='{.spec.clusterIP}')
 python3 "$repo_dir/scripts/check-embeddings.py" "http://$embedding_ip:8080/v1/embeddings" \
-  --model "$MODEL_ALIAS" --api-key-env FRONTEND_OPENAI_API_KEY
+  --model "$MODEL_ALIAS" --api-key-env FRONTEND_OPENAI_API_KEY --check-batches
 # kubectl exec deployment/... can select the old, draining pod after a rollout.
 embedding_pod=$("${kubectl[@]}" -n eqarchives-es get pods -l app=nomic-embeddings -o json | python3 -c '
 import json,sys

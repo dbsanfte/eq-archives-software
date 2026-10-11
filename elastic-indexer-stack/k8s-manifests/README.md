@@ -44,7 +44,9 @@ temporary file before publishing it atomically. The 1 GiB `local-path` PVC store
 only a reproducible model cache, not archive data.
 
 The model runs as UID 1000 with mean pooling, normalized 768-dimensional output,
-512-token context/batch sizes, one server slot, and eight host threads. All
+two server slots, eight host threads and Flash Attention. The aggregate context,
+logical batch and physical batch are 1,024 tokens; each input remains limited to
+512 tokens through the per-slot context cap. All
 13 layers are offloaded through Vulkan. Requests use the existing alias
 `text-embedding-nomic-embed-text-v1.5@q8_0`. The frontend supplies Nomic's
 `search_query:` prefix. There is no new public ingress: NGINX forwards only the
@@ -66,10 +68,24 @@ Model and script ConfigMap hashes trigger a rollout when their content changes;
 the API-key checksum triggers one when the key changes. Normal frontend commits
 leave the model pod and cached model unchanged. The model deployment uses
 `maxUnavailable: 0`, readiness checks, and a short drain period before shutdown.
-Inputs exceeding 512 tokens are rejected; this pinned llama.cpp build reports
-HTTP 500 with an `input ... is too large to process` error. The service remains
-usable for subsequent requests. Larger contexts or indexing batch workloads
-need separate configuration and capacity testing.
+Inputs exceeding 512 tokens are rejected with HTTP 400 and a max-context error.
+The service remains usable for subsequent requests. The real CPU smoke check
+compares batched near-limit documents and an odd final query with individually
+embedded inputs, preserving input/vector identity and normalized dimensions.
+CPU quantized kernels use a 0.998 batch/serial cosine floor because their
+rounding changes with batch shape; the production Vulkan check uses 0.9999.
+
+A bounded October 2026 benchmark on eqvm used 73 inputs from 32 archived sites
+and three query examples while the existing reindex continued on the same GPU.
+Two-chunk requests plus Flash Attention improved throughput about 11–12% over
+the original single-slot configuration. All compared GPU vectors had cosine
+similarity above 0.99996 to the original configuration, with identical token
+coverage. In a mixed-load test, query latency was 244 ms median and 610 ms maximum
+for the batched configuration versus 140–196 ms median and 349–441 ms maximum
+for the original configuration. These are bounded tests under competing live
+load, not a corpus-wide speed or latency guarantee. Four-slot batching was slower;
+the reindex therefore caps requests at two inputs. Other indexers retain their
+single-input default. Larger contexts or batches need separate capacity testing.
 
 ## GitHub Actions
 

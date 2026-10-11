@@ -123,8 +123,13 @@ sudo -n kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml -n eqarchives-es \
   logs -f job/reindex-text-html-20261005 -c indexer
 ```
 
-The workload submits one embedding chunk at a time, without an intentional pause
-between requests, and uses the existing 768-dimensional Nomic model and credentials.
+The workload submits at most two embedding chunks per request, with one request
+in flight and no intentional pause between requests. `NOMIC_EMBEDDING_BATCH_SIZE=2`
+opts this Job into batching; other indexers default to one. The cluster server has
+two slots, a 1,024-token aggregate batch, Flash Attention, and a 512-token limit
+per input. Chunk boundaries, document prefixes, the 768-dimensional model and
+version checkpoints stay the same. Returned indices bind vectors to source chunks;
+incomplete or invalid batches fail before the document or checkpoint is updated.
 `EMBEDDING_REQUEST_PAUSE` is no longer used; older Job templates that still set it
 cannot introduce a delay when running the updated image. Logs report processed,
 updated, unchanged, unavailable-source and failed counts. To resume a failed run,
