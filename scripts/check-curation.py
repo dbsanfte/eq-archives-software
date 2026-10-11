@@ -19,7 +19,7 @@ def main():
     assert health["status"] == "ok"
     if os.environ.get("GITHUB_SHA"):
         assert health["version"] == os.environ["GITHUB_SHA"], "Curation build revision does not match this deployment"
-    with opener.open(base + "/api/queue", timeout=15) as response:
+    with opener.open(base + "/api/queue?compact=1&filter=queued", timeout=15) as response:
         queue = json.load(response)
         assert response.headers["Cache-Control"] == "no-store"
     assert isinstance(queue["all_count"], int) and isinstance(queue["candidates"], list)

@@ -344,6 +344,8 @@ maintenance and prepare full review records only for the visible page. Keep
 counts, filters and FIFO ordering complete and within one read snapshot so a
 concurrent worker claim cannot invalidate sorting. Workers and action preflights
 retain coverage validation; preserve the original operator API refresh behavior.
+Deployment readiness uses the same compact Queue request; it must not run archive
+maintenance or load complete capture manifests to verify a rollout.
 Preserve operations,
 approvals and progress across restart; approved capture transport interruptions
 retry independently of automatic discovery mode. Manual discovery/publication

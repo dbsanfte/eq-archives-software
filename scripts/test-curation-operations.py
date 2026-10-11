@@ -8,7 +8,7 @@ import io
 import json
 from pathlib import Path
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import urllib.error
 
 
@@ -21,6 +21,7 @@ def module(name):
 
 credentials = module("curation-secrets")
 guard = module("indexer-job-guard")
+readiness = module("check-curation")
 
 
 def encoded(value):
@@ -28,6 +29,37 @@ def encoded(value):
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_readiness_uses_bounded_portal_queue_without_archive_maintenance(self):
+        requests = []
+
+        def response(url, timeout):
+            requests.append(url)
+            self.assertEqual(timeout, 15)
+            if url.endswith('/healthz'):
+                value = {'status': 'ok', 'version': 'fixture-revision'}
+            elif url.endswith('/api/queue?compact=1&filter=queued'):
+                value = {'all_count': 4001, 'candidates': [{'id': 'queued-site'}]}
+            else:
+                raise TimeoutError('Legacy archive maintenance exceeds the rollout probe deadline')
+            result = io.StringIO(json.dumps(value))
+            result.headers = {'Cache-Control': 'no-store'}
+            return result
+
+        client = Mock()
+        client.getresponse.return_value.status = 403
+        client.getresponse.return_value.read.return_value = b'Intranet access only'
+        with patch('sys.argv', ['check-curation.py', '--image', 'fixture-image']), \
+                patch.dict('os.environ', {'GITHUB_SHA': 'fixture-revision'}), \
+                patch.object(readiness.urllib.request, 'build_opener', return_value=Mock(open=response)), \
+                patch.object(readiness.http.client, 'HTTPConnection', return_value=client) as tcp, \
+                redirect_stdout(io.StringIO()):
+            readiness.main()
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(tcp.call_count, 3)
+        for invocation in tcp.call_args_list:
+            self.assertEqual(invocation.kwargs['source_address'], ('127.0.0.1', 0))
+        self.assertEqual(client.request.call_count, 3)
+
     def test_separate_create_only_account_reuses_password_and_excludes_admin_from_output(self):
         incoming = {"items": [
             {"metadata": {"name": "elastic-password-secret"}, "data": {"ELASTIC_PASSWORD": encoded("dummy-admin")}},
