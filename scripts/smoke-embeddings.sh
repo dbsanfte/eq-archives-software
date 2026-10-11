@@ -74,8 +74,11 @@ frontend_id=$(docker run --detach --network "$network" --network-alias search-eq
   --env ELASTICSEARCH_INDEX=eq-archive --env OPENAI_URL=http://nomic:8080 "$image")
 frontend_address=$(docker port "$frontend_id" 80/tcp)
 bash "$repo_dir/scripts/wait-http.sh" "http://$frontend_address/healthz" >/dev/null
+# CPU quantized matrix kernels differ with batch shape (the repetitive fixture
+# measures ~0.999 cosine locally). The production Vulkan check retains 0.9999.
 python3 "$repo_dir/scripts/check-embeddings.py" \
-  "http://$frontend_address/openai/v1/embeddings" --model "$MODEL_ALIAS"
+  "http://$frontend_address/openai/v1/embeddings" --model "$MODEL_ALIAS" \
+  --check-batches --batch-min-cosine 0.998
 if docker exec "$embedding_id" /bin/sh /bootstrap/check-gpu.sh; then
   echo 'GPU verification incorrectly accepted the CPU-only CI server.' >&2
   exit 1
@@ -86,14 +89,14 @@ python3 -c 'import json,os; print(json.dumps({"model":os.environ["MODEL_ALIAS"],
 status=$(curl --silent --show-error --output "$work_dir/oversized-response.json" --write-out '%{http_code}' \
   -H 'Content-Type: application/json' --data-binary "@$work_dir/oversized.json" \
   "http://$frontend_address/openai/v1/embeddings")
-if [[ "$status" != 500 ]]; then
-  echo "The pinned runtime should reject oversized input with HTTP 500; received $status." >&2
+if [[ "$status" != 400 ]]; then
+  echo "The pinned runtime should reject input above its per-slot context with HTTP 400; received $status." >&2
   exit 1
 fi
 python3 - "$work_dir/oversized-response.json" <<'PY'
 import json, sys
 message = json.load(open(sys.argv[1])).get("error", {}).get("message", "")
-assert "input (602 tokens) is too large to process" in message, "Unexpected oversized-input error"
+assert "input (602 tokens) is larger than the max context size (512 tokens)" in message, "Unexpected oversized-input error"
 PY
 python3 "$repo_dir/scripts/check-embeddings.py" \
   "http://$frontend_address/openai/v1/embeddings" --model "$MODEL_ALIAS"
