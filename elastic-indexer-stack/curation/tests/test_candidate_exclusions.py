@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from conftest import add_candidate
@@ -86,3 +88,52 @@ def test_existing_ad_moves_to_history_with_explanation_and_keeps_source_and_deci
         assert not store.db.execute('SELECT 1 FROM attempts').fetchone()
     result=call(app,'POST','/api/restore',{'id':pending['id'],'manifest_sha256':pending['manifest_sha256']})
     assert result.status_code==409 and 'hosting signup advertisement' in result.json()['error']
+
+
+def test_exclusion_scan_allows_other_workers_to_save_progress(candidate, monkeypatch):
+    import candidate_actions
+    root, row = candidate
+    original = candidate_actions.candidate_exclusion
+    def check(url):
+        with connect(root) as other:
+            other.db.execute('PRAGMA busy_timeout=0')
+            other.set('worker_progress', {'saved': True})
+        return original(url)
+    monkeypatch.setattr(candidate_actions, 'candidate_exclusion', check)
+    candidate_actions.retire_excluded(root)
+    with connect(root) as store:
+        assert store.get('worker_progress') == {'saved': True}
+        assert store.db.execute('SELECT state FROM candidates WHERE id=?', (row['id'],)).fetchone()[0] == row['state']
+
+
+@pytest.mark.parametrize('change', ['decision', 'grading', 'indexing', 'url', 'removed'])
+def test_exclusion_rechecks_concurrent_changes_before_retirement(tmp_path, monkeypatch, change):
+    import candidate_actions
+    root = tmp_path/'state'
+    row = add_candidate(root, url=AD, grade=None)
+    original = candidate_actions.candidate_exclusion
+    def check(url):
+        with connect(root) as other:
+            other.db.execute('PRAGMA busy_timeout=0')
+            if change == 'decision':
+                other.db.execute('UPDATE candidates SET decision=? WHERE id=?',
+                                 ('{"decision":"defer"}', row['id']))
+            elif change == 'grading':
+                enqueue(other, 'candidate_check', {'id': row['id']})
+            elif change == 'indexing':
+                other.db.execute("INSERT INTO batches(id,state) VALUES (?,'indexing')", ('a'*32,))
+                other.db.execute('UPDATE candidates SET coverage=? WHERE id=?',
+                    (json.dumps({'capture': {'review_id': 'a'*32}}), row['id']))
+            elif change == 'url':
+                other.db.execute('UPDATE candidates SET url=? WHERE id=?',
+                                 ('http://clerics.freeservers.com/', row['id']))
+            else:
+                other.db.execute('DELETE FROM candidates WHERE id=?', (row['id'],))
+            other.db.commit()
+        return original(url)
+    monkeypatch.setattr(candidate_actions, 'candidate_exclusion', check)
+    candidate_actions.retire_excluded(root)
+    with connect(root) as store:
+        current = store.db.execute('SELECT state FROM candidates WHERE id=?', (row['id'],)).fetchone()
+        assert current is None if change == 'removed' else current['state'] == row['state']
+        assert not store.db.execute("SELECT 1 FROM events WHERE action='candidate_excluded'").fetchone()

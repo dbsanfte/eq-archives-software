@@ -3,20 +3,35 @@ import json
 
 from common import CrawlError, candidate_exclusion, now
 from capture_flow import Action, transition
-from portal import Stage, decorate, dismissal_preview
-from review import queue
+from portal import CANDIDATE_STAGES, Stage, decorate, dismissal_preview
+from review import metadata, queue
 from state import connect, identifier
 
 
 def retire_excluded(root):
     """Retire known promotions atomically, without inventing human decisions."""
     with connect(root) as store:
+        # URL screening needs neither review sources nor a write lock. Most
+        # ticks have nothing to retire, even in a very large candidate history.
+        excluded = {row['id']: (row['url'], reason) for row in store.db.execute(
+            f"""SELECT id,url FROM candidates WHERE decision IS NULL
+                AND state NOT IN ({','.join('?' for _ in CANDIDATE_STAGES)})""",
+            tuple(CANDIDATE_STAGES)) if (reason := candidate_exclusion(row['url']))}
+        if not excluded:
+            return
         store.db.execute('BEGIN IMMEDIATE')
         active = {row[0] for row in store.db.execute("SELECT json_extract(payload,'$.id') FROM operations WHERE kind='candidate_check' AND state IN ('queued','running')")}
-        for row in decorate(store, queue(store)):
-            reason = candidate_exclusion(row['url'])
-            if not reason or row['stage'] != Stage.CANDIDATES or row['decision'] or row['id'] in active:
+        matches = []
+        for candidate, (url, _) in excluded.items():
+            current = store.db.execute('''SELECT id,url,scope,priority,coverage,NULL evidence,
+                state,captures,rating,error,decision FROM candidates
+                WHERE id=? AND url=? AND decision IS NULL''', (candidate, url)).fetchone()
+            if current:
+                matches.append(metadata(current))
+        for row in decorate(store, matches):
+            if row['stage'] != Stage.CANDIDATES or row['id'] in active:
                 continue
+            reason = excluded[row['id']][1]
             coverage = {**(row['coverage'] or {}), 'candidate_exclusion': reason}
             state = transition(row['state'], Action.REJECT)
             store.db.execute('UPDATE candidates SET state=?,coverage=?,error=? WHERE id=?',
