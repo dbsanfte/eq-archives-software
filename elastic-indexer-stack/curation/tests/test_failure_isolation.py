@@ -180,6 +180,40 @@ def test_site_failure_cannot_hide_a_later_funded_budget_resume(tmp_path):
         assert store.db.execute('SELECT state FROM operations WHERE id=?', (funded,)).fetchone()[0] == 'queued'
 
 
+def test_many_nonresumable_failures_do_not_hold_the_scheduler_write_lock(tmp_path, monkeypatch):
+    from contextlib import contextmanager
+    root = tmp_path/'state'
+    account = enable(root)
+    with connect(root) as store:
+        failed = [f'{number:032x}' for number in range(300)]
+        store.db.executemany('INSERT INTO operations(id,kind,state,payload,error,updated) VALUES (?,?,?,?,?,?)',
+            [(identifier, 'discover', 'interrupted', '{"automatic":true}', 'Source changed', '2020')
+                for identifier in failed])
+        store.db.executemany('INSERT INTO events(action,detail,created) VALUES (?,?,?)',
+            [('site_coverage_changed', json.dumps({'operation': identifier}), '2020')
+                for identifier in failed])
+        store.db.commit()
+        funded = enqueue(store, 'discover', {'automatic': True})
+        store.db.execute("UPDATE operations SET state='interrupted',error='Daily budget reached',result=? WHERE id=?",
+            (json.dumps({'automatic_pause': {'reason': 'daily_budget', 'required_usd': .01}}), funded))
+        store.db.commit()
+    calls = 0
+    def bounded():
+        nonlocal calls
+        calls += 1
+        return calls > 200
+    @contextmanager
+    def bounded_connection(directory):
+        with connect(directory) as store:
+            store.db.set_progress_handler(bounded, 1000)
+            yield store
+    monkeypatch.setattr(automation, 'connect', bounded_connection)
+    automation.resume_owned(root, Lane.CANDIDATES, account)
+    with connect(root) as store:
+        assert store.db.execute("SELECT COUNT(*) FROM operations WHERE state='interrupted'").fetchone()[0] == 300
+        assert store.db.execute("SELECT id FROM operations WHERE state='queued'").fetchone()[0] == funded
+
+
 def test_candidate_check_preflight_failure_is_held_once_and_other_site_starts(tmp_path, monkeypatch):
     root = tmp_path/'state'
     account = enable(root)

@@ -147,3 +147,40 @@ def test_publication_can_queue_during_capture_without_starting_another_download(
 @pytest.mark.parametrize('state,action',[('capturing',Action.UNDO),('published',Action.APPROVE),('approval_pending',Action.COMPLETE),('captured_awaiting_review',Action.INDEX)])
 def test_out_of_order_transitions_are_rejected(state,action):
     with pytest.raises(CrawlError): transition(state,action)
+
+
+@pytest.mark.parametrize('listing', [True, False])
+def test_large_mixed_queue_has_bounded_query_work_and_complete_fifo(tmp_path, listing):
+    from capture_queue import next_entry, queue_order
+    with connect(tmp_path/'state') as store:
+        approvals = [f'{number:024x}' for number in range(300)]
+        resumes = [f'{number:024x}' for number in range(300, 600)]
+        grant = json.dumps({'capture_after': '2020-01-01'})
+        store.db.executemany('INSERT INTO candidates(id,url,state,decision) VALUES (?,?,?,?)',
+            [(identifier, f'http://{identifier}.example/', 'approved_waiting_batch', grant)
+                for identifier in approvals] +
+            [(identifier, f'http://{identifier}.example/', 'capture_resume_queued', grant)
+                for identifier in resumes])
+        store.db.executemany('INSERT INTO operations(id,kind,state,payload,updated) VALUES (?,?,?,?,?)',
+            [(identifier, 'capture', 'resume_queued', json.dumps({'sites': [{'id': identifier}]}),
+              '2021-01-01') for identifier in resumes])
+        store.db.execute('INSERT INTO capture_queue_failures VALUES (?,?,?,?)',
+                         (approvals[0], grant, 'Needs correction', 'now',))
+        store.db.commit()
+        # A deterministic SQLite work budget catches the quadratic join without
+        # relying on CI wall-clock speed. Both portal reads and worker claims
+        # must handle the whole queue without a page/count cap.
+        calls = 0
+        def bounded():
+            nonlocal calls
+            calls += 1
+            return calls > 200
+        store.db.set_progress_handler(bounded, 1000)
+        try:
+            if listing:
+                assert queue_order(store) == approvals[1:] + resumes + approvals[:1]
+            else:
+                selected = next_entry(store, '2025-01-01')
+                assert selected['id'] == approvals[1] and selected['operation'] is None
+        finally:
+            store.db.set_progress_handler(None, 0)
