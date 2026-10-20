@@ -659,6 +659,36 @@ local-path requests are not filesystem quotas. Back it up separately from the
 public archive using SQLite's backup API plus manifest-listed captures. Preserve
 publication/indexing state on restore and keep private state/keys outside Git.
 
+New discovery campaigns use `shared-graph-v1` storage: the main database owns the
+link graph and scan cache, while each run retains its candidates, exact evidence,
+paid responses/reservations and resume checkpoints. Initialization copies only
+the small host/board identity inventories and their coverage cursors, never the
+entire portal database. Link selection streams shared and run-local evidence,
+deduplicating exact URL/source pairs without copying the graph. Staged sources
+are scanned once across new runs. Existing initialized campaigns keep their
+original databases, deadlines, budgets and paid caches when resumed.
+
+On eqvm, curation state now lives at `/mnt/samsung/eqarchives-curation`. A persistent
+bind mount preserves its existing local-path PV directory under
+`/var/lib/rancher/k3s/storage`; neither the PVC nor container `/data` paths change.
+`/etc/fstab` orders the bind after `/mnt/samsung`, and the k3s systemd drop-in
+`curation-storage.conf` requires that mount before startup. A missing Samsung disk
+must fail startup rather than silently write into the root filesystem.
+Monitor **actual filesystem free space**, including the root disk shared by
+other services; the PVC request is not a storage limit.
+
+For an offline relocation, stop only the curation Deployment, verify no unfinished
+import is using its PVC, and hold the worker lease while copying with ownership,
+permissions, hardlinks and extended attributes preserved (`rsync -aHAX
+--numeric-ids`). Verify all files using a checksum dry-run before switching the
+mount. Retain the original directory until the destination/mount and SQLite
+integrity checks pass, then remove only that verified original to reclaim space.
+Preserve all ledgers, run directories, sources, Jobs and archive checkouts.
+Restore the previous replica count and check LAN health, public search and pending
+Jobs. Disk-pressure image garbage collection may remove locally built reindex
+images: restore the **same** image from Docker into k3s/containerd after dependent
+services are healthy, letting the existing pending Job resume itself.
+
 One replica uses `Recreate` and an exclusive process lease covering three worker
 threads: candidate gathering (discovery, manual sites and evidence grading), capture,
 and publication/indexing. Atomic SQLite claims prevent two operations from using the same worker; API actions and retries check only

@@ -14,6 +14,7 @@ from pathlib import Path
 
 from common import CrawlError, Store, candidate_exclusion, tier
 from discovery import Archive, SKIP, record_source
+from discovery_cache import shared_graph_root
 from site_inventory import InventoryPause, SiteInventory
 
 RETRY_SECONDS = 86400
@@ -191,7 +192,13 @@ def advance(args, run, *, root, deadline, notify=None):
         summary = scan(archive, args, deadline=deadline, notify=notify)
         run.db.execute('ATTACH DATABASE ? AS frontier', (str(main.root / 'crawl.sqlite3'),))
         try:
-            for table in ('scans', 'links', 'ezboard_aliases'):
+            shared = shared_graph_root(run)
+            if shared is not None and shared != main.root:
+                raise CrawlError('Shared discovery graph does not match the source frontier')
+            # New runs read the graph in place. Older campaigns retain their
+            # original snapshots and resume semantics.
+            tables = ('ezboard_aliases',) if shared else ('scans', 'links', 'ezboard_aliases')
+            for table in tables:
                 run.db.execute(f'INSERT OR IGNORE INTO {table} SELECT * FROM frontier.{table}')
             run.db.commit()
         finally:

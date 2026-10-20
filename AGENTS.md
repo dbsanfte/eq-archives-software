@@ -233,7 +233,18 @@ campaign snapshots. Rotate across known hosts, prefer curated seeds/early pages,
 and advance past cached or unavailable sources. Empty slices must continue while
 the frontier has work under the original deadline/spend cap. Preserve metadata,
 source-byte/time and probe bounds, report unavailable sources separately from
-exhaustion, and never let an old resumed campaign rewind shared cursors. Wayback requests are serial through a persistent client,
+exhaustion, and never let an old resumed campaign rewind shared cursors.
+New discovery campaigns use `shared-graph-v1`: initialize fresh per-run ledgers,
+copy only host/board identity metadata, and read the shared link graph in place.
+Never back up the entire portal database into each campaign or copy all shared
+links/scans during frontier advancement. Retain exact candidate evidence, local
+source additions, exclusions, original budgets/deadlines and initialized legacy
+runs. Stage-source scans are shared across new runs; missing shared storage must
+fail visibly rather than create an empty graph. Curation's eqvm state is on
+`/mnt/samsung/eqarchives-curation`, persistently bound to the existing PVC path;
+k3s requires that mount at boot. Preserve paths, ownership and all private ledgers
+during checksum-verified offline moves. Local-path PVC sizes are not quotas.
+Wayback requests are serial through a persistent client,
 using the persistent Net::HTTP approach from upstream PR #280: no fixed request
 delay or bandwidth cap, with cumulative request/byte/time budgets and bounded
 422/429 backoff.
