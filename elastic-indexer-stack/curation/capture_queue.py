@@ -25,15 +25,19 @@ def attention(store):
         WHERE o.kind='capture' AND o.state='interrupted' AND r.retry_at IS NOT NULL AND r.paused=0""").fetchone()[0]}
 
 
+# Keep the resumed-site expansion before the candidate lookup. SQLite can
+# otherwise scan every queued candidate for each operation, then expand its
+# JSON again; claims hold the write lock for that entire quadratic scan.
 QUEUE = """SELECT c.id,c.decision,c.rowid ordinal,
         COALESCE(json_extract(c.decision,'$.capture_after'),json_extract(c.decision,'$.reviewed_at')) ready,
         (f.candidate IS NOT NULL) held,NULL operation FROM candidates c
         LEFT JOIN capture_queue_failures f ON f.candidate=c.id AND f.decision=c.decision
         WHERE c.state='approved_waiting_batch'
         UNION ALL SELECT c.id,c.decision,c.rowid,o.updated,0,o.id
-        FROM operations o,json_each(o.payload,'$.sites') site
-        JOIN candidates c ON c.id=json_extract(site.value,'$.id')
-        WHERE o.kind='capture' AND o.state='resume_queued' AND c.state='capture_resume_queued'"""
+        FROM operations o CROSS JOIN json_each(o.payload,'$.sites') site
+        CROSS JOIN candidates c
+        WHERE c.id=json_extract(site.value,'$.id')
+          AND o.kind='capture' AND o.state='resume_queued' AND c.state='capture_resume_queued'"""
 
 
 def queue_order(store):
