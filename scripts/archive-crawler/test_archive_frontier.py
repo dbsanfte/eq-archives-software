@@ -195,6 +195,24 @@ class FrontierTests(unittest.TestCase):
         self.assertEqual(runs[0].db.execute('SELECT COUNT(*) FROM links').fetchone()[0], 3)
         self.assertEqual(self.git('status', '--porcelain'), '')
 
+    def test_new_campaign_discovers_shared_links_without_copying_archive_metadata(self):
+        from discovery_cache import SHARED_GRAPH_VERSION
+        self.page('seed.example', 'links.html', 'new-guild.example')
+        self.commit()
+        run = Store(self.store.root / 'runs' / ('a' * 32))
+        self.addCleanup(run.close)
+        run.set('campaign_storage', SHARED_GRAPH_VERSION)
+        advance(self.args, run, root=self.store.root, deadline=float('inf'))
+        self.assertEqual(run.db.execute('SELECT COUNT(*) FROM links').fetchone()[0], 0)
+        self.assertEqual(run.db.execute('SELECT COUNT(*) FROM scans').fetchone()[0], 0)
+        with patch.object(Archive, 'blob', side_effect=AssertionError('Shared sources must not be reread')):
+            discover(self.args, run, cached_only=True)
+        self.assertEqual([row['url'] for row in run.candidates()], ['http://new-guild.example/'])
+        evidence = json.loads(run.candidates()[0]['evidence'])[0]
+        self.assertEqual(evidence['source'], 'websites/seed.example/20000101000000/links.html')
+        self.assertEqual(run.db.execute('SELECT COUNT(*) FROM links').fetchone()[0], 0)
+        self.assertEqual(self.store.db.execute('SELECT COUNT(*) FROM links').fetchone()[0], 1)
+
 
 if __name__ == '__main__':
     unittest.main()

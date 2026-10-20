@@ -1,5 +1,6 @@
 """Bounded Git-object reads and a cached link graph; never clone, pull or walk."""
 
+from contextlib import closing
 import json
 import os
 from pathlib import Path
@@ -9,6 +10,7 @@ import time
 from urllib.parse import urlsplit
 
 from common import CrawlError, Page, candidate_exclusion, decode, digest, original_url, site_identity, site_scope, tier
+from discovery_cache import link_rows
 
 SKIP = re.compile(r"\.(?:gif|jpe?g|png|webp|css|js|ico|zip|exe|mp[34]|wav|pdf)(?:$|\?)", re.I)
 SIGNALS = re.compile(r"everquest|\beq\b|norrath|guild|class|cleric|druid|shaman|monk|wizard|enchanter|necromancer|bard|paladin|ranger|rogue|warrior|shadow.?knight|news|forum|raid|tradeskill|spell|quest|blog", re.I)
@@ -192,13 +194,14 @@ def discover(args, store, *, cached_only=False, deadline=None):
         by_host[host] = by_host.get(host, 0) + 1
         read_bytes += len(data)
         record_source(store, host, timestamp, path, blob, category, data, archive.sha)
-    rows = list(store.db.execute("SELECT url,evidence FROM links ORDER BY url"))
     grouped = {}
-    for row in rows:
-        evidence = json.loads(row["evidence"])
-        entry = grouped.setdefault(row["url"], [])
-        if len(entry) < 8:
-            entry.append(evidence)
+    with closing(link_rows(store)) as rows:
+        for row in rows:
+            if deadline is not None and time.time() >= deadline:
+                break
+            entry = grouped.setdefault(row["url"], [])
+            if len(entry) < 8:
+                entry.append(json.loads(row["evidence"]))
     ranked = []
     for url, evidence in grouped.items():
         signals = " ".join(e["anchor"] + " " + e["context"] for e in evidence)

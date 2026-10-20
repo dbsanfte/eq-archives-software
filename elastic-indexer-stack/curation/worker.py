@@ -3,12 +3,12 @@
 import json
 import os
 from pathlib import Path
-import sqlite3
 import threading
 import time
 from datetime import datetime, timedelta
 
-from common import CrawlError, Store, capture_scope, digest, now, save, site_scope
+from common import CrawlError, Store, capture_scope, digest, now, save
+from campaign_storage import initialize as initialize_campaign
 from capture_flow import Action, UNDO_SECONDS, transition
 from capture_queue import claim, claim_resume, next_entry
 from crawler import parser
@@ -47,23 +47,7 @@ def campaign(root, operation):
             if existing is not None:
                 return {'candidate_id': existing['id'], 'existing': True, 'candidates': 0}
     directory = Path(root) / "runs" / operation["id"]
-    if not (directory / "initialized").exists():
-        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
-        with connect(root) as main:
-            backup = sqlite3.connect(directory / "crawl.sqlite3")
-            main.db.backup(backup)
-            backup.close()
-            excluded = [site_scope(row["url"]) for row in main.candidates()]
-        run = Store(directory)
-        try:
-            for table in ("candidates", "attempts", "events", "operations", "batches"):
-                run.db.execute(f"DELETE FROM {table}")
-            run.db.execute("DELETE FROM meta WHERE key IN ('acquisition_started','wayback_transport','luna_budget_usd','grading_result', 'discovery_completed','sampling_completed','discovery_result','sampling_result','staged_graph_result')")
-            run.db.execute("DELETE FROM meta WHERE key LIKE 'ezboard_resolution:%' OR key='ezboard_pending_links'")
-            run.set("excluded_scopes", excluded)
-        finally:
-            run.close()
-        (directory / "initialized").touch(mode=0o600)
+    initialize_campaign(root, directory)
     run = Store(directory)
     downloader = None
     try:
