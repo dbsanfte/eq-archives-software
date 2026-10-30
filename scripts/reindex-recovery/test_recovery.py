@@ -89,15 +89,21 @@ class RecoveryTests(unittest.TestCase):
         for status, ready in [('green', True), ('yellow', True), ('ok', True), ('red', False)]:
             self.assertEqual(runner.request_ready('http://internal', {},
                 opener=lambda *a, **k: Response(json.dumps({'status': status}))), ready)
+        for data, ready in [([{'id': 'nomic'}], True), ([], False), (None, False)]:
+            self.assertEqual(runner.request_ready('http://internal/v1/models', {}, models=True,
+                opener=lambda *a, **k: Response(json.dumps({'data': data}))), ready)
+        def unauthorized(*args, **kwargs): raise HTTPError('http://model/v1/models', 401, 'bad key', {}, None)
+        with self.assertRaises(runner.ConfigurationError):
+            runner.request_ready('http://model/v1/models', {}, models=True, opener=unauthorized)
 
     def test_credentials_are_read_from_mounted_files_and_not_logged(self):
         calls = []
         with patch.dict('os.environ', {'ELASTICSEARCH_HOST': 'http://es', 'ELASTICSEARCH_PORT': '9200',
                                       'OPENAI_ENDPOINT': 'http://model:8080/v1'}), \
              patch.object(Path, 'read_text', return_value='private-key\n'), \
-             patch.object(runner, 'request_ready', side_effect=lambda u, h: calls.append(u) or True):
+             patch.object(runner, 'request_ready', side_effect=lambda u, h, **k: calls.append(u) or True):
             self.assertTrue(runner.dependencies_ready())
-        self.assertEqual(calls, ['http://es:9200/_cluster/health?wait_for_status=yellow&timeout=5s', 'http://model:8080/health'])
+        self.assertEqual(calls, ['http://es:9200/_cluster/health?wait_for_status=yellow&timeout=5s', 'http://model:8080/v1/models'])
         with patch.object(Path, 'read_text', side_effect=OSError('secret detail')):
             with self.assertRaises(runner.ConfigurationError): runner.dependencies_ready()
         with patch.object(Path, 'read_text', return_value=''):

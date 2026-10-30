@@ -18,10 +18,12 @@ class ConfigurationError(Exception):
     """A correction is required; retrying cannot repair credentials/configuration."""
 
 
-def request_ready(url, headers, *, opener=urllib.request.urlopen):
+def request_ready(url, headers, *, models=False, opener=urllib.request.urlopen):
     try:
         with opener(urllib.request.Request(url, headers=headers), timeout=10) as response:
             result = json.load(response)
+        if models:
+            return isinstance(result.get('data'), list) and bool(result['data'])
         return result.get('status') in ('ok', 'yellow', 'green') and not result.get('timed_out')
     except urllib.error.HTTPError as error:
         if error.code in (408, 429) or error.code >= 500:
@@ -47,7 +49,7 @@ def dependencies_ready():
     model = os.environ['OPENAI_ENDPOINT'].rstrip('/').removesuffix('/v1')
     return (request_ready(f'{host}:{port}/_cluster/health?wait_for_status=yellow&timeout=5s',
                           {'Authorization': 'Basic ' + basic}) and
-            request_ready(model + '/health', {'Authorization': 'Bearer ' + key}))
+            request_ready(model + '/v1/models', {'Authorization': 'Bearer ' + key}, models=True))
 
 
 def is_transient(error):
