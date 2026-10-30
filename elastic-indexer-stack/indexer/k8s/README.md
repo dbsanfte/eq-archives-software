@@ -193,7 +193,11 @@ Pin the exact local worker image in containerd so kubelet image garbage collecti
 cannot remove it while a replacement waits for scheduling:
 `sudo -n k3s ctr -n k8s.io images label <fully-qualified-image> io.cri-containerd.pinned=pinned`.
 Verify `pinned: true` using `sudo -n k3s crictl images -o json`; retain the Docker
-copy as a recovery source. This pins only the selected archive worker image.
+copy as a recovery source. Containerd 1.7.7 caches an existing image's pinned
+state: label both its tag and config-digest references, and verify the labels
+with `ctr images ls`. Its CRI cache refreshes on the next normal daemon start;
+do not restart k3s merely to refresh it. The running worker also keeps its image
+in use. This protects only the selected archive worker image.
 The runner tests execute in the required CI check with
 `python3 -m unittest discover -s scripts/reindex-recovery -v`. Also run them inside
 the chosen Python 3.13 worker image and verify its real exception types/imports.
