@@ -60,7 +60,8 @@ def is_transient(error):
     return (isinstance(error, (TransportError, APIConnectionError, APITimeoutError,
                               InternalServerError, RateLimitError)) or
             isinstance(error, ApiError) and (error.status_code == 429 or error.status_code >= 500) or
-            isinstance(error, RuntimeError) and str(error) == UPSTREAM_FAILURE)
+            isinstance(error, RuntimeError) and str(error) == UPSTREAM_FAILURE
+            and error.__context__ is not None and is_transient(error.__context__))
 
 
 def execute_worker():

@@ -5,6 +5,7 @@ from pathlib import Path
 import unittest
 import tempfile
 from unittest.mock import patch
+from types import SimpleNamespace
 from urllib.error import HTTPError, URLError
 
 import render
@@ -27,6 +28,27 @@ def predecessor():
 
 
 class RecoveryTests(unittest.TestCase):
+    def test_repeated_upstream_failures_retain_the_original_error_classification(self):
+        class Transport(Exception): pass
+        class Connection(Exception): pass
+        class Server(Exception): pass
+        class Rejected(Exception): pass
+        class ApiError(Exception):
+            status_code = 503
+        modules = {'elastic_transport': SimpleNamespace(TransportError=Transport),
+                   'elasticsearch': SimpleNamespace(ApiError=ApiError),
+                   'openai': SimpleNamespace(APIConnectionError=Connection, APITimeoutError=Connection,
+                                            InternalServerError=Server, RateLimitError=Server)}
+        with patch.dict('sys.modules', modules):
+            for original, expected in [(Transport(), True), (Connection(), True), (Server(), True),
+                                       (ApiError(), True), (Rejected(), False), (ValueError(), False)]:
+                try:
+                    try: raise original
+                    except Exception: raise RuntimeError(runner.UPSTREAM_FAILURE) from None
+                except RuntimeError as error:
+                    self.assertEqual(runner.is_transient(error), expected)
+            self.assertFalse(runner.is_transient(RuntimeError(runner.UPSTREAM_FAILURE)))
+
     def test_mounted_runner_preserves_sibling_imports_and_exact_id_arguments(self):
         import sys
         with tempfile.TemporaryDirectory() as temporary:
