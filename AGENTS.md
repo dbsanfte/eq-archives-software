@@ -205,6 +205,13 @@ recovery checks in the embedding smoke test when changing these settings.
 Operator-requested reindex tuning uses a prepared, checkpoint-preserving handoff
 as documented in the Jobs guide; ordinary curation delivery still leaves existing
 indexing Jobs untouched.
+Authorized infrastructure continuations use `scripts/reindex-recovery`: preserve
+the failed Job, original image, dedicated sources and checkpoints; probe an exact
+remaining ID before the broad continuation. Wait for dependencies and retry
+temporary transport outages without counting reboot disruptions against the
+Job's lifetime backoff limit. Content/integrity/authentication failures must stay
+visible. Keep the recovery ConfigMap immutable and the local image pinned; never
+rerun source preparation or change extraction/chunking versions to resume.
 
 ### Search relevance evaluation
 

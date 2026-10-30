@@ -153,3 +153,54 @@ This keeps an unfinished Job present for the import guard throughout the handoff
 Completed version checkpoints are skipped; any interrupted record is retried.
 Keep the old Job suspended and retain its logs, verify new progress and public
 search/embedding health, and do not change other indexing Jobs or source checkouts.
+
+### Recovery across VM restarts
+
+Use `scripts/reindex-recovery/render.py` for an operator-authorized continuation
+of a terminal failed broad Job. It retains the original image, credentials,
+read-only source checkout, two-chunk batching and version checkpoints. It removes
+source preparation and generated controller selectors. Previous Jobs are retained.
+The runner is mounted from an immutable, content-addressed ConfigMap, so the
+existing tested indexer image does not need rebuilding.
+
+The runner waits for authenticated Elasticsearch cluster health, cluster DNS and
+Nomic readiness. Temporary transport failures during processing retry with
+5–60 second backoff and a fresh scan of remaining checkpoints. There is no pause
+between successful embedding requests. Authentication/configuration failures
+stop with exit 42; source/integrity failures retain the worker's failure status.
+Pod failure policy excludes Kubernetes disruptions and observed reboot exit
+codes 143/255 from the Job's lifetime retry allowance. These rules are supported
+by eqvm's Kubernetes API; validate each rendered Job with server-side dry-run.
+
+Save the failed Job JSON and logs privately, verify the dedicated source HEAD
+against its original run record, and confirm no other unfinished unsuspended
+indexing Job exists. Render an exact-ID probe before the unrestricted continuation:
+
+```bash
+# Keep failed-job.json and rendered manifests outside both repositories.
+python3 scripts/reindex-recovery/render.py --name reindex-recovery-probe-<date> \
+  --probe-id '<exact remaining ID>' < failed-job.json > probe.json
+sudo -n kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml apply --dry-run=server -f probe.json
+sudo -n kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml apply -f probe.json
+# Verify probe completion, saved versions/vectors and preserved metadata first.
+python3 scripts/reindex-recovery/render.py --name reindex-text-resume-<date> \
+  < failed-job.json > continuation.json
+sudo -n kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml apply --dry-run=server -f continuation.json
+sudo -n kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml apply -f continuation.json
+```
+
+Pin the exact local worker image in containerd so kubelet image garbage collection
+cannot remove it while a replacement waits for scheduling:
+`sudo -n k3s ctr -n k8s.io images label <fully-qualified-image> io.cri-containerd.pinned=pinned`.
+Verify `pinned: true` using `sudo -n k3s crictl images -o json`; retain the Docker
+copy as a recovery source. Containerd 1.7.7 caches an existing image's pinned
+state: label both its tag and config-digest references, and verify the labels
+with `ctr images ls`. Its CRI cache refreshes on the next normal daemon start;
+do not restart k3s merely to refresh it. The running worker also keeps its image
+in use. This protects only the selected archive worker image.
+The runner tests execute in the required CI check with
+`python3 -m unittest discover -s scripts/reindex-recovery -v`. Also run them inside
+the chosen Python 3.13 worker image and verify its real exception types/imports.
+Infrastructure recovery is automatic; application/integrity failures remain
+visible for a correction. Inspect Job conditions and logs rather than assuming
+that a Running pod has made progress.
