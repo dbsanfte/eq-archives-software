@@ -443,7 +443,7 @@ class OpenAIManager:
             self._logger.error("Error fetching embedding batch (%s)", type(error).__name__)
             raise
 
-    def get_chunks_and_embeddings(self, document: Document) -> list[dict]:
+    def get_chunks_and_embeddings(self, document: Document, *, _prepared_source=None) -> list[dict]:
         if "nomic-embed" in self._embedding_model_name:
             # The default Vulkan service retains its two-input capacity. Larger
             # batches require the explicitly selected, separately tested CUDA service.
@@ -459,7 +459,10 @@ class OpenAIManager:
             if encoding not in ("float", "base64"):
                 raise ValueError("NOMIC_EMBEDDING_ENCODING must be float or base64")
             self.chunking_version = CHUNKING_VERSION
-            source = chunk_source(document.page_content)
+            if _prepared_source is not None:
+                from .reindex_preparation import verify_prepared
+                verify_prepared(document.page_content, _prepared_source)
+            source = chunk_source(document.page_content) if _prepared_source is None else _prepared_source
             chunks = []
             for offset in range(0, len(source), batch_size):
                 batch = source[offset:offset + batch_size]

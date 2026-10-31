@@ -4,5 +4,6 @@ ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 COPY elastic-indexer-stack/indexer/src/reindex_text.py /app/src/reindex_text.py
 COPY elastic-indexer-stack/indexer/src/indexer/openai_manager.py /app/src/indexer/openai_manager.py
-RUN python -m compileall -b -f -o 2 /app/src/reindex_text.py /app/src/indexer/openai_manager.py && \
-    rm /app/src/reindex_text.py /app/src/indexer/openai_manager.py
+COPY elastic-indexer-stack/indexer/src/indexer/reindex_preparation.py /app/src/indexer/reindex_preparation.py
+RUN python -m compileall -b -f -o 2 /app/src/reindex_text.py /app/src/indexer/openai_manager.py /app/src/indexer/reindex_preparation.py && \
+    rm /app/src/reindex_text.py /app/src/indexer/openai_manager.py /app/src/indexer/reindex_preparation.py

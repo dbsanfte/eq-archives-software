@@ -1,11 +1,13 @@
 """Resume extraction/rechunking of existing text records without replacing metadata."""
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor, wait, FIRST_COMPLETED
+from concurrent.futures.process import BrokenProcessPool
 from contextlib import nullcontext
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import logging
+import multiprocessing
 import os
 from pathlib import Path
 import threading
@@ -21,6 +23,7 @@ from indexer.es_manager import ElasticsearchManager, ES_FIELDS
 from indexer.html_extraction import TEXT_EXTRACTION_VERSION, WEBSITE_EXTRACTION_VERSION, extraction_version
 from indexer.openai_manager import OpenAIManager
 from indexer.text_handler import TextHandler
+from indexer.reindex_preparation import prepare_source, verify_prepared
 
 
 LOGGER = logging.getLogger(__name__)
@@ -49,7 +52,7 @@ def source_path(repo, record_id):
     return resolved
 
 
-def reindex_record(client, index, hit, repo, handler, embedder, progress):
+def reindex_record(client, index, hit, repo, handler, embedder, progress, preparation_pool=None):
     record_id = hit["_id"]
     source = hit["_source"]
     if source.get("id") != record_id:
@@ -58,14 +61,20 @@ def reindex_record(client, index, hit, repo, handler, embedder, progress):
     original = source.get("text_full") or ""
     text = original
     available = path.is_file()
-    if available:
+    prepared = None
+    if preparation_pool is not None:
+        text, prepared = preparation_pool.submit(prepare_source, record_id, str(path), available, original).result()
+        verify_prepared(text, prepared)
+        if available and original.strip() and not text.strip():
+            raise ValueError("refusing to replace existing text with empty extraction")
+    elif available:
         documents = handler._get_documents_from_file(record_id, str(path))
         if len(documents) != 1:
             raise ValueError("expected one complete source document")
         text = documents[0].page_content
         if original.strip() and not text.strip():
             raise ValueError("refusing to replace existing text with empty extraction")
-    else:
+    if not available:
         # A sparse/older checkout must not delete preserved text or pretend it
         # has repaired extraction. Its existing full text can still be rechunked.
         progress.unavailable_sources += 1
@@ -76,7 +85,9 @@ def reindex_record(client, index, hit, repo, handler, embedder, progress):
         return
     patch = {}
     if text != original or source.get("text_chunking_version") != CHUNKING_VERSION:
-        chunks = embedder.get_chunks_and_embeddings(Document(page_content=text)) if text.strip() else []
+        document = Document(page_content=text)
+        chunks = (embedder.get_chunks_and_embeddings(document, _prepared_source=prepared) if prepared is not None
+                  else embedder.get_chunks_and_embeddings(document))
         if text.strip() and not chunks:
             raise ValueError("nonempty source has no embedding chunks")
         patch.update(text_full=text, text=chunks, text_chunking_version=CHUNKING_VERSION)
@@ -125,7 +136,7 @@ def completed_records(hits, execute, pool, workers):
 
 
 def reindex(client, index, repo, handler, embedder, record_ids=None, limit=0, batch_size=100,
-            *, workers=1, worker_factory=None):
+            *, workers=1, worker_factory=None, preparation_pool=None):
     if type(workers) is not int or not 1 <= workers <= 8 or workers > 1 and worker_factory is None:
         raise ValueError("Use 1–8 workers; concurrent workers require isolated handlers/clients")
     progress = Progress()
@@ -135,7 +146,10 @@ def reindex(client, index, repo, handler, embedder, record_ids=None, limit=0, ba
             local.resources = worker_factory() if worker_factory else (handler, embedder)
         delta = Progress()
         try:
-            reindex_record(client, index, hit, repo, *local.resources, delta)
+            if preparation_pool is None:
+                reindex_record(client, index, hit, repo, *local.resources, delta)
+            else:
+                reindex_record(client, index, hit, repo, *local.resources, delta, preparation_pool)
         except Exception as error:
             return delta, error
         if getattr(local.resources[1], '_reindex_backend', None) == 'secondary':
@@ -204,6 +218,8 @@ def _reindex(client, index, record_ids, limit, batch_size, progress, execute, po
             if error is not None:
                 raise error
             upstream_failures = 0
+        except BrokenProcessPool:
+            raise RuntimeError("Source preparation process exited; completed checkpoints retained") from None
         except ConflictError:
             progress.failed += 1
             LOGGER.warning("Concurrent update, left untouched: %s", hit["_id"])
@@ -228,12 +244,15 @@ def main():
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--batch-size", type=int, default=100)
     parser.add_argument("--workers", type=int, default=int(os.environ.get("REINDEX_WORKERS", "1")))
+    parser.add_argument("--preparation-workers", type=int, default=int(os.environ.get("REINDEX_PREPARATION_WORKERS", "0")))
     parser.add_argument("--secondary-endpoint", default=os.environ.get("REINDEX_SECONDARY_ENDPOINT"))
     parser.add_argument("--secondary-workers", type=int, default=int(os.environ.get("REINDEX_SECONDARY_WORKERS", "1")))
     args = parser.parse_args()
     if args.limit < 0 or not 1 <= args.batch_size <= 1000 or not 1 <= args.workers <= 8:
         parser.error("limit must be nonnegative, batch size 1–1000 and workers 1–8")
     total_workers = args.workers + (args.secondary_workers if args.secondary_endpoint else 0)
+    if not 0 <= args.preparation_workers <= 4:
+        parser.error("preparation workers must be 0–4")
     if not 1 <= args.secondary_workers <= 2 or total_workers > 8:
         parser.error("secondary workers must be 1–2 and total workers at most 8")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -260,9 +279,15 @@ def main():
             worker_embedder._nomic_encoding = 'float'
         worker_embedder._reindex_backend = 'secondary' if secondary else 'primary'
         return TextHandler(ArchiveHandler(), None, llm_enrichment_enabled=False), worker_embedder
-    progress = reindex(client, manager._index_name, args.repo, handler, OpenAIManager(),
-                       args.record_ids, args.limit, args.batch_size, workers=total_workers,
-                       worker_factory=worker_factory if total_workers > 1 else None)
+    # Spawn avoids inheriting live HTTP sockets. Each process only reads and
+    # chunks sources; checkpointed ES updates remain in the original workers.
+    with (ProcessPoolExecutor(max_workers=args.preparation_workers,
+                              mp_context=multiprocessing.get_context('spawn'))
+          if args.preparation_workers else nullcontext()) as preparation_pool:
+        progress = reindex(client, manager._index_name, args.repo, handler, OpenAIManager(),
+                           args.record_ids, args.limit, args.batch_size, workers=total_workers,
+                           worker_factory=worker_factory if total_workers > 1 else None,
+                           preparation_pool=preparation_pool)
     return 1 if progress.failed else 0
 
 

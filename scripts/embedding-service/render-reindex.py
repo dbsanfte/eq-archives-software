@@ -31,7 +31,7 @@ def render(previous, name, image):
               'NOMIC_EMBEDDING_PROFILE': 'cuda', 'NOMIC_EMBEDDING_BATCH_SIZE': '8',
               'NOMIC_EMBEDDING_ENCODING': 'base64', 'REINDEX_WORKERS': '4',
               'REINDEX_SECONDARY_ENDPOINT': 'http://nomic-embeddings.eqarchives-es.svc.cluster.local:8080/v1',
-              'REINDEX_SECONDARY_WORKERS': '1', 'OPENBLAS_NUM_THREADS': '1'}
+              'REINDEX_SECONDARY_WORKERS': '1', 'REINDEX_PREPARATION_WORKERS': '2', 'OPENBLAS_NUM_THREADS': '1'}
     env.update({key: {'name': key, 'value': value} for key, value in values.items()})
     container['env'] = list(env.values())
     container['image'] = image

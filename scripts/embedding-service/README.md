@@ -106,7 +106,13 @@ At most eight workers total share one bounded ES scan and read-only source tree.
 The next free worker takes the next record, naturally allocating work in proportion
 to device throughput; no fixed 50/50 split or slow-worker barrier between pages.
 The log's `primary_updated` and `secondary_updated` counters show the actual split.
-One document stays wholly on its assigned backend. Optimistic partial updates
+`REINDEX_PREPARATION_WORKERS=2` opts into a separate, bounded process pool for
+HTML extraction and pinned-tokenizer chunking, avoiding contention on Python's
+interpreter lock. It defaults to zero for existing Jobs. Spawned processes read
+sources only, have no ES/model clients or enrichment, and return complete text
+and source-bound chunk offsets. The parent validates coverage before submitting
+embeddings. HTTP requests and optimistic ES updates remain in the original
+bounded workers. One document stays wholly on its assigned backend. Optimistic partial updates
 retain existing enrichment, dates, OCR, provenance and checkpoint versions.
 
 Use the [operator handoff sequence](../../elastic-indexer-stack/indexer/k8s/README.md)
