@@ -4,7 +4,12 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 test "$(id -u)" = 0
 test -s /etc/eqarchives-embeddings/openai_api_key
-nvidia-smi >/dev/null
+install -d /etc/systemd/system/nvidia-persistenced.service.d /etc/systemd/system/nvidia-cdi-refresh.service.d
+install -m 644 scripts/embedding-service/nvidia-persistenced.conf /etc/systemd/system/nvidia-persistenced.service.d/60-eqarchives.conf
+install -m 644 scripts/embedding-service/nvidia-cdi-persistence.conf /etc/systemd/system/nvidia-cdi-refresh.service.d/60-eqarchives-persistence.conf
+systemctl daemon-reload
+systemctl start nvidia-persistenced.service
+nvidia-smi -pm 1
 docker info >/dev/null
 systemctl enable --now docker nvidia-cdi-refresh.path
 install -d -m 755 /opt/eqarchives-embeddings /var/lib/eqarchives-embeddings/models

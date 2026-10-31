@@ -16,3 +16,12 @@ configMapGenerator:
       - download-model.sh
       - start-server.sh
       - check-gpu.sh
+# commonLabels adds Service selectors; keep the external laptop endpoint manual.
+patchesJson6902:
+  - target:
+      version: v1
+      kind: Service
+      name: nomic-embeddings-rtx3080
+    patch: |-
+      - op: remove
+        path: /spec/selector

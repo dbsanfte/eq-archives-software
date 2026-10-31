@@ -42,4 +42,32 @@ class ServiceTests(unittest.TestCase):
             self.assertFalse(service.healthy(config, opener))
             self.assertFalse(service.healthy(config, lambda *a, **kw: (_ for _ in ()).throw(OSError('private error'))))
 
+
+class BootRecoveryTests(unittest.TestCase):
+    def test_persistence_precedes_cdi_and_installer_probes(self):
+        persistent = (ROOT/'nvidia-persistenced.conf').read_text()
+        cdi = (ROOT/'nvidia-cdi-persistence.conf').read_text()
+        self.assertIn('--persistence-mode', persistent)
+        self.assertNotIn('--no-persistence-mode', persistent)
+        self.assertIn('StopWhenUnneeded=false', persistent)
+        self.assertIn('After=nvidia-persistenced.service', cdi)
+        script = (ROOT/'install.sh').read_text()
+        self.assertLess(script.index('systemctl start nvidia-persistenced.service'), script.index('nvidia-smi -pm 1'))
+        self.assertLess(script.index('nvidia-smi -pm 1'), script.index('systemctl enable --now docker'))
+
+    def test_manual_health_check_before_service_start_is_clear_and_does_not_restart(self):
+        import contextlib
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)/'absent'
+            output = io.StringIO()
+            with patch.object(service, 'settings', return_value={}), \
+                 patch('sys.argv', ['service.py','health']), \
+                 patch.object(service, 'Path', side_effect=lambda *a: root/'health-failures'), \
+                 patch.object(service.subprocess, 'run') as run, \
+                 contextlib.redirect_stdout(output):
+                self.assertEqual(service.main(), 1)
+            self.assertIn('has not started', output.getvalue())
+            run.assert_not_called()
+            self.assertFalse(root.exists())
+
 if __name__ == '__main__': unittest.main()

@@ -81,6 +81,9 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/frontend-browser"
           "$RUNNER_TEMP/frontend-browser/bin/pip" install -r scripts/browser-test-requirements.txt -r scripts/deployment-test-requirements.txt
           "$RUNNER_TEMP/frontend-browser/bin/playwright" install --with-deps chromium
+      - name: Validate the rendered external embedding route
+        run: |
+          kubectl kustomize elastic-indexer-stack/k8s-manifests | "$RUNNER_TEMP/frontend-browser/bin/python" scripts/embedding-service/check-manifests.py
       - name: Reuse the MCP image already published for this commit
         id: existing-mcp
         if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'

@@ -7,7 +7,9 @@ The separately managed CUDA server is reachable on the wired LAN only, at
 `192.168.50.193:8081`, with the existing Nomic API key. It is not a paid API.
 The root Kubernetes Kustomization manages a selectorless
 `nomic-embeddings-rtx3080` Service/Endpoints pointing to this host, without changing
-the Vulkan Deployment. Reserve the laptop's wired DHCP address in the router;
+the Vulkan Deployment. The JSON patch removes the Service selector added by
+Kustomize's shared labels; the rendered-route CI check verifies that routing stays
+on the external address and does not select local cluster pods. Reserve the laptop's wired DHCP address in the router;
 update both `cuda.env` and the endpoint manifest if its address changes.
 
 ## Host prerequisites and installation
@@ -40,6 +42,12 @@ read-only, drops capabilities and has only model/key/cache mounts. Its key is
 never passed in arguments. Docker failures restart after 15 seconds; three
 consecutive failed one-minute inference checks restart a stalled server.
 Automatic CDI refresh avoids stale GPU configuration after reboot/driver updates.
+The installer enables persistence in `nvidia-persistenced` and orders CDI after
+that daemon. Ubuntu's packaged daemon otherwise starts with persistence disabled;
+on this laptop, CDI closing the last GPU handle during boot hung in the driver's
+ACPI shutdown path. Keep these drop-ins when updating the NVIDIA packages.
+A kernel-level GPU deadlock can require a physical power cycle; container restart
+recovery alone cannot repair a wedged kernel driver.
 To upgrade, rerun installation and explicitly restart the service after checking
 new pins; installation does not restart an already running service automatically.
 
