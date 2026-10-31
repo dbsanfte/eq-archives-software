@@ -194,14 +194,18 @@ shortcut can undercount what the Nomic server processes. Retain completed versio
 checkpoints when repairing that counting bug. Resume failed broad runs in a new
 Job after probing the previously failing exact IDs; preserve old Jobs and the
 dedicated source checkout, and do not repeat source preparation.
-Nomic reindex requests remain serial, with no intentional sleep between requests.
-The full reindex opts into at most two chunks per request through
-`NOMIC_EMBEDDING_BATCH_SIZE=2`; other indexers default to one. Preserve the 480-token
-chunk budget and source/vector identity, reject incomplete or invalid batch
-responses before saving a document, and retain checkpoint versions. The embedding
-server has two slots, 1,024-token aggregate capacity, a 512-token per-input cap,
-and Flash Attention. Keep real near-limit batch/serial compatibility and oversize
-recovery checks in the embedding smoke test when changing these settings.
+The default Vulkan profile keeps Nomic requests serial with at most two chunks
+per request, a 480-token chunk budget, 768-dimensional vectors and no intentional
+sleep. The operator-selected CUDA alternative in `scripts/embedding-service`
+uses the same pinned Q8_0 weights and alias, 64 slots with 512 tokens per input,
+and a 512-token compute microbatch. `NOMIC_EMBEDDING_PROFILE=cuda` permits up to
+64 inputs per request; the measured starting point is eight inputs, base64 wire
+encoding and four workers. `REINDEX_SECONDARY_ENDPOINT` adds a separate serial
+Vulkan worker with its own two-input/float policy. Both backends pull records
+from one bounded scan so the faster device naturally handles more work, without
+page-boundary barriers. Preserve full source coverage, indexed response identity,
+complete finite vectors and checkpoint versions. Reject incomplete batches before
+saving a document. Keep real near-limit compatibility and oversize recovery checks.
 Operator-requested reindex tuning uses a prepared, checkpoint-preserving handoff
 as documented in the Jobs guide; ordinary curation delivery still leaves existing
 indexing Jobs untouched.
@@ -805,7 +809,7 @@ available for builds and isolated checks. Production resources are in namespace
 
 Nomic Embed v1.5 **Q8_0** runs in llama.cpp under alias
 `text-embedding-nomic-embed-text-v1.5@q8_0`, with mean pooling, normalized vectors,
-512-token context/batches, one request slot and eight host threads. All 13 layers
+a 1,024-token aggregate context, two 512-token slots and eight host threads. All 13 layers
 are offloaded through Vulkan. The device plugin exposes two shared
 `eqarchives.org/igpu` allocations so an old and replacement pod can coexist; these
 are not separate physical GPUs. Neither inference nor the device plugin requires

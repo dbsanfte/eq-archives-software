@@ -33,6 +33,8 @@ jobs:
           python3 -m py_compile scripts/curation-secrets.py scripts/check-curation.py scripts/test-curation-browser.py scripts/indexer-job-guard.py
           python3 scripts/test-http-readiness.py
           python3 scripts/test-curation-operations.py
+          python3 -m unittest discover -s scripts/embedding-service -v
+          bash -n scripts/embedding-service/install.sh
           python3 -m unittest discover -s scripts/reindex-recovery -v
           python3 -m unittest discover -s scripts/search-benchmark -v
           ruby -c scripts/archive-crawler/downloader.rb

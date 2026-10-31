@@ -1,0 +1,8 @@
+[Unit]
+Description=Verify EQ Archives CUDA inference and recover a stalled service
+After=eqarchives-embeddings.service
+ConditionPathExists=/run/eqarchives-embeddings
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/eqarchives-embeddings/service.py health

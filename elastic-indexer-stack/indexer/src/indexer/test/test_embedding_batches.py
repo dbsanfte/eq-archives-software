@@ -106,3 +106,50 @@ def test_unsupported_batch_size_fails_before_inference(manager, monkeypatch, val
 def test_empty_source_never_calls_embedding_service(manager):
     assert manager.get_chunks_and_embeddings(Document(page_content="")) == []
     manager._openai_embeddings.client.create.assert_not_called()
+
+
+def test_cuda_opt_in_larger_batches_keep_all_source_chunks(manager, monkeypatch):
+    monkeypatch.setenv('NOMIC_EMBEDDING_PROFILE', 'cuda')
+    monkeypatch.setenv('NOMIC_EMBEDDING_BATCH_SIZE', '8')
+    text = 'cleric spells and guild raids. ' * 3000
+    source = chunk_source(text)
+    manager._openai_embeddings.client.create.side_effect = lambda **kw: {
+        'data': [{'index': i, 'embedding': vector(i)} for i in range(len(kw['input']))]}
+    result = manager.get_chunks_and_embeddings(Document(page_content=text))
+    assert [row['text_chunk'] for row in result] == [chunk.text for chunk in source]
+    assert max(len(call.kwargs['input']) for call in manager._openai_embeddings.client.create.call_args_list) == 8
+
+
+def test_each_backend_retains_its_own_capacity_and_encoding(manager, monkeypatch):
+    import base64
+    import struct
+    monkeypatch.setenv('NOMIC_EMBEDDING_PROFILE', 'cuda')
+    monkeypatch.setenv('NOMIC_EMBEDDING_BATCH_SIZE', '8')
+    monkeypatch.setenv('NOMIC_EMBEDDING_ENCODING', 'base64')
+    expected = vector(7)
+    manager._openai_embeddings.client.create.return_value = {'data': [
+        {'index': 0, 'embedding': base64.b64encode(struct.pack('<768f', *expected)).decode()}]}
+    result = manager.get_chunks_and_embeddings(Document(page_content='cleric'))
+    np.testing.assert_array_equal(result[0]['vector'], expected)
+    assert manager._openai_embeddings.client.create.call_args.kwargs['encoding_format'] == 'base64'
+    manager._nomic_profile, manager._nomic_batch_size, manager._nomic_encoding = 'vulkan', '2', 'float'
+    manager._openai_embeddings.client.create.return_value = {'data': [{'index': 0, 'embedding': expected}]}
+    result = manager.get_chunks_and_embeddings(Document(page_content='cleric'))
+    np.testing.assert_array_equal(result[0]['vector'], expected)
+    assert manager._openai_embeddings.client.create.call_args.kwargs['encoding_format'] == 'float'
+
+
+@pytest.mark.parametrize('payload', ['invalid base64!', 'AAAA', [0.0]*768])
+def test_bad_base64_cannot_return_partial_document(manager, monkeypatch, payload):
+    monkeypatch.setenv('NOMIC_EMBEDDING_ENCODING', 'base64')
+    manager._openai_embeddings.client.create.return_value = {'data': [{'index': 0, 'embedding': payload}]}
+    with pytest.raises(ValueError):
+        manager.get_chunks_and_embeddings(Document(page_content='cleric'))
+
+
+@pytest.mark.parametrize('name,value', [('NOMIC_EMBEDDING_PROFILE', 'other'), ('NOMIC_EMBEDDING_ENCODING', 'other')])
+def test_unknown_profile_or_encoding_rejected_before_request(manager, monkeypatch, name, value):
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ValueError):
+        manager.get_chunks_and_embeddings(Document(page_content='cleric'))
+    manager._openai_embeddings.client.create.assert_not_called()

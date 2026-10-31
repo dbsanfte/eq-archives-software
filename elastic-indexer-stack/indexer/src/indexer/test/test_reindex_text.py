@@ -221,3 +221,67 @@ def test_cli_rejects_invalid_limits(monkeypatch, args):
     monkeypatch.setattr("sys.argv", ["reindex_text", *args])
     with pytest.raises(SystemExit):
         job.main()
+
+
+def test_slow_secondary_does_not_block_fast_workers_at_page_boundary(tmp_path, monkeypatch):
+    import threading
+    import time
+    hits = []
+    for i in range(9):
+        hit, client, _, _ = setup_record(tmp_path, record_id=f'websites/example.org/20000101000000/{i}/index.html')
+        hits.append(hit)
+    client.count.return_value = {'count': len(hits)}
+    pages = [hits[i:i+2] for i in range(0, len(hits), 2)] + [[]]
+    client.search.side_effect = [{'hits': {'hits': page}} for page in pages]
+    fast_finished = threading.Event()
+    lock = threading.Lock()
+    active = maximum = assignments = 0
+    def factory():
+        nonlocal assignments
+        with lock:
+            assignments += 1
+            number = assignments
+        return object(), SimpleNamespace(_reindex_backend='secondary' if number == 1 else 'primary')
+    completed = []
+    def process(client, index, hit, repo, handler, embedder, progress):
+        nonlocal active, maximum
+        with lock:
+            active += 1
+            maximum = max(maximum, active)
+        try:
+            if embedder._reindex_backend == 'secondary':
+                assert fast_finished.wait(3), 'slow worker blocked pagination'
+            else:
+                time.sleep(.005)
+                completed.append(hit['_id'])
+                if len(completed) >= 8:
+                    fast_finished.set()
+            progress.updated += 1
+        finally:
+            with lock: active -= 1
+    monkeypatch.setattr(job, 'reindex_record', process)
+    progress = job.reindex(client, 'eq-archive', tmp_path, None, None,
+                           workers=2, worker_factory=factory, batch_size=2, limit=9)
+    assert progress.updated == progress.processed == 9
+    assert progress.primary_updated == 8 and progress.secondary_updated == 1
+    assert progress.failed == 0
+    assert maximum == 2 and assignments == 2
+    assert all(call.kwargs['size'] <= 2 for call in client.search.call_args_list)
+
+
+def test_concurrent_failures_do_not_checkpoint_or_log_payloads(tmp_path, caplog):
+    hit, client, handler, embedder = setup_record(tmp_path)
+    client.count.return_value = {'count': 3}
+    client.search.side_effect = [{'hits': {'hits': [hit]*3}}, {'hits': {'hits': []}}]
+    embedder.get_chunks_and_embeddings.side_effect = ValueError('secret-bearing payload')
+    progress = job.reindex(client, 'eq-archive', tmp_path, None, None, workers=2,
+                           worker_factory=lambda: (handler, embedder))
+    assert progress.failed == progress.processed == 3 and progress.updated == 0
+    client.update.assert_not_called()
+    assert 'secret-bearing' not in caplog.text
+
+
+@pytest.mark.parametrize('workers,factory', [(0,None), (9,None), (2,None), (True,None)])
+def test_worker_count_and_isolation_are_explicit(tmp_path, workers, factory):
+    with pytest.raises(ValueError):
+        job.reindex(MagicMock(), 'eq-archive', tmp_path, None, None, workers=workers, worker_factory=factory)

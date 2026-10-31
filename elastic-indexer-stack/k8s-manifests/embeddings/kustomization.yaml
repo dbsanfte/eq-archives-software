@@ -6,6 +6,7 @@ commonLabels:
 resources:
   - device-plugin.yaml
   - deployment.yaml
+  - cuda-service.yaml
 configMapGenerator:
   - name: nomic-embedding-config
     envs:
