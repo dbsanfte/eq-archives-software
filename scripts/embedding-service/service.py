@@ -85,6 +85,9 @@ def main():
         subprocess.run(['docker', 'rm', '-f', NAME], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         os.execvp('docker', command(config))
     failures = Path('/run/eqarchives-embeddings/health-failures')
+    if not failures.parent.is_dir():
+        print('Embedding service has not started; inference health unavailable', flush=True)
+        return 1
     if healthy(config):
         failures.write_text('0')
         return 0
