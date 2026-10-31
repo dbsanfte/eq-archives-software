@@ -173,3 +173,15 @@ def test_base64_sdk_response_does_not_emit_float_schema_warnings(manager, monkey
         result = manager.get_chunks_and_embeddings(Document(page_content='cleric'))
     assert not emitted
     np.testing.assert_array_equal(result[0]['vector'], vector(0))
+
+
+def test_prepared_chunks_reuse_pinned_source_without_retokenizing(manager):
+    text = 'cleric guild raids. ' * 500
+    source = chunk_source(text)
+    manager._openai_embeddings.client.create.side_effect = lambda **kw: {
+        'data': [{'index': i, 'embedding': vector(i)} for i in range(len(kw['input']))]}
+    with patch('indexer.openai_manager.chunk_source', side_effect=AssertionError('duplicate preparation')):
+        result = manager.get_chunks_and_embeddings(Document(page_content=text), _prepared_source=source)
+    assert [row['text_chunk'] for row in result] == [chunk.text for chunk in source]
+    with pytest.raises(ValueError, match='differ'):
+        manager.get_chunks_and_embeddings(Document(page_content='different source'), _prepared_source=source)

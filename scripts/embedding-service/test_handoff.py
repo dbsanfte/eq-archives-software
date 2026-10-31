@@ -30,6 +30,7 @@ class HandoffTests(unittest.TestCase):
         env = {row['name']:row['value'] for row in container['env']}
         self.assertEqual(env['REINDEX_WORKERS'], '4')
         self.assertEqual(env['REINDEX_SECONDARY_WORKERS'], '1')
+        self.assertEqual(env['REINDEX_PREPARATION_WORKERS'], '2')
         self.assertEqual(env['SKIP_LLM_ENRICHMENT'], 'true')
 
     def test_rejects_preparation_writable_sources_or_unrecognized_entrypoint(self):

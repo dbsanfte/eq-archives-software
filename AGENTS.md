@@ -203,7 +203,11 @@ and a 512-token compute microbatch. `NOMIC_EMBEDDING_PROFILE=cuda` permits up to
 encoding and four workers. `REINDEX_SECONDARY_ENDPOINT` adds a separate serial
 Vulkan worker with its own two-input/float policy. Both backends pull records
 from one bounded scan so the faster device naturally handles more work, without
-page-boundary barriers. Preserve full source coverage, indexed response identity,
+page-boundary barriers. Opt-in `REINDEX_PREPARATION_WORKERS=2` moves CPU extraction
+and pinned-tokenizer chunking into spawned processes without inheriting network
+clients. Their complete text/offsets are checked before the original embedding
+and ES workers continue. Existing Jobs default to no preparation pool.
+Preserve full source coverage, indexed response identity,
 complete finite vectors and checkpoint versions. Reject incomplete batches before
 saving a document. Keep real near-limit compatibility and oversize recovery checks.
 Operator-requested reindex tuning uses a prepared, checkpoint-preserving handoff
