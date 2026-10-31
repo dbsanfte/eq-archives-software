@@ -1,8 +1,8 @@
-# Standalone CUDA embeddings and dual-GPU reindex
+# Standalone CUDA embeddings for indexing
 
-The optional Ubuntu GPU host runs the **same Nomic Embed v1.5 Q8_0 weights,
+The Ubuntu GPU host runs the **same Nomic Embed v1.5 Q8_0 weights,
 768-dimensional normalized vectors, document/query prefixes and model alias** as
-the default Vulkan service. Public search and MCP retain the default endpoint.
+the Vulkan service. All indexers use CUDA; live search and MCP use Vulkan.
 The separately managed CUDA server is reachable on the wired LAN only, at
 `192.168.50.193:8081`, with the existing Nomic API key. It is not a paid API.
 The root Kubernetes Kustomization manages a selectorless
@@ -100,12 +100,12 @@ before a document can be saved. The 480-token chunker and version checkpoints
 remain unchanged.
 
 `REINDEX_WORKERS=4` starts isolated handler/embedding clients for the primary CUDA
-endpoint. `REINDEX_SECONDARY_ENDPOINT` adds one independently configured Vulkan
-worker (two inputs, float encoding), controlled by `REINDEX_SECONDARY_WORKERS`.
-At most eight workers total share one bounded ES scan and read-only source tree.
-The next free worker takes the next record, naturally allocating work in proportion
-to device throughput; no fixed 50/50 split or slow-worker barrier between pages.
-The log's `primary_updated` and `secondary_updated` counters show the actual split.
+endpoint. The production renderer removes all inherited `REINDEX_SECONDARY_*`
+settings and sets `OPENAI_ENDPOINT_EMBEDDINGS` explicitly to CUDA, so a previous
+embedding override cannot send background indexing to Vulkan. The four workers
+share one bounded ES scan and read-only source tree. Curation imports and saved
+indexing Job templates also use the CUDA endpoint. Public search and MCP retain
+their Vulkan endpoint independently of laptop availability.
 `REINDEX_PREPARATION_WORKERS=2` opts into a separate, bounded process pool for
 HTML extraction and pinned-tokenizer chunking, avoiding contention on Python's
 interpreter lock. It defaults to zero for existing Jobs. Spawned processes read
@@ -130,7 +130,7 @@ Save the original Job JSON/logs privately and render a **pending** replacement:
 
 ```bash
 python3 scripts/embedding-service/render-reindex.py \
-  --name reindex-dual-gpu-<date> \
+  --name reindex-cuda-<date> \
   --image eqarchives-indexer:rtx3080-<merged-40-character-sha> \
   < /private/running-job.json > /private/new-job.json
 ```

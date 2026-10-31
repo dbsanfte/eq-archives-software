@@ -64,7 +64,7 @@ class Services:
         self.es_url = os.environ.get("ELASTICSEARCH_URL", "http://elasticsearch.eqarchives-es.svc.cluster.local:9200").rstrip("/")
         self.index = os.environ.get("ELASTICSEARCH_INDEX", "eq-archive")
         self.model = os.environ.get("EMBEDDING_MODEL", "text-embedding-nomic-embed-text-v1.5@q8_0")
-        self.embedding_url = os.environ.get("EMBEDDING_URL", "http://nomic-embeddings.eqarchives-es.svc.cluster.local:8080").rstrip("/")
+        self.embedding_url = os.environ.get("EMBEDDING_URL", "http://nomic-embeddings-rtx3080.eqarchives-es.svc.cluster.local:8080").rstrip("/")
         self.client = httpx.Client(auth=(directory.joinpath("es_username").read_text().strip(),
                                         directory.joinpath("es_password").read_text().strip()),
                                    timeout=httpx.Timeout(120, connect=10), trust_env=False)

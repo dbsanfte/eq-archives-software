@@ -27,6 +27,12 @@ def render(previous, name, runner, *, probe_id=None):
     env = {item['name']: item.get('value') for item in container.get('env', [])}
     if env.get('SKIP_LLM_ENRICHMENT') != 'true' or env.get('NOMIC_EMBEDDING_BATCH_SIZE') != '2':
         raise ValueError('Retain the no-enrichment, two-chunk text repair policy')
+    # Bulk repairs use CUDA; reserve Vulkan for interactive search.
+    routing = {item['name']: item for item in container['env']
+               if not item['name'].startswith('REINDEX_SECONDARY_')}
+    for key in ('OPENAI_ENDPOINT', 'OPENAI_ENDPOINT_EMBEDDINGS'):
+        routing[key] = {'name': key, 'value': 'http://nomic-embeddings-rtx3080.eqarchives-es.svc.cluster.local:8080/v1'}
+    container['env'] = list(routing.values())
     archive = next(v for v in pod['volumes'] if v['name'] == 'archive')
     if archive.get('hostPath', {}).get('path') != '/mnt/samsung/eq-archives-html-reindex':
         raise ValueError('Retain the dedicated prepared source checkout')

@@ -29,9 +29,23 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(container['command'], ['python','-u','/recovery/runner.py'])
         env = {row['name']:row['value'] for row in container['env']}
         self.assertEqual(env['REINDEX_WORKERS'], '4')
-        self.assertEqual(env['REINDEX_SECONDARY_WORKERS'], '1')
+        self.assertFalse(any(name.startswith('REINDEX_SECONDARY_') for name in env))
         self.assertEqual(env['REINDEX_PREPARATION_WORKERS'], '2')
         self.assertEqual(env['SKIP_LLM_ENRICHMENT'], 'true')
+
+    def test_cuda_handoff_removes_inherited_secondary_and_embedding_overrides(self):
+        previous = self.previous()
+        previous['spec']['template']['spec']['containers'][0]['env'] += [
+            {'name': 'REINDEX_SECONDARY_ENDPOINT', 'value': 'http://vulkan/v1'},
+            {'name': 'REINDEX_SECONDARY_WORKERS', 'value': '1'},
+            {'name': 'OPENAI_ENDPOINT_EMBEDDINGS', 'value': 'http://vulkan/v1'}]
+        original = deepcopy(previous)
+        job = handoff.render(previous, 'reindex-cuda-only', 'eqarchives-indexer:rtx3080-'+'a'*40)
+        env = {e['name']: e.get('value') for e in job['spec']['template']['spec']['containers'][0]['env']}
+        self.assertEqual(previous, original)
+        self.assertFalse(any(name.startswith('REINDEX_SECONDARY_') for name in env))
+        self.assertEqual(env['OPENAI_ENDPOINT_EMBEDDINGS'], env['OPENAI_ENDPOINT'])
+        self.assertIn('nomic-embeddings-rtx3080.', env['OPENAI_ENDPOINT'])
 
     def test_rejects_preparation_writable_sources_or_unrecognized_entrypoint(self):
         for change in ('init', 'write', 'command', 'enrichment'):

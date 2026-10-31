@@ -99,7 +99,7 @@ def import_job(batch, image):
                                                "env": [{"name": "ELASTICSEARCH_URL", "value": "http://elasticsearch.eqarchives-es.svc.cluster.local:9200"},
                                                        {"name": "IMPORT_JOB_NAME", "value": import_name(batch)},
                                                        {"name": "LUNA_DAILY_BUDGET_ROOT", "value": "/luna-budget"},
-                                                       {"name": "EMBEDDING_URL", "value": "http://nomic-embeddings.eqarchives-es.svc.cluster.local:8080"},
+                                                       {"name": "EMBEDDING_URL", "value": "http://nomic-embeddings-rtx3080.eqarchives-es.svc.cluster.local:8080"},
                                                        {"name": "EMBEDDING_MODEL", "value": "text-embedding-nomic-embed-text-v1.5@q8_0"}],
                                                "resources": {"requests": {"cpu": "100m", "memory": "128Mi"},
                                                              "limits": {"cpu": "1", "memory": "512Mi"}},
