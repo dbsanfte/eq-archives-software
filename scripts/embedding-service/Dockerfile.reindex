@@ -1,0 +1,8 @@
+# Checkpoint-preserving operator update, retaining the running Job's dependencies.
+# Pass the exact locally verified predecessor image (record its image ID privately).
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+COPY elastic-indexer-stack/indexer/src/reindex_text.py /app/src/reindex_text.py
+COPY elastic-indexer-stack/indexer/src/indexer/openai_manager.py /app/src/indexer/openai_manager.py
+RUN python -m compileall -b -f -o 2 /app/src/reindex_text.py /app/src/indexer/openai_manager.py && \
+    rm /app/src/reindex_text.py /app/src/indexer/openai_manager.py

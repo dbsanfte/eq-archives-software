@@ -123,7 +123,7 @@ sudo -n kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml -n eqarchives-es \
   logs -f job/reindex-text-html-20261005 -c indexer
 ```
 
-The workload submits at most two embedding chunks per request, with one request
+The default Vulkan workload submits at most two embedding chunks per request, with one request
 in flight and no intentional pause between requests. `NOMIC_EMBEDDING_BATCH_SIZE=2`
 opts this Job into batching; other indexers default to one. The cluster server has
 two slots, a 1,024-token aggregate batch, Flash Attention, and a 512-token limit
@@ -153,6 +153,18 @@ This keeps an unfinished Job present for the import guard throughout the handoff
 Completed version checkpoints are skipped; any interrupted record is retried.
 Keep the old Job suspended and retain its logs, verify new progress and public
 search/embedding health, and do not change other indexing Jobs or source checkouts.
+
+### Optional dual-GPU processing
+
+The [standalone CUDA service guide](../../../scripts/embedding-service/README.md)
+describes the RTX 3080 alternative, measured capacity, deployment and prepared
+handoff renderer. The CUDA endpoint can use four document workers and eight
+chunks per request while a separate serial worker keeps eqvm's Vulkan GPU busy.
+Both pull from the same bounded scan, with no slow-device barrier between pages,
+so work is allocated in proportion to completion speed. Defaults remain serial;
+select the CUDA profile explicitly. Backend counters expose the actual split.
+The existing model, source checkout, complete-source chunking, optimistic updates,
+LLM-disabled policy, recovery runner and checkpoint versions are preserved.
 
 ### Recovery across VM restarts
 

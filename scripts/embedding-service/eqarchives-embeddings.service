@@ -1,0 +1,22 @@
+[Unit]
+Description=EQ Archives CUDA embeddings
+Wants=network-online.target nvidia-cdi-refresh.service
+After=network-online.target docker.service nvidia-cdi-refresh.service
+Requires=docker.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+RuntimeDirectory=eqarchives-embeddings
+RuntimeDirectoryPreserve=restart
+ExecStartPre=/usr/bin/nvidia-smi -pm 1
+ExecStart=/usr/bin/python3 /opt/eqarchives-embeddings/service.py start
+ExecStop=-/usr/bin/docker stop --time 30 eqarchives-nomic-cuda
+Restart=always
+RestartSec=15
+TimeoutStopSec=45
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

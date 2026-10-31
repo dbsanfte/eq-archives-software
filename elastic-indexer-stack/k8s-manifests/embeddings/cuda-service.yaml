@@ -1,0 +1,22 @@
+# Optional bulk-indexing endpoint. Public search continues using nomic-embeddings.
+apiVersion: v1
+kind: Service
+metadata:
+  name: nomic-embeddings-rtx3080
+spec:
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8081
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: nomic-embeddings-rtx3080
+subsets:
+  - addresses:
+      - ip: 192.168.50.193
+    ports:
+      - name: http
+        port: 8081
+        protocol: TCP

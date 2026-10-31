@@ -1,4 +1,5 @@
 import os
+import base64
 import json
 import logging
 import re
@@ -410,9 +411,13 @@ class OpenAIManager:
     def _embed_nomic_batch(self, texts: list[str]) -> list:
         """Bind each returned vector to its input index before accepting a batch."""
         try:
+            encoding = getattr(self, "_nomic_encoding", os.environ.get("NOMIC_EMBEDDING_ENCODING", "float"))
+            if encoding not in ("float", "base64"):
+                raise ValueError("NOMIC_EMBEDDING_ENCODING must be float or base64")
             response = self._openai_embeddings.client.create(
-                input=texts, model=self._embedding_model_name, encoding_format="float")
-            payload = response if isinstance(response, dict) else response.model_dump()
+                input=texts, model=self._embedding_model_name, encoding_format=encoding)
+            payload = (response if isinstance(response, dict) else
+                       response.model_dump(warnings=False) if encoding == "base64" else response.model_dump())
             rows = payload.get("data")
             if not isinstance(rows, list) or len(rows) != len(texts):
                 raise ValueError("Nomic returned an incomplete embedding batch")
@@ -422,26 +427,44 @@ class OpenAIManager:
                 raise ValueError("Nomic returned invalid embedding indices")
             if any("embedding" not in row for row in rows):
                 raise ValueError("Nomic returned a missing embedding vector")
-            return [row["embedding"] for row in sorted(rows, key=lambda row: row["index"])]
+            values = [row["embedding"] for row in sorted(rows, key=lambda row: row["index"])]
+            if encoding == "base64":
+                decoded = []
+                for value in values:
+                    if not isinstance(value, str):
+                        raise ValueError("Nomic did not return base64 embeddings")
+                    raw = base64.b64decode(value, validate=True)
+                    if len(raw) != 768 * 4:
+                        raise ValueError("Nomic must return 768 finite embedding dimensions")
+                    decoded.append(np.frombuffer(raw, dtype="<f4").copy())
+                values = decoded
+            return values
         except Exception as error:
             self._logger.error("Error fetching embedding batch (%s)", type(error).__name__)
             raise
 
     def get_chunks_and_embeddings(self, document: Document) -> list[dict]:
         if "nomic-embed" in self._embedding_model_name:
-            # Opt in only for a server with tested batch capacity. Requests stay
-            # serial and bounded so bulk ingestion leaves room for public queries.
-            setting = os.environ.get("NOMIC_EMBEDDING_BATCH_SIZE", "1")
-            if setting not in ("1", "2"):
-                raise ValueError("NOMIC_EMBEDDING_BATCH_SIZE must be 1 or 2")
+            # The default Vulkan service retains its two-input capacity. Larger
+            # batches require the explicitly selected, separately tested CUDA service.
+            profile = getattr(self, "_nomic_profile", os.environ.get("NOMIC_EMBEDDING_PROFILE", "vulkan"))
+            if profile not in ("vulkan", "cuda"):
+                raise ValueError("NOMIC_EMBEDDING_PROFILE must be vulkan or cuda")
+            maximum = 64 if profile == "cuda" else 2
+            setting = getattr(self, "_nomic_batch_size", os.environ.get("NOMIC_EMBEDDING_BATCH_SIZE", "1"))
+            if setting not in {str(n) for n in range(1, maximum + 1)}:
+                raise ValueError(f"NOMIC_EMBEDDING_BATCH_SIZE must be 1–{maximum}")
             batch_size = int(setting)
+            encoding = getattr(self, "_nomic_encoding", os.environ.get("NOMIC_EMBEDDING_ENCODING", "float"))
+            if encoding not in ("float", "base64"):
+                raise ValueError("NOMIC_EMBEDDING_ENCODING must be float or base64")
             self.chunking_version = CHUNKING_VERSION
             source = chunk_source(document.page_content)
             chunks = []
             for offset in range(0, len(source), batch_size):
                 batch = source[offset:offset + batch_size]
                 texts = [DOCUMENT_PREFIX + chunk.text for chunk in batch]
-                vectors = ([self.embed_text(texts[0])] if batch_size == 1
+                vectors = ([self.embed_text(texts[0])] if batch_size == 1 and encoding == "float"
                            else self._embed_nomic_batch(texts))
                 for chunk, values in zip(batch, vectors, strict=True):
                     vector = np.asarray(values, dtype=np.float32)
