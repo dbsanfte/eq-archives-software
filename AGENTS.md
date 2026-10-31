@@ -200,10 +200,11 @@ sleep. The operator-selected CUDA alternative in `scripts/embedding-service`
 uses the same pinned Q8_0 weights and alias, 64 slots with 512 tokens per input,
 and a 512-token compute microbatch. `NOMIC_EMBEDDING_PROFILE=cuda` permits up to
 64 inputs per request; the measured starting point is eight inputs, base64 wire
-encoding and four workers. `REINDEX_SECONDARY_ENDPOINT` adds a separate serial
-Vulkan worker with its own two-input/float policy. Both backends pull records
-from one bounded scan so the faster device naturally handles more work, without
-page-boundary barriers. Opt-in `REINDEX_PREPARATION_WORKERS=2` moves CPU extraction
+encoding and four workers. Production indexers use only the CUDA service;
+Vulkan is reserved for live search and MCP. Handoffs remove inherited
+`REINDEX_SECONDARY_*` settings and explicitly set both primary and embedding
+URLs to CUDA. Curation imports and saved indexing Job templates also target CUDA.
+Opt-in `REINDEX_PREPARATION_WORKERS=2` moves CPU extraction
 and pinned-tokenizer chunking into spawned processes without inheriting network
 clients. Their complete text/offsets are checked before the original embedding
 and ES workers continue. Existing Jobs default to no preparation pool.

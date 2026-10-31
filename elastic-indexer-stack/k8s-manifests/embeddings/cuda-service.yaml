@@ -1,4 +1,4 @@
-# Optional bulk-indexing endpoint. Public search continues using nomic-embeddings.
+# Indexing endpoint. Live search and MCP continue using nomic-embeddings.
 apiVersion: v1
 kind: Service
 metadata:

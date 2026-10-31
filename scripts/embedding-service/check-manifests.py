@@ -16,4 +16,9 @@ for item in (service, endpoints):
     assert item['metadata']['labels']['app.kubernetes.io/part-of'] == 'eqarchives-embeddings'
 local = resources['Service', 'nomic-embeddings']
 assert local['spec']['selector']['app'] == 'nomic-embeddings'
-print('Verified selectorless CUDA routing and unchanged local Vulkan service identity.')
+# Online search and MCP must retain the low-latency Vulkan route.
+for name, variable in (('search-eqarchives', 'OPENAI_URL'), ('eqarchives-mcp', 'EMBEDDING_URL')):
+    containers = resources['Deployment', name]['spec']['template']['spec']['containers']
+    env = {row['name']: row.get('value') for container in containers for row in container.get('env', [])}
+    assert env[variable] == 'http://nomic-embeddings.eqarchives-es.svc.cluster.local:8080', 'Online queries must stay on Vulkan'
+print('Verified CUDA indexing route and dedicated Vulkan routes for online queries.')

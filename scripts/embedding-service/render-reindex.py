@@ -1,4 +1,4 @@
-"""Prepare an operator-authorized dual-GPU handoff; never modify the live Job."""
+"""Prepare an operator-authorized CUDA-only handoff; never modify the live Job."""
 import argparse
 import copy
 import json
@@ -17,7 +17,8 @@ def render(previous, name, image):
     container = pod['containers'][0]
     if container['command'] != ['python', '-u', '/recovery/runner.py'] or container.get('args'):
         raise ValueError('Expected the unrestricted checkpointed recovery runner')
-    env = {item['name']: item for item in container['env']}
+    env = {item['name']: item for item in container['env']
+           if not item['name'].startswith('REINDEX_SECONDARY_')}
     if env['SKIP_LLM_ENRICHMENT'].get('value') != 'true':
         raise ValueError('Do not enable paid enrichment')
     archive = next(v for v in pod['volumes'] if v['name'] == 'archive')
@@ -28,10 +29,10 @@ def render(previous, name, image):
     if 'initContainers' in pod:
         raise ValueError('Do not repeat source preparation')
     values = {'OPENAI_ENDPOINT': 'http://nomic-embeddings-rtx3080.eqarchives-es.svc.cluster.local:8080/v1',
+              'OPENAI_ENDPOINT_EMBEDDINGS': 'http://nomic-embeddings-rtx3080.eqarchives-es.svc.cluster.local:8080/v1',
               'NOMIC_EMBEDDING_PROFILE': 'cuda', 'NOMIC_EMBEDDING_BATCH_SIZE': '8',
               'NOMIC_EMBEDDING_ENCODING': 'base64', 'REINDEX_WORKERS': '4',
-              'REINDEX_SECONDARY_ENDPOINT': 'http://nomic-embeddings.eqarchives-es.svc.cluster.local:8080/v1',
-              'REINDEX_SECONDARY_WORKERS': '1', 'REINDEX_PREPARATION_WORKERS': '2', 'OPENBLAS_NUM_THREADS': '1'}
+              'REINDEX_PREPARATION_WORKERS': '2', 'OPENBLAS_NUM_THREADS': '1'}
     env.update({key: {'name': key, 'value': value} for key, value in values.items()})
     container['env'] = list(env.values())
     container['image'] = image

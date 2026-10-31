@@ -10,7 +10,7 @@ reindex Jobs described here.
 `alt.games.everquest` articles. It is deliberately outside the frontend
 Kustomization. It reads the existing archive checkout on eqvm at
 `/mnt/samsung/eq-archives` through a read-only `hostPath` mount and writes to
-the existing `eq-archive` Elasticsearch index. It uses the cluster's Nomic
+the existing `eq-archive` Elasticsearch index. It uses the cluster's CUDA Nomic
 embedding service with the document prefix and 768-dimensional vectors.
 `SKIP_LLM_ENRICHMENT=true` prevents summaries, tags and other LLM work.
 The Job leaves the existing Elasticsearch index template and mappings untouched.
@@ -123,11 +123,12 @@ sudo -n kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml -n eqarchives-es \
   logs -f job/reindex-text-html-20261005 -c indexer
 ```
 
-The default Vulkan workload submits at most two embedding chunks per request, with one request
+The base Job template retains at most two embedding chunks per request, with one request
 in flight and no intentional pause between requests. `NOMIC_EMBEDDING_BATCH_SIZE=2`
-opts this Job into batching; other indexers default to one. The cluster server has
-two slots, a 1,024-token aggregate batch, Flash Attention, and a 512-token limit
-per input. Chunk boundaries, document prefixes, the 768-dimensional model and
+opts this Job into batching; other legacy indexers default to one. This base
+client policy remains conservative; the CUDA server has 64 slots and a 512-token
+limit per input. The performance handoff selects the larger tested CUDA batch
+profile described below. Chunk boundaries, document prefixes, the 768-dimensional model and
 version checkpoints stay the same. Returned indices bind vectors to source chunks;
 incomplete or invalid batches fail before the document or checkpoint is updated.
 `EMBEDDING_REQUEST_PAUSE` is no longer used; older Job templates that still set it
@@ -154,23 +155,25 @@ Completed version checkpoints are skipped; any interrupted record is retried.
 Keep the old Job suspended and retain its logs, verify new progress and public
 search/embedding health, and do not change other indexing Jobs or source checkouts.
 
-### Optional dual-GPU processing
+### CUDA indexing; Vulkan for live queries
 
 The [standalone CUDA service guide](../../../scripts/embedding-service/README.md)
-describes the RTX 3080 alternative, measured capacity, deployment and prepared
-handoff renderer. The CUDA endpoint can use four document workers and eight
-chunks per request while a separate serial worker keeps eqvm's Vulkan GPU busy.
-Both pull from the same bounded scan, with no slow-device barrier between pages,
-so work is allocated in proportion to completion speed. Defaults remain serial;
-select the CUDA profile explicitly. Backend counters expose the actual split.
-The existing model, source checkout, complete-source chunking, optimistic updates,
-LLM-disabled policy, recovery runner and checkpoint versions are preserved.
+describes the RTX 3080 endpoint, measured capacity, deployment and prepared
+handoff renderer. All indexing uses CUDA. Live search and MCP keep Vulkan.
+The performance handoff uses four document workers, eight chunks per request
+and two spawned source-preparation processes. It removes inherited secondary
+backend settings and embedding URL overrides so a previous dual-GPU Job cannot
+reintroduce indexing traffic on Vulkan. The saved base templates and legacy
+recovery renderer also route to CUDA, retaining their original batching limits.
+The model, complete-source chunking, optimistic updates, enrichment policy,
+source checkout, recovery runner and checkpoint versions are preserved.
 
 ### Recovery across VM restarts
 
 Use `scripts/reindex-recovery/render.py` for an operator-authorized continuation
 of a terminal failed broad Job. It retains the original image, credentials,
-read-only source checkout, two-chunk batching and version checkpoints. It removes
+read-only source checkout, two-chunk batching and version checkpoints. It routes
+embedding and readiness requests to CUDA, reserving Vulkan for online queries. It removes
 source preparation and generated controller selectors. Previous Jobs are retained.
 The runner is mounted from an immutable, content-addressed ConfigMap, so the
 existing tested indexer image does not need rebuilding.

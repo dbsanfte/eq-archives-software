@@ -132,3 +132,20 @@ def test_embeddings_are_serial_prefixed_and_retry_transient_busy_response(tmp_pa
         assert all(row['input']=='search_document: Complete source.' for row in requests)
         assert all(row['model']=='text-embedding-nomic-embed-text-v1.5@q8_0' for row in requests)
     finally: instance.close()
+
+
+def test_default_embedding_requests_use_cuda_and_leave_vulkan_for_live_queries(tmp_path, monkeypatch):
+    monkeypatch.delenv('EMBEDDING_URL', raising=False)
+    monkeypatch.setattr('index_captures.time.sleep', lambda _: None)
+    seen=[]
+    def handler(request):
+        seen.append(request)
+        return httpx.Response(200, json={'data':[{'embedding':[1.0]+[0.0]*767}]})
+    services=service(tmp_path,handler)
+    try:
+        assert len(services.embedding('EverQuest cleric guild'))==768
+        assert len(seen)==1
+        assert seen[0].url.host=='nomic-embeddings-rtx3080.eqarchives-es.svc.cluster.local'
+        assert seen[0].url.path=='/v1/embeddings'
+    finally:
+        services.close()

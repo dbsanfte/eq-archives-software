@@ -578,7 +578,9 @@ containing the batch and may be newer than its original publication commit.
 `ARCHIVE_CRAWLER_OPENAI_API_KEY` is the separate paid Actions key. Both are
 projected into `eqarchives-curation-secrets`; neither reaches the browser or
 image. Import receives only the paid `luna_api_key` item, never the publication
-key. It uses the existing Nomic key and a separate ES
+key. Indexing and summary embeddings use the CUDA service
+`nomic-embeddings-rtx3080:8080`; Vulkan serves live search and MCP. Imports use
+the existing Nomic key and a separate ES
 user/role `eqarchives-capture-import`, restricted to `read` and `create_doc` on
 `eq-archive`, from `eqarchives-capture-indexer-secrets`. The trusted deployment
 runner reads the existing elastic password through stdin to provision this

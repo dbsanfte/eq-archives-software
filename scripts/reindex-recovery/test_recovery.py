@@ -135,6 +135,9 @@ class RecoveryTests(unittest.TestCase):
 
     def test_continuation_preserves_image_sources_and_policy_and_removes_preparation(self):
         old = predecessor()
+        old['spec']['template']['spec']['containers'][0]['env'] += [
+            {'name':'REINDEX_SECONDARY_ENDPOINT','value':'http://vulkan/v1'},
+            {'name':'OPENAI_ENDPOINT_EMBEDDINGS','value':'http://vulkan/v1'}]
         saved = copy.deepcopy(old)
         result = render.render(old, 'reindex-resume-1', 'immutable runner')
         config, job = result['items']
@@ -146,6 +149,10 @@ class RecoveryTests(unittest.TestCase):
         self.assertNotIn('selector', job['spec'])
         self.assertEqual(pod['containers'][0]['image'], 'immutable-original-image')
         self.assertTrue(pod['containers'][0]['volumeMounts'][0]['readOnly'])
+        env = {e['name']: e.get('value') for e in pod['containers'][0]['env']}
+        self.assertEqual(env['OPENAI_ENDPOINT'], 'http://nomic-embeddings-rtx3080.eqarchives-es.svc.cluster.local:8080/v1')
+        self.assertEqual(env['OPENAI_ENDPOINT_EMBEDDINGS'], env['OPENAI_ENDPOINT'])
+        self.assertFalse(any(name.startswith('REINDEX_SECONDARY_') for name in env))
         rules = job['spec']['podFailurePolicy']['rules']
         self.assertEqual(rules[0]['action'], 'FailJob')
         self.assertEqual(rules[1]['onPodConditions'][0]['type'], 'DisruptionTarget')
