@@ -416,7 +416,8 @@ class OpenAIManager:
                 raise ValueError("NOMIC_EMBEDDING_ENCODING must be float or base64")
             response = self._openai_embeddings.client.create(
                 input=texts, model=self._embedding_model_name, encoding_format=encoding)
-            payload = response if isinstance(response, dict) else response.model_dump()
+            payload = (response if isinstance(response, dict) else
+                       response.model_dump(warnings=False) if encoding == "base64" else response.model_dump())
             rows = payload.get("data")
             if not isinstance(rows, list) or len(rows) != len(texts):
                 raise ValueError("Nomic returned an incomplete embedding batch")

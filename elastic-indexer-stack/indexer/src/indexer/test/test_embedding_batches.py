@@ -153,3 +153,23 @@ def test_unknown_profile_or_encoding_rejected_before_request(manager, monkeypatc
     with pytest.raises(ValueError):
         manager.get_chunks_and_embeddings(Document(page_content='cleric'))
     manager._openai_embeddings.client.create.assert_not_called()
+
+
+def test_base64_sdk_response_does_not_emit_float_schema_warnings(manager, monkeypatch):
+    import base64
+    import struct
+    import warnings
+    from openai.types import CreateEmbeddingResponse, Embedding
+    monkeypatch.setenv('NOMIC_EMBEDDING_ENCODING', 'base64')
+    encoded = base64.b64encode(struct.pack('<768f', *vector(0))).decode()
+    # The SDK annotates this field as list[float] even when the server honors
+    # OpenAI's explicitly requested base64 representation.
+    response = CreateEmbeddingResponse.model_construct(
+        data=[Embedding.model_construct(index=0, embedding=encoded, object='embedding')],
+        model=manager._embedding_model_name, object='list')
+    manager._openai_embeddings.client.create.return_value = response
+    with warnings.catch_warnings(record=True) as emitted:
+        warnings.simplefilter('always')
+        result = manager.get_chunks_and_embeddings(Document(page_content='cleric'))
+    assert not emitted
+    np.testing.assert_array_equal(result[0]['vector'], vector(0))
