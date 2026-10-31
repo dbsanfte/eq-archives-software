@@ -7,7 +7,9 @@ The separately managed CUDA server is reachable on the wired LAN only, at
 `192.168.50.193:8081`, with the existing Nomic API key. It is not a paid API.
 The root Kubernetes Kustomization manages a selectorless
 `nomic-embeddings-rtx3080` Service/Endpoints pointing to this host, without changing
-the Vulkan Deployment. Reserve the laptop's wired DHCP address in the router;
+the Vulkan Deployment. The JSON patch removes the Service selector added by
+Kustomize's shared labels; the rendered-route CI check verifies that routing stays
+on the external address and does not select local cluster pods. Reserve the laptop's wired DHCP address in the router;
 update both `cuda.env` and the endpoint manifest if its address changes.
 
 ## Host prerequisites and installation
