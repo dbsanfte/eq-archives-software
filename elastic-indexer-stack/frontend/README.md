@@ -265,10 +265,13 @@ which had the highest average grouped NDCG@10 in the Luna pilot (60 queries,
 repeat the evaluation when the broad reindex finishes. Visitors can still change
 the parameters or disable semantic search in **Advanced...**.
 
-For Nomic Embed v1.5, the embedding client adds `search_query:` to the request
-text while keeping its cache keyed by the original search. The production
-deployment provides a local Q8_0 model under the existing
-`text-embedding-nomic-embed-text-v1.5@q8_0` alias, with a 512-token input limit.
+EmbeddingGemma 2 uses `task: search result | query: ` for queries and
+`title: none | text: ` for documents. The Q8 model serves the canonical
+`embeddinggemma-2-768-v1` space on both CUDA and Vulkan, with a deliberately
+bounded 512-token input limit. Cache keys include the exact model and query.
+Every semantic branch filters `embedding_model` to this version; lexical search
+covers the full corpus while the in-place migration runs. Source chunks, summary
+vectors and OCR vectors become visible together through one atomic checkpoint.
 
 Do not put Elasticsearch passwords or model API keys in this file or in
 `REACT_APP_*` variables. NGINX reads those credentials from runtime secret mounts.
@@ -351,7 +354,7 @@ it to the commit being deployed.
 ## Production deployment
 
 Pull requests are tested and built automatically. Commits on `master` publish
-and deploy the tested image and a Vulkan-backed Nomic embedding service to k3s. See the
+and deploy the tested image and a Vulkan-backed EmbeddingGemma service to k3s. See the
 [deployment guide](../k8s-manifests/README.md) for secrets, manifests, health
 checks, idempotence, and rollback.
 

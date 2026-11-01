@@ -6,7 +6,7 @@ import re
 import sys
 
 
-def render(previous, name, image):
+def render(previous, name, image, *, gemma=False):
     if not re.fullmatch(r'reindex-[a-z0-9-]{1,54}', name) or name == previous['metadata']['name']:
         raise ValueError('Use a new descriptive reindex Job name')
     if not re.fullmatch(r'eqarchives-indexer:rtx3080-[0-9a-f]{40}', image):
@@ -33,6 +33,10 @@ def render(previous, name, image):
               'NOMIC_EMBEDDING_PROFILE': 'cuda', 'NOMIC_EMBEDDING_BATCH_SIZE': '8',
               'NOMIC_EMBEDDING_ENCODING': 'base64', 'REINDEX_WORKERS': '4',
               'REINDEX_PREPARATION_WORKERS': '2', 'OPENBLAS_NUM_THREADS': '1'}
+    if gemma:
+        values.update(OPENAI_EMBEDDING_MODEL_NAME='embeddinggemma-2-768-v1',
+                      REINDEX_ENTRYPOINT='reindex_embeddings.pyc', GEMMA_EMBEDDING_PROFILE='cuda',
+                      GEMMA_EMBEDDING_BATCH_SIZE='8')
     env.update({key: {'name': key, 'value': value} for key, value in values.items()})
     container['env'] = list(env.values())
     container['image'] = image
@@ -52,5 +56,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--name', required=True)
     parser.add_argument('--image', required=True)
+    parser.add_argument('--gemma', action='store_true', help='Start a new, independent model-version checkpoint')
     args = parser.parse_args()
-    print(json.dumps(render(json.load(sys.stdin), args.name, args.image)))
+    print(json.dumps(render(json.load(sys.stdin), args.name, args.image, gemma=args.gemma)))

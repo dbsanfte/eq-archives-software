@@ -37,6 +37,7 @@ test('exports the real lexical builder, constrained policy and semantic prefilte
   for (const branch of hybrid.body.knn) {
     expect(branch).toMatchObject({ k: 50, num_candidates: 250, boost: 10, query_vector: vector });
     expect(branch.filter).toContainEqual(hybrid.body.post_filter);
+    expect(branch.filter).toContainEqual({ term: { embedding_model: 'embeddinggemma-2-768-v1' } });
   }
   expect(weighted.body.query.bool.should[0].multi_match.fields).toEqual(['title^3', 'text_full^1']);
 });
@@ -66,5 +67,5 @@ test('exports the date picker range contract instead of treating a range as a te
   } }]);
   const range = { range: { capture_date: { gte: '1999-01-01T00:00:00.000Z', lte: '2002-12-31T23:59:59.999Z' } } };
   expect(request.body.query.bool.filter).toEqual([{ bool: { filter: [range] } }]);
-  for (const branch of request.body.knn) expect(branch.filter).toEqual(request.body.query.bool.filter);
+  for (const branch of request.body.knn) expect(branch.filter).toEqual([...request.body.query.bool.filter, { term: { embedding_model: 'embeddinggemma-2-768-v1' } }]);
 });

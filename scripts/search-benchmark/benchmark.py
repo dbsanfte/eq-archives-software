@@ -193,12 +193,13 @@ def validate_vector(vector):
 
 
 def embedding(client, model, text, cache):
-    key = digest({"model": model, "input": "search_query: " + text})
+    prefix = "task: search result | query: " if model == "embeddinggemma-2-768-v1" else "search_query: "
+    key = digest({"model": model, "input": prefix + text})
     path = cache / (key + ".json")
     if path.exists():
         return validate_vector(load(path)["vector"]), 0, True
     started = time.perf_counter()
-    response = client.request("POST", "/embeddings", {"model": model, "input": ["search_query: " + text], "encoding_format": "float"})
+    response = client.request("POST", "/embeddings", {"model": model, "input": [prefix + text], "encoding_format": "float"})
     if response.get("model") != model or len(response.get("data", [])) != 1:
         raise BenchmarkError("Embedding service contract changed")
     vector = validate_vector(response["data"][0]["embedding"])

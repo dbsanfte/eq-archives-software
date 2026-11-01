@@ -799,11 +799,13 @@ class FrontendBrowserTests(unittest.TestCase):
 
                     search('ancient cyclops')
                     self.assertEqual(len(embeddings), 1)
-                    self.assertEqual(embeddings[0]['input'], ['search_query: ancient cyclops'])
+                    self.assertEqual(embeddings[0]['input'], ['task: search result | query: ancient cyclops'])
                     self.assertIn('knn', requests[-1])
                     self.assertEqual(len(requests[-1]['knn']), 3)
                     for branch in requests[-1]['knn']:
                         self.assertEqual((branch['k'], branch['num_candidates'], branch['boost']), (50, 250, 10))
+                        self.assertIn({'term': {'embedding_model': 'embeddinggemma-2-768-v1'}}, branch['filter'])
+                    self.assertNotIn('embedding_model', str(requests[-1]['query']))
                     search('"ancient cyclops"')
                     self.assertEqual(len(embeddings), 1)
                     self.assertNotIn('knn', requests[-1])

@@ -57,5 +57,5 @@
   "recentFacets": [
     "last_indexed"
   ],
-  "embeddingModel": "text-embedding-nomic-embed-text-v1.5@q8_0"
+  "embeddingModel": "embeddinggemma-2-768-v1"
 }

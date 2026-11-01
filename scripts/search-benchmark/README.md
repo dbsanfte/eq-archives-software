@@ -84,7 +84,7 @@ python3 scripts/search-benchmark/benchmark.py run \
 
 `--query-ids q007,q043,q045 --config-ids current-hybrid,source-semantic,title-lexical`
 selects a small smoke run. `--embedding-cache` can reuse query vectors across
-runs; its key includes the model and complete `search_query:` input. The default
+runs; its key includes the model and complete model-specific prefixed input (Gemma uses `task: search result | query: `). The default
 request pause is 0.2 seconds and inference is serial for the shared Nomic slot.
 There is no LLM work during collection. Each retrieval run is capped at 800
 query/configuration cases; partial shards, timeouts and escaped filters fail it.

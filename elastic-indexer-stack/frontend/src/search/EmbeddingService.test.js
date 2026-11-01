@@ -31,6 +31,18 @@ describe('EmbeddingService', () => {
   });
 
   describe('fetchEmbedding', () => {
+    it('uses Gemma prefixes and never reuses another models cached vector', async () => {
+      const model = 'embeddinggemma-2-768-v1';
+      fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ embedding: [1, 0] }] }) });
+      fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ embedding: [0, 1] }] }) });
+      await embeddingService.fetchEmbedding('cleric', 'old-model');
+      await embeddingService.fetchEmbedding('cleric', model);
+      expect(JSON.parse(fetch.mock.calls[1][1].body)).toEqual({ model, input: ['task: search result | query: cleric'] });
+      expect(embeddingService.getEmbedding('cleric', model)).toEqual([0, 1]);
+      expect(embeddingService.getEmbedding('cleric', 'old-model')).toEqual([1, 0]);
+      await embeddingService.fetchEmbedding('cleric', model);
+      expect(fetch).toHaveBeenCalledTimes(2);
+    });
     it('returns null for empty query', async () => {
       const result = await embeddingService.fetchEmbedding('');
       expect(result).toBeNull();
@@ -75,7 +87,7 @@ describe('EmbeddingService', () => {
       expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({
         input: ['search_query: ancient cyclops'], model
       });
-      expect(embeddingService.getEmbedding('ancient cyclops')).toEqual(vector);
+      expect(embeddingService.getEmbedding('ancient cyclops', model)).toEqual(vector);
     });
 
     it('preserves the input for other embedding models', async () => {

@@ -27,7 +27,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the project files
 COPY ./src /app/src
-RUN python -m indexer.chunking --download-tokenizer /opt/eqarchives/nomic-tokenizer.json
+RUN python -m indexer.chunking --download-tokenizer /opt/eqarchives/nomic-tokenizer.json && \
+    python -m indexer.gemma --download-tokenizer /opt/eqarchives/gemma-tokenizer.json
 
 FROM builder AS test-stage
 
@@ -73,6 +74,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy the precompiled code
 COPY --from=compile-stage /app/src /app/src
 COPY --from=builder /opt/eqarchives/nomic-tokenizer.json /opt/eqarchives/nomic-tokenizer.json
+COPY --from=builder /opt/eqarchives/gemma-tokenizer.json /opt/eqarchives/gemma-tokenizer.json
 COPY --from=test-stage /tmp/test-results.txt /tmp/test-results.txt
 
 WORKDIR /app/src

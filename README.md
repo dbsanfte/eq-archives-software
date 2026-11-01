@@ -34,7 +34,7 @@ flowchart LR
     Worker --> Models[Embedding and language models]
     Browser[React search UI] --> Proxy[NGINX]
     Proxy --> ES
-    Proxy --> Embeddings[Local Nomic embeddings]
+    Proxy --> Embeddings[Local EmbeddingGemma embeddings]
     Assistants[ChatGPT / Claude / MCP clients] --> MCP[Read-only MCP search / fetch]
     MCP --> ES
     MCP --> Embeddings
@@ -58,7 +58,7 @@ browser configuration or JavaScript bundle.
 | [`elastic-indexer-stack/mcp/`](elastic-indexer-stack/mcp/) | Public MCP search/fetch service, protocol tests and coverage |
 | [`elastic-indexer-stack/indexer/`](elastic-indexer-stack/indexer/) | Python file finder, indexing workers, extraction handlers, and tests |
 | [`elastic-indexer-stack/indexer/src/indexer/resources/`](elastic-indexer-stack/indexer/src/indexer/resources/) | Enrichment prompts and response schemas |
-| [`elastic-indexer-stack/k8s-manifests/`](elastic-indexer-stack/k8s-manifests/) | Production frontend and Nomic embedding manifests, plus backend reference configuration |
+| [`elastic-indexer-stack/k8s-manifests/`](elastic-indexer-stack/k8s-manifests/) | Production frontend and embedding manifests, plus backend reference configuration |
 | [`elastic-indexer-stack/docker-compose.yml`](elastic-indexer-stack/docker-compose.yml) | Reference Compose configuration for the services |
 | [`scripts/`](scripts/) | Deployment, runtime secrets, smoke checks and search relevance evaluation |
 | [`.github/workflows/elastic-indexer-stack-cicd.yml`](.github/workflows/elastic-indexer-stack-cicd.yml) | Frontend pull-request checks and deployment from `master` |
@@ -131,7 +131,8 @@ python3.13 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r src/indexer/requirements-dev.txt
 PYTHONPATH=src python -m indexer.chunking --download-tokenizer /tmp/nomic-tokenizer.json
-NOMIC_TOKENIZER_PATH=/tmp/nomic-tokenizer.json PYTHONPATH=src python -m pytest src/indexer/test
+PYTHONPATH=src python -m indexer.gemma --download-tokenizer /tmp/gemma-tokenizer.json
+GEMMA_TOKENIZER_PATH=/tmp/gemma-tokenizer.json NOMIC_TOKENIZER_PATH=/tmp/nomic-tokenizer.json PYTHONPATH=src python -m pytest src/indexer/test
 ```
 
 The Docker build downloads the pinned tokenizer automatically.
@@ -234,18 +235,26 @@ skips completed extraction/chunking versions on restart, and uses a separate
 archive checkout. Missing source files retain their indexed text and are
 reported separately; rechunking that text cannot recover missing paragraphs.
 
+The current embedding migration uses **EmbeddingGemma 2 Q8_0** on eqvm (live
+search/MCP, Vulkan) and the RTX 3080 (full reindex and curation, CUDA). It rewrites
+all searched vectors in place and atomically marks each document
+`embedding_model=embeddinggemma-2-768-v1`. Lexical search covers the full archive;
+semantic branches only use completed Gemma documents. Existing enrichment, OCR,
+provenance and dates remain intact, with **no paid Luna calls** during backfill.
+See the [model migration runbook](scripts/embedding-service/README.md#embeddinggemma-migration).
+
 ## Deployment
 
-The frontend, read-only MCP connector, intranet curation service and local **llama.cpp / Nomic Embed v1.5 Q8_0** service deploy
-automatically from `master` to the production **k3s** cluster. Nomic uses eqvm's
+The frontend, read-only MCP connector, intranet curation service and local **llama.cpp / EmbeddingGemma 2 Q8_0** service deploy
+automatically from `master` to the production **k3s** cluster. The embedding service uses eqvm's
 Radeon iGPU through Vulkan and returns normalized 768-dimensional vectors.
 The model is pinned to a Hugging Face revision and SHA-256, downloaded into a
 persistent cache, and served only inside the cluster. NGINX forwards the public
-`/openai/v1/embeddings` route with its runtime API key. The frontend adds Nomic's
-`search_query:` prefix; this instance accepts up to 512 tokens per input.
+`/openai/v1/embeddings` route with its runtime API key. The frontend adds Gemma's
+`task: search result | query: ` prefix; this instance accepts up to 512 tokens per input.
 
 Pull requests run tests, enforce frontend/MCP coverage, build frontend, MCP and curation/import containers,
-and exercise the real Nomic server on CPU through both services on a GitHub-hosted
+and exercise the real Gemma server on CPU through both services on a GitHub-hosted
 runner. Only `master` publishes images and deploys through the VM's self-hosted runner.
 
 Deployments use immutable image digests and rolling readiness checks. Reapplying

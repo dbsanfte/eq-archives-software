@@ -86,7 +86,7 @@ export const createConnector = (paramsRef) => {
       enabled: paramsRef.current.groupCaptures !== false,
       params: paramsRef.current,
       dateFilters: filterRegistry.applyFilters({}),
-      embedding: embeddingService.getEmbedding(state.searchTerm)
+      embedding: embeddingService.getEmbedding(state.searchTerm, embeddingModel)
     }));
   }
   return connector;

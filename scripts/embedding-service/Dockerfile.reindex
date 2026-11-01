@@ -7,3 +7,8 @@ COPY elastic-indexer-stack/indexer/src/indexer/openai_manager.py /app/src/indexe
 COPY elastic-indexer-stack/indexer/src/indexer/reindex_preparation.py /app/src/indexer/reindex_preparation.py
 RUN python -m compileall -b -f -o 2 /app/src/reindex_text.py /app/src/indexer/openai_manager.py /app/src/indexer/reindex_preparation.py && \
     rm /app/src/reindex_text.py /app/src/indexer/openai_manager.py /app/src/indexer/reindex_preparation.py
+COPY elastic-indexer-stack/indexer/src/reindex_embeddings.py /app/src/reindex_embeddings.py
+COPY elastic-indexer-stack/indexer/src/indexer/gemma.py elastic-indexer-stack/indexer/src/indexer/chunking.py elastic-indexer-stack/indexer/src/indexer/es_manager.py /app/src/indexer/
+RUN python -m indexer.gemma --download-tokenizer /opt/eqarchives/gemma-tokenizer.json && \
+    python -m compileall -b -f -o 2 /app/src/reindex_embeddings.py /app/src/indexer/gemma.py /app/src/indexer/chunking.py /app/src/indexer/es_manager.py && \
+    rm /app/src/reindex_embeddings.py /app/src/indexer/gemma.py /app/src/indexer/chunking.py /app/src/indexer/es_manager.py

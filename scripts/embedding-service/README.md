@@ -1,6 +1,6 @@
 # Standalone CUDA embeddings for indexing
 
-The Ubuntu GPU host runs the **same Nomic Embed v1.5 Q8_0 weights,
+The Ubuntu GPU host runs the **same EmbeddingGemma 2 Q8_0 weights,
 768-dimensional normalized vectors, document/query prefixes and model alias** as
 the Vulkan service. All indexers use CUDA; live search and MCP use Vulkan.
 The separately managed CUDA server is reachable on the wired LAN only, at
@@ -19,7 +19,7 @@ Secure Boot, Docker, and NVIDIA Container Toolkit with **native CDI** support.
 This installation uses driver 580.178.04, toolkit 1.20.1 and Docker 29.1.3.
 Enable `nvidia-cdi-refresh.path`; `docker run --device nvidia.com/gpu=all` must list
 the CUDA GPU. Keep Secure Boot enabled. Do not raise the laptop's 80 W power limit.
-The CUDA image in `cuda.env` is pinned to the same llama.cpp b11096 revision as
+The CUDA image in `cuda.env` is pinned to the same llama.cpp 1052f7e1d626 revision as
 `k8s-manifests/embeddings/runtime.env`. That existing file remains authoritative
 for model URL, SHA-256 and alias. Consult the
 [Ubuntu driver guide](https://ubuntu.com/server/docs/nvidia-drivers-installation/)
@@ -142,3 +142,66 @@ Keep the original recovery runner, immutable ConfigMap, credentials, previous Jo
 logs and prepared source checkout; never repeat source preparation. Curation's
 unfinished-Job guard remains in effect throughout. Watch both backend counters,
 GPU utilization/power and ES resource usage. No LLM enrichment or API spend is added.
+
+## EmbeddingGemma migration
+
+The production text embedding model is EmbeddingGemma 2 Q8_0, 768 dimensions,
+canonical alias `embeddinggemma-2-768-v1`. CUDA and Vulkan image pins use the same
+llama.cpp revision (1052f7e1d626); public model/runtime hashes live in `runtime.env`
+and `cuda.env`. Both GPUs fit the same 310 MB text model. The separate multimedia
+encoders are not needed for this text/OCR migration; no image/audio backfill is
+implied. Never mix Gemma and Nomic vectors in the same semantic query.
+
+1. Validate both pinned runtimes privately, including finite normalized vectors,
+   cross-host cosine, near-480-token batch/serial identity, oversize rejection and
+   recovery. Preserve the prior systemd runtime/configuration and model files.
+2. Test `indexer/test` on Python 3.13 with **both** pinned tokenizers installed.
+   Build the operator image using `Dockerfile.reindex` and the exact previously
+   verified image as `BASE_IMAGE`. Tag it `eqarchives-indexer:rtx3080-<merged-sha>`;
+   record its immutable local image ID, and import it to k3s containerd.
+3. Save the old Job JSON and logs privately. Render a new Job with
+   `render-reindex.py --gemma --name reindex-gemma-<date> --image <tested-image>`.
+   It starts with `parallelism=0`, retaining the source checkout, credentials,
+   recovery wrapper and no-paid-enrichment policy. Create it **before** suspending
+   the old Job, so the curation unfinished-Job guard remains effective.
+4. After normal CI/deployment completes, suspend the old broad Job as an explicit
+   operator handoff. Wait for its pod to stop; do not delete the Job, repeat source
+   preparation or allow Nomic/Gemma writers to overlap. Install the new CUDA
+   `runtime.env`, `cuda.env` and `service.py` and restart the embedding service.
+   Verify authenticated inference and the systemd health check before proceeding.
+5. Run exact-ID migration probes with the tested image against CUDA, including a
+   long text, existing summary/OCR and an old extraction version. Inspect complete
+   vectors and the optimistic update, and verify keyword plus model-filtered
+   semantic searches. Probes must not regenerate Luna enrichment.
+6. Set the prepared new Job's `parallelism=1`. Use four isolated network workers,
+   two CPU preparation processes and `GEMMA_EMBEDDING_BATCH_SIZE=8` with profile
+   `cuda`, initially retaining the benchmarked 64-slot/512-token server profile.
+   There is no intentional request sleep. Read-only sources remain at
+   `/mnt/samsung/eq-archives-html-reindex`; current extraction versions reuse stored
+   full text to avoid source I/O. Curation also routes exclusively to this CUDA
+   endpoint, using Gemma's prefix/tokenizer and marker on newly imported documents.
+
+`reindex_embeddings.py` scans stable IDs without a long-lived PIT. It preserves
+source text, existing enrichment/OCR, dates and provenance; summaries/OCR are
+chunked and normalized when aggregated. One optimistic partial update replaces
+**every searched vector** and then marks the model version. Invalid/incomplete
+vectors cannot mark readiness; conflicts and document errors are counted and do
+not hold other workers. Missing sources are counted, retain original text/chunks,
+and never claim repaired extraction. Unusable old vectors with no corresponding
+text are cleared during replacement. Empty sources are not invented.
+
+`embedding_model` is the resume checkpoint, independently of historical extraction
+and chunking versions. The recovery wrapper waits for infrastructure and resumes
+completed versions after temporary outages. A final nonzero failed count requires
+inspection and another checkpointed pass; never report it as complete. To check
+progress, count remaining documents using `remaining_query()` and count the exact
+`embedding_model` marker; read rate/counters from the Job's bounded progress logs.
+Do not equate a Job exit or a process-local processed count with total completion.
+
+The frontend and MCP use Gemma query prefixes and restrict all semantic branches
+to the marker. Keyword search still covers the entire index. Deployment validates
+that a zero-ready initial corpus really has zero model checkpoints; once ready
+records exist, the vector-only smoke check must return a match. Test search
+relevance on the completed corpus before claiming an improvement. Preserve old
+models/Jobs for diagnosis; reverting runtime alone after partial migration is
+unsafe because the embedding spaces differ even though both have 768 dimensions.

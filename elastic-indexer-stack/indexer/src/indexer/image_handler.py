@@ -55,6 +55,7 @@ class ImageHandler:
                 title=os.path.basename(relative_path),
                 thumbnail=self._archive_handler._resolve_thumbnail_url(url=url, file_type="image"),
                 file_type="image",
+                embedding_model=getattr(self._openai_manager, "_embedding_model_name", None),
                 mime_type=mime_type,
                 domain_name=domain_name,
                 url=url,

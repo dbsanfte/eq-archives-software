@@ -54,7 +54,7 @@ def test_hybrid_search_preserves_query_limits_fields_and_citations():
     assert result.results[0].model_dump() == {
         "id": HIT["_id"], "title": "Ancient Cyclops", "url": HIT["_source"]["url"],
     }
-    assert seen["embedding"] == {"input": ["search_query: ancient cyclops"], "model": Settings.model}
+    assert seen["embedding"] == {"input": ["task: search result | query: ancient cyclops"], "model": Settings.model}
     body = seen["query"]
     assert body["size"] == 10 and body["timeout"] == "8s"
     assert body["query"]["simple_query_string"]["query"] == "ancient cyclops"
@@ -62,6 +62,8 @@ def test_hybrid_search_preserves_query_limits_fields_and_citations():
         "text.vector", "llm_summary_vector", "llm_image_text_vector",
     }
     assert all(item["query_vector"] == VECTOR for item in body["knn"])
+    assert all(item["filter"] == {"term": {"embedding_model": Settings.model}} for item in body["knn"])
+    assert "embedding_model" not in str(body["query"])
     for item in body["knn"]:
         assert (item["k"], item["num_candidates"], item.get("boost")) == (50, 250, 10)
         assert "similarity" not in item
@@ -145,14 +147,14 @@ def test_embedding_cache_expiry_eviction_and_busy_fallback():
         archive = make_archive(embedding_handler=embed)
         await archive.embedding("cyclops")
         assert await archive.embedding("cyclops") == VECTOR and len(calls) == 1
-        archive.cache["cyclops"] = (0, VECTOR)
+        archive.cache[(Settings.model, "cyclops")] = (0, VECTOR)
         await archive.embedding("cyclops")
         assert len(calls) == 2
         async with archive.embedding_lock:
             assert await archive.embedding("busy") is None
         for n in range(129):
             await archive.embedding(str(n))
-        assert len(archive.cache) == 128 and "cyclops" not in archive.cache and "0" not in archive.cache
+        assert len(archive.cache) == 128 and (Settings.model, "cyclops") not in archive.cache and (Settings.model, "0") not in archive.cache
         await archive.close()
         assert archive.es.is_closed and archive.embeddings.is_closed
 

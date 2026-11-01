@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from ann import exact_documents
-from benchmark import BenchmarkError, Elasticsearch, HTTP, Snapshot, build_body, digest, filter_matches, grouped, load, rrf, save, validate_suite, validate_vector
+from benchmark import BenchmarkError, Elasticsearch, HTTP, Snapshot, embedding, build_body, digest, filter_matches, grouped, load, rrf, save, validate_suite, validate_vector
 from evaluate import average_ranking, paired_interval, report, resolved_parameters, review, scores, valid_ratings
 from grade import response_ratings
 
@@ -325,3 +325,22 @@ class JudgmentTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ModelEmbeddingTests(unittest.TestCase):
+    def test_gemma_and_nomic_caches_and_task_prefixes_remain_distinct(self):
+        calls = []
+        vector = [1.] + [0.] * 767
+        class Client:
+            def request(self, method, path, payload):
+                calls.append(payload)
+                return {"model": payload["model"], "data": [{"embedding": vector}]}
+        with tempfile.TemporaryDirectory() as directory:
+            cache = Path(directory)
+            embedding(Client(), "old-nomic", "cleric", cache)
+            embedding(Client(), "embeddinggemma-2-768-v1", "cleric", cache)
+            _, _, cached = embedding(Client(), "embeddinggemma-2-768-v1", "cleric", cache)
+            self.assertTrue(cached)
+            self.assertEqual(len(calls), 2)
+            self.assertEqual(calls[0]["input"], ["search_query: cleric"])
+            self.assertEqual(calls[1]["input"], ["task: search result | query: cleric"])

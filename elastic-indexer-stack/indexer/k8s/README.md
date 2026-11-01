@@ -1,3 +1,8 @@
+> Current model migration: use the [EmbeddingGemma runbook](../../../scripts/embedding-service/README.md#embeddinggemma-migration)
+> and `reindex_embeddings.py`, with new model-version checkpoints. The Nomic
+> extraction repair below is retained for historical recovery. Its tokenizer and
+> completion versions do not establish Gemma readiness.
+
 # BlueWorld newsgroup recovery indexing
 
 Approved website batches use the separate

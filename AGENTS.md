@@ -171,7 +171,8 @@ separate curation image and manifest import entry point with Python 3.13 pytest.
   python3.13 -m venv .venv
   .venv/bin/pip install -r src/indexer/requirements-dev.txt
   PYTHONPATH=src .venv/bin/python -m indexer.chunking --download-tokenizer /tmp/nomic-tokenizer.json
-  NOMIC_TOKENIZER_PATH=/tmp/nomic-tokenizer.json PYTHONPATH=src .venv/bin/python -m pytest src/indexer/test
+  PYTHONPATH=src .venv/bin/python -m indexer.gemma --download-tokenizer /tmp/gemma-tokenizer.json
+  GEMMA_TOKENIZER_PATH=/tmp/gemma-tokenizer.json NOMIC_TOKENIZER_PATH=/tmp/nomic-tokenizer.json PYTHONPATH=src .venv/bin/python -m pytest src/indexer/test
 )
 ```
 
@@ -211,6 +212,18 @@ and ES workers continue. Existing Jobs default to no preparation pool.
 Preserve full source coverage, indexed response identity,
 complete finite vectors and checkpoint versions. Reject incomplete batches before
 saving a document. Keep real near-limit compatibility and oversize recovery checks.
+The current model upgrade uses `reindex_embeddings.py`: EmbeddingGemma 2 Q8_0,
+768 dimensions, Gemma's pinned tokenizer, 480-token source-preserving chunks and
+48-token overlap. Use `task: search result | query: ` for queries and
+`title: none | text: ` for documents. Live search/MCP stay on eqvm Vulkan;
+all indexing uses RTX 3080 CUDA. Replace chunks, summary and OCR vectors atomically
+before marking `embedding_model=embeddinggemma-2-768-v1`; semantic search must
+filter that marker while lexical search covers the full corpus. Preserve old
+extraction checkpoints, enrichment, source identity, dates and last_indexed. No
+paid enrichment during this backfill. Do not reuse Nomic checkpoints as Gemma
+completion. The Nomic repair entry point remains for historical recovery only.
+Follow the embedding-service migration runbook for operator-authorized handoffs.
+
 Operator-requested reindex tuning uses a prepared, checkpoint-preserving handoff
 as documented in the Jobs guide; ordinary curation delivery still leaves existing
 indexing Jobs untouched.

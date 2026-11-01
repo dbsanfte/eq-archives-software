@@ -32,6 +32,7 @@ jobs:
           python3 -m py_compile scripts/frontend-secrets.py scripts/check-embeddings.py scripts/test-frontend-browser.py scripts/check-mcp.py scripts/check-explore.py scripts/mcp-smoke-fixture.py scripts/render-ingress-test.py scripts/test-frontend-rollout.py scripts/test-http-readiness.py scripts/check-static-assets.py
           python3 -m py_compile scripts/curation-secrets.py scripts/check-curation.py scripts/test-curation-browser.py scripts/indexer-job-guard.py
           python3 scripts/test-http-readiness.py
+          python3 scripts/test-embedding-checks.py
           python3 scripts/test-curation-operations.py
           python3 -m unittest discover -s scripts/embedding-service -v
           bash -n scripts/embedding-service/install.sh
@@ -151,7 +152,7 @@ jobs:
         run: bash scripts/smoke-curation.sh dbsanfte/frontend:curation-${{ github.sha }}
       - name: Test the offline candidate review screen
         run: '"${{ runner.temp }}/frontend-browser/bin/python" scripts/archive-crawler/verify_review_browser.py'
-      - name: Test the Nomic service through the frontend proxy
+      - name: Test the EmbeddingGemma service through the frontend proxy
         env:
           IMAGE_TAG: dbsanfte/frontend:${{ github.sha }}
           MCP_IMAGE_TAG: dbsanfte/frontend:mcp-${{ github.sha }}
