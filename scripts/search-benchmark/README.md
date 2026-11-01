@@ -32,7 +32,7 @@ for that evidence. The PIT is closed on success or failure and expires after two
 minutes without another request. The default 15-minute run budget prevents an
 accidental multi-day snapshot while reindexing is active.
 
-The default cohort requires `nomic-paragraphs-480-overlap48-v1`. While regeneration
+The default cohort requires `embeddinggemma2-paragraphs-480-overlap48-v1`. While regeneration
 is unfinished this cohort can be highly biased toward the sources processed
 first. Inspect the recorded source distribution. A mail-heavy pilot cannot
 establish website capture-grouping performance, historical Usenet coverage or

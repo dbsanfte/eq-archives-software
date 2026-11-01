@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from ann import exact_documents
-from benchmark import BenchmarkError, Elasticsearch, HTTP, Snapshot, embedding, build_body, digest, filter_matches, grouped, load, rrf, save, validate_suite, validate_vector
+from benchmark import BenchmarkError, Elasticsearch, HTTP, Snapshot, embedding, parser, build_body, digest, filter_matches, grouped, load, rrf, save, validate_suite, validate_vector
 from evaluate import average_ranking, paired_interval, report, resolved_parameters, review, scores, valid_ratings
 from grade import response_ratings
 
@@ -328,6 +328,11 @@ if __name__ == "__main__":
 
 
 class ModelEmbeddingTests(unittest.TestCase):
+    def test_default_cohort_uses_the_current_gemma_chunk_checkpoint(self):
+        args = parser().parse_args(['run','--es-url','http://fixture','--embedding-url','http://fixture/v1',
+                                    '--out','/tmp/fixture','--archive-sha','a'*40])
+        self.assertEqual(args.chunking_version, 'embeddinggemma2-paragraphs-480-overlap48-v1')
+
     def test_gemma_and_nomic_caches_and_task_prefixes_remain_distinct(self):
         calls = []
         vector = [1.] + [0.] * 767
