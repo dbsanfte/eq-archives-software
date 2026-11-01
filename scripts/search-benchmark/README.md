@@ -32,7 +32,7 @@ for that evidence. The PIT is closed on success or failure and expires after two
 minutes without another request. The default 15-minute run budget prevents an
 accidental multi-day snapshot while reindexing is active.
 
-The default cohort requires `nomic-paragraphs-480-overlap48-v1`. While regeneration
+The default cohort requires `embeddinggemma2-paragraphs-480-overlap48-v1`. While regeneration
 is unfinished this cohort can be highly biased toward the sources processed
 first. Inspect the recorded source distribution. A mail-heavy pilot cannot
 establish website capture-grouping performance, historical Usenet coverage or
@@ -84,7 +84,7 @@ python3 scripts/search-benchmark/benchmark.py run \
 
 `--query-ids q007,q043,q045 --config-ids current-hybrid,source-semantic,title-lexical`
 selects a small smoke run. `--embedding-cache` can reuse query vectors across
-runs; its key includes the model and complete `search_query:` input. The default
+runs; its key includes the model and complete model-specific prefixed input (Gemma uses `task: search result | query: `). The default
 request pause is 0.2 seconds and inference is serial for the shared Nomic slot.
 There is no LLM work during collection. Each retrieval run is capped at 800
 query/configuration cases; partial shards, timeouts and escaped filters fail it.

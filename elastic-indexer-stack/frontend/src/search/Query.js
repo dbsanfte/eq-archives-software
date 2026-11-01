@@ -49,6 +49,9 @@ export function resolveQuery(requestState,
             // Top-level kNN matches are ORed with keyword results. Restrict each
             // vector branch too, including facets, before selecting candidates.
             const knnFilters = [filters || [], requestBody.post_filter || []].flat();
+            if (embeddingModel === 'embeddinggemma-2-768-v1') {
+                knnFilters.push({ term: { embedding_model: embeddingModel } });
+            }
             if (knnFilters.length) {
                 requestBody.knn = requestBody.knn.map(query => ({ ...query, filter: knnFilters }));
             }
@@ -61,7 +64,7 @@ export function resolveQuery(requestState,
 
 function buildKnnQuery(queryText, embeddingModel, paramsRef, vectorFields, nestedVectorFields) {
     // Get the embedding from cache instead of synchronous XHR
-    const vector = embeddingService.getEmbedding(queryText);
+    const vector = embeddingService.getEmbedding(queryText, embeddingModel);
     let knnQuery = [];
 
     if (vector) {

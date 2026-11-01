@@ -1,7 +1,7 @@
 """Create-only, manifest-directed indexing of approved and published captures.
 
 No Git checkout, finder, RabbitMQ, mapping updates or existing-document edits.
-Reuse the archive's extractor, Nomic chunker and default source-bound enrichment.
+Reuse the archive's extractor, EmbeddingGemma chunker and default source-bound enrichment.
 """
 
 import argparse
@@ -21,7 +21,7 @@ import httpx
 from common import CrawlError, decode, digest, now
 from captures import check_manifest, indexable, verified_source
 from capture_budget import budget_identity
-from indexer.chunking import CHUNKING_VERSION, DOCUMENT_PREFIX, chunk_source
+from indexer.gemma import CHUNKING_VERSION, DOCUMENT_PREFIX, MODEL, chunk_source
 from indexer.html_extraction import WEBSITE_EXTRACTION_VERSION, website_markdown
 from indexer.capture_enrichment import Enricher, policy
 from import_status import EnrichmentError, describe, write_status
@@ -63,7 +63,9 @@ class Services:
         self.enricher = enricher
         self.es_url = os.environ.get("ELASTICSEARCH_URL", "http://elasticsearch.eqarchives-es.svc.cluster.local:9200").rstrip("/")
         self.index = os.environ.get("ELASTICSEARCH_INDEX", "eq-archive")
-        self.model = os.environ.get("EMBEDDING_MODEL", "text-embedding-nomic-embed-text-v1.5@q8_0")
+        self.model = os.environ.get("EMBEDDING_MODEL", MODEL)
+        if self.model != MODEL:
+            raise CrawlError("Import embedding model does not match its pinned tokenizer")
         self.embedding_url = os.environ.get("EMBEDDING_URL", "http://nomic-embeddings-rtx3080.eqarchives-es.svc.cluster.local:8080").rstrip("/")
         self.client = httpx.Client(auth=(directory.joinpath("es_username").read_text().strip(),
                                         directory.joinpath("es_password").read_text().strip()),
@@ -94,22 +96,24 @@ class Services:
                 response = self.embedder.post(self.embedding_url + "/v1/embeddings", json={"model": self.model, "input": DOCUMENT_PREFIX + text})
             except httpx.HTTPError:
                 if attempt == 2:
-                    raise CrawlError("Nomic request failed; batch remains resumable") from None
+                    raise CrawlError("Embedding service request failed; batch remains resumable") from None
             else:
                 if response.status_code == 200:
                     try:
                         vector = response.json()["data"][0]["embedding"]
                     except (ValueError, KeyError, IndexError, TypeError):
-                        raise CrawlError("Nomic returned an invalid embedding") from None
+                        raise CrawlError("Embedding service returned an invalid embedding") from None
                     if (not isinstance(vector, list) or len(vector) != 768 or any(type(value) not in (int, float) or not math.isfinite(value) for value in vector)
                             or not any(vector)):
-                        raise CrawlError("Nomic returned an invalid 768-dimensional vector")
+                        raise CrawlError("Embedding service returned an invalid 768-dimensional vector")
+                    if response.json().get("model") != self.model:
+                        raise CrawlError("Embedding service returned a different model; import remains pending")
                     time.sleep(0.2)
                     return vector
                 if response.status_code not in (429, 502, 503, 504):
-                    raise CrawlError(f"Nomic HTTP {response.status_code}; upstream details omitted")
+                    raise CrawlError(f"Embedding service HTTP {response.status_code}; upstream details omitted")
             time.sleep(2 * (attempt + 1))
-        raise CrawlError("Nomic is busy; batch remains resumable")
+        raise CrawlError("Embedding service is busy; batch remains resumable")
 
     def create(self, record_id, document):
         response = self.client.put(f"{self.es_url}/{quote(self.index, safe='')}/_create/{quote(record_id, safe='')}", json=document)
@@ -154,7 +158,7 @@ def index_batch(root, batch, services, chunker=chunk_source):
                     "domain_name": urlsplit(capture["url"]).netloc, "capture_date": timestamp, "last_indexed": now(),
                     "url": replay, "mime_type": (capture.get('content_type') or 'text/html').split(';')[0], "file_type": "text", "thumbnail": "thumbnails/website.webp",
                     "text_full": content, "text": chunks, "text_extraction_version": WEBSITE_EXTRACTION_VERSION,
-                    "text_chunking_version": CHUNKING_VERSION, "archive_source_sha256": capture["sha256"],
+                    "text_chunking_version": CHUNKING_VERSION, "embedding_model": MODEL, "archive_source_sha256": capture["sha256"],
                     "archive_source_manifest": batch["manifest_sha256"], "archive_commit": batch["publication"]["commit"],
                     **metadata, "llm_summary_vector": summary_vector}
         if services.create(record_id, document):

@@ -68,7 +68,7 @@ def _budget_offsets(text, tokenizer, *, add_special_tokens=False):
     return offsets
 
 
-def chunk_source(text, tokenizer=None, max_tokens=480, overlap_tokens=48):
+def chunk_source(text, tokenizer=None, max_tokens=480, overlap_tokens=48, *, prefix=DOCUMENT_PREFIX):
     """Prefer paragraphs/headings, then lines/sentences, then exact token spans.
 
     Offsets refer to the original source, including whitespace and line endings.
@@ -76,7 +76,7 @@ def chunk_source(text, tokenizer=None, max_tokens=480, overlap_tokens=48):
     without truncating the source or embedding sentences to choose boundaries.
     """
     tokenizer = tokenizer or load_tokenizer()
-    prefix_tokens = len(_budget_offsets(DOCUMENT_PREFIX, tokenizer, add_special_tokens=True))
+    prefix_tokens = len(_budget_offsets(prefix, tokenizer, add_special_tokens=True))
     budget = max_tokens - prefix_tokens
     if budget < 8 or not 0 <= overlap_tokens < budget // 2:
         raise ValueError("invalid chunk token budget or overlap")
@@ -104,7 +104,7 @@ def chunk_source(text, tokenizer=None, max_tokens=480, overlap_tokens=48):
                     break
         # Retokenizing a boundary can change WordPiece segmentation. Always
         # validate the actual request; reduce it rather than relying on estimates.
-        while len(_budget_offsets(DOCUMENT_PREFIX + text[start:end], tokenizer, add_special_tokens=True)) > max_tokens:
+        while len(_budget_offsets(prefix + text[start:end], tokenizer, add_special_tokens=True)) > max_tokens:
             last = bisect_left(starts, end) - 1
             if last <= first:
                 raise ValueError("cannot fit source token within embedding context")

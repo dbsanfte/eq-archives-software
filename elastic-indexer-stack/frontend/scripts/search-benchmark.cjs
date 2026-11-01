@@ -45,7 +45,7 @@ async function handle(input) {
   const params = { current: { ...DEFAULT_KNN_PARAMS, ...input.params,
     enableSemanticSearch: Boolean(input.vector), groupCaptures: false } };
   embeddingService.cache.clear();
-  if (input.vector) embeddingService.cache.set(query.text, input.vector);
+  if (input.vector) embeddingService.cache.set(JSON.stringify([engine.embeddingModel, query.text]), input.vector);
   // Capture the real connector's postprocessor, including sorting and constraints.
   // The constructor assigns this hook as a public instance property.
   const connector = createConnector(params);

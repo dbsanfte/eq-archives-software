@@ -193,12 +193,13 @@ def validate_vector(vector):
 
 
 def embedding(client, model, text, cache):
-    key = digest({"model": model, "input": "search_query: " + text})
+    prefix = "task: search result | query: " if model == "embeddinggemma-2-768-v1" else "search_query: "
+    key = digest({"model": model, "input": prefix + text})
     path = cache / (key + ".json")
     if path.exists():
         return validate_vector(load(path)["vector"]), 0, True
     started = time.perf_counter()
-    response = client.request("POST", "/embeddings", {"model": model, "input": ["search_query: " + text], "encoding_format": "float"})
+    response = client.request("POST", "/embeddings", {"model": model, "input": [prefix + text], "encoding_format": "float"})
     if response.get("model") != model or len(response.get("data", [])) != 1:
         raise BenchmarkError("Embedding service contract changed")
     vector = validate_vector(response["data"][0]["embedding"])
@@ -448,7 +449,7 @@ def parser():
     sub = root.add_subparsers(dest="command", required=True)
     collect = sub.add_parser("run", help="Collect results and complete source text from one ES snapshot")
     collect.add_argument("--es-url", required=True)
-    collect.add_argument("--embedding-url", required=True, help="OpenAI-compatible Nomic endpoint, ending in /v1")
+    collect.add_argument("--embedding-url", required=True, help="OpenAI-compatible EmbeddingGemma endpoint, ending in /v1")
     collect.add_argument("--credentials", help="Private JSON file: es_username, es_password, embedding_api_key")
     collect.add_argument("--index", default="eq-archive")
     collect.add_argument("--out", required=True)
@@ -457,7 +458,7 @@ def parser():
     collect.add_argument("--query-ids")
     collect.add_argument("--config-ids")
     collect.add_argument("--node-image", default="eqarchives-benchmark-node")
-    collect.add_argument("--chunking-version", default="nomic-paragraphs-480-overlap48-v1", help="Empty string selects the entire index")
+    collect.add_argument("--chunking-version", default="embeddinggemma2-paragraphs-480-overlap48-v1", help="Empty string selects the entire index")
     collect.add_argument("--archive-sha", required=True)
     collect.add_argument("--embedding-cache")
     collect.add_argument("--depth", type=int, default=50, choices=range(10, 101))

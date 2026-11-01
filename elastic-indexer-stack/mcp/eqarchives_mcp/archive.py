@@ -36,7 +36,7 @@ class Settings:
     elasticsearch_url: str = "http://elasticsearch.eqarchives-es.svc.cluster.local:9200"
     index: str = "eq-archive"
     embedding_url: str = "http://nomic-embeddings.eqarchives-es.svc.cluster.local:8080"
-    model: str = "text-embedding-nomic-embed-text-v1.5@q8_0"
+    model: str = "embeddinggemma-2-768-v1"
     secret_dir: str = "/run/secrets"
 
     @classmethod
@@ -121,9 +121,10 @@ class Archive:
 
     async def embedding(self, query: str) -> list[float] | None:
         now = time.monotonic()
-        cached = self.cache.get(query)
+        key = (self.settings.model, query)
+        cached = self.cache.get(key)
         if cached and cached[0] > now:
-            self.cache.move_to_end(query)
+            self.cache.move_to_end(key)
             return cached[1]
         # Do not queue research traffic behind the single-slot shared model.
         # Long queries still get full lexical search without silent truncation.
@@ -132,7 +133,8 @@ class Archive:
         async with self.embedding_lock:
             try:
                 response = await self.embeddings.post("v1/embeddings", json={
-                    "input": ["search_query: " + query], "model": self.settings.model,
+                    "input": [("task: search result | query: " if self.settings.model == "embeddinggemma-2-768-v1"
+                               else "search_query: ") + query], "model": self.settings.model,
                 })
                 response.raise_for_status()
                 vector = response.json()["data"][0]["embedding"]
@@ -147,8 +149,8 @@ class Archive:
             except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError):
                 self.cooldown_until = now + 15
                 return None
-            self.cache[query] = (now + 300, vector)
-            self.cache.move_to_end(query)
+            self.cache[key] = (now + 300, vector)
+            self.cache.move_to_end(key)
             while len(self.cache) > 128:
                 self.cache.popitem(last=False)
             return vector
@@ -198,6 +200,8 @@ class Archive:
                     body["knn"] = [{
                         "field": field, "query_vector": vector, "k": 50,
                         "num_candidates": 250, "boost": 10,
+                        **({"filter": {"term": {"embedding_model": self.settings.model}}}
+                           if self.settings.model == "embeddinggemma-2-768-v1" else {}),
                     } for field in ("text.vector", "llm_summary_vector", "llm_image_text_vector")]
             hits = await self.query(body)
             return SearchResults(results=[result_from_hit(hit) for hit in hits])

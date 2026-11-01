@@ -9,7 +9,7 @@ model_path="$model_dir/$MODEL_FILE"
 mkdir -p "$model_dir"
 
 if [ -f "$model_path" ] && printf '%s  %s\n' "$MODEL_SHA256" "$model_path" | sha256sum --check --status; then
-  echo 'Verified cached Nomic model.'
+  echo 'Verified cached embedding model.'
   exit 0
 fi
 
@@ -23,4 +23,4 @@ curl --fail --location --silent --show-error --proto '=https' --proto-redir '=ht
 printf '%s  %s\n' "$MODEL_SHA256" "$download" | sha256sum --check --status
 chmod 644 "$download"
 mv "$download" "$model_path"
-echo 'Downloaded and verified the pinned Nomic model.'
+echo 'Downloaded and verified the pinned embedding model.'

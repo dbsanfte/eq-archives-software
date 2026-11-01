@@ -26,7 +26,7 @@ const EnhancedSearchBox = ({
     activeEmbedding.current = controller;
     try {
       if (shouldUseSemanticSearch(value, semanticEnabled.current, vectorFields, nestedVectorFields) &&
-          embeddingService.isEmbeddingServiceAvailable() && !embeddingService.getEmbedding(value)) {
+          embeddingService.isEmbeddingServiceAvailable() && !embeddingService.getEmbedding(value, embeddingModel)) {
         await embeddingService.fetchEmbedding(value, embeddingModel, { signal: controller.signal });
       }
     } catch (error) {

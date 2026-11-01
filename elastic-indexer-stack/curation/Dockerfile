@@ -11,11 +11,12 @@ COPY elastic-indexer-stack/curation/requirements.txt /app/requirements.txt
 RUN pip install --no-cache-dir --require-hashes -r /app/requirements.txt
 COPY scripts/archive-crawler /app/scripts/archive-crawler
 COPY elastic-indexer-stack/curation /app/curation
-COPY elastic-indexer-stack/indexer/src/indexer/__init__.py elastic-indexer-stack/indexer/src/indexer/chunking.py elastic-indexer-stack/indexer/src/indexer/html_extraction.py /app/indexer/
+COPY elastic-indexer-stack/indexer/src/indexer/__init__.py elastic-indexer-stack/indexer/src/indexer/chunking.py elastic-indexer-stack/indexer/src/indexer/gemma.py elastic-indexer-stack/indexer/src/indexer/html_extraction.py /app/indexer/
 COPY elastic-indexer-stack/indexer/src/indexer/capture_enrichment.py /app/indexer/
 COPY elastic-indexer-stack/indexer/src/indexer/resources /app/indexer/resources
 COPY elastic-indexer-stack/indexer/src/index_captures.py /app/index_captures.py
-RUN python -m indexer.chunking --download-tokenizer /opt/eqarchives/nomic-tokenizer.json
+RUN python -m indexer.chunking --download-tokenizer /opt/eqarchives/nomic-tokenizer.json && \
+    python -m indexer.gemma --download-tokenizer /opt/eqarchives/gemma-tokenizer.json
 
 FROM dependencies AS test
 COPY elastic-indexer-stack/curation/requirements-dev.txt /app/requirements-dev.txt

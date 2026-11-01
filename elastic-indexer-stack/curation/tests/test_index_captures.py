@@ -8,7 +8,7 @@ import pytest
 from common import CrawlError, digest
 from conftest import manifest_for
 from index_captures import Services, index_batch, read_batch, text_document
-from indexer.chunking import DOCUMENT_PREFIX, load_tokenizer
+from indexer.gemma import DOCUMENT_PREFIX, load_tokenizer, MODEL
 
 
 def published(row):
@@ -42,6 +42,7 @@ def test_manifest_indexing_creates_missing_ids_preserves_source_and_skips_existi
     assert doc['archive_commit'] == 'b'*40
     assert doc['llm_model_name']=='gpt-6-luna' and doc['llm_tags']==['raid']
     assert len(doc['llm_summary_vector'])==768
+    assert doc['embedding_model'] == MODEL
     assert all('Page URL:' not in text for text in services.enrichments)
     assert all(len(load_tokenizer().encode(DOCUMENT_PREFIX+text).ids)<=480 for text in services.inputs)
     original=json.dumps(doc,sort_keys=True)
@@ -123,14 +124,14 @@ def test_embeddings_are_serial_prefixed_and_retry_transient_busy_response(tmp_pa
     requests=[]
     def handler(request):
         requests.append(json.loads(request.content))
-        return httpx.Response(503) if len(requests)==1 else httpx.Response(200,json={'data':[{'embedding':[0.1]*768}]})
+        return httpx.Response(503) if len(requests)==1 else httpx.Response(200,json={'model':MODEL,'data':[{'embedding':[0.1]*768}]})
     instance=service(tmp_path,handler)
     try:
         with patch('index_captures.time.sleep'):
             assert len(instance.embedding('Complete source.'))==768
         assert len(requests)==2
-        assert all(row['input']=='search_document: Complete source.' for row in requests)
-        assert all(row['model']=='text-embedding-nomic-embed-text-v1.5@q8_0' for row in requests)
+        assert all(row['input']=='title: none | text: Complete source.' for row in requests)
+        assert all(row['model']==MODEL for row in requests)
     finally: instance.close()
 
 
@@ -140,7 +141,7 @@ def test_default_embedding_requests_use_cuda_and_leave_vulkan_for_live_queries(t
     seen=[]
     def handler(request):
         seen.append(request)
-        return httpx.Response(200, json={'data':[{'embedding':[1.0]+[0.0]*767}]})
+        return httpx.Response(200, json={'model':MODEL,'data':[{'embedding':[1.0]+[0.0]*767}]})
     services=service(tmp_path,handler)
     try:
         assert len(services.embedding('EverQuest cleric guild'))==768
@@ -149,3 +150,13 @@ def test_default_embedding_requests_use_cuda_and_leave_vulkan_for_live_queries(t
         assert seen[0].url.path=='/v1/embeddings'
     finally:
         services.close()
+
+
+def test_model_mismatch_cannot_index_vectors_from_old_backend(tmp_path):
+    instance=service(tmp_path, lambda request: httpx.Response(200, json={
+        'model':'old-nomic', 'data':[{'embedding':[1.0]+[0.0]*767}]}))
+    try:
+        with pytest.raises(CrawlError, match='different model'):
+            instance.embedding('Cleric')
+    finally:
+        instance.close()

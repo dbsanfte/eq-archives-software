@@ -96,7 +96,7 @@ fi
 python3 - "$work_dir/oversized-response.json" <<'PY'
 import json, sys
 message = json.load(open(sys.argv[1])).get("error", {}).get("message", "")
-assert "input (602 tokens) is larger than the max context size (512 tokens)" in message, "Unexpected oversized-input error"
+assert "larger than the max context size (512 tokens)" in message, "Unexpected oversized-input error"
 PY
 python3 "$repo_dir/scripts/check-embeddings.py" \
   "http://$frontend_address/openai/v1/embeddings" --model "$MODEL_ALIAS"

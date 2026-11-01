@@ -12,6 +12,7 @@ from langchain_openai.embeddings import OpenAIEmbeddings
 from langchain_core.documents import Document
 from langchain_experimental.text_splitter import SemanticChunker
 from .chunking import CHUNKING_VERSION, DOCUMENT_PREFIX, chunk_source
+from . import gemma
 
 class OpenAIManager:
     AWAITING_LLM_ENRICHMENT = "[ Still awaiting LLM Enrichment... ]"
@@ -398,6 +399,9 @@ class OpenAIManager:
             if not text or text.isspace():
                 self._logger.debug(f"Empty text, returning a None embedding for text: {text}")
                 return None
+            if getattr(self, "_embedding_model_name", None) == gemma.MODEL:
+                chunks = self._gemma_chunks(text)
+                return np.asarray(gemma.mean_vector([chunk["vector"].tolist() for chunk in chunks]), dtype=np.float32)
             self._logger.debug(f"Fetching embedding for: {text}")
             embedding = self._openai_embeddings.embed_query(text)
             if embedding is None:
@@ -438,12 +442,39 @@ class OpenAIManager:
                         raise ValueError("Nomic must return 768 finite embedding dimensions")
                     decoded.append(np.frombuffer(raw, dtype="<f4").copy())
                 values = decoded
+            if self._embedding_model_name == gemma.MODEL and payload.get("model") != gemma.MODEL:
+                raise ValueError("Embedding service returned a different model")
             return values
         except Exception as error:
             self._logger.error("Error fetching embedding batch (%s)", type(error).__name__)
             raise
 
+    def _gemma_chunks(self, text, prepared=None):
+        from .reindex_preparation import verify_prepared
+        source = gemma.chunk_source(text) if prepared is None else prepared
+        verify_prepared(text, source)
+        setting = os.environ.get("GEMMA_EMBEDDING_BATCH_SIZE", "1")
+        profile = os.environ.get("GEMMA_EMBEDDING_PROFILE", "vulkan")
+        if profile not in ("vulkan", "cuda"):
+            raise ValueError("Invalid Gemma embedding profile")
+        maximum = 64 if profile == "cuda" else 2
+        if setting not in {str(n) for n in range(1, maximum + 1)}:
+            raise ValueError("Invalid Gemma embedding batch capacity")
+        size = int(setting)
+        result = []
+        for offset in range(0, len(source), size):
+            batch = source[offset:offset + size]
+            values = self._embed_nomic_batch([gemma.DOCUMENT_PREFIX + chunk.text for chunk in batch])
+            for chunk, value in zip(batch, values, strict=True):
+                row = np.asarray(value, dtype=np.float32)
+                gemma.vector(row.tolist())
+                result.append({"text_chunk": chunk.text, "vector": row})
+        self.chunking_version = gemma.CHUNKING_VERSION
+        return result
+
     def get_chunks_and_embeddings(self, document: Document, *, _prepared_source=None) -> list[dict]:
+        if self._embedding_model_name == gemma.MODEL:
+            return self._gemma_chunks(document.page_content, _prepared_source)
         if "nomic-embed" in self._embedding_model_name:
             # The default Vulkan service retains its two-input capacity. Larger
             # batches require the explicitly selected, separately tested CUDA service.

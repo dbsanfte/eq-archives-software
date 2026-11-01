@@ -33,6 +33,16 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(env['REINDEX_PREPARATION_WORKERS'], '2')
         self.assertEqual(env['SKIP_LLM_ENRICHMENT'], 'true')
 
+    def test_gemma_handoff_has_its_own_checkpoint_and_keeps_cuda_only(self):
+        previous = self.previous()
+        job = handoff.render(previous, 'reindex-gemma', 'eqarchives-indexer:rtx3080-'+'a'*40, gemma=True)
+        env = {e['name']: e['value'] for e in job['spec']['template']['spec']['containers'][0]['env']}
+        self.assertEqual(env['REINDEX_ENTRYPOINT'], 'reindex_embeddings.pyc')
+        self.assertEqual(env['OPENAI_EMBEDDING_MODEL_NAME'], 'embeddinggemma-2-768-v1')
+        self.assertEqual(env['GEMMA_EMBEDDING_BATCH_SIZE'], '8')
+        self.assertEqual(env['SKIP_LLM_ENRICHMENT'], 'true')
+        self.assertEqual(job['spec']['parallelism'], 0)
+
     def test_cuda_handoff_removes_inherited_secondary_and_embedding_overrides(self):
         previous = self.previous()
         previous['spec']['template']['spec']['containers'][0]['env'] += [

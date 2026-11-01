@@ -79,6 +79,7 @@ class TextHandler:
                     id = relative_path.replace(os.sep, '/'),
                     title = title,
                     file_type = "text",
+                    embedding_model=getattr(self._openai_manager, "_embedding_model_name", None),
                     mime_type = mime_type,
                     text = chunks_and_embeddings,
                     text_full = document.page_content,

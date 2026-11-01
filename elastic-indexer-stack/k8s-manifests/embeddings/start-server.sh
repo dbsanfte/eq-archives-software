@@ -7,7 +7,7 @@ key_file=${API_KEY_FILE:-/run/secrets/openai_api_key}
 test -s "$key_file"
 export XDG_CACHE_HOME=${XDG_CACHE_HOME:-/cache}
 
-# Keep the benchmarked 512-token, single-slot settings. Hosted CI exercises the
+# Keep the tested 512-token input cap and two independent slots. Hosted CI exercises the
 # same server with LLAMA_DEVICE=none and LLAMA_GPU_LAYERS=0 on its CPU.
 set -- /app/llama-server \
   --model "${MODEL_DIR:-/models}/$MODEL_FILE" --alias "$MODEL_ALIAS" \

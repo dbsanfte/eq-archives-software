@@ -18,9 +18,9 @@ for info in /proc/1/fdinfo/*; do
     esac
   done < "$info" 2>/dev/null || continue
   if [ "$driver" = amdgpu ] && [ "$((vram + gtt))" -ge 102400 ] && [ "$compute" -gt 0 ]; then
-    echo 'Verified GPU model allocation and compute activity in the running Nomic server.'
+    echo 'Verified GPU model allocation and compute activity in the running embedding server.'
     exit 0
   fi
 done
-echo 'The running Nomic server has no verified AMD GPU allocation/compute activity.' >&2
+echo 'The running embedding server has no verified AMD GPU allocation/compute activity.' >&2
 exit 1

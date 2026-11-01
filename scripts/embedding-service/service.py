@@ -55,7 +55,7 @@ def command(config):
 
 def healthy(config, opener=urllib.request.urlopen):
     try:
-        body = json.dumps({'model': config['MODEL_ALIAS'], 'input': ['search_document: EverQuest guild'],
+        body = json.dumps({'model': config['MODEL_ALIAS'], 'input': ['title: none | text: EverQuest guild'],
                            'encoding_format': 'float'}).encode()
         request = urllib.request.Request(
             f"http://{config['BIND_ADDRESS']}:{config['BIND_PORT']}/v1/embeddings", data=body,

@@ -41,6 +41,19 @@ describe('Query.js', () => {
     });
 
     describe('resolveQuery', () => {
+        test('Gemma restricts all vector fields to complete model checkpoints while lexical covers everything', () => {
+            const model = 'embeddinggemma-2-768-v1';
+            embeddingService.isEmbeddingServiceAvailable.mockReturnValue(true);
+            embeddingService.getEmbedding.mockReturnValue([1, 0]);
+            const lexical = { bool: { should: [{ match: { text_full: 'cleric' } }] } };
+            requestBody.query = lexical;
+            resolveQuery(requestState, requestBody, searchFields, paramsRef, vectorFields, nestedVectorFields, model);
+            expect(embeddingService.getEmbedding).toHaveBeenCalledWith(requestState.searchTerm, model);
+            expect(requestBody.knn).toHaveLength(3);
+            requestBody.knn.forEach(branch => expect(branch.filter).toEqual([{ term: { embedding_model: model } }]));
+            expect(requestBody.query).toBe(lexical);
+            expect(requestBody.query.bool.filter).toBeUndefined();
+        });
         test.each(['"cleric"', 'cleric'])('requires the text match and retains date filters for %s', query => {
             requestState.searchTerm = query;
             paramsRef.current.enableSemanticSearch = false;
@@ -120,7 +133,7 @@ describe('Query.js', () => {
 
                 resolveQuery(requestState, requestBody, searchFields, paramsRef, vectorFields, nestedVectorFields, embeddingModel);
 
-                expect(embeddingService.getEmbedding).toHaveBeenCalledWith('simple query');
+                expect(embeddingService.getEmbedding).toHaveBeenCalledWith('simple query', embeddingModel);
                 expect(requestBody.knn).toHaveLength(3); // 2 vector fields + 1 nested field
                 expect(requestBody.query).toBeUndefined();
             });

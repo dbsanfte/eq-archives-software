@@ -13,7 +13,8 @@ class EmbeddingService {
 
   async fetchEmbedding(query, model, { signal } = {}) {
     if (!query || signal?.aborted) return null;
-    if (this.cache.has(query)) return this.cache.get(query);
+    const key = model ? JSON.stringify([model, query]) : query;
+    if (this.cache.has(key)) return this.cache.get(key);
     if (!this.isServiceAvailable && !this.shouldRetryService()) return null;
 
     const controller = new AbortController();
@@ -29,9 +30,10 @@ class EmbeddingService {
     }, this.FETCH_TIMEOUT);
 
     try {
-      // Nomic requires a task prefix; keep the cache keyed by the user query.
+      // Prefixes and cached vectors belong to an exact embedding model.
       const input = model?.includes('nomic-embed-text-v1.5')
-        ? `search_query: ${query}` : query;
+        ? `search_query: ${query}`
+        : model === 'embeddinggemma-2-768-v1' ? `task: search result | query: ${query}` : query;
       const responseBody = fetch('/openai/v1/embeddings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -51,7 +53,7 @@ class EmbeddingService {
         this.isServiceAvailable = true;
         this.showServiceRestoredNotification();
       }
-      this.cache.set(query, vector);
+      this.cache.set(key, vector);
       this.clearOldEmbeddings();
       return vector;
     } catch (error) {
@@ -70,8 +72,8 @@ class EmbeddingService {
     return null;
   }
 
-  getEmbedding(query) {
-    return this.cache.get(query);
+  getEmbedding(query, model) {
+    return this.cache.get(model ? JSON.stringify([model, query]) : query);
   }
 
   clearOldEmbeddings(maxSize = 50) {

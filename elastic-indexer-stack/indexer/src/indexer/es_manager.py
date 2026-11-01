@@ -7,6 +7,7 @@ from elasticsearch import Elasticsearch, exceptions
 
 # A single dictionary describing each field and its ES mapping configuration
 ES_FIELDS = {
+    "embedding_model": {"mapping": {"type": "keyword"}, "default": None},
     "id": {
         "mapping": {"type": "keyword"},
         "default": None
