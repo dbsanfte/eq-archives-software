@@ -821,7 +821,7 @@ available for builds and isolated checks. Production resources are in namespace
 | Elasticsearch | Existing service `elasticsearch.eqarchives-es.svc.cluster.local:9200`, index `eq-archive`; managed separately from frontend CI |
 | Embeddings | Deployment/Service `nomic-embeddings`, one replica, internal endpoint `http://nomic-embeddings.eqarchives-es.svc.cluster.local:8080`, zero-unavailable rolling updates |
 | MCP connector | Deployment/Service `eqarchives-mcp`, one replica, port 8080, exact public `/mcp` HTTPS ingress, zero-unavailable rolling updates; uses the existing read-only ES/model credentials |
-| Curation | Deployment `eqarchives-curation`, one replica/Recreate, LAN-only `192.168.50.100:8090`, no Service/Ingress/auth; separate 25 GiB staging PVC and controlled import Jobs |
+| Curation | Deployment `eqarchives-curation`, one replica/Recreate, LAN-only `192.168.68.53:8090`, no Service/Ingress/auth; separate 25 GiB staging PVC and controlled import Jobs |
 | Model cache | PVC `nomic-embedding-models`, 1 GiB on existing `local-path` storage; reproducible model cache, not archive storage |
 | GPU access | DaemonSet `eqarchives-vulkan-device-plugin`, AMD Radeon Vulkan device `/dev/dri/renderD128`, supplemental render GID 109 |
 

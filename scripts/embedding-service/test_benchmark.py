@@ -46,8 +46,8 @@ class BenchmarkTests(unittest.TestCase):
         with patch.object(benchmark.socket, 'getaddrinfo', return_value=[(None, None, None, None, ('8.8.8.8', 443))]):
             with self.assertRaises(ValueError): benchmark.private_endpoint('https://api.example/v1/embeddings')
         with self.assertRaises(ValueError): benchmark.private_endpoint('http://user:password@127.0.0.1/')
-        with patch.object(benchmark.socket, 'getaddrinfo', return_value=[(None, None, None, None, ('192.168.50.193', 8081))]):
-            self.assertEqual(benchmark.private_endpoint('http://192.168.50.193:8081/v1/embeddings').port, 8081)
+        with patch.object(benchmark.socket, 'getaddrinfo', return_value=[(None, None, None, None, ('192.168.68.108', 8081))]):
+            self.assertEqual(benchmark.private_endpoint('http://192.168.68.108:8081/v1/embeddings').port, 8081)
 
     def test_bounded_concurrency_and_request_budget(self):
         class FakeClient:

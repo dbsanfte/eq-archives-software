@@ -239,4 +239,5 @@ jobs:
             python3 scripts/indexer-job-guard.py --before "$job_snapshot"
           echo "Deployed \`$IMAGE\` to https://search.eqarchives.org" >> "$GITHUB_STEP_SUMMARY"
           echo "Deployed MCP \`$MCP_IMAGE\` to https://search.eqarchives.org/mcp" >> "$GITHUB_STEP_SUMMARY"
-          echo "Deployed intranet review \`$CURATION_IMAGE\` to http://192.168.50.100:8090" >> "$GITHUB_STEP_SUMMARY"
+          curation_address=$(sudo -n kubectl --kubeconfig=/etc/rancher/k3s/k3s.yaml get node eqvm -o jsonpath='{.status.addresses[?(@.type=="InternalIP")].address}')
+          echo "Deployed intranet review \`$CURATION_IMAGE\` to http://$curation_address:8090" >> "$GITHUB_STEP_SUMMARY"

@@ -9,7 +9,7 @@ from server import create_app
 from state import connect
 from conftest import add_candidate, manifest_for
 
-ORIGIN = "http://192.168.50.100:8090"
+ORIGIN = "http://192.168.68.53:8090"
 
 
 def call(app, method, path, payload=None, peer="192.168.50.20", headers=None):
@@ -35,6 +35,14 @@ def test_every_endpoint_rejects_non_lan_peers_and_forwarded_spoofs(tmp_path, pat
 def test_actions_require_same_origin_host_and_non_simple_json_request(tmp_path, headers):
     app = create_app(tmp_path / "state", start_worker=False)
     assert call(app, "POST", "/api/discover", {"max_candidates":50,"max_usd":2}, headers=headers).status_code == 403
+
+
+def test_application_origin_follows_configured_lan_address_after_renumbering(tmp_path, monkeypatch):
+    monkeypatch.setenv('LAN_BIND_IP', '192.168.68.99')
+    monkeypatch.delenv('CURATION_ORIGIN', raising=False)
+    app = create_app(tmp_path / 'state', start_worker=False)
+    assert call(app, 'GET', '/healthz', headers={'Host': '192.168.68.99:8090'}).status_code == 200
+    assert call(app, 'GET', '/healthz').status_code == 403
 
 
 def test_queue_source_scope_approval_and_capture_survive_reload(candidate):

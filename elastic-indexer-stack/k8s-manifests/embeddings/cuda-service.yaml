@@ -15,7 +15,7 @@ metadata:
   name: nomic-embeddings-rtx3080
 subsets:
   - addresses:
-      - ip: 192.168.50.193
+      - ip: 192.168.68.108
     ports:
       - name: http
         port: 8081

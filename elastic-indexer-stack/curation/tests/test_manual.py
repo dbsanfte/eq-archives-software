@@ -31,7 +31,7 @@ def test_manual_url_preserves_original_page_identity(supplied, expected):
 
 @pytest.mark.parametrize('url', [None, [], 3, '', ' ', 'x'*4097, 'not a url', 'javascript:alert(1)',
     'file:///etc/passwd', 'ftp://guild.example/', 'http://user:password@guild.example/',
-    'http://127.0.0.1/', 'http://192.168.50.100/', 'http://localhost/', 'http://host.internal/',
+    'http://127.0.0.1/', 'http://192.168.50.100/', 'http://192.168.68.53/', 'http://localhost/', 'http://host.internal/',
     'http://[::1]/', 'http://guild.example:wrong/', 'http://guild.example/\npage',
     'https://web.archive.org/', 'https://web.archive.org/save/http://guild.example/',
     'https://web.archive.org/web/bad/http://guild.example/',

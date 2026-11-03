@@ -21,7 +21,7 @@ class ServiceTests(unittest.TestCase):
         config = self.config()
         command = service.command(config)
         self.assertIn('--read-only', command)
-        self.assertEqual(command[command.index('--publish')+1], '192.168.50.193:8081:8080')
+        self.assertEqual(command[command.index('--publish')+1], '192.168.68.108:8081:8080')
         for flag, value in [('--ubatch-size','512'),('--parallel','64'),('--ctx-size','32768'),
                             ('--pooling','mean'),('--device','CUDA0')]:
             self.assertIn([flag, value], [command[i:i+2] for i in range(len(command)-1)])

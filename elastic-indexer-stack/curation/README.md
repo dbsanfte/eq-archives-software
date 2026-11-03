@@ -1,6 +1,6 @@
 # Intranet curation and targeted indexing
 
-Production review: **http://192.168.50.100:8090/** on eqvm's existing k3s cluster.
+Production review: **http://192.168.68.53:8090/** on eqvm's existing k3s cluster.
 No authentication is required. The service binds only the node's LAN address,
 accepts actual TCP peers in `192.168.0.0/16`, ignores forwarded-IP headers and
 checks literal Host/same-origin action headers. There is no Service, NodePort or

@@ -216,7 +216,7 @@ stages bounded Wayback samples, and optionally grades them with Luna. Its offlin
 approval queue binds review decisions to exact source hashes. State stays outside
 both repositories; discovery does not clone, fetch, or walk archive content.
 The production [intranet curation service](elastic-indexer-stack/curation/README.md)
-serves the persistent queue at **http://192.168.50.100:8090/**, restricted to actual
+serves the persistent queue at **http://192.168.68.53:8090/**, restricted to actual
 LAN clients in `192.168.0.0/16`, without authentication or public ingress.
 Deep-link directory scopes and whole-site/account alternatives are explicit.
 Approved sites capture all available files and dated versions in 1999–2006

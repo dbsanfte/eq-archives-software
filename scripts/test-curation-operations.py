@@ -48,17 +48,35 @@ class DeploymentTests(unittest.TestCase):
         client = Mock()
         client.getresponse.return_value.status = 403
         client.getresponse.return_value.read.return_value = b'Intranet access only'
+        pods = {'items': [{'metadata': {}, 'status': {'phase': 'Running', 'hostIP': '192.168.68.53',
+                          'conditions': [{'type': 'Ready', 'status': 'True'}]}}]}
         with patch('sys.argv', ['check-curation.py', '--image', 'fixture-image']), \
                 patch.dict('os.environ', {'GITHUB_SHA': 'fixture-revision'}), \
+                patch.object(readiness.subprocess, 'check_output', return_value=json.dumps(pods).encode()) as kube, \
                 patch.object(readiness.urllib.request, 'build_opener', return_value=Mock(open=response)), \
                 patch.object(readiness.http.client, 'HTTPConnection', return_value=client) as tcp, \
                 redirect_stdout(io.StringIO()):
             readiness.main()
         self.assertEqual(len(requests), 2)
+        self.assertTrue(all(url.startswith('http://192.168.68.53:8090/') for url in requests))
+        self.assertEqual(kube.call_args.kwargs['timeout'], 15)
         self.assertEqual(tcp.call_count, 3)
         for invocation in tcp.call_args_list:
             self.assertEqual(invocation.kwargs['source_address'], ('127.0.0.1', 0))
         self.assertEqual(client.request.call_count, 3)
+
+    def test_readiness_discovers_renumbered_host_and_ignores_draining_or_unready_pods(self):
+        def pod(address, ready=True, deleting=False):
+            return {'metadata': {'deletionTimestamp': 'now'} if deleting else {},
+                    'status': {'phase': 'Running', 'hostIP': address,
+                               'conditions': [{'type': 'Ready', 'status': 'True' if ready else 'False'}]}}
+        for address in ('192.168.68.53', '192.168.240.2'):
+            self.assertEqual(readiness.ready_address({'items': [pod('192.168.50.100', deleting=True),
+                             pod('192.168.50.100', ready=False), pod(address)]}), address)
+        for items in ([], [pod('203.0.113.1')], [pod('::1')],
+                      [pod('192.168.68.53'), pod('192.168.68.54')]):
+            with self.assertRaises(ValueError):
+                readiness.ready_address({'items': items})
 
     def test_separate_create_only_account_reuses_password_and_excludes_admin_from_output(self):
         incoming = {"items": [

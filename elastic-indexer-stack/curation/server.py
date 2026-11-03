@@ -91,7 +91,8 @@ async def body(request):
 
 def create_app(root=None, origin=None, start_worker=True):
     root = Path(root or os.environ.get("CURATION_ROOT", "/data"))
-    origin = origin or os.environ.get("CURATION_ORIGIN", "http://192.168.50.100:8090")
+    address = os.environ.get("LAN_BIND_IP", "192.168.68.53")
+    origin = origin or os.environ.get("CURATION_ORIGIN", f"http://{address}:8090")
     with connect(root):
         pass
     migrate(root)
@@ -642,7 +643,7 @@ def create_app(root=None, origin=None, start_worker=True):
 
 def main():
     import uvicorn
-    address = os.environ.get("LAN_BIND_IP", "192.168.50.100")
+    address = os.environ.get("LAN_BIND_IP", "192.168.68.53")
     if ipaddress.ip_address(address) not in NETWORK:
         raise SystemExit("Curation must bind an address in 192.168.0.0/16")
     os.environ["CURATION_ORIGIN"] = f"http://{address}:8090"
