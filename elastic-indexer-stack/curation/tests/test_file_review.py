@@ -131,8 +131,8 @@ def test_large_review_validation_allows_polling_and_rejects_concurrent_decision(
     monkeypatch.setattr('server.check_manifest', delayed)
     async def run():
         transport = httpx.ASGITransport(app=app, client=('192.168.50.20',54321))
-        async with httpx.AsyncClient(transport=transport, base_url='http://192.168.50.100:8090') as client:
-            headers = {'Origin':'http://192.168.50.100:8090','X-Curation-Request':'1'}
+        async with httpx.AsyncClient(transport=transport, base_url='http://192.168.68.53:8090') as client:
+            headers = {'Origin':'http://192.168.68.53:8090','X-Curation-Request':'1'}
             payload = {'id':batch,'manifest_sha256':digest(manifest),'decision':'approve'}
             pending = asyncio.create_task(client.post('/api/site-decision', json=payload, headers=headers))
             try:

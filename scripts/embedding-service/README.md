@@ -4,13 +4,25 @@ The Ubuntu GPU host runs the **same EmbeddingGemma 2 Q8_0 weights,
 768-dimensional normalized vectors, document/query prefixes and model alias** as
 the Vulkan service. All indexers use CUDA; live search and MCP use Vulkan.
 The separately managed CUDA server is reachable on the wired LAN only, at
-`192.168.50.193:8081`, with the existing Nomic API key. It is not a paid API.
+`192.168.68.108:8081`, with the existing Nomic API key. It is not a paid API.
 The root Kubernetes Kustomization manages a selectorless
 `nomic-embeddings-rtx3080` Service/Endpoints pointing to this host, without changing
 the Vulkan Deployment. The JSON patch removes the Service selector added by
 Kustomize's shared labels; the rendered-route CI check verifies that routing stays
 on the external address and does not select local cluster pods. Reserve the laptop's wired DHCP address in the router;
 update both `cuda.env` and the endpoint manifest if its address changes.
+
+The current eqvm LAN address is `192.168.68.53`; CUDA is at `192.168.68.108`.
+For a LAN renumbering, preserve active indexing Jobs and their sources. Update the
+GPU host's installed `cuda.env`, restart only its embedding service, and update the
+selectorless Endpoints address. If k3s still reports the old node address, refresh
+the k3s server process: its normal service restart preserves running containers
+(`KillMode=process`). Never use `k3s-killall.sh`, drain the node, or recreate the
+indexer to change these addresses. Verify the same Job/pod UID and restart count,
+updated node/Flannel addresses, authenticated inference and resumed checkpoints.
+Curation derives its bind address from `status.hostIP`; the deployment readiness
+check discovers the ready pod's host address instead of a fixed IP. Commit the
+new CUDA binding and Endpoints together so future deployments retain the route.
 
 ## Host prerequisites and installation
 
@@ -79,7 +91,7 @@ endpoints, validates complete indexed finite vectors, and reuses HTTP connection
 
 ```bash
 python3 scripts/embedding-service/benchmark.py \
-  --url http://192.168.50.193:8081/v1/embeddings \
+  --url http://192.168.68.108:8081/v1/embeddings \
   --api-key-file /private/nomic-api.key \
   --model 'text-embedding-nomic-embed-text-v1.5@q8_0' \
   --fixtures /private/prefixed-480-token-chunks.json \

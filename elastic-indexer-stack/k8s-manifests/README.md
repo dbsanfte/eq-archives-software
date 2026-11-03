@@ -3,7 +3,7 @@
 The same CI/CD workflow builds, tests and deploys the separate
 [intranet curation/import service](../curation/README.md) through
 [`deploy-curation.sh`](../../scripts/deploy-curation.sh). Its Kustomization manages
-a persistent queue and Jobs controller at `http://192.168.50.100:8090`, without
+a persistent queue and Jobs controller at `http://192.168.68.53:8090`, without
 authentication or public routing. Actions secrets `ARCHIVE_CRAWLER_OPENAI_API_KEY`
 and `ARCHIVE_PUBLISH_SSH_KEY` are dedicated to grading and archive publication.
 Existing ingestion Jobs are guarded before/after deployment; new imports wait
