@@ -41,7 +41,8 @@ def test_application_origin_follows_configured_lan_address_after_renumbering(tmp
     monkeypatch.setenv('LAN_BIND_IP', '192.168.68.99')
     monkeypatch.delenv('CURATION_ORIGIN', raising=False)
     app = create_app(tmp_path / 'state', start_worker=False)
-    assert call(app, 'GET', '/healthz', headers={'Host': '192.168.68.99:8090'}).status_code == 200
+    assert call(app, 'GET', '/healthz', headers={'Host': '192.168.68.99:8090',
+                'Origin': 'http://192.168.68.99:8090'}).status_code == 200
     assert call(app, 'GET', '/healthz').status_code == 403
 
 
