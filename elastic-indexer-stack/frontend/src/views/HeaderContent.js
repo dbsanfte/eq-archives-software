@@ -11,6 +11,7 @@ export default function HeaderContent({ compact = false }) {
           <span>EQ Archives</span>
         </a>
         <nav className="archive-resource-links" aria-label="Archive resources">
+          <a href="https://github.com/dbsanfte/eq-archives-software" target="_blank" rel="noopener noreferrer" aria-label="EQ Archives source on GitHub">GitHub</a>
           <a
             href="https://www.youtube.com/watch?v=DWXsCpAwKU4"
             target="_blank"

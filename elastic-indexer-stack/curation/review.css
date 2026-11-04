@@ -169,7 +169,9 @@ p { font-size:15px; line-height:1.6; overflow-wrap:anywhere; margin-bottom:12px;
 #theme-toggle svg { width:17px; height:17px; flex-shrink:0; }
 #theme-toggle .sun, [data-theme=dark] #theme-toggle .moon { display:none; }
 [data-theme=dark] #theme-toggle .sun { display:block; }
-.header-actions button:hover { background:#ffffff14; }
+.header-actions button:hover, .header-actions a:hover { background:#ffffff14; }
+.header-actions a { display:inline-flex; align-items:center; justify-content:center; min-height:44px; min-width:44px; padding:8px 6px; box-sizing:border-box; color:inherit; font:11px ui-monospace,monospace; text-underline-offset:3px; }
+.header-actions a[hidden] { display:none; }
 input::placeholder,textarea::placeholder { color:var(--muted); opacity:1; }
 #luna-spend { grid-area:spend; align-self:start; margin-left:4px; }
 #luna-spend summary { display:grid; gap:5px; padding:6px 0 6px 12px; border-left:1px solid var(--header-line); font-size:11px; list-style:none; }

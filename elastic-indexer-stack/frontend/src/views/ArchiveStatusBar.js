@@ -4,6 +4,7 @@ import { getConfig } from "../config/config-helper";
 
 export default function ArchiveStatusBar() {
   const buildSha = process.env.REACT_APP_GIT_SHA;
+  const commit = /^[0-9a-f]{40}$/i.test(buildSha || '') ? buildSha : null;
   const [docCount, setDocCount] = useState(0);
   // Start with a null value to indicate indexing rate is not ready
   const [indexRate, setIndexRate] = useState(null);
@@ -76,13 +77,20 @@ export default function ArchiveStatusBar() {
           Indexing Rate: {indexRate.toFixed(2)} docs/min
         </Typography>
       )}
+      <Box className="archive-status-bar__source">
       <Typography
         className="archive-status-bar__revision"
+        component={commit ? 'a' : 'span'}
+        href={commit ? `https://github.com/dbsanfte/eq-archives-software/commit/${commit}` : undefined}
+        target={commit ? '_blank' : undefined}
+        rel={commit ? 'noopener noreferrer' : undefined}
+        aria-label={commit ? `Deployed commit ${commit}` : undefined}
         variant="body2"
-        title={buildSha || "Local development build"}
+        title={commit || "Local development build"}
       >
-        Build: {buildSha ? buildSha.slice(0, 7) : "development"}
+        Build: {commit ? commit.slice(0, 7) : "development"}
       </Typography>
+      </Box>
     </Box>
   );
 }

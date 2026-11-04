@@ -202,7 +202,7 @@ not hold other workers. Missing sources are counted, retain original text/chunks
 and never claim repaired extraction. Unusable old vectors with no corresponding
 text are cleared during replacement. Empty sources are not invented.
 
-`embedding_model` and `text_chunking_version=eq-passages-480-v2` together are the
+`embedding_model` and `text_chunking_version=eq-passages-480-v3` together are the
 text resume checkpoint. Older Gemma records remain eligible for the passage
 upgrade; `REINDEX_PRIORITIZE_UNCONVERTED=true` finishes the old model frontier
 first, then upgrades previously converted Gemma records. Count model conversion
@@ -232,6 +232,31 @@ mailing lists retain quotation boundaries and source attribution. RSS entries
 have separate boundaries. Table chunks retain complete rows where possible and
 repeat column context. Oversized rows/prose split with overlap. Every complete
 request is checked with the pinned Gemma tokenizer against 480 tokens.
+
+Policy `eq-passages-480-v3` recognizes phpBB, WWWThreads and Snitz by cooperating
+HTML features across domains, along with Ezboard's Author/Comment rows. Each post
+keeps its own speaker/date, quotes and authored data tables. Signature separators,
+profiles and thread controls stay outside those message bodies. Partial/damaged
+recognition keeps unmatched bodies or falls back to the complete generic view;
+unregistered authors are retained. Posting/login forms and recognized error or
+disabled-site pages receive no semantic vectors, including summary/OCR vectors.
+Full reader text and existing enrichment remain intact.
+
+Separate data tables get separate column contexts from meaningful rows rather
+than empty Markdown framing headers. Short prose sections pack together within
+the request budget; post, feed and quote boundaries remain independent. Fenced
+code is not interpreted as table/quote markup. A numbered author reply following
+wrapped quoted text starts a new attribution scope. These heuristics are tested
+against structural reproductions of live captures and sampled unrelated layouts;
+they are not a claim that every historical forum theme is recognized.
+
+The reindex progress log includes passage, post/table/quote, short-passage and
+semantically excluded-document counters for acknowledged writes. Review these
+alongside bounded exact-record samples; small chunks can be legitimate short
+replies. Keep private source snapshots/audit outputs outside both repositories.
+Version 2 checkpoints remain valid history but need a version 3 passage upgrade.
+Use the normal pending-Job handoff, retaining source preparation and all previous
+Jobs; the independent image backfill and embedding services need no restart.
 
 Passages store offsets into the selected search view, title, context and kind;
 `text_passage_provenance` records source/view hashes and exclusions. These offsets

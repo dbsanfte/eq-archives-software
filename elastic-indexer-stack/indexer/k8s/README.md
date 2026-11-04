@@ -225,7 +225,7 @@ Infrastructure recovery is automatic; application/integrity failures remain
 visible for a correction. Inspect Job conditions and logs rather than assuming
 that a Running pod has made progress.
 
-The current Gemma passage upgrade uses `eq-passages-480-v2`, with both model and
+The current Gemma passage upgrade uses `eq-passages-480-v3`, with both model and
 passage policy required for completion. Its pending handoff prioritizes the
 unfinished model frontier, then upgrades older Gemma passages. Retain the old
 Job and prepared checkout. A separate `render-reindex.py --images` Job can index

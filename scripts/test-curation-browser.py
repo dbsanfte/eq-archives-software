@@ -40,6 +40,36 @@ async def safe_layout(page,width):
         assert box['width']>=44 and box['height']>=44,(width,box)
 
 
+async def header_source_flow(browser,base,width):
+    context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
+    page=await context.new_page();revision='a'*40;posts=[]
+    page.on('request',lambda request:posts.append(request.url) if request.method=='POST' else None)
+    async def response(route):
+        original=await route.fetch();payload=await original.json();payload['version']=revision
+        await route.fulfill(response=original,json=payload)
+    await page.route('**/api/queue?*',response)
+    try:
+        await page.goto(base);await settled(page)
+        repository=page.get_by_role('link',name='EQ Archives source on GitHub',exact=True)
+        commit=page.get_by_role('link',name='Deployed commit '+revision,exact=True)
+        await expect(repository).to_have_attribute('href','https://github.com/dbsanfte/eq-archives-software')
+        await expect(commit).to_have_attribute('href','https://github.com/dbsanfte/eq-archives-software/commit/'+revision)
+        for scheme in ('light','dark'):
+            await page.evaluate('(theme)=>document.documentElement.dataset.theme=theme',scheme)
+            await safe_layout(page,width)
+            for link in (repository,commit):
+                box=await link.bounding_box()
+                assert box['width']>=44 and box['height']>=44,(width,box)
+                assert await link.evaluate('(el)=>{const r=el.getBoundingClientRect();return el.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));}')
+                await expect(link).to_have_attribute('rel','noopener noreferrer')
+        revision='development'
+        await page.evaluate('()=>refresh()');await settled(page)
+        await expect(page.locator('#header-revision')).to_be_hidden()
+        assert await page.locator('#header-revision').get_attribute('href') is None
+        assert not posts
+    finally:await context.close()
+
+
 async def theme_flow(browser,base,width):
     context=await browser.new_context(viewport={'width':width,'height':844},
         is_mobile=width<700,has_touch=width<700,color_scheme='dark')
@@ -2393,6 +2423,7 @@ async def check(base):
                 if width in (390,1280):await slow_polling_flow(browser,base,width)
                 await pipeline_activity_flow(browser,base,width)
                 await continuous_mode_flow(browser,base,width)
+                await header_source_flow(browser,base,width)
                 await theme_flow(browser,base,width)
                 await regenerate_capture_flow(browser,base,width)
                 await regenerate_capture_flow(browser,base,width,retry_files=True)

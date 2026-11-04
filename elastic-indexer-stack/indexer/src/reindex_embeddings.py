@@ -35,6 +35,12 @@ class Progress:
     unchanged: int = 0
     unavailable_sources: int = 0
     failed: int = 0
+    passages: int = 0
+    post_passages: int = 0
+    table_passages: int = 0
+    quote_passages: int = 0
+    short_passages: int = 0
+    excluded_documents: int = 0
 
 
 def remaining_query(ids=None):
@@ -87,7 +93,7 @@ def prepare(source, repo):
     return groups, patch, missing
 
 
-def migrate_record(client, index, hit, repo, embedder, preparation_pool=None):
+def migrate_record(client, index, hit, repo, embedder, preparation_pool=None, *, diagnostics=None):
     source = hit["_source"]
     if source.get("id") != hit["_id"]:
         raise ValueError("Stored ID differs from exact Elasticsearch ID")
@@ -109,10 +115,11 @@ def migrate_record(client, index, hit, repo, embedder, preparation_pool=None):
     patch.update(text=chunks, text_chunking_version=passages.VERSION,
                  text_passage_provenance={"version": passages.VERSION,
                                           "sources": [plan.provenance() for _, plan in groups]})
-    asset = any("supporting_asset" in plan.exclusions for _, plan in groups)
+    excluded = any(set(plan.exclusions) & {"supporting_asset", "archived_access_or_error_page", "forum_utility_page"}
+                   for _, plan in groups)
     for field, body in (("llm_summary_vector", source.get("llm_summary")),
                         ("llm_image_text_vector", source.get("llm_image_text_full") or source.get("llm_image_text"))):
-        body = None if asset else passages.useful_summary(body)
+        body = None if excluded else passages.useful_summary(body)
         value = embedder.embed_text(body) if body and body.strip() else None
         if body and body.strip() and value is None:
             raise ValueError("Embedding response omitted summary/OCR vector")
@@ -123,6 +130,11 @@ def migrate_record(client, index, hit, repo, embedder, preparation_pool=None):
                              if_seq_no=hit["_seq_no"], if_primary_term=hit["_primary_term"])
     if response.get("result") not in ("updated", "noop"):
         raise ValueError("Elasticsearch did not update the record")
+    if diagnostics is not None:
+        selected=[p for _,plan in groups for p in plan.passages]
+        diagnostics.update(passages=len(selected),post_passages=sum(p.kind=='post' for p in selected),
+                           table_passages=sum(p.kind=='table' for p in selected),quote_passages=sum(p.kind=='quote' for p in selected),
+                           short_passages=sum(len(p.text.strip())<80 for p in selected),excluded_documents=int(excluded))
     return 1, missing
 
 
@@ -138,7 +150,9 @@ def reindex(client, index, repo, *, ids=None, limit=0, workers=4, batch_size=100
     def execute(hit):
         if not hasattr(local, "embedder"):
             local.embedder = factory(embedding_model_name=gemma.MODEL)
-        return migrate_record(client, index, hit, repo, local.embedder, preparation_pool)
+        diagnostics={}
+        result=migrate_record(client, index, hit, repo, local.embedder, preparation_pool,diagnostics=diagnostics)
+        return *result,diagnostics
     def scan():
         scanned = 0
         queries=[query]
@@ -168,10 +182,12 @@ def reindex(client, index, repo, *, ids=None, limit=0, workers=4, batch_size=100
     with ThreadPoolExecutor(max_workers=workers) as pool:
         for hit, result, _ in completed_records(scan(), execute, pool, workers):
             try:
-                updated, missing = result()
+                updated, missing, diagnostics = result()
                 progress.updated += updated
                 progress.unchanged += not updated
                 progress.unavailable_sources += missing
+                for key,value in diagnostics.items():
+                    setattr(progress,key,getattr(progress,key)+value)
                 failures = 0
             except ConflictError:
                 progress.failed += 1

@@ -16,14 +16,15 @@ from bs4 import BeautifulSoup, Comment
 from . import gemma
 from .chunking import SourceChunk, chunk_source
 from .html_extraction import website_markdown
+from . import passage_forums
 
-VERSION = "eq-passages-480-v2"
+VERSION = "eq-passages-480-v3"
 MAX_TOKENS = 480
 ASSETS = {".js", ".css", ".map", ".ico", ".svg", ".woff", ".woff2"}
 CONTROLS = re.compile(r"^(?:reply(?: to (?:item|topic))?(?: with quote)?|quote|edit|delete|"
                       r"login|log in|log out|register(?: your free account(?: \(required\))?)?|"
                       r"view public profile|send (?:a private message|email) to .+|"
-                      r"find all posts by .+|add .+ to your buddy list|print|back to top)$", re.I)
+                      r"find all posts by .+|add .+ to your buddy list|send a correction|print|back to top)$", re.I)
 DECORATION = re.compile(r"^(?:spacer|blank|pixel|bullet|divider|banner|logo|reply|quote|old|new|"
                         r".*(?:is offline|is online))$", re.I)
 NAV = re.compile(r"(?:^|[-_ ])(?:nav(?:igation)?|sidebar|site-menu|site-header|site-footer|"
@@ -111,10 +112,19 @@ class Plan:
                 "method": self.method, "exclusions": list(self.exclusions)}
 
 
-def _html_view(raw, host, _preserve_layout=False):
+def _html_view(raw, host, _preserve_layout=False, path=""):
     soup = BeautifulSoup(raw, "html.parser")
     excluded = []
     title = soup.title.get_text(" ", strip=True) if soup.title else ""
+    thread=passage_forums.extract(soup,host)
+    reason=None if thread else passage_forums.excluded_page(soup,title,path)
+    if reason:
+        return "",title,"archive_status",[reason]
+    if thread:
+        title=thread.title or title
+        soup=BeautifulSoup(thread.html,"html.parser")
+        excluded.append(thread.engine+"_posts")
+        if thread.engine=='ezboard':excluded.append('ezboard_author_comment_structure')
     for node in list(soup.find_all("title")):
         if not node.find_parent(["item","entry","rss","feed"]):
             node.decompose()
@@ -171,8 +181,13 @@ def _html_view(raw, host, _preserve_layout=False):
             signals = sum(any(term in label for label in labels) for term in
                           ("news", "search", "contact", "login", "links", "main"))
             linked = sum(len(a.get_text(" ", strip=True)) for a in links)
-            if (len(links) >= 8 and signals >= 3 and len(text) < 6000
-                    and linked/max(1,len(text)) > .55 and not node.select("#headerrow,th,caption")):
+            database_menu=sum(any(term in label for label in labels) for term in ('by item','by zone','by faction'))==3
+            data_grid=any(len(cells:=row.find_all(['td','th'],recursive=False))>1 and
+                          any(re.fullmatch(r'[+\-]?\d[\d,.\s]*',c.get_text(' ',strip=True)) for c in cells)
+                          for row in node.find_all('tr'))
+            if ((len(links) >= 8 and signals >= 3 or len(links)>=3 and database_menu) and len(text) < 6000
+                    and linked/max(1,len(text)) > .55 and not data_grid and not node.find('table')
+                    and not node.select("#headerrow,th,caption")):
                 excluded.append("legacy_aggregator_navigation")
                 node.decompose()
     if host.endswith("allakhazam.com"):
@@ -183,7 +198,7 @@ def _html_view(raw, host, _preserve_layout=False):
         heading = soup.find(["h1", "h2"])
         if heading:
             title = heading.get_text(" ", strip=True)
-    if host.endswith("ezboard.com"):
+    if not thread and host.endswith("ezboard.com"):
         for table in list(soup.find_all("table")):
             if not table.parent:
                 continue
@@ -233,7 +248,7 @@ def _html_view(raw, host, _preserve_layout=False):
             excluded.append("allakhazam_comment_controls")
     # Modern forum engines and many Ezboard mirrors expose the message body.
     # Replace a single-post presentation table, retaining its source author/date.
-    for node in list(soup.select("[id^=post_message_],.postbody,.post-content,.postText")):
+    for node in ([] if thread else list(soup.select("[id^=post_message_],.postbody,.post-content,.postText"))):
         if not node.parent:
             continue
         parent=node.find_parent("table")
@@ -278,17 +293,26 @@ def _html_view(raw, host, _preserve_layout=False):
             node.replace_with(alt)
     for comment in soup.find_all(string=lambda x: isinstance(x, Comment)):
         comment.extract()
-    visible=soup.get_text(" ",strip=True)
-    status=re.fullmatch(r"(?:System Message:\s*Error|404(?: Not Found)?|403(?: Forbidden)?|Access Denied|Page Not Found)",title,re.I)
-    private=host.endswith("ezboard.com") and "requested access to a private forum" in visible.lower()
-    if (status and len(visible)<5000 and not soup.find(["article","main"])) or private and len(visible)<1000:
-        return "",title,"archive_status",excluded+["archived_access_or_error_page"]
+    # Empty framing rows otherwise become a fabricated Markdown header above
+    # the actual data headings. Promote only explicit/recognizable headings.
+    header_words=re.compile(r'^(?:faction|positive quests|negative quests|member name|rank|name|spell|mana|item|effect|recipe|ingredients|username|from|joined|posts|email|url|icq|aim|yim|msn|replies|author|views|last post|topics):?$',re.I)
+    for table in reversed(list(soup.find_all('table'))):
+        rows=[r for r in table.find_all('tr') if r.find_parent('table') is table]
+        kept=[]
+        for row in rows:
+            cells=row.find_all(['td','th'],recursive=False)
+            if not any(c.get_text(strip=True) for c in cells):row.decompose()
+            else:kept.append(row)
+        if kept:
+            cells=kept[0].find_all(['td','th'],recursive=False)
+            if len(cells)>1 and all(header_words.fullmatch(c.get_text(' ',strip=True)) or c.find(['b','strong']) for c in cells):
+                for cell in cells:cell.name='th'
     view=website_markdown(str(soup))
     if not _preserve_layout and len(_plain(view))<50 and len(raw)>300:
-        fallback, fallback_title, method, reasons=_html_view(raw,host,_preserve_layout=True)
+        fallback, fallback_title, method, reasons=_html_view(raw,host,_preserve_layout=True,path=path)
         if len(_plain(fallback))>len(_plain(view))+100:
             return fallback,fallback_title,method,reasons+["conservative_layout_fallback"]
-    return view, title, "html_structure", excluded
+    return view, title, "forum_posts" if thread else "html_structure", excluded
 
 
 def _text_view(text, record_id):
@@ -298,6 +322,7 @@ def _text_view(text, record_id):
     # This is a search view, not a replacement for the preserved reader source.
     text = re.sub(r"!?\[([^\]\n]*)\]\([^\n]*?\)", r"\1", text)
     if record_id.startswith(("newsgroups/", "mailing-lists/")):
+        text=re.sub(r'<br\s*/?>','\n',text,flags=re.I)
         kept = []
         # A promotion can be appended to a long quoted conversation without
         # blank lines. Never discard that whole conversation to remove its ad.
@@ -316,23 +341,45 @@ def _sections(view):
     lines = [m for m in lines if m.start() < m.end()]
     boundaries = {0, len(view)}
     headings = {}
+    quoted_headings={}
+    code_lines=set();fence=None
+    for line in lines:
+        marker=re.match(r'^ {0,3}(`{3,}|~{3,})',line[0])
+        if fence:
+            code_lines.add(line.start())
+            if marker and marker[1][0]==fence[0] and len(marker[1])>=len(fence):
+                boundaries.add(line.end());fence=None
+        elif marker:
+            fence=marker[1];code_lines.add(line.start());boundaries.add(line.start())
+    reply_starts=set()
+    quoted=False
+    for line in lines:
+        if line.start() in code_lines:continue
+        value=line[0].strip()
+        if re.match(r'(?:\\?>)+\s',value):quoted=True
+        elif quoted and re.match(r'\d{1,3}[.)]\s+\S',value):
+            boundaries.add(line.start());reply_starts.add(line.start());quoted=False
     previous = ""
     paragraph_kind=""
     for paragraph in re.finditer(r".+?(?:\n[ \t]*\n|\Z)",view,re.S):
         value=paragraph[0].lstrip()
         if not value:continue
-        kind="quote" if re.match(r"(?:\\?>)+\s",value) else "prose"
+        kind="code" if paragraph.start() in code_lines else "quote" if re.match(r"(?:\\?>)+\s",value) else "prose"
         if paragraph_kind and kind!=paragraph_kind and "quote" in (kind,paragraph_kind):
             boundaries.add(paragraph.start())
         # Replies often begin quoting immediately, without a blank line. Split
         # at the first quote marker, retaining wrapped continuation lines as
         # part of that quote rather than creating a fragment for every line.
-        first_quote=re.search(r"(?m)^(?:\\?>)+[ \t]",paragraph[0])
+        first_quote=next((m for m in re.finditer(r"(?m)^(?:\\?>)+[ \t]",paragraph[0])
+                          if paragraph.start()+m.start() not in code_lines),None)
         if kind=="prose" and first_quote:
             boundaries.add(paragraph.start()+first_quote.start())
             kind="quote"
         paragraph_kind=kind
     for index, line in enumerate(lines):
+        if line.start() in code_lines:
+            previous='code'
+            continue
         value = line[0].strip()
         heading = re.match(r"#{1,6}\s+(.+)", value)
         bold_heading=re.fullmatch(r"\*\*([^:*\n]{3,100}\s+[^:*\n]+)\*\*",value)
@@ -344,22 +391,32 @@ def _sections(view):
             boundaries.add(line.start());headings[line.start()] = _plain(value)
         quoted_from=re.match(r"(?:\\?>[ \t]*)+From:\s*(.+)",value,re.I)
         if quoted_from:
-            boundaries.add(line.start());headings[line.start()]="Quoted message from "+_short(quoted_from[1])
+            boundaries.add(line.start());quoted_headings[line.start()]="Quoted message from "+_short(quoted_from[1])
         kind = "table" if value.startswith("|") and value.count("|") >= 2 else "prose"
+        if kind=='table' and index and not lines[index-1][0].strip():
+            boundaries.add(line.start())
         if kind != previous and (kind != "prose" or value):
             boundaries.add(line.start())
         previous = kind if value else previous
     points = sorted(boundaries)
     section = ""
+    post_scope="";quoted_scope=""
     for start,end in zip(points,points[1:]):
-        section = headings.get(start,section)
+        if start in headings:
+            heading=headings[start]
+            if re.match(r'^Post(?: by |$| \|)',heading) or re.search(r'\bBy: .+ Posted @',heading):
+                post_scope=heading;section=''
+            else:section=heading
         value = view[start:end]
         first = value.lstrip().splitlines()[0] if value.strip() else ""
-        kind = "table" if first.startswith("|") and first.count("|")>=2 else "quote" if re.match(r"(?:\\?>)+\s",first) else "prose"
-        yield start,end,section,kind
+        attributed=bool(post_scope)
+        kind = "code" if start in code_lines else "table" if first.startswith("|") and first.count("|")>=2 else "quote" if re.match(r"(?:\\?>)+\s",first) else "post" if attributed else "prose"
+        quoted_scope=quoted_headings.get(start,quoted_scope) if kind=='quote' else ''
+        context='\n\n'.join(part for part in (post_scope,section,quoted_scope) if part)
+        yield start,end,context,kind
 
 
-def _chunks(view, title, document_context=""):
+def _chunks(view, title, document_context="", strict_sections=False):
     result = []
     tokenizer = gemma.load_tokenizer()
     for start,end,heading,kind in _sections(view):
@@ -370,11 +427,10 @@ def _chunks(view, title, document_context=""):
         if kind == "table":
             lines = list(re.finditer(r"[^\n]*(?:\n|$)", body))
             lines = [m for m in lines if m.start()<m.end()]
-            header = []
-            for line in lines[:3]:
-                if re.search(r"\|\s*:?-{3,}",line[0]) or len(header)<2:
-                    header.append(line[0])
-            table_context = _short(" ".join(header),80)
+            # The first meaningful row, including legacy <td> headings after
+            # blank Markdown header rows. Never label dashes as column names.
+            header=next((line[0] for line in lines[:8] if any(c.isalpha() for c in _plain(line[0]))),"")
+            table_context = _short(header,80)
             if table_context:
                 context += "Table columns: " + table_context + "\n\n"
             prefix = document_prefix(title)+context
@@ -399,7 +455,20 @@ def _chunks(view, title, document_context=""):
             prefix=document_prefix(title)+context
             for chunk in chunk_source(body,tokenizer,prefix=prefix):
                 result.append(Passage(start+chunk.start,start+chunk.end,chunk.text,title,context,kind))
-    return tuple(result)
+    packed=[]
+    for passage in result:
+        if packed and not strict_sections:
+            previous=packed[-1]
+            punctuation=(not any(c.isalnum() for c in passage.text) or not any(c.isalnum() for c in previous.text)) and not {previous.kind,passage.kind}&{'post','quote'}
+            merge=previous.kind==passage.kind=='prose' or punctuation
+            context=previous.context if previous.context==passage.context else document_context
+            if merge and previous.end==passage.start:
+                body=view[previous.start:passage.end]
+                if len(tokenizer.encode(document_prefix(title)+context+body).ids)<=MAX_TOKENS:
+                    packed[-1]=Passage(previous.start,passage.end,body,title,context,previous.kind)
+                    continue
+        packed.append(passage)
+    return tuple(packed)
 
 
 def prepare(text, record_id="", title="", *, html_source=None, mime_type=""):
@@ -408,7 +477,7 @@ def prepare(text, record_id="", title="", *, html_source=None, mime_type=""):
     if host and (any(path.lower().endswith(suffix) for suffix in ASSETS) or path.lower().endswith("/robots.txt")):
         view="";excluded.append("supporting_asset")
     elif host and html_source and len(html_source)<=8*1024*1024 and ("html" in mime_type or "xml" in mime_type or re.match(r"\s*(?:<!DOCTYPE[^>]*>\s*)?<(?:html|body|rss|feed)\b",html_source,re.I)):
-        view,extracted,method,excluded=_html_view(html_source,host)
+        view,extracted,method,excluded=_html_view(html_source,host,path=path)
         raw_hash=digest(html_source)
         title=extracted or title
     else:
@@ -429,7 +498,7 @@ def prepare(text, record_id="", title="", *, html_source=None, mime_type=""):
     if view:view += "\n"
     elif text.strip():excluded.append("no_visible_content")
     title=_short(title)
-    passages=_chunks(view,title,document_context) if view.strip() else ()
+    passages=_chunks(view,title,document_context,strict_sections=method=='feed_entries') if view.strip() else ()
     plan=Plan(digest(text),raw_hash,view,title,method,tuple(sorted(set(excluded))),passages)
     verify(text,plan)
     return plan

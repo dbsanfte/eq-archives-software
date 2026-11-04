@@ -43,6 +43,24 @@ body {
   white-space: nowrap;
 }
 
+.archive-status-bar__source {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.archive-status-bar__source a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  min-width: 44px;
+  color: var(--archive-muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
 .archive-masthead {
   padding: 20px 0 25px;
 }
@@ -107,7 +125,8 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  min-height: 36px;
+  min-height: 44px;
+  min-width: 44px;
   color: var(--archive-muted);
   font-size: 12px;
   line-height: 1.5;
