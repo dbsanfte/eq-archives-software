@@ -6,6 +6,9 @@ test('offers the MCP connection screen with an accessible icon beside the archiv
   render(<HeaderContent />);
   const links = within(screen.getByRole('navigation', { name: 'Archive resources' }));
   expect(links.getByRole('link', { name: /Contact/ })).toBeInTheDocument();
+  const source=links.getByRole('link',{name:'EQ Archives source on GitHub'});
+  expect(source).toHaveAttribute('href','https://github.com/dbsanfte/eq-archives-software');
+  expect(source).toHaveAttribute('rel','noopener noreferrer');
   const mcpLink = screen.getByRole('link', { name: 'Connect with MCP' });
   expect(mcpLink).toHaveAttribute('href', '/mcp.html');
   expect(mcpLink.querySelector('img')).toHaveAttribute('src', '/images/mcp.svg');

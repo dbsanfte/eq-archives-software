@@ -88,6 +88,34 @@ def test_binary_document_keeps_its_existing_extracted_text_and_extraction_checkp
     assert patch['text'][0]['text_chunk'].strip()==hit['_source']['text_full']
 
 
+def test_archived_error_clears_all_semantic_vectors_and_preserves_the_reader_and_enrichment(tmp_path):
+    hit,client,embedder=fixture()
+    source=hit['_source']
+    raw='<title>System Message: Error</title><h1>Error</h1><p>The post you selected no longer exists.</p>'
+    path=tmp_path/source['id'];path.parent.mkdir(parents=True);path.write_text(raw)
+    source.update(text_full='Original error reader',mime_type='text/html',llm_summary='Historical summary retained')
+    diagnostics={}
+    job.migrate_record(client,'eq-archive',hit,tmp_path,embedder,diagnostics=diagnostics)
+    patch=client.update.call_args.kwargs['doc']
+    assert patch['text']==[]
+    assert patch['llm_summary_vector'] is None and patch['llm_image_text_vector'] is None
+    assert 'text_full' not in patch and 'llm_summary' not in patch
+    assert patch['text_chunking_version']==passages.VERSION
+    embedder.embed_text.assert_not_called()
+    assert diagnostics['excluded_documents']==1 and diagnostics['passages']==0
+
+
+def test_pipeline_quality_counters_record_only_acknowledged_writes(tmp_path):
+    hit,client,embedder=fixture();diagnostics={}
+    job.migrate_record(client,'eq-archive',hit,tmp_path,embedder,diagnostics=diagnostics)
+    assert diagnostics['passages']==1
+    assert diagnostics['excluded_documents']==0
+    client.update.return_value={'result':'unexpected'};failed={}
+    with pytest.raises(ValueError,match='did not update'):
+        job.migrate_record(client,'eq-archive',hit,tmp_path,embedder,diagnostics=failed)
+    assert failed=={}
+
+
 def test_missing_original_uses_stored_chunks_and_clears_unbacked_old_vectors(tmp_path):
     hit, client, embedder = fixture()
     hit['_source'].update(text_full='', text=[{'text_chunk': 'Preserved chunk'}],

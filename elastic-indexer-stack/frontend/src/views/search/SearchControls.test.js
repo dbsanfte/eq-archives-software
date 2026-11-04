@@ -85,3 +85,23 @@ test('handles missing count data and reports count request failures', async () =
     expect(log).toHaveBeenCalledWith('Error fetching archive stats:', error);
   } finally { global.fetch = originalFetch; }
 });
+
+test.each(['a'.repeat(40), 'development'])('links the source repository and only a real deployed commit (%s)', async revision => {
+  const originalFetch=global.fetch;
+  const previous=process.env.REACT_APP_GIT_SHA;
+  process.env.REACT_APP_GIT_SHA=revision;
+  global.fetch=jest.fn().mockResolvedValue({json:async()=>({count:100})});
+  try {
+    await act(async()=>{render(<ArchiveStatusBar />);});
+    if (revision==='development') expect(screen.queryByRole('link',{name:/Deployed commit/})).not.toBeInTheDocument();
+    else {
+      const commit=screen.getByRole('link',{name:`Deployed commit ${revision}`});
+      expect(commit).toHaveAttribute('href',`https://github.com/dbsanfte/eq-archives-software/commit/${revision}`);
+      expect(commit).toHaveTextContent('Build: aaaaaaa');
+    }
+  } finally {
+    global.fetch=originalFetch;
+    if(previous===undefined) delete process.env.REACT_APP_GIT_SHA;
+    else process.env.REACT_APP_GIT_SHA=previous;
+  }
+});

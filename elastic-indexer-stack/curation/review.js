@@ -183,6 +183,11 @@ async function refresh(navigated=false,reportErrors=false) {
     activityReceived=Date.now();activityDisconnected=false;
     data=listing;detail=context;renderShell();renderList();renderWorkspace();renderDock();renderTools();
     $('version').textContent=`Build ${data.version}`;
+    const revision=$('header-revision'),sha=data.version;
+    const valid=typeof sha==='string' && /^[0-9a-f]{40}$/i.test(sha);
+    revision.hidden=!valid;
+    if (valid) { revision.href=`https://github.com/dbsanfte/eq-archives-software/commit/${sha}`;revision.textContent=sha.slice(0,7);revision.title=`Deployed commit ${sha}`;revision.setAttribute('aria-label',`Deployed commit ${sha}`); }
+    else { revision.removeAttribute('href');revision.textContent='';revision.removeAttribute('title');revision.removeAttribute('aria-label'); }
     $('status').textContent=`${names[route.view]}: ${data.total} sites. ${detail ? statusLabel(detail.candidate) : ''}`;
     if (navigated) restorePosition();
   } catch (error) {

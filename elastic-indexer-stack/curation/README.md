@@ -140,6 +140,11 @@ Use the light/dark toggle in the header to change the entire portal, including
 source readers and dialogs. It initially follows the device's appearance and
 remembers an explicit choice in this browser across visits.
 
+The header links to the software repository and the exact deployed commit on
+GitHub. The shortened revision comes from the current service's queue metadata;
+development/unknown revisions do not create a misleading commit link. These are
+external navigation links, with no workflow action or paid work on refresh.
+
 1. Review Luna's grade, reason, verbatim evidence and complete extracted source.
    Archived scripts, HTML and images never execute in this screen.
 2. Choose scope and **Approve site for capture**. This authorizes capture, publication
@@ -770,7 +775,7 @@ dismissal is fabricated and no Luna request is made to classify this known adver
 
 ## Imported search content
 
-Imported text uses the shared `eq-passages-480-v2` search policy: real titles,
+Imported text uses the shared `eq-passages-480-v3` search policy: real titles,
 section/table context and attributed forum/mail quotations, with full reader
 content retained separately. Verified raster assets also receive local Gemma
 visual vectors through `gemma-image-embeddings`. This does not call Luna or change

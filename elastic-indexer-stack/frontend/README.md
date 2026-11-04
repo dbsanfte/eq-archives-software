@@ -346,8 +346,9 @@ routes in [nginx.conf.template](nginx.conf.template), or equivalent routes with
 server-side authentication. Serving the static files alone does not provide
 search access.
 
-The top status bar displays the first seven characters of the build revision,
-with the full SHA in its tooltip. Builds without a revision show
+The header links to the source repository on GitHub. The top status bar links
+the first seven characters of the deployed build revision to that exact commit,
+with the full SHA in its tooltip. Builds without a valid commit revision show
 `Build: development`. The container build accepts `GIT_SHA`; GitHub Actions sets
 it to the commit being deployed.
 

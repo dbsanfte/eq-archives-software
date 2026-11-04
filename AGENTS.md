@@ -223,12 +223,20 @@ extraction checkpoints, enrichment, source identity, dates and last_indexed. No
 paid enrichment during this backfill. Do not reuse Nomic checkpoints as Gemma
 completion. The Nomic repair entry point remains for historical recovery only.
 Follow the embedding-service migration runbook for operator-authorized handoffs.
-Gemma text uses `eq-passages-480-v2`: budget title/context with every 480-token
+Gemma text uses `eq-passages-480-v3`: budget title/context with every 480-token
 request, retain full reader text, verify source-bound selected-view coverage and
 store view offsets/provenance separately. Unknown layouts retain content;
 format-specific navigation/post/table handling needs regression evidence. Resume
 requires both model and passage version; prioritize the unfinished model frontier
 before older Gemma records. Never embed enrichment placeholder summaries.
+Forum extraction uses structural phpBB/WWWThreads/Snitz signatures across hosts;
+retain guest and damaged-header messages, quoted bodies and genuine data tables.
+Known error/utility projections clear every semantic field atomically, retaining
+reader/enrichment metadata. Keep table contexts meaningful, pack small prose
+sections without crossing post/feed/quote boundaries, and preserve fenced code.
+Validate against private live-capture samples plus unrelated layouts. Quality
+counters in reindex logs count only acknowledged writes; they are diagnostics,
+not a relevance score. Keep the independent image Job untouched in text handoffs.
 The separate CUDA vision companion uses the pinned projector in `vision.env`,
 one image slot and the same Gemma space. Keep text/live services independent.
 Install additive image/passages mappings before querying new vector fields.

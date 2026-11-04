@@ -60,6 +60,21 @@ def test_entire_manifest_is_verified_before_any_index_or_embedding_request(candi
     with pytest.raises(CrawlError): index_batch(root,batch,Forbidden())
 
 
+def test_archived_error_remains_captured_without_paying_for_enrichment_or_embedding(candidate):
+    root,row=candidate
+    capture=row['captures'][0]
+    raw=b'<title>System Message: Error</title><h1>Error</h1><p>The post you selected no longer exists.</p>'
+    (root/capture['path']).write_bytes(raw)
+    capture.update(content_type='text/html',bytes=len(raw),sha256=digest(raw))
+    class SourcesOnly:
+        def exists(self,*args):return False
+        def enrich(self,*args):raise AssertionError('No paid enrichment of an archived error')
+        def embedding(self,*args):raise AssertionError('No error embedding')
+        def create(self,*args):raise AssertionError('Do not publish a semantic document')
+    assert index_batch(root,published(row),SourcesOnly())=={'created':0,'existing':0,'captures':1,'preserved_files':1}
+    assert (root/capture['path']).read_bytes()==raw
+
+
 def test_enrichment_failure_leaves_new_document_pending_and_never_writes_fallback(candidate):
     root,row=candidate
     class Pending:

@@ -4,6 +4,7 @@
 import os
 import fnmatch
 import json
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
@@ -42,6 +43,28 @@ class FrontendBrowserTests(unittest.TestCase):
                 "hits": {"total": {"value": 0, "relation": "eq"}, "hits": []},
                 "aggregations": {"facet_bucket_all": {"doc_count": 0, **facets}},
             })
+
+    def test_header_links_the_repository_and_the_exact_deployed_commit(self):
+        for width in (320,390,768,1280):
+            with self.subTest(width=width):
+                context=self.browser.new_context(viewport={'width':width,'height':900},is_mobile=width<800,has_touch=width<800)
+                try:
+                    page=context.new_page()
+                    page.route('**/elasticsearch/**',self.mock_elasticsearch)
+                    page.goto(self.base_url,wait_until='networkidle')
+                    repository=page.get_by_role('link',name='EQ Archives source on GitHub',exact=True)
+                    expect(repository).to_have_attribute('href','https://github.com/dbsanfte/eq-archives-software')
+                    commit=page.get_by_role('link',name='Deployed commit',exact=False)
+                    expect(commit).to_have_attribute('href',re.compile(r'^https://github.com/dbsanfte/eq-archives-software/commit/[a-f0-9]{40}$'))
+                    if os.environ.get('EXPECTED_GIT_SHA'):
+                        expect(commit).to_have_attribute('href','https://github.com/dbsanfte/eq-archives-software/commit/'+os.environ['EXPECTED_GIT_SHA'])
+                    for link in (repository,commit):
+                        box=link.bounding_box()
+                        self.assertGreaterEqual(box['height'],44)
+                        self.assertGreaterEqual(box['width'],44)
+                        self.assertTrue(link.evaluate('(el)=>{const r=el.getBoundingClientRect();return el.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));}'))
+                    self.assertTrue(page.evaluate('document.documentElement.scrollWidth<=innerWidth'))
+                finally:context.close()
 
     def check_sort_menu(self, width, filled_dates):
         context = self.browser.new_context(
