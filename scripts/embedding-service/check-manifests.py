@@ -14,6 +14,14 @@ assert endpoints['subsets'] == [{'addresses': [{'ip': config['BIND_ADDRESS']}],
                                 'ports': [{'name': 'http', 'port': int(config['BIND_PORT']), 'protocol': 'TCP'}]}]
 for item in (service, endpoints):
     assert item['metadata']['labels']['app.kubernetes.io/part-of'] == 'eqarchives-embeddings'
+vision = dict(line.split('=', 1) for line in Path(__file__).with_name('vision.env').read_text().splitlines()
+              if line and not line.startswith('#'))
+image_service = resources['Service', 'gemma-image-embeddings']
+image_endpoints = resources['Endpoints', 'gemma-image-embeddings']
+assert not image_service['spec'].get('selector'), 'Vision must not select local cluster pods'
+assert image_service['spec']['ports'][0]['targetPort'] == int(vision['VISION_PORT'])
+assert image_endpoints['subsets'] == [{'addresses': [{'ip': config['BIND_ADDRESS']}],
+    'ports': [{'name': 'http', 'port': int(vision['VISION_PORT']), 'protocol': 'TCP'}]}]
 local = resources['Service', 'nomic-embeddings']
 assert local['spec']['selector']['app'] == 'nomic-embeddings'
 # Online search and MCP must retain the low-latency Vulkan route.

@@ -89,6 +89,10 @@ python3 "$repo_dir/scripts/frontend-secrets.py" |
     --field-manager=frontend-cicd -f - >/dev/null
 
 # Bring up and verify the local model before changing frontend routing.
+schema_ip=$("${kubectl[@]}" -n eqarchives-es get service elasticsearch -o jsonpath='{.spec.clusterIP}')
+export EMBEDDING_SCHEMA_ES_URL="http://$schema_ip:9200"
+"${kubectl[@]}" -n eqarchives-es get secret elastic-password-secret -o json |
+  python3 "$repo_dir/scripts/embedding-service/provision-schema.py"
 "${kubectl[@]}" apply -f "$work_dir/frontend.yaml" -l app.kubernetes.io/part-of=eqarchives-embeddings
 "${kubectl[@]}" -n eqarchives-es rollout status daemonset/eqarchives-vulkan-device-plugin --timeout=180s
 "${kubectl[@]}" -n eqarchives-es rollout status deployment/nomic-embeddings --timeout=900s

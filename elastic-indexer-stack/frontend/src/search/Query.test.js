@@ -1,4 +1,5 @@
 import { resolveQuery } from './Query';
+import engine from '../config/engine.json';
 
 // Mock the embedding service
 jest.mock('./EmbeddingService', () => ({
@@ -41,6 +42,18 @@ describe('Query.js', () => {
     });
 
     describe('resolveQuery', () => {
+        test('production semantic search includes visual vectors with the same model and site constraints', () => {
+            embeddingService.isEmbeddingServiceAvailable.mockReturnValue(true);
+            embeddingService.getEmbedding.mockReturnValue([1, 0]);
+            requestState.searchTerm = 'a dragon over a snowy mountain';
+            const site = { term: { domain_name: 'eqatlas.com' } };
+            requestBody.query = { bool: { filter: [site] } };
+            resolveQuery(requestState, requestBody, searchFields, paramsRef, engine.vectorFields,
+                engine.nestedVectorFields, engine.embeddingModel);
+            const visual = requestBody.knn.find(branch => branch.field === 'image_vector');
+            expect(visual.query_vector).toEqual([1, 0]);
+            expect(visual.filter).toEqual([site, { term: { embedding_model: engine.embeddingModel } }]);
+        });
         test('Gemma restricts all vector fields to complete model checkpoints while lexical covers everything', () => {
             const model = 'embeddinggemma-2-768-v1';
             embeddingService.isEmbeddingServiceAvailable.mockReturnValue(true);

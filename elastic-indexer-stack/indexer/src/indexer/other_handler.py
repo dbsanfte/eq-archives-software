@@ -34,10 +34,12 @@ class OtherHandler:
             chunks_and_embeddings = self._openai_manager.get_chunks_and_embeddings(
                 document=Document(
                     page_content=markdown, 
-                    metadata={"file_path": file_path, "mime_type": mime_type}
+                    metadata={"file_path": file_path, "record_id": doc_id, "title": title, "mime_type": mime_type}
                 )
             )
             
+            chunking_version = getattr(self._openai_manager, "chunking_version", None)
+            passage_provenance = getattr(self._openai_manager, "passage_provenance", None)
             llm_response = {}
             try:
                 if self._LLM_ENRICHMENT_ENABLED:
@@ -66,6 +68,9 @@ class OtherHandler:
                 title=title,
                 thumbnail=thumbnail,
                 file_type="other",
+                embedding_model=getattr(self._openai_manager, "_embedding_model_name", None),
+                text_chunking_version=chunking_version,
+                text_extraction_version="docling-markdown-v1",
                 mime_type=mime_type,
                 text_full=markdown,
                 llm_summary = llm_summary,
@@ -80,6 +85,8 @@ class OtherHandler:
                 text=chunks_and_embeddings,
                 alternate_url=alternate_url
             )
+            if passage_provenance:
+                doc["text_passage_provenance"] = passage_provenance
             return [doc]
         except Exception as e:
             self._logger.error(f"Error processing other file type: {e}")

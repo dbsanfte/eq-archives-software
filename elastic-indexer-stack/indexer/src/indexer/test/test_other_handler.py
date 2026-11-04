@@ -261,3 +261,25 @@ def test_llm_enrichment_enabled_default(dummy_dependencies, monkeypatch):
     
     # Check that the flag is True by default
     assert handler._LLM_ENRICHMENT_ENABLED is True
+
+def test_primary_passage_checkpoint_survives_summary_embedding(tmp_path, other_handler):
+    from indexer import gemma,passages
+    manager=other_handler._openai_manager
+    manager._embedding_model_name=gemma.MODEL
+    original=manager.get_chunks_and_embeddings
+    def primary(document):
+        manager.chunking_version=passages.VERSION
+        manager.passage_provenance={"version":passages.VERSION,"source_sha256":"primary"}
+        return original(document)
+    def summary(**kwargs):
+        manager.chunking_version=gemma.CHUNKING_VERSION
+        manager.passage_provenance={"source_sha256":"summary"}
+        return {"llm_summary":"A useful summary"}
+    manager.get_chunks_and_embeddings=primary
+    manager.call_openai_api_text=summary
+    path=tmp_path/'guide.txt';path.write_text('Complete document content.')
+    doc=other_handler.process_other_file(str(path),'text/plain')[0]
+    assert doc['embedding_model']==gemma.MODEL
+    assert doc['text_chunking_version']==passages.VERSION
+    assert doc['text_passage_provenance']['source_sha256']=='primary'
+    assert doc['text_full']=='Complete document content.'

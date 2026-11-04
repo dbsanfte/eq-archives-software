@@ -801,7 +801,8 @@ class FrontendBrowserTests(unittest.TestCase):
                     self.assertEqual(len(embeddings), 1)
                     self.assertEqual(embeddings[0]['input'], ['task: search result | query: ancient cyclops'])
                     self.assertIn('knn', requests[-1])
-                    self.assertEqual(len(requests[-1]['knn']), 3)
+                    self.assertEqual(len(requests[-1]['knn']), 4)
+                    self.assertIn('image_vector', [branch['field'] for branch in requests[-1]['knn']])
                     for branch in requests[-1]['knn']:
                         self.assertEqual((branch['k'], branch['num_candidates'], branch['boost']), (50, 250, 10))
                         self.assertIn({'term': {'embedding_model': 'embeddinggemma-2-768-v1'}}, branch['filter'])

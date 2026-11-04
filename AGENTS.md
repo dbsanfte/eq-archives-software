@@ -223,6 +223,19 @@ extraction checkpoints, enrichment, source identity, dates and last_indexed. No
 paid enrichment during this backfill. Do not reuse Nomic checkpoints as Gemma
 completion. The Nomic repair entry point remains for historical recovery only.
 Follow the embedding-service migration runbook for operator-authorized handoffs.
+Gemma text uses `eq-passages-480-v2`: budget title/context with every 480-token
+request, retain full reader text, verify source-bound selected-view coverage and
+store view offsets/provenance separately. Unknown layouts retain content;
+format-specific navigation/post/table handling needs regression evidence. Resume
+requires both model and passage version; prioritize the unfinished model frontier
+before older Gemma records. Never embed enrichment placeholder summaries.
+The separate CUDA vision companion uses the pinned projector in `vision.env`,
+one image slot and the same Gemma space. Keep text/live services independent.
+Install additive image/passages mappings before querying new vector fields.
+Raster imports/backfills call no paid enrichment. Backfills use local Git trees,
+source-blob verification, create-only writes and persistent private SQLite cursors;
+preserve prepared sources and all previous Jobs. Keep per-file diagnostic reasons
+and image input bounds. Run embedding-service and legacy backend regressions.
 
 Operator-requested reindex tuning uses a prepared, checkpoint-preserving handoff
 as documented in the Jobs guide; ordinary curation delivery still leaves existing

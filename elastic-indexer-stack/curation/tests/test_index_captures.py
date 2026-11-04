@@ -27,7 +27,7 @@ def test_manifest_indexing_creates_missing_ids_preserves_source_and_skips_existi
             return {'llm_summary':'An EverQuest guild history and guide.', 'llm_content_flavour':'Guild Achievements',
                     'llm_tags':['raid'],'llm_guessed_date':None,'llm_extracted_dates':[],
                     'llm_model_name':'gpt-6-luna','llm_enrichment_signature':'c'*64}
-        def embedding(self,text): self.inputs.append(text); return [0.01]*768
+        def embedding(self,text,**kwargs): self.inputs.append(text); return [0.01]*768
         def create(self,identifier,document): self.docs[identifier]=document; return True
     services=FakeServices()
     assert index_batch(root,batch,services) == {'created':1,'existing':0,'captures':1}
@@ -150,6 +150,16 @@ def test_default_embedding_requests_use_cuda_and_leave_vulkan_for_live_queries(t
         assert seen[0].url.path=='/v1/embeddings'
     finally:
         services.close()
+
+
+def test_successful_model_requests_have_no_intentional_throttle(tmp_path):
+    instance=service(tmp_path,lambda request:httpx.Response(200,json={
+        'model':MODEL,'data':[{'embedding':[1.]+[0.]*767}]}))
+    try:
+        with patch('index_captures.time.sleep') as sleep:
+            instance.embedding('A complete guide.')
+        sleep.assert_not_called()
+    finally:instance.close()
 
 
 def test_model_mismatch_cannot_index_vectors_from_old_backend(tmp_path):

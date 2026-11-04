@@ -57,6 +57,20 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(env['OPENAI_ENDPOINT_EMBEDDINGS'], env['OPENAI_ENDPOINT'])
         self.assertIn('nomic-embeddings-rtx3080.', env['OPENAI_ENDPOINT'])
 
+    def test_image_backfill_has_its_own_persistent_state_without_mutating_text_sources(self):
+        previous=self.previous();original=deepcopy(previous)
+        job=handoff.render(previous,'reindex-images','eqarchives-indexer:rtx3080-'+'a'*40,images=True)
+        pod=job['spec']['template']['spec'];container=pod['containers'][0]
+        env={row['name']:row['value'] for row in container['env']}
+        self.assertEqual(previous,original)
+        self.assertEqual(job['spec']['parallelism'],0)
+        self.assertEqual(env['REINDEX_ENTRYPOINT'],'index_images.pyc')
+        self.assertEqual(env['SKIP_LLM_ENRICHMENT'],'true')
+        self.assertIn('gemma-image-embeddings.',env['OPENAI_ENDPOINT'])
+        self.assertEqual(env['REINDEX_WORKERS'],'1')
+        self.assertEqual(container['volumeMounts'][0],original['spec']['template']['spec']['containers'][0]['volumeMounts'][0])
+        self.assertEqual(pod['volumes'][-1]['hostPath'],{'path':'/mnt/samsung/eqarchives-images','type':'Directory'})
+
     def test_rejects_preparation_writable_sources_or_unrecognized_entrypoint(self):
         for change in ('init', 'write', 'command', 'enrichment'):
             previous = self.previous(); pod = previous['spec']['template']['spec']; c = pod['containers'][0]

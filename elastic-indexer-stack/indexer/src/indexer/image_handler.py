@@ -48,6 +48,17 @@ class ImageHandler:
             llm_image_text_vector = llm_response.get("llm_image_text_vector", None)
             llm_tags = llm_response.get("llm_tags", None)
                 
+            visual = {}
+            if getattr(self._openai_manager, "_embedding_model_name", None) == "embeddinggemma-2-768-v1":
+                from .image_embeddings import prepare_image, ImageUnavailable, VERSION
+                try:
+                    image = prepare_image(image_bytes)
+                    visual = dict(image_vector=self._openai_manager.embed_image(image),
+                                  image_embedding_version=VERSION, image_embedding_status="embedded",
+                                  image_embedding_sha256=image.source_sha256,
+                                  image_embedding_provenance=image.provenance())
+                except ImageUnavailable as error:
+                    visual = dict(image_embedding_version=VERSION, image_embedding_status=str(error))
             # Build document for image file
             doc_id = relative_path.replace(os.sep, '/')
             doc = ElasticsearchManager.build_document(
@@ -66,6 +77,7 @@ class ImageHandler:
                 llm_content_flavour=llm_content_flavour,
                 llm_tags=llm_tags,
                 llm_image_text_vector=llm_image_text_vector,
+                **visual,
             )
             return [doc]
         except Exception as e:

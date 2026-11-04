@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 from langchain_core.documents import Document
 
-from indexer import gemma
+from indexer import gemma, passages
 from indexer.openai_manager import OpenAIManager
 from indexer.reindex_preparation import verify_prepared
 
@@ -76,7 +76,7 @@ def test_gemma_uses_source_chunks_batched_prefixes_and_normalized_summary(monkey
     client._openai_embeddings.client.create.side_effect = respond
     body = 'Guild recruitment. ' * 700
     result = client.get_chunks_and_embeddings(Document(page_content=body))
-    assert len(result) >= 3 and client.chunking_version == gemma.CHUNKING_VERSION
+    assert len(result) >= 3 and client.chunking_version == passages.VERSION
     assert result[0]['text_chunk'] == body[:len(result[0]['text_chunk'])]
     assert client.embed_text(body).tolist() == V
     assert client.embed_text(' ') is None
@@ -106,3 +106,27 @@ def test_server_model_mismatch_never_produces_ready_vectors(monkeypatch):
     monkeypatch.setenv('GEMMA_EMBEDDING_PROFILE', 'typo')
     with pytest.raises(ValueError, match='profile'):
         client.embed_text('Cleric')
+
+
+def test_direct_image_request_uses_only_local_data_and_the_shared_gemma_space(monkeypatch):
+    from indexer import image_embeddings as visual
+    from PIL import Image
+    stream = io.BytesIO()
+    Image.new('RGB', (32, 32), 'blue').save(stream, format='PNG')
+    raw_image = stream.getvalue()
+    client=object.__new__(OpenAIManager);client._api_key='fixture-key';client._embedding_model_name=gemma.MODEL
+    wire=MagicMock();wire.embeddings.create.return_value.model_dump.return_value={
+        'model':gemma.MODEL,'data':[{'index':0,'embedding':[2.]+[0.]*767}]}
+    image=visual.prepare_image(raw_image)
+    with patch('indexer.openai_manager.OpenAI',return_value=wire) as factory:
+        result=client.embed_image(image)
+        assert result==[1.]+[0.]*767
+        request=wire.embeddings.create.call_args.kwargs
+        assert request['model']==gemma.MODEL
+        assert request['input']==[image.content()]
+        assert request['encoding_format']=='float'
+        assert factory.call_args.kwargs['api_key']=='fixture-key'
+        assert 'gemma-image-embeddings' in factory.call_args.kwargs['base_url']
+        client.embed_image(image);assert factory.call_count==1
+    client._embedding_model_name='old-nomic'
+    with pytest.raises(ValueError,match='Gemma'):client.embed_image(image)
