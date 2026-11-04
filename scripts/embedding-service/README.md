@@ -202,7 +202,7 @@ not hold other workers. Missing sources are counted, retain original text/chunks
 and never claim repaired extraction. Unusable old vectors with no corresponding
 text are cleared during replacement. Empty sources are not invented.
 
-`embedding_model` and `text_chunking_version=eq-passages-480-v3` together are the
+`embedding_model` and `text_chunking_version=eq-passages-480-v4` together are the
 text resume checkpoint. Older Gemma records remain eligible for the passage
 upgrade; `REINDEX_PRIORITIZE_UNCONVERTED=true` finishes the old model frontier
 first, then upgrades previously converted Gemma records. Count model conversion
@@ -233,13 +233,18 @@ have separate boundaries. Table chunks retain complete rows where possible and
 repeat column context. Oversized rows/prose split with overlap. Every complete
 request is checked with the pinned Gemma tokenizer against 480 tokens.
 
-Policy `eq-passages-480-v3` recognizes phpBB, WWWThreads and Snitz by cooperating
+Policy `eq-passages-480-v4` recognizes phpBB, WWWThreads, Snitz and vBulletin by cooperating
 HTML features across domains, along with Ezboard's Author/Comment rows. Each post
 keeps its own speaker/date, quotes and authored data tables. Signature separators,
 profiles and thread controls stay outside those message bodies. Partial/damaged
 recognition keeps unmatched bodies or falls back to the complete generic view;
 unregistered authors are retained. Posting/login forms and recognized error or
 disabled-site pages receive no semantic vectors, including summary/OCR vectors.
+vBulletin uses complete message-comment regions or per-post IDs in full threads,
+and matched username/posttext pairs in stripped archive pages. It retains attached
+file labels and authored tables/quotes, excludes profile/signature controls and
+falls back on damaged boundaries. Earlier v3 checkpoints remain eligible for this
+upgrade; source preparation, dates, readers and enrichment remain intact.
 Full reader text and existing enrichment remain intact.
 
 Separate data tables get separate column contexts from meaningful rows rather

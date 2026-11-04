@@ -9,7 +9,7 @@ from indexer.capture_enrichment import policy
 from review import record
 from review_actions import apply_decision
 from site_reviews import get
-from state import connect, valid_id
+from state import connect, database_busy, valid_id
 
 
 def approved_site(store, captured):
@@ -61,6 +61,7 @@ def prepare_next(root):
             return result
         except Exception as error:
             store.db.rollback()
+            if database_busy(error):raise
             detail = str(error) if isinstance(error, CrawlError) else 'Indexing preparation failed; saved files are retained. Retry preparation.'
             store.db.execute("UPDATE batches SET state='index_preflight_failed',error=?,updated=? WHERE id=? AND state='awaiting_review' AND manifest_sha256=?",
                              (detail, now(), identifier, expected))

@@ -1,8 +1,10 @@
 """Independent resumable candidate, capture and publication/indexing workers."""
 
 import json
+import logging
 import os
 from pathlib import Path
+import sqlite3
 import threading
 import time
 from datetime import datetime, timedelta
@@ -21,7 +23,7 @@ from captures import capture_sites
 from capture_progress import CaptureProgress
 from jobs import Kubernetes, blockers, import_attempt, import_job, import_name
 from publisher import publish
-from state import Lane, OPERATION_KINDS, active_operation, connect, unpack, worker_lease
+from state import Lane, OPERATION_KINDS, active_operation, connect, database_busy, unpack, worker_lease
 from coverage_check import refresh
 from site_reviews import materialize, migrate
 from import_status import read_error, read_status, read_budget_pause
@@ -33,6 +35,8 @@ from capture_budget import budget_identity
 from capture_continuation import require_eligible
 import automation
 from daily_budget import automatic_request, require_automatic
+
+LOG=logging.getLogger(__name__)
 
 
 class ImportQueueUnavailable(CrawlError):
@@ -164,6 +168,72 @@ class Worker:
             self.transport.close()
             self.lease.close()
 
+    def save_state(self, write, *args):
+        """Retry a metadata transaction, never the external work it records.
+
+        Each callback opens/closes its own connection and commits last. A busy
+        transaction rolls back on close before retry; shutdown leaves unfinished
+        work for the existing checkpoint/reconciliation rules.
+        """
+        while True:
+            try:
+                return write(*args)
+            except sqlite3.OperationalError as error:
+                if not database_busy(error):raise
+                LOG.warning('Curation metadata write waiting for SQLite; retrying without replaying external work')
+                if self.stop.wait(1):raise
+
+    def publication_complete(self, batch_id, manifest, result):
+        with connect(self.root) as store:
+            store.db.execute("UPDATE batches SET state='published_waiting_index',publication=?,updated=? WHERE id=?",
+                             (json.dumps(result), now(), batch_id))
+            for site in manifest['sites']:
+                row=store.db.execute('SELECT state FROM candidates WHERE id=?',(site['id'],)).fetchone()
+                store.db.execute('UPDATE candidates SET state=? WHERE id=?',(transition(row['state'],Action.PUBLISH),site['id']))
+            store.db.commit()
+
+    def capture_progress(self, operation, batch_id, snapshot):
+        with connect(self.root) as store:
+            store.db.execute("UPDATE operations SET result=?,updated=? WHERE id=? AND state='running'",
+                             (json.dumps({'batch_id':batch_id,'progress':snapshot}),now(),operation['id']))
+            store.db.commit()
+
+    def capture_complete(self, batch_id, manifest):
+        with connect(self.root) as store:
+            store.db.execute("UPDATE batches SET state='awaiting_review',manifest=?,manifest_sha256=?,error=NULL,updated=? WHERE id=?",
+                             (json.dumps(manifest),digest(manifest),now(),batch_id))
+            for site in manifest['sites']:
+                row=store.db.execute('SELECT state,coverage FROM candidates WHERE id=?',(site['id'],)).fetchone()
+                coverage=json.loads(row['coverage'] or '{}')
+                coverage['capture']={'batch_id':batch_id,'completed_at':now()}
+                store.db.execute('UPDATE candidates SET state=?,coverage=? WHERE id=?',
+                                 (transition(row['state'],Action.COMPLETE),json.dumps(coverage),site['id']))
+            materialize(store,unpack(store.db.execute('SELECT * FROM batches WHERE id=?',(batch_id,)).fetchone()))
+            store.db.commit()
+
+    def operation_complete(self, operation, result):
+        with connect(self.root) as store:
+            store.db.execute("UPDATE operations SET state='completed',result=?,updated=? WHERE id=?",
+                             (json.dumps(result),now(),operation['id']))
+            store.db.commit()
+        automation.finished(self.root,operation,result)
+
+    def operation_interrupted(self, operation, error):
+        detail=str(error) if isinstance(error,CrawlError) else f'Operation failed ({type(error).__name__}); staged evidence retained'
+        if operation['kind']=='capture' and detail=='Worker stopped; resume explicitly':
+            from capture_failures import WORKER_INTERRUPTED
+            detail=WORKER_INTERRUPTED
+        with connect(self.root) as store:
+            previous=store.db.execute('SELECT result FROM operations WHERE id=?',(operation['id'],)).fetchone()
+            result=json.loads(previous['result'] or '{}');result.pop('automatic_pause',None)
+            if pause:=automation.pause_detail(error,operation):result['automatic_pause']=pause
+            store.db.execute("UPDATE operations SET state='interrupted',error=?,result=?,updated=? WHERE id=?",
+                             (detail,json.dumps(result),now(),operation['id']))
+            if operation['kind']=='capture':
+                from capture_recovery import register
+                register(store,operation,detail)
+            store.db.commit()
+
     def capture_queue(self):
         from capture_recovery import schedule
         schedule(self.root)
@@ -241,13 +311,7 @@ class Worker:
                 destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
                 save(destination,
                      {"manifest": batch["manifest"], "manifest_sha256": expected, "publication": result})
-                with connect(self.root) as store:
-                    store.db.execute("UPDATE batches SET state='published_waiting_index',publication=?,updated=? WHERE id=?",
-                                     (json.dumps(result), now(), batch_id))
-                    for site in batch["manifest"]["sites"]:
-                        row = store.db.execute('SELECT state FROM candidates WHERE id=?', (site['id'],)).fetchone()
-                        store.db.execute('UPDATE candidates SET state=? WHERE id=?', (transition(row['state'], Action.PUBLISH), site['id']))
-                    store.db.commit()
+                self.save_state(self.publication_complete,batch_id,batch['manifest'],result)
             else:
                 with connect(self.root) as store:
                     for site in operation['payload']['sites']:
@@ -258,43 +322,13 @@ class Worker:
                 def progress(snapshot):
                     nonlocal latest
                     latest = tracker.update(snapshot)
-                    with connect(self.root) as store:
-                        store.db.execute("UPDATE operations SET result=?,updated=? WHERE id=? AND state='running'",
-                                         (json.dumps({'batch_id': batch_id, 'progress': latest}), now(), operation['id']))
-                        store.db.commit()
+                    self.save_state(self.capture_progress,operation,batch_id,latest)
                 manifest = capture_sites(self.root, batch_id, operation["payload"]["sites"], progress=progress)
-                with connect(self.root) as store:
-                    store.db.execute("UPDATE batches SET state='awaiting_review',manifest=?,manifest_sha256=?,error=NULL,updated=? WHERE id=?",
-                                     (json.dumps(manifest), digest(manifest), now(), batch_id))
-                    for site in manifest["sites"]:
-                        row = store.db.execute('SELECT state,coverage FROM candidates WHERE id=?', (site['id'],)).fetchone()
-                        coverage = json.loads(row['coverage'] or '{}')
-                        coverage['capture'] = {'batch_id':batch_id,'completed_at':now()}
-                        store.db.execute('UPDATE candidates SET state=?,coverage=? WHERE id=?',
-                                         (transition(row['state'], Action.COMPLETE), json.dumps(coverage), site['id']))
-                    materialize(store, unpack(store.db.execute('SELECT * FROM batches WHERE id=?',(batch_id,)).fetchone()))
-                    store.db.commit()
+                self.save_state(self.capture_complete,batch_id,manifest)
                 result = {"captures": len(manifest["captures"]), "batch_id": batch_id, "progress": latest}
-            with connect(self.root) as store:
-                store.db.execute("UPDATE operations SET state='completed',result=?,updated=? WHERE id=?", (json.dumps(result), now(), operation["id"]))
-                store.db.commit()
-            automation.finished(self.root, operation, result)
+            self.save_state(self.operation_complete,operation,result)
         except Exception as error:
-            detail = str(error) if isinstance(error, CrawlError) else f"Operation failed ({type(error).__name__}); staged evidence retained"
-            if operation['kind'] == 'capture' and detail == 'Worker stopped; resume explicitly':
-                from capture_failures import WORKER_INTERRUPTED
-                detail = WORKER_INTERRUPTED
-            with connect(self.root) as store:
-                previous = store.db.execute('SELECT result FROM operations WHERE id=?', (operation['id'],)).fetchone()
-                result = json.loads(previous['result'] or '{}')
-                result.pop('automatic_pause', None)
-                if pause := automation.pause_detail(error, operation):
-                    result['automatic_pause'] = pause
-                store.db.execute("UPDATE operations SET state='interrupted',error=?,result=?,updated=? WHERE id=?", (detail, json.dumps(result), now(), operation["id"]))
-                if operation['kind'] == 'capture':
-                    from capture_recovery import register
-                    register(store, operation, detail)
-                store.db.commit()
+            self.save_state(self.operation_interrupted,operation,error)
         finally:
             automatic_request.reset(auto_token)
 
@@ -321,6 +355,7 @@ class Worker:
             except ImportQueueUnavailable:
                 raise
             except Exception as error:
+                if database_busy(error):raise
                 detail = str(error) if isinstance(error, CrawlError) else 'Index submission failed for this site; saved sources and paid results are retained.'
                 job = dict(batch.get('job') or {})
                 try:
@@ -410,34 +445,44 @@ class Worker:
     def run_lane(self, lane):
         while not self.stop.is_set():
             try:
-                automation.resume_owned(self.root, lane, self.daily_budget)
-                if lane == Lane.CANDIDATES:
-                    automation.promote(self.root, self.daily_budget)
-                    automation.schedule(self.root, self.daily_budget)
-            except Exception as error:
-                with connect(self.root) as store:
-                    detail = str(error) if isinstance(error, CrawlError) else 'Automatic scheduling paused; saved state is retained'
-                    store.set('automatic_activity', {'phase': 'attention', 'error': detail})
-            if lane == Lane.INDEXING:
-                prepare_next(self.root)
-            if lane == Lane.CAPTURE:
-                try:
-                    self.capture_queue()
-                except Exception as error:
-                    # Keep stale approvals queued for an explicit correction.
-                    with connect(self.root) as store:
-                        detail = str(error) if isinstance(error, CrawlError) else 'Capture queue paused; staging is unavailable'
-                        if store.get('capture_queue_error') != detail:
-                            store.set('capture_queue_error', detail)
-            self.operation(lane)
-            if self.stop.is_set():
-                break
-            if lane == Lane.INDEXING:
-                try:
-                    self.indexing()
-                except Exception as error:
-                    detail = str(error) if isinstance(error, CrawlError) else "Index submission paused; Kubernetes state unavailable"
-                    with connect(self.root) as store:
-                        store.db.execute("UPDATE batches SET error=? WHERE state IN ('published_waiting_index','indexing','index_budget_waiting')", (detail,))
-                        store.db.commit()
+                self.run_turn(lane)
+            except sqlite3.OperationalError as error:
+                if not database_busy(error):raise
+                LOG.warning('Curation %s worker waiting for SQLite; queued work retained for next turn',lane.value)
             self.stop.wait(10)
+
+    def run_turn(self, lane):
+        try:
+            automation.resume_owned(self.root, lane, self.daily_budget)
+            if lane == Lane.CANDIDATES:
+                automation.promote(self.root, self.daily_budget)
+                automation.schedule(self.root, self.daily_budget)
+        except Exception as error:
+            if database_busy(error):raise
+            with connect(self.root) as store:
+                detail = str(error) if isinstance(error, CrawlError) else 'Automatic scheduling paused; saved state is retained'
+                store.set('automatic_activity', {'phase': 'attention', 'error': detail})
+        if lane == Lane.INDEXING:
+            prepare_next(self.root)
+        if lane == Lane.CAPTURE:
+            try:
+                self.capture_queue()
+            except Exception as error:
+                if database_busy(error):raise
+                # Keep stale approvals queued for an explicit correction.
+                with connect(self.root) as store:
+                    detail = str(error) if isinstance(error, CrawlError) else 'Capture queue paused; staging is unavailable'
+                    if store.get('capture_queue_error') != detail:
+                        store.set('capture_queue_error', detail)
+        self.operation(lane)
+        if self.stop.is_set():
+            return
+        if lane == Lane.INDEXING:
+            try:
+                self.indexing()
+            except Exception as error:
+                if database_busy(error):raise
+                detail = str(error) if isinstance(error, CrawlError) else "Index submission paused; Kubernetes state unavailable"
+                with connect(self.root) as store:
+                    store.db.execute("UPDATE batches SET error=? WHERE state IN ('published_waiting_index','indexing','index_budget_waiting')", (detail,))
+                    store.db.commit()
