@@ -240,6 +240,18 @@ not a relevance score. Keep the independent image Job untouched in text handoffs
 vBulletin supports complete message-comment boundaries, per-post IDs and stripped
 archive author/body pairs. Retain attachments and genuine tables/quotes; damaged
 boundaries fall back without dropping messages. Upgrade older passage checkpoints.
+Source decoding is shared by the crawler, imports and legacy indexer, without
+hostname exceptions. Validate full bytes, support CP932/Shift-JIS, EUC-JP and
+ISO-2022-JP using declaration/script evidence, and preserve unaffected encodings.
+Bounded damaged Japanese sequences retain U+FFFD markers and a counted, hashed
+decoding provenance; excessive damage fails visibly. Website extraction uses
+`html-2026-11-04-source-decoding`; retain mail/newsgroup checkpoints. The Gemma
+resume query also requires that checkpoint for textual websites. Reuse vectors
+when the reader and source-bound passage plan are identical; repair corrupted
+readers/vectors atomically and source-proven garbled titles only. Retain original
+bytes, enrichment, dates and image Jobs; no paid enrichment for decoding repairs.
+New format-specific exceptions require evidence of a major site or widely used
+structured engine; prefer broadly applicable source/DOM rules for other content.
 The separate CUDA vision companion uses the pinned projector in `vision.env`,
 one image slot and the same Gemma space. Keep text/live services independent.
 Install additive image/passages mappings before querying new vector fields.

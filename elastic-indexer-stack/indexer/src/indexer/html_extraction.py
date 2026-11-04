@@ -5,7 +5,7 @@ from markdownify import MarkdownConverter
 
 
 TEXT_EXTRACTION_VERSION = "html-2026-10-05"
-WEBSITE_EXTRACTION_VERSION = "html-2026-10-06-source-links"
+WEBSITE_EXTRACTION_VERSION = "html-2026-11-04-source-decoding"
 
 
 def extraction_version(record_id):

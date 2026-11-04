@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import sqlite3
 from urllib.parse import parse_qsl, unquote, urljoin, urlsplit, urlunsplit
+from source_decoding import decode_source
 
 TIERS = {1: ("19990101000000", "20011231235959"),
          2: ("20020101000000", "20061231235959")}
@@ -281,14 +282,8 @@ class Page(HTMLParser):
 
 
 def decode(data, content_type=""):
-    match = re.search(r"charset=[\"']?([\w-]+)", content_type, re.I)
-    encodings = ([match[1]] if match else []) + ["utf-8", "windows-1252", "latin-1"]
-    for encoding in encodings:
-        try:
-            return data.decode(encoding), encoding
-        except (UnicodeError, LookupError):
-            continue
-    raise CrawlError("Could not decode source")
+    decoded=decode_source(data,content_type)
+    return decoded.text,decoded.encoding
 
 
 def save(path, value):

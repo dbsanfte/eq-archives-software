@@ -792,6 +792,14 @@ rasters have a typed `image_embedding_status` and do not block the remaining
 site. Supporting-file browsing remains available. See the
 [image and passage runbook](../../scripts/embedding-service/README.md#content-aware-passages-and-images).
 
+Discovery, source browsing and imports share the dependency-free source decoder.
+Validated Japanese byte/script evidence selects Shift-JIS/CP932, EUC-JP or
+ISO-2022-JP despite incorrect archive wrapper declarations. Limited damaged byte
+sequences remain U+FFFD markers, with source hashes and counts in imported decoding
+provenance. Original captures/manifests stay unchanged; excessive damage is a
+visible failure. Existing documents are repaired only by the separate authorized
+backfill, preserving the create-only import contract.
+
 ## Ezboard capture
 
 Ezboard candidates represent a complete board across historical servers.

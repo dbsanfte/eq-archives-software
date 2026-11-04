@@ -948,25 +948,13 @@ def test_detect_and_read_file_exception_handling(tmp_path, dummy_dependencies, m
     # Restore original function
     monkeypatch.undo()
     
-    # Test case 3: Internal ValueError when all encodings fail
-    temp_file3 = tmp_path / "encoding_fail_test.txt" 
-    
-    # Create file with raw binary data that won't decode with any standard encoding
-    with open(temp_file3, 'wb') as f:
-        f.write(bytes([0xFF, 0xFE, 0x00, 0xFD] + [random.randint(0, 255) for _ in range(20)]))
-    
-    # Mock the encoding attempts to all fail but let the detection work
-    def mock_open_encoding_fails(file, *args, **kwargs):
-        if str(file) == str(temp_file3) and 'encoding' in kwargs:
-            raise UnicodeDecodeError('charmap', b'test', 0, 1, 'Test decoding error')
-        return original_open(file, *args, **kwargs)
-    
-    monkeypatch.setattr(builtin_name, mock_open_encoding_fails)
-    
-    # Test the method when all encodings fail
+    # A malformed BOM is a visible source decoding failure, rather than a
+    # permissive Western fallback. This exercises real bytes, not mocked opens.
+    temp_file3 = tmp_path / "encoding_fail_test.txt"
+    temp_file3.write_bytes(b"\xff\xfe\x01")
     content3, encoding3 = handler._detect_and_read_file(str(temp_file3))
     assert content3 is None
     assert encoding3 is None
-    
+
     # Restore original open function
     monkeypatch.undo()

@@ -9,6 +9,12 @@ archive coverage, stages historical Wayback samples, grades complete extracted
 sources with Luna, and produces an offline approval queue. Commands need Python
 3.10+ and Ruby 3.0+, with no Python packages or Ruby gems.
 
+The CLI uses the same dependency-free byte decoder as imports/indexing, loaded
+from this software checkout. Japanese Shift-JIS/CP932, EUC-JP and ISO-2022-JP are
+selected from encoding declarations and script evidence, without site exceptions.
+Bounded damaged sequences stay visible as replacement markers; captured bytes,
+source hashes and existing manifests are never rewritten by decoding.
+
 The standalone CLI pilot ends at a manifest of explicitly approved page samples. It
 does not download an entire site, publish archive Git changes, or write index
 documents. Subsequent operator work can expand approved site scopes, publish one

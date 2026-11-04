@@ -213,6 +213,18 @@ progress, count remaining documents using `remaining_query()` and count the exac
 `embedding_model` marker; read rate/counters from the Job's bounded progress logs.
 Do not equate a Job exit or a process-local processed count with total completion.
 
+Website source repair also requires extraction checkpoint
+`html-2026-11-04-source-decoding`. The shared offline decoder handles CP932 Windows
+extensions, Shift-JIS, EUC-JP and ISO-2022-JP using actual byte/script evidence.
+Misdeclared UTF-8 archive wrappers do not override validated bytes. Bounded damaged
+sequences remain visible as U+FFFD and have counted source-hash-bound provenance;
+excessive damage fails visibly. Original capture bytes are unchanged. The migration
+keeps the v4 passage checkpoint and reuses vectors when reader text and the complete
+search plan are unchanged. Corrupted reader text and searched vectors are replaced
+atomically, preserving enrichment/dates and correcting only source-proven garbled
+titles. Mail/newsgroup and binary-document extraction checkpoints remain intact.
+Use the normal prepared-Job handoff; never repeat source preparation or call Luna.
+
 The frontend and MCP use Gemma query prefixes and restrict all semantic branches
 to the marker. Keyword search still covers the entire index. Deployment validates
 that a zero-ready initial corpus really has zero model checkpoints; once ready

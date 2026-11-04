@@ -254,6 +254,11 @@ normal text import enrichment retains its existing approval/budget policy. See
 the [passage and image runbook](scripts/embedding-service/README.md#content-aware-passages-and-images)
 for input bounds, provenance, model pins and checkpoint-preserving rollout.
 
+Japanese source decoding is shared across discovery, imports and reindexing.
+CP932 Windows extensions and bounded truncated sequences retain readable Japanese
+and explicit damage provenance. The decoding repair checkpoint reuses unchanged
+embeddings and preserves archive bytes, dates and existing enrichment.
+
 ## Deployment
 
 The frontend, read-only MCP connector, intranet curation service and local **llama.cpp / EmbeddingGemma 2 Q8_0** service deploy

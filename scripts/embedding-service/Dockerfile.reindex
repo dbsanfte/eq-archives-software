@@ -13,6 +13,8 @@ COPY elastic-indexer-stack/indexer/src/reindex_embeddings.py /app/src/reindex_em
 COPY elastic-indexer-stack/indexer/src/indexer/gemma.py elastic-indexer-stack/indexer/src/indexer/chunking.py elastic-indexer-stack/indexer/src/indexer/es_manager.py /app/src/indexer/
 COPY elastic-indexer-stack/indexer/src/indexer/passages.py elastic-indexer-stack/indexer/src/indexer/image_embeddings.py elastic-indexer-stack/indexer/src/indexer/archive_images.py elastic-indexer-stack/indexer/src/indexer/text_handler.py elastic-indexer-stack/indexer/src/indexer/image_handler.py /app/src/indexer/
 COPY elastic-indexer-stack/indexer/src/indexer/passage_forums.py /app/src/indexer/passage_forums.py
+COPY elastic-indexer-stack/indexer/src/indexer/source_encoding.py elastic-indexer-stack/indexer/src/indexer/html_extraction.py /app/src/indexer/
+RUN python -m compileall -b -f -o 2 /app/src/indexer/source_encoding.py /app/src/indexer/html_extraction.py && rm /app/src/indexer/source_encoding.py /app/src/indexer/html_extraction.py
 RUN python -m compileall -b -f -o 2 /app/src/indexer/passage_forums.py && rm /app/src/indexer/passage_forums.py
 COPY elastic-indexer-stack/indexer/src/index_images.py /app/src/index_images.py
 COPY elastic-indexer-stack/indexer/src/indexer/other_handler.py /app/src/indexer/other_handler.py
