@@ -32,6 +32,7 @@ NAV = re.compile(r"(?:^|[-_ ])(?:nav(?:igation)?|sidebar|site-menu|site-header|s
 FOOTER = re.compile(r"ONElist is THE place|e-mails exchanged daily|ONElist has nearly|"
                     r"Looking to expand your world\?|Yahoo! Groups Links|"
                     r"Your use of Yahoo! Groups is subject", re.I)
+COLUMN_NAMES=re.compile(r'^(?:faction|positive quests|negative quests|member name|rank|name|spell|mana|item|effect|recipe|ingredients|username|from|joined|posts|email|url|icq|aim|yim|msn|replies|author|views|last post|topics|type|value|description|level|class|race|guild|location|zone):?$',re.I)
 
 
 def digest(text):
@@ -295,7 +296,6 @@ def _html_view(raw, host, _preserve_layout=False, path=""):
         comment.extract()
     # Empty framing rows otherwise become a fabricated Markdown header above
     # the actual data headings. Promote only explicit/recognizable headings.
-    header_words=re.compile(r'^(?:faction|positive quests|negative quests|member name|rank|name|spell|mana|item|effect|recipe|ingredients|username|from|joined|posts|email|url|icq|aim|yim|msn|replies|author|views|last post|topics):?$',re.I)
     for table in reversed(list(soup.find_all('table'))):
         rows=[r for r in table.find_all('tr') if r.find_parent('table') is table]
         kept=[]
@@ -305,7 +305,7 @@ def _html_view(raw, host, _preserve_layout=False, path=""):
             else:kept.append(row)
         if kept:
             cells=kept[0].find_all(['td','th'],recursive=False)
-            if len(cells)>1 and all(header_words.fullmatch(c.get_text(' ',strip=True)) or c.find(['b','strong']) for c in cells):
+            if len(cells)>1 and all(COLUMN_NAMES.fullmatch(c.get_text(' ',strip=True)) or c.find(['b','strong']) for c in cells):
                 for cell in cells:cell.name='th'
     view=website_markdown(str(soup))
     if not _preserve_layout and len(_plain(view))<50 and len(raw)>300:
@@ -429,7 +429,15 @@ def _chunks(view, title, document_context="", strict_sections=False):
             lines = [m for m in lines if m.start()<m.end()]
             # The first meaningful row, including legacy <td> headings after
             # blank Markdown header rows. Never label dashes as column names.
-            header=next((line[0] for line in lines[:8] if any(c.isalpha() for c in _plain(line[0]))),"")
+            header=''
+            for i,line in enumerate(lines[:8]):
+                cells=[_plain(c).strip() for c in line[0].strip().strip('|').split('|')]
+                if len(cells)>1 and all(c and COLUMN_NAMES.fullmatch(c) for c in cells):
+                    header=line[0];break
+                if i and re.fullmatch(r'[|:\-\s]+',line[0]) and '-' in line[0]:
+                    candidate=lines[i-1][0]
+                    if any(c.isalpha() for c in _plain(candidate)):
+                        header=candidate;break
             table_context = _short(header,80)
             if table_context:
                 context += "Table columns: " + table_context + "\n\n"
@@ -461,11 +469,14 @@ def _chunks(view, title, document_context="", strict_sections=False):
             previous=packed[-1]
             punctuation=(not any(c.isalnum() for c in passage.text) or not any(c.isalnum() for c in previous.text)) and not {previous.kind,passage.kind}&{'post','quote'}
             merge=previous.kind==passage.kind=='prose' or punctuation
-            context=previous.context if previous.context==passage.context else document_context
+            if not any(c.isalnum() for c in passage.text):context=previous.context
+            elif not any(c.isalnum() for c in previous.text):context=passage.context
+            else:context=previous.context if previous.context==passage.context else document_context
             if merge and previous.end==passage.start:
                 body=view[previous.start:passage.end]
                 if len(tokenizer.encode(document_prefix(title)+context+body).ids)<=MAX_TOKENS:
-                    packed[-1]=Passage(previous.start,passage.end,body,title,context,previous.kind)
+                    kind=passage.kind if not any(c.isalnum() for c in previous.text) else previous.kind
+                    packed[-1]=Passage(previous.start,passage.end,body,title,context,kind)
                     continue
         packed.append(passage)
     return tuple(packed)

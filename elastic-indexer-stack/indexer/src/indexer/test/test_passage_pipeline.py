@@ -214,3 +214,15 @@ def test_menu_links_sharing_a_table_with_numeric_data_do_not_discard_the_data_gr
     raw='<title>Faction reference</title><table><tr><td colspan="3">'+links+'</td></tr><tr><td>Faction:</td><td>Positive Quests:</td><td>Negative Quests:</td></tr><tr><td>Clerics of Dawn</td><td>12</td><td>0</td></tr></table>'
     p=plan(raw,'websites/everquest.allakhazam.com/20000101000000/db/flist.html')
     assert 'Clerics of Dawn' in p.view and '12' in p.view
+
+
+def test_trailing_rule_cannot_clear_the_data_table_context():
+    raw='<title>Spell reference</title><table><tr><th>Spell</th><th>Mana</th></tr>'+''.join(f'<tr><td>Healing spell {i}</td><td>{i}</td></tr>' for i in range(60))+'</table><hr>'
+    p=plan(raw)
+    assert all('Spell' in c.context and 'Mana' in c.context for c in p.passages if c.kind=='table')
+
+
+def test_prose_in_a_layout_table_is_not_invented_as_column_names():
+    p=plan('<title>December news</title><table><tr><td>Monday December 13, 1999</td><td>'+('Our guild recovered the corpse and learned a new raid strategy. '*100)+'</td></tr></table>')
+    assert 'learned a new raid strategy' in p.view
+    assert all('Table columns:' not in c.context for c in p.passages)
