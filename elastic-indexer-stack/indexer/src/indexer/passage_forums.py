@@ -5,9 +5,10 @@ None and keep the generic content-preserving path. Archival readers are untouche
 """
 from dataclasses import dataclass
 import re
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Comment
 
 DATE = re.compile(r'\b\d{1,2}/\d{1,2}/\d{2,4}(?:\s*:\s*|\s+)\d{1,2}:\d{2}(?::\d{2})?(?:\s*[ap]m)?', re.I)
+POST_DATE = re.compile(r'\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}(?:,?\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s*[ap]m)?)?',re.I)
 
 
 @dataclass(frozen=True)
@@ -132,6 +133,90 @@ def snitz(soup):
     if posts and recognized:return Thread('\n'.join(posts),'snitz')
 
 
+def comment_region(start, label):
+    """Only accept a complete sibling-delimited template region."""
+    nodes=[]
+    for node in start.next_siblings:
+        if isinstance(node,Comment) and str(node).strip()=='/ '+label:
+            return nodes
+        if isinstance(node,Comment) and str(node).strip()==label:
+            break
+        nodes.append(node)
+    return None
+
+
+def vbulletin_header(body):
+    container=next((p for p in body.parents if re.fullmatch(r'post\d+',p.get('id',''))),None)
+    if container is not None:
+        author=container.select_one('.bigusername,.username')
+        anchor=container.find('a',attrs={'name':re.compile(r'^post\d+$')})
+        stamp=POST_DATE.search(words(anchor.find_parent('td'))) if anchor and anchor.find_parent('td') else None
+        if author and stamp:return words(author),stamp[0]
+        return None
+    # Early vB 3 beta themes put every post in ONE presentation table. The
+    # preceding header row and the body's own profile cell identify the post;
+    # looking for an author in the whole table assigns every reply to user one.
+    row=body.find_parent('tr')
+    if row is None:return None
+    cells=row.find_all('td',recursive=False)
+    if len(cells)!=2 or cells[1] not in body.parents:return None
+    header=next((p for p in row.previous_siblings if getattr(p,'name',None)=='tr'
+                 and p.find('a',attrs={'name':re.compile(r'^post\d+$')})),None)
+    if header is None:return None
+    stamp=POST_DATE.search(words(header))
+    author=cells[0].select_one('.bigusername,.username') or cells[0].find(['b','strong'])
+    if stamp and words(author):return words(author),stamp[0]
+    return None
+
+
+def vbulletin(soup):
+    archive=soup.select('div.posttext')
+    thread_link=soup.select_one('.largefont a[href*="showthread.php"]')
+    if archive and thread_link:
+        posts=[];recognized=False
+        for body in archive:
+            if any('posttext' in p.get('class',[]) for p in body.parents):continue
+            container=body.find_parent('div',class_='post')
+            author=container.find('div',class_='username',recursive=False) if container else None
+            if author and re.fullmatch(r'p\d+',body.get('id','')) and author.get('id')=='u'+body['id'][1:]:
+                recognized=True
+            else:author=None
+            posts.append(section(words(author),'',body_copy(body)))
+        if recognized:return Thread('\n'.join(posts),'vbulletin',words(thread_link))
+    markers=[c for c in soup.find_all(string=lambda n:isinstance(n,Comment))
+             if str(c).strip()=='message' and not c.find_parent(['blockquote','pre','code'])]
+    posts=[];covered=set()
+    for marker in markers:
+        nodes=comment_region(marker,'message');header=vbulletin_header(marker)
+        # A broken boundary/header must keep the complete generic view, rather
+        # than drop one body or attach it to its neighbour's author.
+        if nodes is None or header is None:return None
+        for node in nodes:
+            covered.add(id(node));covered.update(id(child) for child in getattr(node,'descendants',()))
+        # Attachments are authored content outside the message region in some
+        # templates. Signatures, edit/profile controls and menus are separate.
+        for attachment in marker.parent.find_all(string=lambda n:isinstance(n,Comment)):
+            if str(attachment).strip()=='attachments':
+                attached=comment_region(attachment,'attachments')
+                if attached is None:return None
+                nodes+=attached
+        body=BeautifulSoup(''.join(str(n) for n in nodes),'html.parser')
+        for control in list(body.select('div.smallfont')):
+            if (control.find('a',href=re.compile(r'(?:^|/)report\.php\?'))
+                    and control.find('a',href=re.compile(r'(?:^|/)postings\.php\?'))):control.decompose()
+        posts.append(section(*header,body_copy(body)))
+    bodies=soup.select('[id^=post_message_]')
+    if markers:
+        if any(id(body) not in covered for body in bodies):return None
+    else:
+        for body in bodies:
+            if any(str(p.get('id','')).startswith('post_message_') for p in body.parents):continue
+            header=vbulletin_header(body)
+            if header is None:return None
+            posts.append(section(*header,body_copy(body)))
+    if posts:return Thread('\n'.join(posts),'vbulletin')
+
+
 def ezboard(soup,host):
     if not host.endswith('ezboard.com'):return None
     posts=[]
@@ -155,10 +240,10 @@ def ezboard(soup,host):
 def extract(soup,host):
     # A forum widget can be embedded beside an independent article. The
     # engine view must not replace that page's unique non-message content.
-    bodies='.postbody,span.spnMessageText[id=msg],p.post'
+    bodies='.postbody,span.spnMessageText[id=msg],p.post,.posttext,[id^=post_message_]'
     if any(words(node) and not node.select_one(bodies) for node in soup.select('article,main,[role=main]')):
         return None
-    for parser in (phpbb,wwwthreads,snitz):
+    for parser in (phpbb,wwwthreads,snitz,vbulletin):
         result=parser(soup)
         if result:return result
     return ezboard(soup,host)

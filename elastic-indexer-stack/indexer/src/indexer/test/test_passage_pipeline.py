@@ -15,6 +15,76 @@ def plan(html,rid=RID):
     return result
 
 
+def vbulletin_legacy(count=2):
+    rows=''
+    for i in range(count):
+        rows+=f'''<tr title="Post {100+i}"><td class="thead"><a name="post{100+i}"></a>01-0{i+1}-2000, 02:30 PM</td><td class="thead">Epic advice</td></tr>
+        <tr><td class="alt1"><b>Shaman{i}</b><span class="smallfont">Joined: 1999</span></td>
+        <td class="alt1"><!-- message --><p>Unique advice from Shaman{i}.</p>
+        <div class="smallfont"><a href="report.php?postid={100+i}">Report Post</a> | IP: <a href="postings.php?do=getip&postid={100+i}">Logged</a></div><!-- / message --></td></tr>
+        <tr><td>Posts: 9000</td><td>Profile Send PM Reply</td></tr>'''
+    return '<title>Forum - Epic advice</title><p>Search this Thread: Linear Hybrid Threaded</p><table id="poststable" class="tborder">'+rows+'</table><p>Powered by vBulletin</p>'
+
+
+def test_vbulletin_legacy_messages_remove_layout_fragments_and_keep_each_author_date():
+    p=plan(vbulletin_legacy())
+    assert len(p.passages)==2
+    assert 'vbulletin_posts' in p.exclusions
+    for i,c in enumerate(p.passages):
+        assert c.kind=='post' and f'Shaman{i}' in c.context
+        assert f'01-0{i+1}-2000, 02:30 PM' in c.context
+        assert f'Unique advice from Shaman{i}' in c.text
+        assert f'Unique advice from Shaman{1-i}' not in c.text
+    assert all(s not in p.view for s in ['Posts: 9000','Joined:','Report Post','Logged','Hybrid','Powered by'])
+
+
+def test_vbulletin_comment_posts_keep_quoted_and_tabular_evidence_and_attachments_without_signatures():
+    raw='''<title>Guild thread</title><table id="post501" class="tborder"><tr><td class="thead"><a name="post501"></a>02-01-2001, 01:00 AM</td></tr>
+    <tr><td><a class="bigusername" href="member.php?u=3">Cleric</a>Joined: 1999</td></tr><tr><td>
+    <!-- message --><div>Healing advice.<blockquote>Another player wrote: Quoted healing numbers.</blockquote>My own reply.
+    <table><tr><th>Spell</th><th>Mana</th></tr><tr><td>Complete Heal</td><td>400</td></tr></table></div><!-- / message -->
+    <!-- attachments --><div><a href="attachment.php?id=2">raid-notes.txt</a></div><!-- / attachments -->
+    <!-- sig --><div>Repeated guild signature.</div><!-- / sig -->
+    </td></tr></table><p>Forum Rules FAQ</p>'''
+    p=plan(raw)
+    assert all('Post by Cleric' in c.context and '02-01-2001' in c.context for c in p.passages)
+    assert 'Complete Heal' in p.view and '400' in p.view and 'raid-notes.txt' in p.view
+    assert any(c.kind=='quote' and 'Quoted healing numbers' in c.text for c in p.passages)
+    assert 'Repeated guild signature' not in p.view and 'Joined:' not in p.view and 'Forum Rules' not in p.view
+
+
+def test_vbulletin_archive_pairs_usernames_and_bodies_without_inventing_dates():
+    raw='''<title>Guild forums</title><p class="largefont">Click here for full thread: <a href="showthread.php?t=123">Cleric epics</a></p>
+    <div class="post"><div class="username" id="u1"><b>Cleric</b></div><div class="posttext" id="p1">The first epic testimony.</div></div><hr>
+    <div class="post"><div class="username" id="u2"><b>Guest</b></div><div class="posttext" id="p2">The guest reply.</div></div><div id="copyright">Powered by vBulletin</div>'''
+    p=plan(raw)
+    assert len(p.passages)==2 and p.title=='Cleric epics'
+    assert 'Cleric' in p.passages[0].context and 'Guest' in p.passages[1].context
+    assert all(c.kind=='post' and '2000' not in c.context for c in p.passages)
+    assert 'full thread' not in p.view and 'Powered by' not in p.view
+
+
+def test_vbulletin_modern_body_id_without_comment_markers_keeps_guest_message():
+    raw='''<title>Epic discussion</title><table id="post10"><tr><td class="thead"><a name="post10"></a>01-01-2000, 01:00 PM</td></tr><tr><td><span class="bigusername">Guest Healer</span></td><td><div id="post_message_10">Important guest testimony.</div><div class="signature">A guild signature.</div></td></tr></table>'''
+    p=plan(raw)
+    assert len(p.passages)==1 and 'Guest Healer' in p.passages[0].context
+    assert p.passages[0].kind=='post' and 'guild signature' not in p.view
+
+
+@pytest.mark.parametrize('change',[
+    lambda s:s.replace('<!-- / message -->','',1),
+    lambda s:s.replace('name="post100"','name="unrelated"',1),
+])
+def test_damaged_vbulletin_boundaries_fall_back_without_losing_either_message(change):
+    p=plan(change(vbulletin_legacy()))
+    assert 'Unique advice from Shaman0' in p.view and 'Unique advice from Shaman1' in p.view
+
+
+def test_vbulletin_widget_cannot_erase_an_independent_article():
+    p=plan('<article><h1>Guild guide</h1><p>Independent application instructions.</p></article>'+vbulletin_legacy(1))
+    assert 'Independent application instructions' in p.view and 'Unique advice from Shaman0' in p.view
+
+
 def phpbb(count=2):
     posts=''
     for i in range(count):

@@ -223,13 +223,13 @@ extraction checkpoints, enrichment, source identity, dates and last_indexed. No
 paid enrichment during this backfill. Do not reuse Nomic checkpoints as Gemma
 completion. The Nomic repair entry point remains for historical recovery only.
 Follow the embedding-service migration runbook for operator-authorized handoffs.
-Gemma text uses `eq-passages-480-v3`: budget title/context with every 480-token
+Gemma text uses `eq-passages-480-v4`: budget title/context with every 480-token
 request, retain full reader text, verify source-bound selected-view coverage and
 store view offsets/provenance separately. Unknown layouts retain content;
 format-specific navigation/post/table handling needs regression evidence. Resume
 requires both model and passage version; prioritize the unfinished model frontier
 before older Gemma records. Never embed enrichment placeholder summaries.
-Forum extraction uses structural phpBB/WWWThreads/Snitz signatures across hosts;
+Forum extraction uses structural phpBB/WWWThreads/Snitz/vBulletin signatures across hosts;
 retain guest and damaged-header messages, quoted bodies and genuine data tables.
 Known error/utility projections clear every semantic field atomically, retaining
 reader/enrichment metadata. Keep table contexts meaningful, pack small prose
@@ -237,6 +237,9 @@ sections without crossing post/feed/quote boundaries, and preserve fenced code.
 Validate against private live-capture samples plus unrelated layouts. Quality
 counters in reindex logs count only acknowledged writes; they are diagnostics,
 not a relevance score. Keep the independent image Job untouched in text handoffs.
+vBulletin supports complete message-comment boundaries, per-post IDs and stripped
+archive author/body pairs. Retain attachments and genuine tables/quotes; damaged
+boundaries fall back without dropping messages. Upgrade older passage checkpoints.
 The separate CUDA vision companion uses the pinned projector in `vision.env`,
 one image slot and the same Gemma space. Keep text/live services independent.
 Install additive image/passages mappings before querying new vector fields.
@@ -403,6 +406,11 @@ must not close another worker’s connection. Keep serial publication with the
 existing unfinished-Job guard for imports.
 Expose worker availability independently of capped operation lists, require all
 workers and the shared transport for health and retain the lease until all stop.
+SQLite BUSY/LOCKED failures retry worker turns without killing a lane. After
+external work succeeds, retry only its metadata transaction, never downloads or
+Git publication. Preflight/import reconciliation contention stays retryable rather
+than marking a site's content failed. Preserve shutdown, leases and checkpoints;
+other database failures remain visible. Test real writer contention and HTTP health.
 Keep pipeline status as a compact collapsed disclosure on each stage and site
 workspace, outside disabled manual discovery controls. Navigation to another
 stage collapses it; polling preserves the user-opened state. Show worker/queue/

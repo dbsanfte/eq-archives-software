@@ -6,6 +6,7 @@ import fcntl
 import json
 from pathlib import Path
 import re
+import sqlite3
 import uuid
 
 from common import CrawlError, Store, now
@@ -22,6 +23,14 @@ OPERATION_KINDS = {
     Lane.CAPTURE: ('capture',),
     Lane.INDEXING: ('publish',),
 }
+
+
+def database_busy(error):
+    """Retry contention only; corruption, missing tables and I/O errors surface."""
+    code=getattr(error,'sqlite_errorcode',None)
+    return isinstance(error,sqlite3.OperationalError) and (
+        code is not None and (code & 255) in (sqlite3.SQLITE_BUSY,sqlite3.SQLITE_LOCKED)
+        or code is None and str(error) in ('database is locked','database table is locked','database schema is locked'))
 
 
 def operation_lane(kind):

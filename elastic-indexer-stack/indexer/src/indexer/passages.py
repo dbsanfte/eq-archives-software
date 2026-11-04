@@ -18,7 +18,7 @@ from .chunking import SourceChunk, chunk_source
 from .html_extraction import website_markdown
 from . import passage_forums
 
-VERSION = "eq-passages-480-v3"
+VERSION = "eq-passages-480-v4"
 MAX_TOKENS = 480
 ASSETS = {".js", ".css", ".map", ".ico", ".svg", ".woff", ".woff2"}
 CONTROLS = re.compile(r"^(?:reply(?: to (?:item|topic))?(?: with quote)?|quote|edit|delete|"

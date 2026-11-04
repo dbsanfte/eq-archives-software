@@ -711,6 +711,14 @@ limits. Each operation keeps its own
 cumulative request/byte/time budget; waiting counts toward its original deadline.
 A large file may delay the next sample, but an entire site cannot monopolize the
 connection. Closing a downloader session leaves the shared connection available.
+
+Temporary SQLite BUSY/LOCKED contention retries on the next worker turn, retaining
+queued work and live worker threads. Progress and completion writes after a
+download/publication retry their metadata transaction only; they never replay
+external work. Preflight and import reconciliation locks remain retryable rather
+than becoming content failures. Retries respect shutdown and retain checkpoints
+and the process lease. Other database errors remain visible; warnings identify
+storage waits without including SQL, credentials or upstream responses.
 Health requires all three threads and the shared transport; shutdown retains the
 lease while any worker has an in-flight request. Restart retains payloads,
 approvals and progress. Interrupted manual operations require explicit resume; enabled
@@ -775,7 +783,7 @@ dismissal is fabricated and no Luna request is made to classify this known adver
 
 ## Imported search content
 
-Imported text uses the shared `eq-passages-480-v3` search policy: real titles,
+Imported text uses the shared `eq-passages-480-v4` search policy: real titles,
 section/table context and attributed forum/mail quotations, with full reader
 content retained separately. Verified raster assets also receive local Gemma
 visual vectors through `gemma-image-embeddings`. This does not call Luna or change
