@@ -156,9 +156,54 @@ def test_scan_only_skips_new_model_complete_checkpoints_and_limits_work(tmp_path
     result = job.reindex(client, 'eq', tmp_path, ids=[hit['_id']], limit=1, workers=1, batch_size=1, factory=factory)
     assert result.updated == result.processed == 1 and not result.failed
     query = client.count.call_args.kwargs['query']
-    assert query['bool']['must_not'] == [{'bool': {'filter': [{'term': {'embedding_model': gemma.MODEL}}, {'term': {'text_chunking_version': passages.VERSION}}]}}]
+    completed=query['bool']['must_not'][0]['bool']['filter']
+    assert {'term':{'embedding_model':gemma.MODEL}} in completed
+    assert {'term':{'text_chunking_version':passages.VERSION}} in completed
+    assert completed[-1]['bool']['minimum_should_match']==1
     assert {'ids': {'values': [hit['_id']]}} in query['bool']['filter']
     assert client.search.call_args.kwargs['seq_no_primary_term']
+
+
+def test_completed_gemma_record_with_bad_japanese_reader_repairs_atomically_without_enrichment(tmp_path):
+    hit,client,embedder=fixture();source=hit['_source']
+    text='<html><title>冒険記録</title><p>こんにちは。みんなで①番の髙い山に行きましょう。</p></html>'
+    raw=text.encode('cp932');path=tmp_path/hit['_id'];path.parent.mkdir(parents=True);path.write_bytes(raw)
+    source.update(embedding_model=gemma.MODEL,text_chunking_version=passages.VERSION,
+                  text_extraction_version='html-2026-10-06-source-links',text_full=raw.decode('latin-1'),mime_type='text/html',
+                  title='冒険記録'.encode('cp932').decode('latin-1'))
+    assert not job.current_source(source)
+    assert job.migrate_record(client,'eq',hit,tmp_path,embedder)==(1,0)
+    patch=client.update.call_args.kwargs['doc']
+    assert 'こんにちは。みんなで①番の髙い山に行きましょう。' in patch['text_full']
+    assert any('こんにちは' in c['text_chunk'] for c in patch['text'])
+    assert patch['text_passage_provenance']['decoding']['encoding']=='cp932'
+    assert patch['text_extraction_version']==extraction_version(hit['_id'])
+    assert 'llm_summary' not in patch and 'last_indexed' not in patch and patch['title']=='冒険記録'
+    assert client.update.call_args.kwargs['if_seq_no']==17
+
+
+def test_clean_completed_record_reuses_vectors_when_only_decoding_checkpoint_is_new(tmp_path):
+    hit,client,embedder=fixture();source=hit['_source'];path=tmp_path/hit['_id'];path.parent.mkdir(parents=True)
+    path.write_text('<html><title>Guild</title><p>A complete historical guide.</p></html>')
+    source.update(mime_type='text/html',text_extraction_version='old')
+    groups,patch,_=job.prepare(source,tmp_path)
+    source.update(text_full=patch['text_full'],text_passage_provenance={'version':passages.VERSION,'sources':[p.provenance() for _,p in groups]},
+                  embedding_model=gemma.MODEL,text_chunking_version=passages.VERSION)
+    diagnostics={}
+    assert job.migrate_record(client,'eq',hit,tmp_path,embedder,diagnostics=diagnostics)==(1,0)
+    update=client.update.call_args.kwargs['doc']
+    assert diagnostics=={'reused_embeddings':1}
+    assert 'text' not in update and 'llm_summary_vector' not in update and 'llm_image_text_vector' not in update
+    embedder.get_chunks_and_embeddings.assert_not_called();embedder.embed_text.assert_not_called()
+    client.update.return_value={'result':'unexpected'}
+    with pytest.raises(ValueError,match='did not update'):job.migrate_record(client,'eq',hit,tmp_path,embedder)
+
+
+@pytest.mark.parametrize('prefix,mime,filetype',[
+    ('newsgroups/','text/plain','text'),('mailing-lists/','application/json','text'),
+    ('websites/','application/pdf','text'),('websites/','image/gif','image')])
+def test_decoding_checkpoint_keeps_unaffected_source_types_complete(prefix,mime,filetype):
+    assert job.current_source({'id':prefix+'example','mime_type':mime,'file_type':filetype})
 
 
 def test_scan_advances_and_content_errors_do_not_block_later_records(tmp_path):

@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import html
 import json
 import math
+from bs4 import BeautifulSoup
 import os
 from pathlib import Path
 import re
@@ -25,6 +26,7 @@ from indexer.gemma import CHUNKING_VERSION, DOCUMENT_PREFIX, MODEL, chunk_source
 from indexer import passages
 from indexer.image_embeddings import ImageUnavailable, MAX_BYTES, VERSION as IMAGE_VERSION, prepare_image, response_vector
 from indexer.html_extraction import WEBSITE_EXTRACTION_VERSION, website_markdown
+from indexer.source_encoding import decode_source, repaired_title
 from indexer.capture_enrichment import Enricher, policy
 from import_status import EnrichmentError, describe, write_status
 from daily_budget import DailyBudget, DailyBudgetPause
@@ -201,8 +203,11 @@ def index_batch(root, batch, services, chunker=chunk_source):
         replay, content = text_document(root, capture)
         # Model date extraction sees the original body, not our synthetic
         # provenance header or the capture timestamp embedded in its URL.
-        source, _ = decode(verified_source(root, capture), capture.get("content_type") or "")
-        plan = passages.prepare(content, record_id, capture.get('title') or '',
+        decoded=decode_source(verified_source(root,capture),capture.get('content_type') or '')
+        source=decoded.text
+        title_node=BeautifulSoup(source,'html.parser').title
+        title=repaired_title(capture.get('title'),title_node.string if title_node else None,decoded)
+        plan = passages.prepare(content, record_id, title or '',
                                 html_source=source, mime_type=capture.get('content_type') or '')
         if not plan.passages:
             preserved += 1
@@ -222,11 +227,11 @@ def index_batch(root, batch, services, chunker=chunk_source):
             raise CrawlError("Summary embedding is empty; enriched result retained for retry")
         summary_vector = [value / magnitude for value in summary_vector]
         timestamp = datetime.strptime(capture["timestamp"], "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc).isoformat()
-        document = {"id": record_id, "title": capture.get("title") or urlsplit(capture["url"]).path or "Archived page",
+        document = {"id": record_id, "title": title or urlsplit(capture["url"]).path or "Archived page",
                     "domain_name": urlsplit(capture["url"]).netloc, "capture_date": timestamp, "last_indexed": now(),
                     "url": replay, "mime_type": (capture.get('content_type') or 'text/html').split(';')[0], "file_type": "text", "thumbnail": "thumbnails/website.webp",
                     "text_full": content, "text": chunks, "text_extraction_version": WEBSITE_EXTRACTION_VERSION,
-                    "text_chunking_version": passages.VERSION, "text_passage_provenance": plan.provenance(),
+                    "text_chunking_version": passages.VERSION, "text_passage_provenance": {**plan.provenance(),'decoding':decoded.provenance()},
                     "embedding_model": MODEL, "archive_source_sha256": capture["sha256"],
                     "archive_source_manifest": batch["manifest_sha256"], "archive_commit": batch["publication"]["commit"],
                     **metadata, "llm_summary_vector": summary_vector}

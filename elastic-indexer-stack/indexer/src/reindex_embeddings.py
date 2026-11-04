@@ -13,19 +13,36 @@ from elastic_transport import TransportError
 from elasticsearch import ConflictError
 from openai import OpenAIError
 from langchain_core.documents import Document
+from bs4 import BeautifulSoup
 
 from indexer import gemma
 from indexer import passages
 from indexer.es_manager import ElasticsearchManager
-from indexer.html_extraction import extraction_version
+from indexer.html_extraction import extraction_version, WEBSITE_EXTRACTION_VERSION
 from indexer.openai_manager import OpenAIManager
 from indexer.reindex_preparation import handler, verify_prepared
+from indexer.source_encoding import repaired_title
 from reindex_text import completed_records, source_path
 
 LOG = logging.getLogger(__name__)
 FIELDS = ["id", "file_type", "text_full", "text.text_chunk", "text_extraction_version",
           "embedding_model", "text_chunking_version", "mime_type", "title",
-          "llm_summary", "llm_image_text_full", "llm_image_text"]
+          "llm_summary", "llm_image_text_full", "llm_image_text", "text_passage_provenance"]
+
+
+def website_text_query():
+    return {'bool':{'filter':[{'prefix':{'id':'websites/'}},{'term':{'file_type':'text'}}],
+                   'should':[{'bool':{'must_not':[{'exists':{'field':'mime_type'}}]}},
+                             {'term':{'mime_type':''}},{'prefix':{'mime_type':'text/'}},
+                             {'terms':{'mime_type':['application/xhtml+xml','application/xml','application/json']}}],
+                   'minimum_should_match':1}}
+
+
+def current_source(source):
+    mime=source.get('mime_type') or ''
+    website=(source['id'].startswith('websites/') and source.get('file_type')=='text'
+             and (not mime or mime.startswith('text/') or mime in ('application/xhtml+xml','application/xml','application/json')))
+    return not website or source.get('text_extraction_version')==WEBSITE_EXTRACTION_VERSION
 
 
 @dataclass
@@ -41,13 +58,17 @@ class Progress:
     quote_passages: int = 0
     short_passages: int = 0
     excluded_documents: int = 0
+    reused_embeddings: int = 0
 
 
 def remaining_query(ids=None):
     query = {"bool": {"filter": [{"exists": {"field": "id"}}],
                       "must_not": [{"bool": {"filter": [
                           {"term": {"embedding_model": gemma.MODEL}},
-                          {"term": {"text_chunking_version": passages.VERSION}}]}}],
+                          {"term": {"text_chunking_version": passages.VERSION}},
+                          {'bool':{'should':[{'bool':{'must_not':[website_text_query()]}},
+                                             {'term':{'text_extraction_version':WEBSITE_EXTRACTION_VERSION}}],
+                                   'minimum_should_match':1}}]}}],
                       "should": [{"term": {"file_type": "text"}}] + [
                           {"exists": {"field": name}} for name in
                           ("text_full", "llm_summary", "llm_image_text_full", "llm_image_text",
@@ -74,7 +95,8 @@ def prepare(source, repo):
             if len(documents) != 1 or text.strip() and not documents[0].page_content.strip():
                 raise ValueError("Refusing incomplete or empty source replacement")
             text = documents[0].page_content
-            patch.update(text_full=text, text_extraction_version=extraction_version(record_id))
+            patch['text_extraction_version']=extraction_version(record_id)
+            if text!=source.get('text_full'):patch['text_full']=text
         else:
             missing = 1
     # Legacy records lacking full text can still retain and reembed their exact
@@ -82,14 +104,20 @@ def prepare(source, repo):
     texts = [text] if text.strip() else [row["text_chunk"] for row in source.get("text") or []
                                        if row.get("text_chunk", "").strip()]
     raw = None
+    decoding=None
     if record_id.startswith("websites/") and textual:
         path = source_path(Path(repo), record_id)
         if path.is_file():
-            raw, _ = handler()._detect_and_read_file(str(path))
+            decoded=handler()._read_decoded_file(str(path))
+            raw=decoded.text;decoding=decoded.provenance()
+            title=BeautifulSoup(raw,'html.parser').title
+            corrected=repaired_title(source.get('title'),title.string if title else None,decoded)
+            if corrected!=source.get('title'):patch['title']=corrected
     groups = [(body, passages.prepare(body, record_id, source.get("title") or "",
                html_source=raw, mime_type=source.get("mime_type") or "")) for body in texts]
     for body, plan in groups:
         passages.verify(body, plan)
+    if decoding:patch['_source_decoding']=decoding
     return groups, patch, missing
 
 
@@ -97,10 +125,26 @@ def migrate_record(client, index, hit, repo, embedder, preparation_pool=None, *,
     source = hit["_source"]
     if source.get("id") != hit["_id"]:
         raise ValueError("Stored ID differs from exact Elasticsearch ID")
-    if source.get("embedding_model") == gemma.MODEL and source.get("text_chunking_version") == passages.VERSION:
+    complete=source.get("embedding_model") == gemma.MODEL and source.get("text_chunking_version") == passages.VERSION
+    if complete and current_source(source):
         return 0, 0
     groups, patch, missing = (preparation_pool.submit(prepare, source, str(repo)).result()
                               if preparation_pool else prepare(source, str(repo)))
+    decoding=patch.pop('_source_decoding',None)
+    provenance={'version':passages.VERSION,'sources':[plan.provenance() for _,plan in groups]}
+    if decoding:provenance['decoding']=decoding
+    previous=source.get('text_passage_provenance') or {}
+    # A decoding checkpoint is not a new embedding model or passage policy.
+    # Reuse vectors when the full reader and exact source-bound search plans
+    # are unchanged; do not pay GPU work to mark clean historical sources.
+    reuse=(complete and not missing and patch.get('text_full',source.get('text_full'))==source.get('text_full')
+           and previous.get('version')==passages.VERSION and previous.get('sources')==provenance['sources'])
+    if reuse:
+        patch['text_passage_provenance']=provenance
+        response=client.update(index=index,id=hit['_id'],doc=patch,if_seq_no=hit['_seq_no'],if_primary_term=hit['_primary_term'])
+        if response.get('result') not in ('updated','noop'):raise ValueError('Elasticsearch did not update the record')
+        if diagnostics is not None:diagnostics['reused_embeddings']=1
+        return 1,0
     chunks = []
     for body, prepared in groups:
         generated = embedder.get_chunks_and_embeddings(Document(page_content=body), _prepared_passages=prepared)
@@ -113,8 +157,7 @@ def migrate_record(client, index, hit, repo, embedder, preparation_pool=None, *,
     # corresponding text removes an unusable old vector, preserving all text
     # and enrichment/provenance fields. No partially migrated document is ready.
     patch.update(text=chunks, text_chunking_version=passages.VERSION,
-                 text_passage_provenance={"version": passages.VERSION,
-                                          "sources": [plan.provenance() for _, plan in groups]})
+                 text_passage_provenance=provenance)
     excluded = any(set(plan.exclusions) & {"supporting_asset", "archived_access_or_error_page", "forum_utility_page"}
                    for _, plan in groups)
     for field, body in (("llm_summary_vector", source.get("llm_summary")),

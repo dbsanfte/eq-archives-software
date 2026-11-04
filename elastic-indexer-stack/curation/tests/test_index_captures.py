@@ -60,6 +60,27 @@ def test_entire_manifest_is_verified_before_any_index_or_embedding_request(candi
     with pytest.raises(CrawlError): index_batch(root,batch,Forbidden())
 
 
+def test_new_capture_uses_same_japanese_decoder_for_reader_enrichment_and_embeddings(candidate):
+    root,row=candidate;capture=row['captures'][0]
+    phrase='こんにちは。ギルドのみんなで①番の髙い山へ行きましょう。'
+    raw=('<html><meta charset="utf-8"><title>冒険記録</title><p>'+phrase+'</p></html>').encode('cp932')
+    (root/capture['path']).write_bytes(raw);capture.update(content_type='text/html',bytes=len(raw),sha256=digest(raw))
+    class Services:
+        def exists(self,*a):return False
+        def enrich(self,capture,text):
+            assert phrase in text
+            return {'llm_summary':'An EverQuest guild adventure.'}
+        def embedding(self,text,**k):return [1.]+[0.]*767
+        def create(self,key,document):
+            assert phrase in document['text_full']
+            assert any(phrase in c['text_chunk'] for c in document['text'])
+            assert document['text_passage_provenance']['decoding']['encoding']=='cp932'
+            assert document['archive_source_sha256']==digest(raw)
+            return True
+    assert index_batch(root,published(row),Services())=={'created':1,'existing':0,'captures':1}
+    assert (root/capture['path']).read_bytes()==raw
+
+
 def test_archived_error_remains_captured_without_paying_for_enrichment_or_embedding(candidate):
     root,row=candidate
     capture=row['captures'][0]

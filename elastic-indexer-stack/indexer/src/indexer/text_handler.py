@@ -13,6 +13,8 @@ from .archive_handler import ArchiveHandler
 from .openai_manager import OpenAIManager
 from .es_manager import ElasticsearchManager
 from .html_extraction import extraction_version, website_markdown
+from .source_encoding import decode_source
+from dataclasses import replace
 
 class TextHandler:
     def __init__(self, archive_handler: ArchiveHandler, openai_manager: OpenAIManager, logger: logging.Logger=None,
@@ -131,8 +133,9 @@ class TextHandler:
         
         metadata = {"source": full_path, "record_id": relative_path.replace(os.sep, '/')}
         if self._archive_handler._websites_path in relative_path:
-            raw, _ = self._detect_and_read_file(full_path)
-            metadata["source_html"] = raw
+            decoded = self._read_decoded_file(full_path)
+            metadata["source_html"] = decoded.text
+            metadata["source_decoding"] = decoded.provenance()
         doc = Document(page_content=preprocessed_content, metadata=metadata)
         return [doc]
         
@@ -265,47 +268,21 @@ class TextHandler:
         
         return title
 
+    def _read_decoded_file(self, file_path):
+        with open(file_path, 'rb') as source:
+            raw = source.read()
+        decoded = decode_source(raw, detection=chardet.detect(raw[:10000]))
+        if decoded.invalid_bytes:
+            self._logger.warning("Source has %s undecodable bytes; retained replacement markers (%s)",
+                                 decoded.invalid_bytes, decoded.encoding)
+        # Preserve the former text-mode universal-newline contract, while the
+        # provenance hash binds the original, unchanged bytes.
+        return replace(decoded, text=decoded.text.replace('\r\n', '\n').replace('\r', '\n'))
+
     def _detect_and_read_file(self, file_path: str) -> tuple[str, str]:
-        """
-        Detect file encoding and read the file content.
-        Returns a tuple of (content, encoding used) or (None, None) if file can't be read.
-        """
-        file_content = None
-        encoding_used = None
-        
         try:
-            # Read the file in binary mode first
-            with open(file_path, 'rb') as binary_file:
-                raw_data = binary_file.read(10000)  # Read first chunk to detect encoding
-                detection_result = chardet.detect(raw_data)
-            
-            encoding = detection_result['encoding']
-            confidence = detection_result['confidence']
-            self._logger.debug(f"Detected encoding: {encoding} with confidence: {confidence}")
-            
-            # Try with detected encoding
-            try:
-                with open(file_path, 'r', encoding=encoding) as file:
-                    file_content = file.read()
-                    encoding_used = encoding
-            except UnicodeDecodeError:
-                # If detected encoding fails, try our fallbacks
-                self._logger.warning(f"Detected encoding {encoding} failed for {file_path}")
-                for fallback_encoding in ['utf-8', 'cp1252', 'latin-1']:
-                    if fallback_encoding != encoding:  # Don't try the same encoding twice
-                        try:
-                            with open(file_path, 'r', encoding=fallback_encoding) as file:
-                                file_content = file.read()
-                                encoding_used = fallback_encoding
-                                self._logger.debug(f"Successfully read with fallback encoding: {fallback_encoding}")
-                                break
-                        except UnicodeDecodeError:
-                            continue
-            if file_content is None:
-                raise ValueError(f"Failed to read file {file_path} with all attempted encodings.")
-            
-        except Exception as e:
-            self._logger.error(f"Error during encoding detection for {file_path}: {e}")
-            self._logger.exception(e)
-        
-        return file_content, encoding_used
+            decoded = self._read_decoded_file(file_path)
+            return decoded.text, decoded.encoding
+        except Exception as error:
+            self._logger.error("Could not decode source (%s)", type(error).__name__)
+            return None, None
