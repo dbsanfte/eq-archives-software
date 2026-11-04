@@ -9,7 +9,7 @@ from openai import APIConnectionError
 import httpx
 
 import reindex_embeddings as job
-from indexer import gemma
+from indexer import gemma, passages
 from indexer.html_extraction import extraction_version
 
 V = [1.] + [0.] * 767
@@ -27,7 +27,7 @@ def fixture():
     client.count.return_value = {'count': 1}
     embedder = MagicMock()
     embedder.get_chunks_and_embeddings.side_effect = lambda document, **kw: [
-        {'text_chunk': c.text, 'vector': np.asarray(V)} for c in kw['_prepared_source']]
+        {'text_chunk': c.text, 'vector': np.asarray(V)} for c in kw['_prepared_passages'].passages]
     embedder.embed_text.return_value = np.asarray(V)
     return hit, client, embedder
 
@@ -41,12 +41,12 @@ def test_atomic_replacement_of_all_searched_vectors_preserves_all_enrichment_and
     patch = args['doc']
     assert patch['embedding_model'] == gemma.MODEL
     assert patch['llm_summary_vector'] == patch['llm_image_text_vector'] == V
-    assert patch['text'][0]['text_chunk'] == before['text_full']
+    assert patch['text'][0]['text_chunk'].strip() == before['text_full'].strip()
     for field in ('llm_summary', 'llm_image_text', 'llm_tags', 'archive_source_sha256', 'last_indexed'):
         assert field not in patch
     embedder.embed_text.assert_any_call('Cleric raid')
     assert hit['_source'] == before
-    hit['_source']['embedding_model'] = gemma.MODEL
+    hit['_source'].update(embedding_model=gemma.MODEL, text_chunking_version=passages.VERSION)
     client.reset_mock()
     assert job.migrate_record(client, 'eq-archive', hit, tmp_path, embedder) == (0, 0)
     client.update.assert_not_called()
@@ -63,13 +63,38 @@ def test_bad_summary_or_id_cannot_publish_partial_model_checkpoint(tmp_path):
         job.migrate_record(client, 'eq-archive', hit, tmp_path, embedder)
 
 
+def test_existing_model_checkpoint_is_reprocessed_when_its_passage_policy_is_old(tmp_path):
+    hit,client,embedder=fixture()
+    hit['_source']['embedding_model']=gemma.MODEL
+    assert job.migrate_record(client,'eq-archive',hit,tmp_path,embedder)[0]==1
+    assert client.update.call_args.kwargs['doc']['text_chunking_version']==passages.VERSION
+
+
+def test_placeholder_summary_is_cleared_without_an_inference_call(tmp_path):
+    hit,client,embedder=fixture()
+    hit['_source'].update(llm_summary='[ Still awaiting LLM Enrichment... ]',llm_image_text=None)
+    job.migrate_record(client,'eq-archive',hit,tmp_path,embedder)
+    embedder.embed_text.assert_not_called()
+    assert client.update.call_args.kwargs['doc']['llm_summary_vector'] is None
+
+
+def test_binary_document_keeps_its_existing_extracted_text_and_extraction_checkpoint(tmp_path):
+    hit,client,embedder=fixture()
+    hit['_source'].update(mime_type='application/pdf',text_extraction_version='docling-pdf-v1')
+    path=tmp_path/hit['_id'];path.parent.mkdir(parents=True);path.write_bytes(b'%PDF-1.7 binary source')
+    job.migrate_record(client,'eq-archive',hit,tmp_path,embedder)
+    patch=client.update.call_args.kwargs['doc']
+    assert 'text_full' not in patch and 'text_extraction_version' not in patch
+    assert patch['text'][0]['text_chunk'].strip()==hit['_source']['text_full']
+
+
 def test_missing_original_uses_stored_chunks_and_clears_unbacked_old_vectors(tmp_path):
     hit, client, embedder = fixture()
     hit['_source'].update(text_full='', text=[{'text_chunk': 'Preserved chunk'}],
                           text_extraction_version='old', llm_summary=None, llm_image_text=None)
     assert job.migrate_record(client, 'eq-archive', hit, tmp_path, embedder) == (1, 1)
     patch = client.update.call_args.kwargs['doc']
-    assert patch['text'][0]['text_chunk'] == 'Preserved chunk'
+    assert patch['text'][0]['text_chunk'].strip() == 'Preserved chunk'
     assert patch['llm_summary_vector'] is patch['llm_image_text_vector'] is None
     assert 'text_full' not in patch and 'text_extraction_version' not in patch
 
@@ -103,7 +128,7 @@ def test_scan_only_skips_new_model_complete_checkpoints_and_limits_work(tmp_path
     result = job.reindex(client, 'eq', tmp_path, ids=[hit['_id']], limit=1, workers=1, batch_size=1, factory=factory)
     assert result.updated == result.processed == 1 and not result.failed
     query = client.count.call_args.kwargs['query']
-    assert query['bool']['must_not'] == [{'term': {'embedding_model': gemma.MODEL}}]
+    assert query['bool']['must_not'] == [{'bool': {'filter': [{'term': {'embedding_model': gemma.MODEL}}, {'term': {'text_chunking_version': passages.VERSION}}]}}]
     assert {'ids': {'values': [hit['_id']]}} in query['bool']['filter']
     assert client.search.call_args.kwargs['seq_no_primary_term']
 
@@ -116,6 +141,18 @@ def test_scan_advances_and_content_errors_do_not_block_later_records(tmp_path):
     result = job.reindex(client, 'eq', tmp_path, workers=2, batch_size=1, factory=lambda **kw: embedder)
     assert result.failed == result.updated == 1 and result.processed == 2
     assert client.search.call_args_list[1].kwargs['search_after'] == hit['sort']
+
+
+def test_handoff_finishes_unconverted_records_before_upgrading_existing_gemma_passages(tmp_path):
+    hit,client,embedder=fixture()
+    old=deepcopy(hit);old['_source']['embedding_model']=gemma.MODEL
+    client.search.side_effect=[{'hits':{'hits':[hit]}},{'hits':{'hits':[]}},
+                               {'hits':{'hits':[old]}},{'hits':{'hits':[]}}]
+    result=job.reindex(client,'eq',tmp_path,workers=1,factory=lambda **_:embedder,prioritize_unconverted=True)
+    assert result.updated==2
+    queries=[call.kwargs['query'] for call in client.search.call_args_list]
+    assert {'term':{'embedding_model':gemma.MODEL}} in queries[0]['bool']['must_not']
+    assert {'term':{'embedding_model':gemma.MODEL}} in queries[-1]['bool']['filter']
 
 
 def test_transient_outage_exits_for_recovery_instead_of_finishing_incomplete(tmp_path):
@@ -164,7 +201,7 @@ def test_operator_entrypoint_only_adds_mapping_and_runs_checkpointed_migration(t
     monkeypatch.setattr(job, 'reindex', migrate)
     assert job.main() == failures
     manager.get_client.return_value.indices.put_mapping.assert_called_once_with(
-        index='eq', properties={'embedding_model': {'type': 'keyword'}})
+        index='eq', properties={'embedding_model': {'type': 'keyword'}, 'text_chunking_version': {'type': 'keyword'}, 'text_passage_provenance': {'type': 'object', 'enabled': False}})
     assert migrate.call_args.kwargs['preparation_pool'] is None
     assert migrate.call_args.kwargs['limit'] == 1
     monkeypatch.setattr('sys.argv', ['reindex_embeddings', '--preparation-workers', '5'])

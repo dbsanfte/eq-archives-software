@@ -288,3 +288,25 @@ def test_openai_api_exception(tmp_path, caplog):
     assert "Error calling OpenAI API for image" in caplog.text
     assert "API failure" in caplog.text
     assert "Skipping LLM enrichment for this image" in caplog.text
+
+@pytest.mark.parametrize('valid',[True,False])
+def test_gemma_images_have_searchable_model_identity_without_paid_enrichment(tmp_path,monkeypatch,valid):
+    from unittest.mock import MagicMock
+    from PIL import Image
+    from indexer import gemma
+    monkeypatch.setenv('SKIP_LLM_ENRICHMENT','true')
+    manager=MagicMock();manager._embedding_model_name=gemma.MODEL
+    manager.embed_image.return_value=[1.]+[0.]*767
+    path=tmp_path/'map.png'
+    if valid:Image.new('RGB',(32,32),'green').save(path)
+    else:path.write_bytes(b'corrupt image')
+    handler=ImageHandler(archive_handler=DummyArchiveHandler(),openai_manager=manager)
+    doc=handler.process_image_file('websites/map.example/20000101000000/map.png',str(path),'image/png','map.example')[0]
+    assert doc['embedding_model']==gemma.MODEL
+    manager.call_openai_api_image.assert_not_called()
+    if valid:
+        assert len(doc['image_vector'])==768
+        assert doc['image_embedding_status']=='embedded'
+    else:
+        assert doc['image_embedding_status']=='invalid_or_oversized_raster'
+        assert 'image_vector' not in doc

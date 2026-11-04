@@ -202,7 +202,7 @@ class Archive:
                         "num_candidates": 250, "boost": 10,
                         **({"filter": {"term": {"embedding_model": self.settings.model}}}
                            if self.settings.model == "embeddinggemma-2-768-v1" else {}),
-                    } for field in ("text.vector", "llm_summary_vector", "llm_image_text_vector")]
+                    } for field in ("text.vector", "llm_summary_vector", "llm_image_text_vector", "image_vector")]
             hits = await self.query(body)
             return SearchResults(results=[result_from_hit(hit) for hit in hits])
 

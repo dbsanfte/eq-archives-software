@@ -48,6 +48,7 @@
     "llm_extracted_dates"
   ],
   "vectorFields": [
+    "image_vector",
     "llm_image_text_vector",
     "llm_summary_vector"
   ],

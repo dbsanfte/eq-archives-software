@@ -108,8 +108,8 @@ requests, service restart and host reboot before routing production work.
 limit. Explicit `cuda` permits 1–64 inputs. `NOMIC_EMBEDDING_ENCODING=base64`
 transports the same float32 vectors with less JSON overhead; `float` stays the
 default. Both formats require complete returned indices and 768 finite values
-before a document can be saved. The 480-token chunker and version checkpoints
-remain unchanged.
+before a document can be saved. Text passages retain a 480-token total request
+budget, including the real title, section context and special tokens.
 
 `REINDEX_WORKERS=4` starts isolated handler/embedding clients for the primary CUDA
 endpoint. The production renderer removes all inherited `REINDEX_SECONDARY_*`
@@ -160,9 +160,9 @@ GPU utilization/power and ES resource usage. No LLM enrichment or API spend is a
 The production text embedding model is EmbeddingGemma 2 Q8_0, 768 dimensions,
 canonical alias `embeddinggemma-2-768-v1`. CUDA and Vulkan image pins use the same
 llama.cpp revision (1052f7e1d626); public model/runtime hashes live in `runtime.env`
-and `cuda.env`. Both GPUs fit the same 310 MB text model. The separate multimedia
-encoders are not needed for this text/OCR migration; no image/audio backfill is
-implied. Never mix Gemma and Nomic vectors in the same semantic query.
+and `cuda.env`. Both GPUs fit the same 310 MB text model. Image inference uses a
+separate CUDA companion with the pinned projector in `vision.env`. Never mix
+Gemma and Nomic vectors in the same semantic query.
 
 1. Validate both pinned runtimes privately, including finite normalized vectors,
    cross-host cosine, near-480-token batch/serial identity, oversize rejection and
@@ -202,8 +202,11 @@ not hold other workers. Missing sources are counted, retain original text/chunks
 and never claim repaired extraction. Unusable old vectors with no corresponding
 text are cleared during replacement. Empty sources are not invented.
 
-`embedding_model` is the resume checkpoint, independently of historical extraction
-and chunking versions. The recovery wrapper waits for infrastructure and resumes
+`embedding_model` and `text_chunking_version=eq-passages-480-v2` together are the
+text resume checkpoint. Older Gemma records remain eligible for the passage
+upgrade; `REINDEX_PRIORITIZE_UNCONVERTED=true` finishes the old model frontier
+first, then upgrades previously converted Gemma records. Count model conversion
+and passage-policy completion separately. The recovery wrapper waits for infrastructure and resumes
 completed versions after temporary outages. A final nonzero failed count requires
 inspection and another checkpointed pass; never report it as complete. To check
 progress, count remaining documents using `remaining_query()` and count the exact
@@ -217,3 +220,59 @@ records exist, the vector-only smoke check must return a match. Test search
 relevance on the completed corpus before claiming an improvement. Preserve old
 models/Jobs for diagnosis; reverting runtime alone after partial migration is
 unsafe because the embedding spaces differ even though both have 768 dimensions.
+
+## Content-aware passages and images
+
+`indexer.passages` builds a separate, hashed search view and retains full reader
+text and archive sources. Generic HTML uses explicit content landmarks, headings,
+paragraphs and data tables; uncertain layouts keep their content. Allakhazam,
+Everlore and CastersRealm remove identifiable layout navigation. Ezboard and
+supported forum post containers retain author/date context; newsgroups and
+mailing lists retain quotation boundaries and source attribution. RSS entries
+have separate boundaries. Table chunks retain complete rows where possible and
+repeat column context. Oversized rows/prose split with overlap. Every complete
+request is checked with the pinned Gemma tokenizer against 480 tokens.
+
+Passages store offsets into the selected search view, title, context and kind;
+`text_passage_provenance` records source/view hashes and exclusions. These offsets
+are not offsets into `text_full`. JavaScript/CSS and recognized archive access
+errors retain their archival reader but receive no semantic passages. Placeholder
+summaries never receive vectors. Existing meaningful summaries/OCR are reembedded
+atomically without regenerating enrichment. Fresh imports use the same policy.
+
+`install.sh` also enables `eqarchives-vision-embeddings.service` and its independent
+one-minute real-inference health timer. The companion binds only the CUDA host's
+LAN address on **8082**, uses the same text weights, alias and private Nomic key,
+one 2,048-token slot and the checksum-pinned Q8 projector. It does not restart or
+replace the 64-slot text service. Kubernetes routes it through selectorless
+`gemma-image-embeddings`; `GEMMA_IMAGE_ENDPOINT` can override this private route.
+Three failed health checks restart only the image service.
+
+Visual embeddings use Gemma's structured image input, without a text prefix, in
+the same 768-dimensional space as text queries. Supporting raster files in new
+approved captures are create-only indexed without Luna calls. Readers and assets
+retain their source identity. Inputs are bounded to 20 MiB/40 million pixels,
+EXIF-oriented, fitted within 1,600 pixels and alpha-composited with contrast.
+The first visible frame among eight GIF frames is used. Tiny, transparent,
+corrupt, unsupported or oversized files retain typed per-file diagnostics;
+audio, video and SVG are not directly embedded. Search and MCP include the
+model-filtered `image_vector` branch. Deployment installs its additive mapping
+before releasing a frontend that queries that field.
+
+For the initial raster backfill, reuse the existing prepared source checkout;
+do not clone, fetch or walk it. Prepare `/mnt/samsung/eqarchives-images` with mode
+0700 and owner matching the indexer, then render a separate pending Job:
+
+```bash
+python3 scripts/embedding-service/render-reindex.py --images \
+  --name reindex-images-<date> --image eqarchives-indexer:rtx3080-<merged-sha> \
+  < /private/running-job.json > /private/image-job.json
+```
+
+The image worker streams local Git trees through a remote-free reader, checks
+source bytes against pinned blob identities and never overwrites an existing
+document. Its SQLite per-host cursors, missing-source diagnostics and bounded
+blob-vector cache persist under the image-state volume. One serial image worker
+can run alongside text indexing on CUDA; it performs no paid enrichment. Use
+`index_images.py --host <host> --limit <count>` for bounded probes. Preserve its
+state and exact source commit across retries; a changed revision is rejected.

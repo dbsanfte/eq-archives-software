@@ -7,6 +7,7 @@ resources:
   - device-plugin.yaml
   - deployment.yaml
   - cuda-service.yaml
+  - vision-service.yaml
 configMapGenerator:
   - name: nomic-embedding-config
     envs:
@@ -22,6 +23,13 @@ patchesJson6902:
       version: v1
       kind: Service
       name: nomic-embeddings-rtx3080
+    patch: |-
+      - op: remove
+        path: /spec/selector
+  - target:
+      version: v1
+      kind: Service
+      name: gemma-image-embeddings
     patch: |-
       - op: remove
         path: /spec/selector

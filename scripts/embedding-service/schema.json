@@ -1,0 +1,17 @@
+{
+  "properties": {
+    "text": {"type": "nested", "properties": {
+      "source_start": {"type": "long", "index": false, "doc_values": false},
+      "source_end": {"type": "long", "index": false, "doc_values": false},
+      "context": {"type": "text", "index": false},
+      "title": {"type": "text", "index": false},
+      "kind": {"type": "keyword", "index": false, "doc_values": false}
+    }},
+    "image_vector": {"type": "dense_vector", "dims": 768, "index": true, "index_options": {"type": "int8_hnsw"}},
+    "image_embedding_version": {"type": "keyword"},
+    "image_embedding_sha256": {"type": "keyword"},
+    "image_embedding_status": {"type": "keyword"},
+    "image_embedding_provenance": {"type": "object", "enabled": false},
+    "text_passage_provenance": {"type": "object", "enabled": false}
+  }
+}

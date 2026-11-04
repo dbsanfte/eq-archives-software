@@ -62,16 +62,16 @@ def test_binary_download_and_compact_polls_keep_complete_sources_private(candida
     assert call(app, 'GET', endpoint+'&download=1').status_code == 409
 
 
-def test_indexing_preserves_assets_without_sending_them_to_es_or_luna(candidate):
+def test_indexing_preserves_existing_pages_and_images_without_reembedding_or_luna(candidate):
     root, row = candidate
     manifest = mixed(root, row)
     class Services:
         def exists(self, identifier):
-            assert identifier.endswith('/news.html')
+            assert identifier.endswith(('/news.html','/logo.png'))
             return True
         def enrich(self, *args): raise AssertionError('No charge for an existing page or a binary file')
         def embedding(self, *args): raise AssertionError('No vectors for a binary file')
-    assert index_batch(root, {'manifest': manifest}, Services()) == {'created': 0, 'existing': 1, 'captures': 2, 'preserved_files': 1}
+    assert index_batch(root, {'manifest': manifest}, Services()) == {'created': 0, 'existing': 2, 'captures': 2}
     # Real site manifests can exceed the former 2 MiB sample-batch bound.
     manifest['notes'] = [{'note': 'x' * (2 * 1024**2)}]
     batch = {'manifest': manifest, 'manifest_sha256': digest(manifest), 'publication': {'commit': 'a' * 40}}

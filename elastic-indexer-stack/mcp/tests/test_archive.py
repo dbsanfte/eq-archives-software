@@ -59,7 +59,7 @@ def test_hybrid_search_preserves_query_limits_fields_and_citations():
     assert body["size"] == 10 and body["timeout"] == "8s"
     assert body["query"]["simple_query_string"]["query"] == "ancient cyclops"
     assert {item["field"] for item in body["knn"]} == {
-        "text.vector", "llm_summary_vector", "llm_image_text_vector",
+        "text.vector", "llm_summary_vector", "llm_image_text_vector", "image_vector",
     }
     assert all(item["query_vector"] == VECTOR for item in body["knn"])
     assert all(item["filter"] == {"term": {"embedding_model": Settings.model}} for item in body["knn"])

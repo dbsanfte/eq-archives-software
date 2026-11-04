@@ -8,6 +8,14 @@ from elasticsearch import Elasticsearch, exceptions
 # A single dictionary describing each field and its ES mapping configuration
 ES_FIELDS = {
     "embedding_model": {"mapping": {"type": "keyword"}, "default": None},
+    "image_vector": {"mapping": {"type": "dense_vector", "dims": 768, "index": True,
+                                 "index_options": {"type": "int8_hnsw"}}, "default": None},
+    "image_embedding_version": {"mapping": {"type": "keyword"}, "default": None},
+    "image_embedding_sha256": {"mapping": {"type": "keyword"}, "default": None},
+    "image_embedding_status": {"mapping": {"type": "keyword"}, "default": None},
+    "image_embedding_provenance": {"mapping": {"type": "object", "enabled": False}, "default": None},
+    "text_passage_provenance": {"mapping": {"type": "object", "enabled": False}, "default": None},
+
     "id": {
         "mapping": {"type": "keyword"},
         "default": None
@@ -46,6 +54,11 @@ ES_FIELDS = {
                     "index": True,
                     "index_options": {"type": "int8_hnsw"}
                 },
+                "source_start": {"type": "long", "index": False, "doc_values": False},
+                "source_end": {"type": "long", "index": False, "doc_values": False},
+                "context": {"type": "text", "index": False},
+                "title": {"type": "text", "index": False},
+                "kind": {"type": "keyword", "index": False, "doc_values": False},
                 "text_chunk": {"type": "text"}
             }
         },

@@ -33,7 +33,8 @@ test('exports the real lexical builder, constrained policy and semantic prefilte
   expect(constrained.semantic_allowed).toBe(false);
   expect(constrained.body.knn).toBeUndefined();
   expect(constrained.body.query.bool.should[0].query_string.default_operator).toBe('AND');
-  expect(hybrid.body.knn).toHaveLength(3);
+  expect(hybrid.body.knn).toHaveLength(4);
+  expect(hybrid.body.knn.map(branch => branch.field)).toContain('image_vector');
   for (const branch of hybrid.body.knn) {
     expect(branch).toMatchObject({ k: 50, num_candidates: 250, boost: 10, query_vector: vector });
     expect(branch.filter).toContainEqual(hybrid.body.post_filter);

@@ -1,0 +1,10 @@
+[Unit]
+Description=Periodic image embedding health check
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=1min
+Unit=eqarchives-vision-health.service
+
+[Install]
+WantedBy=timers.target

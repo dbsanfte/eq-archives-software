@@ -1,0 +1,7 @@
+[Unit]
+Description=Check real Gemma image inference
+After=eqarchives-vision-embeddings.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/eqarchives-embeddings/vision.py health

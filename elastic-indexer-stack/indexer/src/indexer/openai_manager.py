@@ -400,6 +400,10 @@ class OpenAIManager:
                 self._logger.debug(f"Empty text, returning a None embedding for text: {text}")
                 return None
             if getattr(self, "_embedding_model_name", None) == gemma.MODEL:
+                from .passages import useful_summary
+                text = useful_summary(text)
+                if text is None:
+                    return None
                 chunks = self._gemma_chunks(text)
                 return np.asarray(gemma.mean_vector([chunk["vector"].tolist() for chunk in chunks]), dtype=np.float32)
             self._logger.debug(f"Fetching embedding for: {text}")
@@ -472,8 +476,50 @@ class OpenAIManager:
         self.chunking_version = gemma.CHUNKING_VERSION
         return result
 
-    def get_chunks_and_embeddings(self, document: Document, *, _prepared_source=None) -> list[dict]:
+    def embed_image(self, image):
+        from .image_embeddings import response_vector
+        if self._embedding_model_name != gemma.MODEL:
+            raise ValueError("Direct images require the Gemma embedding space")
+        if not hasattr(self, "_visual_embeddings"):
+            endpoint = os.environ.get("GEMMA_IMAGE_ENDPOINT", "http://gemma-image-embeddings.eqarchives-es.svc.cluster.local:8080/v1")
+            self._visual_embeddings = OpenAI(api_key=self._api_key, base_url=endpoint, max_retries=2, timeout=120)
+        response = self._visual_embeddings.embeddings.create(model=gemma.MODEL, input=[image.content()], encoding_format="float")
+        return response_vector(response.model_dump(warnings=False))
+
+    def get_passages_and_embeddings(self, document, prepared=None):
+        from . import passages
+        metadata = document.metadata or {}
+        plan = prepared or passages.prepare(document.page_content, metadata.get("record_id", ""),
+                                             metadata.get("title", ""),
+                                             html_source=metadata.get("source_html"),
+                                             mime_type=metadata.get("mime_type", ""))
+        passages.verify(document.page_content, plan)
+        setting = os.environ.get("GEMMA_EMBEDDING_BATCH_SIZE", "1")
+        profile = os.environ.get("GEMMA_EMBEDDING_PROFILE", "vulkan")
+        if profile not in ("cuda", "vulkan"):
+            raise ValueError("Invalid Gemma embedding profile")
+        maximum = 64 if profile == "cuda" else 2
+        if setting not in {str(n) for n in range(1, maximum + 1)}:
+            raise ValueError("Invalid Gemma embedding batch capacity")
+        size = int(setting)
+        result = []
+        for offset in range(0, len(plan.passages), size):
+            batch = plan.passages[offset:offset+size]
+            values = self._embed_nomic_batch([p.request for p in batch])
+            for passage, value in zip(batch, values, strict=True):
+                row = np.asarray(value, dtype=np.float32)
+                gemma.vector(row.tolist())
+                result.append({"text_chunk": passage.text, "vector": row,
+                               "source_start": passage.start, "source_end": passage.end,
+                               "title": passage.title, "context": passage.context, "kind": passage.kind})
+        self.chunking_version = passages.VERSION
+        self.passage_provenance = plan.provenance()
+        return result
+
+    def get_chunks_and_embeddings(self, document: Document, *, _prepared_source=None, _prepared_passages=None) -> list[dict]:
         if self._embedding_model_name == gemma.MODEL:
+            if _prepared_passages is not None or _prepared_source is None:
+                return self.get_passages_and_embeddings(document, _prepared_passages)
             return self._gemma_chunks(document.page_content, _prepared_source)
         if "nomic-embed" in self._embedding_model_name:
             # The default Vulkan service retains its two-input capacity. Larger

@@ -1,5 +1,6 @@
 """Checkpointed in-place EmbeddingGemma migration. Never calls paid enrichment."""
 import argparse
+from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
 from dataclasses import asdict, dataclass
 import logging
@@ -14,6 +15,7 @@ from openai import OpenAIError
 from langchain_core.documents import Document
 
 from indexer import gemma
+from indexer import passages
 from indexer.es_manager import ElasticsearchManager
 from indexer.html_extraction import extraction_version
 from indexer.openai_manager import OpenAIManager
@@ -22,7 +24,8 @@ from reindex_text import completed_records, source_path
 
 LOG = logging.getLogger(__name__)
 FIELDS = ["id", "file_type", "text_full", "text.text_chunk", "text_extraction_version",
-          "embedding_model", "llm_summary", "llm_image_text_full", "llm_image_text"]
+          "embedding_model", "text_chunking_version", "mime_type", "title",
+          "llm_summary", "llm_image_text_full", "llm_image_text"]
 
 
 @dataclass
@@ -36,7 +39,9 @@ class Progress:
 
 def remaining_query(ids=None):
     query = {"bool": {"filter": [{"exists": {"field": "id"}}],
-                      "must_not": [{"term": {"embedding_model": gemma.MODEL}}],
+                      "must_not": [{"bool": {"filter": [
+                          {"term": {"embedding_model": gemma.MODEL}},
+                          {"term": {"text_chunking_version": passages.VERSION}}]}}],
                       "should": [{"term": {"file_type": "text"}}] + [
                           {"exists": {"field": name}} for name in
                           ("text_full", "llm_summary", "llm_image_text_full", "llm_image_text",
@@ -54,7 +59,9 @@ def prepare(source, repo):
     patch = {}
     missing = 0
     record_id = source["id"]
-    if source.get("file_type") == "text" and source.get("text_extraction_version") != extraction_version(record_id):
+    mime=source.get("mime_type") or ""
+    textual=not mime or mime.startswith("text/") or mime in ("application/xhtml+xml","application/xml","application/json")
+    if source.get("file_type") == "text" and textual and source.get("text_extraction_version") != extraction_version(record_id):
         path = source_path(Path(repo), record_id)
         if path.is_file():
             documents = handler()._get_documents_from_file(record_id, str(path))
@@ -68,9 +75,15 @@ def prepare(source, repo):
     # stored chunks. Do not invent repaired extraction or erase their content.
     texts = [text] if text.strip() else [row["text_chunk"] for row in source.get("text") or []
                                        if row.get("text_chunk", "").strip()]
-    groups = [(body, gemma.chunk_source(body)) for body in texts]
-    for body, chunks in groups:
-        verify_prepared(body, chunks)
+    raw = None
+    if record_id.startswith("websites/") and textual:
+        path = source_path(Path(repo), record_id)
+        if path.is_file():
+            raw, _ = handler()._detect_and_read_file(str(path))
+    groups = [(body, passages.prepare(body, record_id, source.get("title") or "",
+               html_source=raw, mime_type=source.get("mime_type") or "")) for body in texts]
+    for body, plan in groups:
+        passages.verify(body, plan)
     return groups, patch, missing
 
 
@@ -78,14 +91,14 @@ def migrate_record(client, index, hit, repo, embedder, preparation_pool=None):
     source = hit["_source"]
     if source.get("id") != hit["_id"]:
         raise ValueError("Stored ID differs from exact Elasticsearch ID")
-    if source.get("embedding_model") == gemma.MODEL:
+    if source.get("embedding_model") == gemma.MODEL and source.get("text_chunking_version") == passages.VERSION:
         return 0, 0
     groups, patch, missing = (preparation_pool.submit(prepare, source, str(repo)).result()
                               if preparation_pool else prepare(source, str(repo)))
     chunks = []
     for body, prepared in groups:
-        generated = embedder.get_chunks_and_embeddings(Document(page_content=body), _prepared_source=prepared)
-        if len(generated) != len(prepared) or any(row["text_chunk"] != chunk.text for row, chunk in zip(generated, prepared)):
+        generated = embedder.get_chunks_and_embeddings(Document(page_content=body), _prepared_passages=prepared)
+        if len(generated) != len(prepared.passages) or any(row["text_chunk"] != chunk.text for row, chunk in zip(generated, prepared.passages)):
             raise ValueError("Embedding response omitted or changed source chunks")
         chunks.extend(generated)
     for row in chunks:
@@ -93,11 +106,13 @@ def migrate_record(client, index, hit, repo, embedder, preparation_pool=None):
     # Every searched field is replaced in the SAME optimistic update. Empty
     # corresponding text removes an unusable old vector, preserving all text
     # and enrichment/provenance fields. No partially migrated document is ready.
-    patch.update(text=chunks, text_chunking_version=gemma.CHUNKING_VERSION)
+    patch.update(text=chunks, text_chunking_version=passages.VERSION,
+                 text_passage_provenance={"version": passages.VERSION,
+                                          "sources": [plan.provenance() for _, plan in groups]})
+    asset = any("supporting_asset" in plan.exclusions for _, plan in groups)
     for field, body in (("llm_summary_vector", source.get("llm_summary")),
                         ("llm_image_text_vector", source.get("llm_image_text_full") or source.get("llm_image_text"))):
-        if isinstance(body, list):
-            body = " ".join(body)
+        body = None if asset else passages.useful_summary(body)
         value = embedder.embed_text(body) if body and body.strip() else None
         if body and body.strip() and value is None:
             raise ValueError("Embedding response omitted summary/OCR vector")
@@ -112,11 +127,11 @@ def migrate_record(client, index, hit, repo, embedder, preparation_pool=None):
 
 
 def reindex(client, index, repo, *, ids=None, limit=0, workers=4, batch_size=100,
-            preparation_pool=None, factory=OpenAIManager):
+            preparation_pool=None, factory=OpenAIManager, prioritize_unconverted=False):
     if not 1 <= workers <= 8 or limit < 0 or not 1 <= batch_size <= 1000:
         raise ValueError("Invalid migration bounds")
     query = remaining_query(ids)
-    LOG.info("Starting Gemma migration: model=%s remaining=%s workers=%s", gemma.MODEL,
+    LOG.info("Starting Gemma migration: model=%s policy=%s remaining=%s workers=%s", gemma.MODEL, passages.VERSION,
              client.count(index=index, query=query)["count"], workers)
     progress = Progress()
     local = threading.local()
@@ -125,23 +140,30 @@ def reindex(client, index, repo, *, ids=None, limit=0, workers=4, batch_size=100
             local.embedder = factory(embedding_model_name=gemma.MODEL)
         return migrate_record(client, index, hit, repo, local.embedder, preparation_pool)
     def scan():
-        after = None
         scanned = 0
-        while not limit or scanned < limit:
-            request = dict(index=index, query=query, source=FIELDS, seq_no_primary_term=True,
-                           sort=[{"id": "asc"}], size=min(batch_size, limit-scanned) if limit else batch_size)
-            if after:
-                request["search_after"] = after
-            response = client.search(**request)
-            if response.get("timed_out") or response.get("_shards", {}).get("failed"):
-                raise ValueError("Incomplete Elasticsearch scan")
-            hits = response["hits"]["hits"]
-            if not hits:
-                return
-            for hit in hits:
-                scanned += 1
-                yield hit
-            after = hits[-1]["sort"]
+        queries=[query]
+        if prioritize_unconverted:
+            first=deepcopy(query);first['bool']['must_not'].append({'term':{'embedding_model':gemma.MODEL}})
+            second=deepcopy(query);second['bool']['filter'].append({'term':{'embedding_model':gemma.MODEL}})
+            queries=[first,second]
+        for phase,selection in enumerate(queries,1):
+            LOG.info('Starting passage scan phase %s/%s',phase,len(queries))
+            after=None
+            while not limit or scanned < limit:
+                request = dict(index=index, query=selection, source=FIELDS, seq_no_primary_term=True,
+                               sort=[{"id": "asc"}], size=min(batch_size, limit-scanned) if limit else batch_size)
+                if after:
+                    request["search_after"] = after
+                response = client.search(**request)
+                if response.get("timed_out") or response.get("_shards", {}).get("failed"):
+                    raise ValueError("Incomplete Elasticsearch scan")
+                hits = response["hits"]["hits"]
+                if not hits:
+                    break
+                for hit in hits:
+                    scanned += 1
+                    yield hit
+                after = hits[-1]["sort"]
     failures = 0
     with ThreadPoolExecutor(max_workers=workers) as pool:
         for hit, result, _ in completed_records(scan(), execute, pool, workers):
@@ -175,6 +197,8 @@ def main():
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--workers", type=int, default=int(os.getenv("REINDEX_WORKERS", "4")))
     parser.add_argument("--preparation-workers", type=int, default=int(os.getenv("REINDEX_PREPARATION_WORKERS", "2")))
+    parser.add_argument("--prioritize-unconverted",action="store_true",
+                        default=os.getenv('REINDEX_PRIORITIZE_UNCONVERTED','false')=='true')
     args = parser.parse_args()
     if not 0 <= args.preparation_workers <= 4:
         parser.error("Preparation workers must be 0–4")
@@ -183,11 +207,14 @@ def main():
     logging.getLogger("elastic_transport").setLevel(logging.WARNING)
     manager = ElasticsearchManager(manage_index=False)
     client = manager.get_client()
-    client.indices.put_mapping(index=manager._index_name, properties={"embedding_model": {"type": "keyword"}})
+    client.indices.put_mapping(index=manager._index_name, properties={
+        "embedding_model": {"type": "keyword"}, "text_chunking_version": {"type": "keyword"},
+        "text_passage_provenance": {"type": "object", "enabled": False}})
     with ProcessPoolExecutor(max_workers=max(1, args.preparation_workers),
                              mp_context=multiprocessing.get_context("spawn")) as preparation_pool:
         progress = reindex(client, manager._index_name, args.repo, ids=args.ids, limit=args.limit,
-                           workers=args.workers, preparation_pool=preparation_pool if args.preparation_workers else None)
+                           workers=args.workers, preparation_pool=preparation_pool if args.preparation_workers else None,
+                           prioritize_unconverted=args.prioritize_unconverted)
     return 1 if progress.failed else 0
 
 

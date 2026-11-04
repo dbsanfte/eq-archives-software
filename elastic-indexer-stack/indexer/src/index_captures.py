@@ -19,9 +19,11 @@ from urllib.parse import quote, urlsplit
 import httpx
 
 from common import CrawlError, decode, digest, now
-from captures import check_manifest, indexable, verified_source
+from captures import check_manifest, indexable, verified_source, verified_path
 from capture_budget import budget_identity
 from indexer.gemma import CHUNKING_VERSION, DOCUMENT_PREFIX, MODEL, chunk_source
+from indexer import passages
+from indexer.image_embeddings import ImageUnavailable, MAX_BYTES, VERSION as IMAGE_VERSION, prepare_image, response_vector
 from indexer.html_extraction import WEBSITE_EXTRACTION_VERSION, website_markdown
 from indexer.capture_enrichment import Enricher, policy
 from import_status import EnrichmentError, describe, write_status
@@ -67,6 +69,8 @@ class Services:
         if self.model != MODEL:
             raise CrawlError("Import embedding model does not match its pinned tokenizer")
         self.embedding_url = os.environ.get("EMBEDDING_URL", "http://nomic-embeddings-rtx3080.eqarchives-es.svc.cluster.local:8080").rstrip("/")
+        self.image_url = os.environ.get("IMAGE_EMBEDDING_URL", "http://gemma-image-embeddings.eqarchives-es.svc.cluster.local:8080").rstrip("/")
+        self.visual_cache = {}
         self.client = httpx.Client(auth=(directory.joinpath("es_username").read_text().strip(),
                                         directory.joinpath("es_password").read_text().strip()),
                                    timeout=httpx.Timeout(120, connect=10), trust_env=False)
@@ -90,10 +94,34 @@ class Services:
             raise CrawlError(f"Elasticsearch HTTP {response.status_code}; upstream details omitted")
         return response.status_code == 200
 
-    def embedding(self, text):
+    def image_embedding(self, image):
+        if image.source_sha256 in self.visual_cache:
+            return self.visual_cache[image.source_sha256]
         for attempt in range(3):
             try:
-                response = self.embedder.post(self.embedding_url + "/v1/embeddings", json={"model": self.model, "input": DOCUMENT_PREFIX + text})
+                response = self.embedder.post(self.image_url + "/v1/embeddings", json={
+                    "model": self.model, "input": [image.content()], "encoding_format": "float"})
+                if response.status_code == 200:
+                    try:
+                        vector = response_vector(response.json())
+                    except (ValueError, TypeError, KeyError):
+                        raise CrawlError("Image service returned an invalid same-space vector") from None
+                    if len(self.visual_cache) >= 512:
+                        self.visual_cache.pop(next(iter(self.visual_cache)))
+                    self.visual_cache[image.source_sha256] = vector
+                    return vector
+                if response.status_code not in (429,502,503,504):
+                    raise CrawlError(f"Image embedding service HTTP {response.status_code}; upstream details omitted")
+            except httpx.HTTPError:
+                if attempt == 2:
+                    raise CrawlError("Image embedding service unavailable; import remains resumable") from None
+            time.sleep(2*(attempt+1))
+        raise CrawlError("Image embedding service busy; import remains resumable")
+
+    def embedding(self, text, *, title="", context=""):
+        for attempt in range(3):
+            try:
+                response = self.embedder.post(self.embedding_url + "/v1/embeddings", json={"model": self.model, "input": passages.document_prefix(title) + context + text})
             except httpx.HTTPError:
                 if attempt == 2:
                     raise CrawlError("Embedding service request failed; batch remains resumable") from None
@@ -108,7 +136,6 @@ class Services:
                         raise CrawlError("Embedding service returned an invalid 768-dimensional vector")
                     if response.json().get("model") != self.model:
                         raise CrawlError("Embedding service returned a different model; import remains pending")
-                    time.sleep(0.2)
                     return vector
                 if response.status_code not in (429, 502, 503, 504):
                     raise CrawlError(f"Embedding service HTTP {response.status_code}; upstream details omitted")
@@ -124,12 +151,46 @@ class Services:
         return True
 
 
+def image_document(root, capture, batch, services):
+    path = verified_path(root, capture)
+    timestamp = datetime.strptime(capture["timestamp"], "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc).isoformat()
+    document = {"id": capture["archive_path"], "title": capture.get("title") or urlsplit(capture["url"]).path.rsplit('/',1)[-1],
+                "file_type": "image", "mime_type": capture.get("content_type") or "application/octet-stream",
+                "domain_name": urlsplit(capture["url"]).netloc, "capture_date": timestamp, "last_indexed": now(),
+                "url": f"https://web.archive.org/web/{capture['timestamp']}/{capture['url']}", "thumbnail": "thumbnails/image.webp",
+                "embedding_model": MODEL, "image_embedding_version": IMAGE_VERSION,
+                "archive_source_sha256": capture["sha256"], "archive_source_manifest": batch["manifest_sha256"],
+                "archive_commit": batch["publication"]["commit"]}
+    try:
+        if capture['bytes'] > MAX_BYTES:
+            raise ImageUnavailable('image_byte_limit')
+        image = prepare_image(path.read_bytes())
+    except ImageUnavailable as error:
+        document['image_embedding_status'] = str(error)
+    else:
+        if image.source_sha256 != capture['sha256']:
+            raise CrawlError('Image source changed after manifest validation')
+        document.update(image_vector=services.image_embedding(image), image_embedding_status='embedded',
+                        image_embedding_sha256=image.source_sha256, image_embedding_provenance=image.provenance())
+    return document
+
+
 def index_batch(root, batch, services, chunker=chunk_source):
     manifest = batch["manifest"]
     check_manifest(root, manifest)
     policy(manifest)
     created = skipped = preserved = 0
     for capture in manifest["captures"]:
+        image = (capture.get('content_type') or '').split(';')[0].lower() in (
+            'image/png','image/jpeg','image/gif','image/webp','image/bmp','image/tiff')
+        if image:
+            if services.exists(capture['archive_path']):
+                skipped += 1
+            elif services.create(capture['archive_path'], image_document(root, capture, batch, services)):
+                created += 1
+            else:
+                skipped += 1
+            continue
         if not indexable(capture):
             preserved += 1
             continue
@@ -141,8 +202,15 @@ def index_batch(root, batch, services, chunker=chunk_source):
         # Model date extraction sees the original body, not our synthetic
         # provenance header or the capture timestamp embedded in its URL.
         source, _ = decode(verified_source(root, capture), capture.get("content_type") or "")
+        plan = passages.prepare(content, record_id, capture.get('title') or '',
+                                html_source=source, mime_type=capture.get('content_type') or '')
+        if not plan.passages:
+            preserved += 1
+            continue
         metadata = services.enrich(capture, source if capture.get('content_type', '').split(';')[0] == 'text/plain' else website_markdown(source))
-        chunks = [{"text_chunk": chunk.text, "vector": services.embedding(chunk.text)} for chunk in chunker(content)]
+        chunks = [{"text_chunk": p.text, "source_start": p.start, "source_end": p.end,
+                   "title": p.title, "context": p.context, "kind": p.kind,
+                   "vector": services.embedding(p.text, title=p.title, context=p.context)} for p in plan.passages]
         if not chunks:
             raise CrawlError("Capture has no source chunks")
         summary_vectors = [services.embedding(chunk.text) for chunk in chunker(metadata["llm_summary"])]
@@ -158,7 +226,8 @@ def index_batch(root, batch, services, chunker=chunk_source):
                     "domain_name": urlsplit(capture["url"]).netloc, "capture_date": timestamp, "last_indexed": now(),
                     "url": replay, "mime_type": (capture.get('content_type') or 'text/html').split(';')[0], "file_type": "text", "thumbnail": "thumbnails/website.webp",
                     "text_full": content, "text": chunks, "text_extraction_version": WEBSITE_EXTRACTION_VERSION,
-                    "text_chunking_version": CHUNKING_VERSION, "embedding_model": MODEL, "archive_source_sha256": capture["sha256"],
+                    "text_chunking_version": passages.VERSION, "text_passage_provenance": plan.provenance(),
+                    "embedding_model": MODEL, "archive_source_sha256": capture["sha256"],
                     "archive_source_manifest": batch["manifest_sha256"], "archive_commit": batch["publication"]["commit"],
                     **metadata, "llm_summary_vector": summary_vector}
         if services.create(record_id, document):

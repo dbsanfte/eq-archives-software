@@ -768,6 +768,17 @@ eligible. Unapproved legacy suggestions move to History with the reason and keep
 their evidence. Active checks and approved records are preserved. No human
 dismissal is fabricated and no Luna request is made to classify this known advert.
 
+## Imported search content
+
+Imported text uses the shared `eq-passages-480-v2` search policy: real titles,
+section/table context and attributed forum/mail quotations, with full reader
+content retained separately. Verified raster assets also receive local Gemma
+visual vectors through `gemma-image-embeddings`. This does not call Luna or change
+approved text-enrichment budgets. Existing IDs remain create-only; unusable
+rasters have a typed `image_embedding_status` and do not block the remaining
+site. Supporting-file browsing remains available. See the
+[image and passage runbook](../../scripts/embedding-service/README.md#content-aware-passages-and-images).
+
 ## Ezboard capture
 
 Ezboard candidates represent a complete board across historical servers.

@@ -2,6 +2,8 @@
 # Pass the exact locally verified predecessor image (record its image ID privately).
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
+COPY scripts/embedding-service/image-requirements.txt /app/image-requirements.txt
+RUN pip install --no-cache-dir --require-hashes -r /app/image-requirements.txt
 COPY elastic-indexer-stack/indexer/src/reindex_text.py /app/src/reindex_text.py
 COPY elastic-indexer-stack/indexer/src/indexer/openai_manager.py /app/src/indexer/openai_manager.py
 COPY elastic-indexer-stack/indexer/src/indexer/reindex_preparation.py /app/src/indexer/reindex_preparation.py
@@ -9,6 +11,10 @@ RUN python -m compileall -b -f -o 2 /app/src/reindex_text.py /app/src/indexer/op
     rm /app/src/reindex_text.py /app/src/indexer/openai_manager.py /app/src/indexer/reindex_preparation.py
 COPY elastic-indexer-stack/indexer/src/reindex_embeddings.py /app/src/reindex_embeddings.py
 COPY elastic-indexer-stack/indexer/src/indexer/gemma.py elastic-indexer-stack/indexer/src/indexer/chunking.py elastic-indexer-stack/indexer/src/indexer/es_manager.py /app/src/indexer/
-RUN python -m indexer.gemma --download-tokenizer /opt/eqarchives/gemma-tokenizer.json && \
-    python -m compileall -b -f -o 2 /app/src/reindex_embeddings.py /app/src/indexer/gemma.py /app/src/indexer/chunking.py /app/src/indexer/es_manager.py && \
-    rm /app/src/reindex_embeddings.py /app/src/indexer/gemma.py /app/src/indexer/chunking.py /app/src/indexer/es_manager.py
+COPY elastic-indexer-stack/indexer/src/indexer/passages.py elastic-indexer-stack/indexer/src/indexer/image_embeddings.py elastic-indexer-stack/indexer/src/indexer/archive_images.py elastic-indexer-stack/indexer/src/indexer/text_handler.py elastic-indexer-stack/indexer/src/indexer/image_handler.py /app/src/indexer/
+COPY elastic-indexer-stack/indexer/src/index_images.py /app/src/index_images.py
+COPY elastic-indexer-stack/indexer/src/indexer/other_handler.py /app/src/indexer/other_handler.py
+RUN python -m compileall -b -f -o 2 /app/src/indexer/other_handler.py && rm /app/src/indexer/other_handler.py && \
+    python -m indexer.gemma --download-tokenizer /opt/eqarchives/gemma-tokenizer.json && \
+    python -m compileall -b -f -o 2 /app/src/reindex_embeddings.py /app/src/index_images.py /app/src/indexer/gemma.py /app/src/indexer/chunking.py /app/src/indexer/es_manager.py /app/src/indexer/passages.py /app/src/indexer/image_embeddings.py /app/src/indexer/archive_images.py /app/src/indexer/text_handler.py /app/src/indexer/image_handler.py && \
+    rm /app/src/reindex_embeddings.py /app/src/index_images.py /app/src/indexer/gemma.py /app/src/indexer/chunking.py /app/src/indexer/es_manager.py /app/src/indexer/passages.py /app/src/indexer/image_embeddings.py /app/src/indexer/archive_images.py /app/src/indexer/text_handler.py /app/src/indexer/image_handler.py

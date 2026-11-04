@@ -205,8 +205,8 @@ tokenizer, prefer paragraph/line/sentence boundaries, and preserve every source
 character, including whitespace and line endings. Each request has at most 480
 tokens including `search_document:` and special tokens, with up to roughly 48
 tokens of overlap. This fits the deployed 512-token server without embedding
-sentences just to choose boundaries. Other embedding models retain the existing
-chunker. The [search relevance benchmark](scripts/search-benchmark/README.md)
+sentences just to choose boundaries. Gemma uses the content-aware passage policy
+described below. The [search relevance benchmark](scripts/search-benchmark/README.md)
 compares lexical, semantic and hybrid settings against a reserved archive query
 set, with source-based judgments, raw/grouped metrics and recorded versions.
 
@@ -242,6 +242,17 @@ all searched vectors in place and atomically marks each document
 semantic branches only use completed Gemma documents. Existing enrichment, OCR,
 provenance and dates remain intact, with **no paid Luna calls** during backfill.
 See the [model migration runbook](scripts/embedding-service/README.md#embeddinggemma-migration).
+
+Gemma's `eq-passages-480-v2` policy embeds real titles, section and table context,
+forum posts and attributed quotations. It removes identifiable navigation and
+supporting scripts from a separate hashed search view, retaining full reader
+text and source files. Unknown site layouts use conservative fallbacks. The
+same policy applies to new imports and the resumable backfill. Direct raster
+embeddings run on a separate CUDA vision companion and share Gemma's text query
+space. Both search and MCP can retrieve images. Image indexing has no Luna cost;
+normal text import enrichment retains its existing approval/budget policy. See
+the [passage and image runbook](scripts/embedding-service/README.md#content-aware-passages-and-images)
+for input bounds, provenance, model pins and checkpoint-preserving rollout.
 
 ## Deployment
 

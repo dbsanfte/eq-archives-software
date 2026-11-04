@@ -14,11 +14,12 @@ docker info >/dev/null
 systemctl enable --now docker nvidia-cdi-refresh.path
 install -d -m 755 /opt/eqarchives-embeddings /var/lib/eqarchives-embeddings/models
 install -d -m 700 -o 1000 -g 1000 /var/lib/eqarchives-embeddings/cache
-install -m 644 scripts/embedding-service/{service.py,benchmark.py,cuda.env} /opt/eqarchives-embeddings/
+install -m 644 scripts/embedding-service/{service.py,benchmark.py,cuda.env,vision.py,vision.env} /opt/eqarchives-embeddings/
 install -m 644 elastic-indexer-stack/k8s-manifests/embeddings/runtime.env /opt/eqarchives-embeddings/
 # Both files contain only version-controlled public configuration, never secrets.
 source /opt/eqarchives-embeddings/runtime.env
 source /opt/eqarchives-embeddings/cuda.env
+source /opt/eqarchives-embeddings/vision.env
 model_path="/var/lib/eqarchives-embeddings/models/$MODEL_FILE"
 if ! printf '%s  %s\n' "$MODEL_SHA256" "$model_path" | sha256sum --check --status; then
   curl --fail --location --retry 3 "$MODEL_URL" --output "$model_path.download"
@@ -26,9 +27,18 @@ if ! printf '%s  %s\n' "$MODEL_SHA256" "$model_path" | sha256sum --check --statu
   mv "$model_path.download" "$model_path"
 fi
 chmod 644 "$model_path"
+projector_path="/var/lib/eqarchives-embeddings/models/$VISION_PROJECTOR_FILE"
+if ! printf '%s  %s\n' "$VISION_PROJECTOR_SHA256" "$projector_path" | sha256sum --check --status; then
+  curl --fail --location --retry 3 "$VISION_PROJECTOR_URL" --output "$projector_path.download"
+  printf '%s  %s\n' "$VISION_PROJECTOR_SHA256" "$projector_path.download" | sha256sum --check --status
+  mv "$projector_path.download" "$projector_path"
+fi
+chmod 644 "$projector_path"
 chown 1000:1000 /etc/eqarchives-embeddings/openai_api_key
 chmod 600 /etc/eqarchives-embeddings/openai_api_key
 docker pull "$CUDA_IMAGE"
 install -m 644 scripts/embedding-service/eqarchives-embeddings.service scripts/embedding-service/eqarchives-embeddings-health.{service,timer} /etc/systemd/system/
+install -m 644 scripts/embedding-service/eqarchives-vision-embeddings.service scripts/embedding-service/eqarchives-vision-health.{service,timer} /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now eqarchives-embeddings.service eqarchives-embeddings-health.timer
+systemctl enable --now eqarchives-vision-embeddings.service eqarchives-vision-health.timer

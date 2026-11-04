@@ -42,11 +42,15 @@ class TextHandler:
                 # Resolve the doc title
                 title = self._resolve_title_from_file(full_path=full_path, relative_path=relative_path)
                 
+                document.metadata.update(record_id=relative_path.replace(os.sep, '/'), title=title,
+                                         mime_type=mime_type)
                 # Chunk the doc and get embeddings
                 chunks_and_embeddings: list[dict] = self._openai_manager.get_chunks_and_embeddings(
                     document=document
                 )
                 
+                chunking_version = getattr(self._openai_manager, "chunking_version", None)
+                passage_provenance = getattr(self._openai_manager, "passage_provenance", None)
                 llm_response = {}
                 try:
                     if self._LLM_ENRICHMENT_ENABLED:
@@ -84,7 +88,7 @@ class TextHandler:
                     text = chunks_and_embeddings,
                     text_full = document.page_content,
                     text_extraction_version = extraction_version(relative_path.replace(os.sep, '/')),
-                    text_chunking_version = getattr(self._openai_manager, "chunking_version", None),
+                    text_chunking_version = chunking_version,
                     llm_summary = llm_summary,
                     llm_summary_vector = llm_summary_vector,
                     llm_guessed_date = llm_guessed_date,
@@ -98,6 +102,8 @@ class TextHandler:
                     alternate_url = alternate_url,
                     thumbnail = self._archive_handler._resolve_thumbnail_url(url=url, file_type="text")
                 )
+                if passage_provenance:
+                    doc["text_passage_provenance"] = passage_provenance
                 docs.append(doc)                
             return docs
         except Exception as e:
@@ -123,7 +129,11 @@ class TextHandler:
                 content = file.read()
                 preprocessed_content = md(content)
         
-        doc = Document(page_content=preprocessed_content, metadata={"source": full_path})
+        metadata = {"source": full_path, "record_id": relative_path.replace(os.sep, '/')}
+        if self._archive_handler._websites_path in relative_path:
+            raw, _ = self._detect_and_read_file(full_path)
+            metadata["source_html"] = raw
+        doc = Document(page_content=preprocessed_content, metadata=metadata)
         return [doc]
         
     def _preprocess_newsgroup_file(self, full_path: str) -> str:
