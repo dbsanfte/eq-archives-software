@@ -15,13 +15,14 @@ cleanup() {
 trap cleanup EXIT
 # Match the production seeder's restricted capabilities, including restarts
 # with service-owned state. Unit tests alone cannot check Linux capabilities.
-docker run --rm -i --network none --user 0:0 --entrypoint python \
+docker run --rm -i --network none --user 0:10001 --entrypoint python \
   --read-only --tmpfs /data:rw,mode=700 \
   --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --security-opt no-new-privileges \
   "$image" - <<'PY'
 import os
 from pathlib import Path
 from seed import seed
+assert os.getuid()==0 and os.getgid()==10001
 caps=int(next(line.split()[1] for line in Path('/proc/self/status').read_text().splitlines() if line.startswith('CapEff:')),16)
 assert not caps & (1<<3), 'The seed regression must run without FOWNER'
 for name,mode in [('fresh',None),('interrupted',0o700),('restart',0o2770)]:
