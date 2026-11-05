@@ -504,7 +504,9 @@ ownership walk, source preparation or copy is required.
 cache. It stores hashes and checksummed 768-dimensional float32 vectors, not
 source text or credentials. Keys bind the entire prefixed title/context/text
 request to the model alias, immutable weight/runtime pins and tokenizer checksum.
-Both image builds copy the authoritative `runtime.env` for that identity. Every
+Both image builds copy the authoritative model `runtime.env` and indexing
+`cuda.env` for that identity; a CUDA-runtime upgrade invalidates reuse independently
+of the live Vulkan runtime. Every
 source occurrence retains its own offsets and vector; a hit never bypasses source
 validation, complete-response checks or the document's atomic model checkpoint.
 

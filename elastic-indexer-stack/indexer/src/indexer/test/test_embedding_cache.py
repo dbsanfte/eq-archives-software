@@ -120,8 +120,13 @@ def test_idle_cleanup_occurs_on_writes_and_freed_pages_are_reused(tmp_path):
 
 def test_runtime_identity_uses_actual_weight_runtime_and_tokenizer_pins(tmp_path,monkeypatch):
     path=tmp_path/'runtime.env';monkeypatch.setenv('EMBEDDING_CACHE_RUNTIME',str(path))
+    cuda=tmp_path/'cuda.env';monkeypatch.setenv('EMBEDDING_CACHE_CUDA_RUNTIME',str(cuda))
+    cuda.write_text('CUDA_IMAGE=cuda@sha256:'+'b'*64+'\n')
     path.write_text('MODEL_ALIAS='+gemma.MODEL+'\nMODEL_SHA256='+'a'*64+'\nLLAMA_IMAGE=runtime@sha256:'+'b'*64+'\n')
     first=runtime_identity();assert json.loads(first)['tokenizer']==gemma.TOKENIZER_SHA256
+    assert json.loads(first)['runtime']=='cuda@sha256:'+'b'*64
+    cuda.write_text('CUDA_IMAGE=cuda@sha256:'+'d'*64+'\n');assert runtime_identity()!=first
+    first=runtime_identity()
     path.write_text(path.read_text().replace('a'*64,'c'*64));assert runtime_identity()!=first
     path.write_text('MODEL_ALIAS=wrong');
     with pytest.raises(ValueError):runtime_identity()

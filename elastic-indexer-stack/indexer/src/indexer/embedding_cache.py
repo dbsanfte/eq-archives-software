@@ -34,11 +34,17 @@ def runtime_identity():
     path=next((p for p in paths if p.is_file()),None)
     if path is None:raise ValueError('Pinned embedding runtime is unavailable for cache identity')
     settings=dict(line.split('=',1) for line in path.read_text().splitlines() if re.match(r'^[A-Z][A-Z0-9_]*=',line))
+    cuda_configured=os.environ.get('EMBEDDING_CACHE_CUDA_RUNTIME')
+    cuda_paths=[Path(cuda_configured)] if cuda_configured else [Path('/opt/eqarchives/embedding-cuda.env')]+[
+        p/'scripts/embedding-service/cuda.env' for p in Path(__file__).resolve().parents]
+    cuda_path=next((p for p in cuda_paths if p.is_file()),None)
+    if cuda_path is None:raise ValueError('Pinned CUDA runtime is unavailable for cache identity')
+    cuda=dict(line.split('=',1) for line in cuda_path.read_text().splitlines() if re.match(r'^[A-Z][A-Z0-9_]*=',line))
     if (settings.get('MODEL_ALIAS')!=gemma.MODEL or not re.fullmatch('[0-9a-f]{64}',settings.get('MODEL_SHA256',''))
-            or not re.fullmatch(r'.+@sha256:[0-9a-f]{64}',settings.get('LLAMA_IMAGE',''))):
+            or not re.fullmatch(r'.+@sha256:[0-9a-f]{64}',cuda.get('CUDA_IMAGE',''))):
         raise ValueError('Invalid pinned embedding cache identity')
     return json.dumps({'model':gemma.MODEL,'weights':settings['MODEL_SHA256'],
-                       'runtime':settings['LLAMA_IMAGE'],'tokenizer':gemma.TOKENIZER_SHA256,
+                       'runtime':cuda['CUDA_IMAGE'],'tokenizer':gemma.TOKENIZER_SHA256,
                        'dimensions':768,'format':'float32-v1'},sort_keys=True)
 
 

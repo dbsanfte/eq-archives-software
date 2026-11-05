@@ -3,6 +3,7 @@
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
 COPY scripts/embedding-service/image-requirements.txt \
+    scripts/embedding-service/cuda.env \
     elastic-indexer-stack/k8s-manifests/embeddings/runtime.env \
     elastic-indexer-stack/indexer/src/reindex_text.py \
     elastic-indexer-stack/indexer/src/reindex_embeddings.py \
@@ -29,6 +30,7 @@ COPY scripts/embedding-service/image-requirements.txt \
     elastic-indexer-stack/indexer/src/indexer/html_extraction.py /updates/
 RUN cp /updates/image-requirements.txt /app/image-requirements.txt && \
     cp /updates/runtime.env /opt/eqarchives/embedding-runtime.env && \
+    cp /updates/cuda.env /opt/eqarchives/embedding-cuda.env && \
     pip install --no-cache-dir --require-hashes -r /app/image-requirements.txt && \
     for update_source in /updates/*.py; do \
       update_name=${update_source##*/}; \

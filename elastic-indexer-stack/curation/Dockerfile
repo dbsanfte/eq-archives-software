@@ -16,6 +16,7 @@ COPY elastic-indexer-stack/indexer/src/indexer/capture_enrichment.py /app/indexe
 COPY elastic-indexer-stack/indexer/src/indexer/source_encoding.py /app/indexer/
 COPY elastic-indexer-stack/indexer/src/indexer/embedding_cache.py elastic-indexer-stack/indexer/src/indexer/sqlite_state.py /app/indexer/
 COPY elastic-indexer-stack/k8s-manifests/embeddings/runtime.env /opt/eqarchives/embedding-runtime.env
+COPY scripts/embedding-service/cuda.env /opt/eqarchives/embedding-cuda.env
 COPY elastic-indexer-stack/indexer/src/indexer/vector_json.py /app/indexer/
 COPY elastic-indexer-stack/indexer/src/indexer/passages.py elastic-indexer-stack/indexer/src/indexer/passage_forums.py elastic-indexer-stack/indexer/src/indexer/image_embeddings.py /app/indexer/
 COPY elastic-indexer-stack/indexer/src/indexer/resources /app/indexer/resources
