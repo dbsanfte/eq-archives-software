@@ -1,5 +1,7 @@
 """Readable Markdown from legacy HTML, retaining source text and image links."""
 
+import re
+
 from bs4 import BeautifulSoup, Tag
 from markdownify import MarkdownConverter
 
@@ -12,6 +14,65 @@ def extraction_version(record_id):
     # Only website headers changed. Completed newsgroups and mailing lists keep
     # their existing extraction checkpoints when the broad job resumes.
     return WEBSITE_EXTRACTION_VERSION if record_id.startswith("websites/") else TEXT_EXTRACTION_VERSION
+
+
+def repair_script_markup(raw):
+    """Isolate broken inline scripts without executing JavaScript.
+
+    Old generators sometimes write a literal closing script tag inside a JS
+    string. Accept a later boundary only after that string closes and another
+    closing tag is proven outside strings. Uncertain/truncated scripts retain
+    the original HTML; ordinary markup cannot be consumed as JavaScript.
+    This is only for the search projection, never the archival reader.
+    """
+    opening=re.compile(r'<script\b[^>]*>',re.I)
+    closing=re.compile(r'</script\s*>',re.I)
+    markup=re.compile(r'</?[a-z][a-z0-9:-]*(?:\s|/?>)',re.I)
+    removed=[];cursor=0
+    while match:=opening.search(raw,cursor):
+        first=closing.search(raw,match.end())
+        if first is None:break
+        cursor=first.end();i=match.end();limit=min(len(raw),i+65536)
+        state='code';quote='';bracket=False;previous='';proved=False
+        while i<limit:
+            char=raw[i]
+            if state=='string':
+                inner=closing.match(raw,i)
+                if inner and inner.start()==first.start():
+                    proved=inner.end()<len(raw) and raw[inner.end()]==quote
+                if char=='\\':i+=2;continue
+                if char==quote:state='code';previous='value'
+            elif state=='regex':
+                if char=='\\':i+=2;continue
+                if char=='[':bracket=True
+                elif char==']':bracket=False
+                elif char=='/' and not bracket:state='code';previous='value'
+                elif char in '\r\n':break
+            else:
+                end=closing.match(raw,i)
+                if end:
+                    if proved and end.start()>first.start():
+                        removed.append((match.start(),end.end()));cursor=end.end()
+                    break
+                if state=='line':
+                    if char in '\r\n':state='code'
+                elif state=='comment':
+                    if raw.startswith('*/',i):state='code';i+=2;continue
+                elif raw.startswith('//',i) or raw.startswith('<!--',i):state='line'
+                elif raw.startswith('/*',i):state='comment';i+=2;continue
+                elif char in '\"\'`':state='string';quote=char
+                elif char=='/' and (previous in ('','=',':','(',',','[','!','?',';','{')
+                                    or re.search(r'\b(?:return|throw|case)\s*$',raw[max(match.end(),i-16):i])):
+                    state='regex';bracket=False
+                elif char=='<' and markup.match(raw,i):break
+                elif not char.isspace():previous=char
+            i+=1
+    if not removed:return raw,0
+    parts=[];cursor=0
+    for start,end in removed:
+        parts.extend((raw[cursor:start],'<script></script>'));cursor=end
+    parts.append(raw[cursor:])
+    return ''.join(parts),len(removed)
 
 
 def is_layout_table(table):

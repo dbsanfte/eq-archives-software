@@ -223,7 +223,7 @@ extraction checkpoints, enrichment, source identity, dates and last_indexed. No
 paid enrichment during this backfill. Do not reuse Nomic checkpoints as Gemma
 completion. The Nomic repair entry point remains for historical recovery only.
 Follow the embedding-service migration runbook for operator-authorized handoffs.
-Gemma text uses `eq-passages-480-v5`: budget title/context with every 480-token
+Gemma text uses `eq-passages-480-v6`: budget title/context with every 480-token
 request, retain full reader text, verify source-bound selected-view coverage and
 store view offsets/provenance separately. Unknown layouts retain content;
 format-specific navigation/post/table handling needs regression evidence. Resume
@@ -253,12 +253,12 @@ bytes, enrichment, dates and image Jobs; no paid enrichment for decoding repairs
 New format-specific exceptions require evidence of a major site or widely used
 structured engine; prefer broadly applicable source/DOM rules for other content.
 
-The v5 forum upgrade uses source-bound vBulletin numbered/paired boundaries,
+The v6 forum upgrade uses source-bound vBulletin numbered/paired boundaries,
 UBB.classic Author/Topic rows and Lithium message/user/date cells across hosts.
 Retain damaged-header fallbacks and real quotes/tables/attachments. Allakhazam
 entity/comment projections may specialize the major site; unrelated layouts keep
 content. Deep reader formatting is flattened without losing visible source data.
-Version upgrades may reuse v4 vectors only after exact request metadata and
+Version upgrades may reuse v4/v5 vectors only after exact request metadata and
 source/view checks, never from version or body hash alone.
 Missing website text uses `index_websites.py`: explicit pinned host scope, remote-free
 Git metadata, verified local blobs, persistent private SQLite cursors/gaps,

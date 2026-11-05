@@ -15,10 +15,10 @@ from bs4 import BeautifulSoup, Comment
 
 from . import gemma
 from .chunking import SourceChunk, chunk_source
-from .html_extraction import website_markdown
+from .html_extraction import website_markdown, repair_script_markup
 from . import passage_forums
 
-VERSION = "eq-passages-480-v5"
+VERSION = "eq-passages-480-v6"
 MAX_TOKENS = 480
 ASSETS = {".js", ".css", ".map", ".ico", ".svg", ".woff", ".woff2"}
 CONTROLS = re.compile(r"^(?:reply(?: to (?:item|topic))?(?: with quote)?|quote|edit|delete|"
@@ -161,17 +161,30 @@ def _allakhazam(soup,title,excluded):
         if posted is None:continue
         # Newer comments put author and body side by side on the same row.
         author_cells=author.find_parent('tr').find_all('td',recursive=False)
-        if len(author_cells)==2 and author_cells[0] is author and author_cells[1] is not posted and author_cells[1].get_text(strip=True):
+        if len(author_cells)==2 and author_cells[0] is author and author_cells[1] is not posted:
             bodies=[author_cells[1]]
         else:
             after=rows.index(posted.find_parent('tr'))+1
             bodies=[cell for row in rows[after:] for cell in row.find_all('td',recursive=False)
-                    if cell.get_text(' ',strip=True) not in ('','Top','[Top]')]
-        if not bodies:continue
+                    if cell is not author and cell.get_text(' ',strip=True) not in ('','Top','[Top]')
+                    and not (cell.get('align')=='right' and re.fullmatch(r'\d+\s+Repl(?:y|ies)',cell.get_text(' ',strip=True),re.I))]
         subject=cells[0].get_text(' ',strip=True).split('Posted @',1)[0].strip()
         author_link=author.find('a',href=re.compile(r'(?:poster|user)'))
-        name=author_link.get_text(' ',strip=True) if author_link else author.get_text(' ',strip=True).removeprefix('By:').strip()
+        if author_link:name=author_link.get_text(' ',strip=True)
+        else:
+            # Anonymous names precede the first profile line break. Do not
+            # promote post counts and moderation scores into an author name.
+            first_line=[]
+            for node in author.descendants:
+                if getattr(node,'name',None)=='br':break
+                if isinstance(node,str) and not isinstance(node,Comment):first_line.append(str(node))
+            name=' '.join(' '.join(first_line).split()).removeprefix('By:').strip()
         body=''.join(str(c) for c in bodies)
+        if not any(c.get_text(' ',strip=True) or c.select_one('img[src],a[href],object,video,audio') for c in bodies):
+            # An empty captured message is not its author's profile/score panel.
+            # Its authored subject can still be useful; never invent a body.
+            body='';excluded.append('empty_allakhazam_comment_body')
+            if not subject:table.decompose();continue
         replacement=BeautifulSoup(passage_forums.section(name,posted.get_text(' ',strip=True),body,subject),'html.parser')
         table.replace_with(replacement);excluded.append('allakhazam_comment_controls')
     headers=[c for c in soup.select('[id=headerrow]') if not c.find_parent(class_='mform')]
@@ -188,8 +201,10 @@ def _allakhazam(soup,title,excluded):
 
 
 def _html_view(raw, host, _preserve_layout=False, path=""):
-    soup = BeautifulSoup(raw, "html.parser")
+    projection,repaired=repair_script_markup(raw)
+    soup = BeautifulSoup(projection, "html.parser")
     excluded = []
+    if repaired:excluded.append('repaired_script_boundaries')
     title = soup.title.get_text(" ", strip=True) if soup.title else ""
     source_title = title
     thread=passage_forums.extract(soup,host,path)
@@ -212,7 +227,7 @@ def _html_view(raw, host, _preserve_layout=False, path=""):
         if not node.find_parent(["item","entry","rss","feed"]):
             node.decompose()
     # Known content markers are stronger evidence than a guessed largest div.
-    marker = None if _preserve_layout else re.search(r"<!--\s*#?beginContent#?\s*-->(.*?)<!--\s*#?endContent#?\s*-->", raw, re.I|re.S)
+    marker = None if _preserve_layout else re.search(r"<!--\s*#?beginContent#?\s*-->(.*?)<!--\s*#?endContent#?\s*-->", projection, re.I|re.S)
     if marker:
         soup = BeautifulSoup(marker[1], "html.parser")
         excluded.append("outside_explicit_content_markers")
@@ -279,29 +294,6 @@ def _html_view(raw, host, _preserve_layout=False, path=""):
         heading = soup.find(["h1", "h2"])
         if heading:
             title = heading.get_text(" ", strip=True)
-    if not thread and host.endswith("ezboard.com"):
-        for table in list(soup.find_all("table")):
-            if not table.parent:
-                continue
-            rows=[r for r in table.find_all("tr") if r.find_parent("table") is table]
-            if not rows:
-                continue
-            header=[c.get_text(" ",strip=True).lower() for c in rows[0].find_all(["td","th"],recursive=False)]
-            if header[:2]!=["author","comment"]:
-                continue
-            collection=soup.new_tag("div")
-            for row in rows[1:]:
-                cells=row.find_all("td",recursive=False)
-                if len(cells)!=2 or not cells[1].get_text(" ",strip=True):
-                    continue
-                author=cells[0].find("a")
-                label=author.get_text(" ",strip=True) if author else cells[0].get_text(" ",strip=True)
-                date=re.search(r"\d{1,2}/\d{1,2}/\d{2,4}(?:\s+\d{1,2}:\d{2}\s*[ap]m)?",cells[0].get_text(" ",strip=True),re.I)
-                section=soup.new_tag("section");heading=soup.new_tag("h2")
-                heading.string="Post by "+label+(" | "+date[0] if date else "")
-                section.append(heading);cells[1].name="div";section.append(cells[1].extract());collection.append(section)
-            if collection.contents:
-                table.replace_with(collection);excluded.append("ezboard_author_comment_structure")
     # Modern forum engines and many Ezboard mirrors expose the message body.
     # Replace a single-post presentation table, retaining its source author/date.
     for node in ([] if thread else list(soup.select("[id^=post_message_],.postbody,.post-content,.postText"))):
