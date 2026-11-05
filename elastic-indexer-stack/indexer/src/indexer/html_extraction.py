@@ -1,11 +1,11 @@
 """Readable Markdown from legacy HTML, retaining source text and image links."""
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 from markdownify import MarkdownConverter
 
 
 TEXT_EXTRACTION_VERSION = "html-2026-10-05"
-WEBSITE_EXTRACTION_VERSION = "html-2026-11-04-source-decoding"
+WEBSITE_EXTRACTION_VERSION = "html-2026-11-04-safe-structure"
 
 
 def extraction_version(record_id):
@@ -44,6 +44,21 @@ def website_markdown(html):
             if element.find_parent("table") is table:
                 element.name = "div"
         table.name = "div"
+    # Damaged old HTML can nest hundreds of formatting tags. Bound converter
+    # stack depth without raising Python's process-wide recursion limit or
+    # discarding text, image links, code or data cells. Only deep containers
+    # lose redundant nesting; explicit line breaks retain block boundaries.
+    stack=[(soup,0)]
+    protected={'table','tr','td','th','thead','tbody','tfoot','a','img','pre','code','kbd','samp'}
+    blocks={'div','p','blockquote','section','article','center','ul','ol','li'}
+    while stack:
+        node,depth=stack.pop()
+        children=list(node.children)
+        if depth>=48 and node.name not in protected and node.parent:
+            if node.name in blocks:
+                node.insert_before(soup.new_tag('br'));node.insert_after(soup.new_tag('br'))
+            node.unwrap();depth-=1
+        stack.extend((child,depth+1) for child in reversed(children) if isinstance(child,Tag))
     return SourceMarkdownConverter().convert_soup(soup)
 
 

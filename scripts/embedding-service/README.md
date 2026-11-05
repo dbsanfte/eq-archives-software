@@ -202,7 +202,7 @@ not hold other workers. Missing sources are counted, retain original text/chunks
 and never claim repaired extraction. Unusable old vectors with no corresponding
 text are cleared during replacement. Empty sources are not invented.
 
-`embedding_model` and `text_chunking_version=eq-passages-480-v4` together are the
+`embedding_model` and `text_chunking_version=eq-passages-480-v5` together are the
 text resume checkpoint. Older Gemma records remain eligible for the passage
 upgrade; `REINDEX_PRIORITIZE_UNCONVERTED=true` finishes the old model frontier
 first, then upgrades previously converted Gemma records. Count model conversion
@@ -214,7 +214,7 @@ progress, count remaining documents using `remaining_query()` and count the exac
 Do not equate a Job exit or a process-local processed count with total completion.
 
 Website source repair also requires extraction checkpoint
-`html-2026-11-04-source-decoding`. The shared offline decoder handles CP932 Windows
+`html-2026-11-04-safe-structure`. The shared offline decoder handles CP932 Windows
 extensions, Shift-JIS, EUC-JP and ISO-2022-JP using actual byte/script evidence.
 Misdeclared UTF-8 archive wrappers do not override validated bytes. Bounded damaged
 sequences remain visible as U+FFFD and have counted source-hash-bound provenance;
@@ -245,7 +245,7 @@ have separate boundaries. Table chunks retain complete rows where possible and
 repeat column context. Oversized rows/prose split with overlap. Every complete
 request is checked with the pinned Gemma tokenizer against 480 tokens.
 
-Policy `eq-passages-480-v4` recognizes phpBB, WWWThreads, Snitz and vBulletin by cooperating
+Policy `eq-passages-480-v5` recognizes phpBB, WWWThreads, Snitz and vBulletin by cooperating
 HTML features across domains, along with Ezboard's Author/Comment rows. Each post
 keeps its own speaker/date, quotes and authored data tables. Signature separators,
 profiles and thread controls stay outside those message bodies. Partial/damaged
@@ -255,7 +255,7 @@ disabled-site pages receive no semantic vectors, including summary/OCR vectors.
 vBulletin uses complete message-comment regions or per-post IDs in full threads,
 and matched username/posttext pairs in stripped archive pages. It retains attached
 file labels and authored tables/quotes, excludes profile/signature controls and
-falls back on damaged boundaries. Earlier v3 checkpoints remain eligible for this
+falls back on damaged boundaries. Earlier v4 checkpoints remain eligible for this
 upgrade; source preparation, dates, readers and enrichment remain intact.
 Full reader text and existing enrichment remain intact.
 
@@ -271,7 +271,7 @@ The reindex progress log includes passage, post/table/quote, short-passage and
 semantically excluded-document counters for acknowledged writes. Review these
 alongside bounded exact-record samples; small chunks can be legitimate short
 replies. Keep private source snapshots/audit outputs outside both repositories.
-Version 2 checkpoints remain valid history but need a version 3 passage upgrade.
+Older checkpoints remain valid history and are checked against the current passage policy.
 Use the normal pending-Job handoff, retaining source preparation and all previous
 Jobs; the independent image backfill and embedding services need no restart.
 
@@ -318,3 +318,62 @@ blob-vector cache persist under the image-state volume. One serial image worker
 can run alongside text indexing on CUDA; it performs no paid enrichment. Use
 `index_images.py --host <host> --limit <count>` for bounded probes. Preserve its
 state and exact source commit across retries; a changed revision is rejected.
+
+
+### Forum template and missing-text recovery
+
+Policy `eq-passages-480-v5` extends shared vBulletin recognition to guest menus,
+word-form dates, numbered post boundaries in malformed themed wrappers, and paired
+vB 2 collapsed/expanded views. UBB.classic uses cooperating Author/Topic columns,
+posted timestamps and body separators; missing cell closures are recovered only
+within their original row. Lithium uses its message/user/date cells independently
+of hostname. Incomplete recognition keeps all messages via conservative fallback.
+Allakhazam chooses actual entity headings instead of sidebar labels and supports
+both stacked and side-by-side comment bodies. Encoded external ad/noscript
+fragments and verified empty posting forms are excluded only from the search view;
+quoted code, tables, attachment labels, biographies and surviving quotations remain.
+The reader converter flattens excessive formatting/container nesting while keeping
+visible text, data cells, code and image links, under extraction checkpoint
+`html-2026-11-04-safe-structure`.
+
+The upgrade checks exact saved text/title/context/kind/offset tuples as well as
+source/view provenance before reusing v4 vectors. Matching records get the new
+checkpoint without inference; changed records replace all searched vectors in one
+optimistic update. Existing enrichment and capture/index dates remain intact.
+
+`index_websites.py` recovers missing HTML/plain-text/XML/JSON website documents
+from the already prepared source checkout. It streams local Git trees, binds raw
+bytes to the committed blob, checks existing IDs in batches, and uses create-only
+writes. It never calls paid enrichment, overwrites existing records, walks the
+checkout, changes archive Git, or repeats source preparation. Its private SQLite
+state retains the selected hosts/revision, per-host metadata cursors and per-file
+diagnostics. A failed extraction or oversized write does not stop later files;
+authentication, transport and invalid embedding responses remain visible. The
+recovery wrapper retries temporary dependency outages with checkpoints intact.
+Files above the explicit 8 MiB source bound and unsupported/invalid captures remain
+in the diagnostic ledger; no truncated content is marked complete. `--retry-failed`
+explicitly revisits saved gaps after correction. A nonzero final gap count is an
+incomplete import, never a successful full repair.
+
+For an authorized run, prepare `/mnt/samsung/eqarchives-text-import` once as UID
+1000, then render a separate pending Job using the **original text reindex Job**:
+
+```bash
+python3 scripts/embedding-service/render-reindex.py --name reindex-missing-text-<date> \
+  --image eqarchives-indexer:rtx3080-<merged-full-sha> \
+  --text-host necro.eqclasses.com --text-host www.thesteelwarrior.org \
+  --text-host www.eqatlas.com --text-host eqcleric.gameglow.com \
+  < previous-text-job.json > missing-text-job.json
+```
+
+Verify exact source-backed records in a disposable index with the compiled image
+first. Follow protected CI/deployment, then create the rendered Job at parallelism
+zero and activate it only after verification. It has one CUDA import worker and
+its own persistent state; the full reindex keeps its independent checkpoints and
+the image Job stays untouched. Add each approved archive host explicitly; changing
+a saved host scope or source revision requires a separate state directory. Monitor
+created/existing/unsupported/unavailable/failed counters and the private gap ledger.
+New records carry archive/source hashes, exact source identity, capture date,
+complete reader, current Gemma/passages/extraction checkpoints and local vectors.
+This is source recovery, so normal curation approval and daily Luna policies are
+unchanged. Existing-document reindexing alone cannot repair absent records.

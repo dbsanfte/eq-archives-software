@@ -225,7 +225,7 @@ Infrastructure recovery is automatic; application/integrity failures remain
 visible for a correction. Inspect Job conditions and logs rather than assuming
 that a Running pod has made progress.
 
-The current Gemma passage upgrade uses `eq-passages-480-v4`, with both model and
+The current Gemma passage upgrade uses `eq-passages-480-v5`, with both model and
 passage policy required for completion. Its pending handoff prioritizes the
 unfinished model frontier, then upgrades older Gemma passages. Retain the old
 Job and prepared checkout. A separate `render-reindex.py --images` Job can index
@@ -234,3 +234,15 @@ persistent `/mnt/samsung/eqarchives-images` inventory. Neither backfill calls
 Luna. Install the additive schema before starting either new writer. See the
 [passage/image runbook](../../../scripts/embedding-service/README.md#content-aware-passages-and-images)
 for source verification, per-file bounds and deployment order.
+
+
+### Missing website text
+
+The separate create-only `index_websites.py` workflow imports absent website
+records from the same pinned prepared checkout. See the
+[forum and text recovery runbook](../../../scripts/embedding-service/README.md#forum-template-and-missing-text-recovery).
+Its explicit host scope, local Git-tree inventory, per-file diagnostics and SQLite
+cursors survive restarts. It uses one CUDA worker, no paid enrichment, no source
+preparation and no archive Git writes. Existing IDs and their enrichment are
+preserved. Run this separately from the checkpoint-preserving passage upgrade;
+neither job replaces the independent image workflow.

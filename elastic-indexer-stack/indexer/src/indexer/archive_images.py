@@ -13,6 +13,7 @@ RASTER=re.compile(r"\.(?:png|jpe?g|gif|webp|bmp|tiff?)(?:\?|$)",re.I)
 
 
 class Inventory:
+    pattern=RASTER
     def __init__(self,repo,state,*,revision=None):
         self.repo=Path(repo).resolve();self.state=Path(state)
         self.state.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
@@ -99,7 +100,7 @@ class Inventory:
             last=ordinal
             if ordinal<=after:continue
             mode,kind,oid=metadata.split()
-            if kind=='blob' and mode in ('100644','100755') and RASTER.search(name):
+            if kind=='blob' and mode in ('100644','100755') and self.pattern.search(name):
                 if any(ord(c)<32 or ord(c)==127 or 0xD800<=ord(c)<=0xDFFF for c in name):
                     key='unsafe-image-path:'+hashlib.sha256(name.encode('utf-8','surrogateescape')).hexdigest()
                     self.gap(key,oid,'unsafe_archive_path')

@@ -81,4 +81,23 @@ class HandoffTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 handoff.render(previous, 'reindex-dual-gpu', 'eqarchives-indexer:rtx3080-'+'a'*40)
 
-if __name__ == '__main__': unittest.main()
+
+
+class TextImportHandoffTests(unittest.TestCase):
+    previous=HandoffTests.previous
+    def test_explicit_text_scope_uses_create_only_entrypoint_and_independent_persistent_state(self):
+        old=self.previous();original=deepcopy(old)
+        job=handoff.render(old,'reindex-missing-text','eqarchives-indexer:rtx3080-'+'a'*40,text_hosts=['necro.eqclasses.com','www.eqatlas.com'])
+        c=job['spec']['template']['spec']['containers'][0];env={e['name']:e['value'] for e in c['env']}
+        self.assertEqual(old,original);self.assertEqual(job['spec']['parallelism'],0)
+        self.assertEqual(env['REINDEX_ENTRYPOINT'],'index_websites.pyc');self.assertEqual(env['REINDEX_WORKERS'],'1')
+        self.assertEqual(env['TEXT_IMPORT_HOSTS'],'necro.eqclasses.com,www.eqatlas.com');self.assertEqual(env['SKIP_LLM_ENRICHMENT'],'true')
+        self.assertIn('rtx3080',env['OPENAI_ENDPOINT']);self.assertNotIn('initContainers',job['spec']['template']['spec'])
+        self.assertEqual(c['volumeMounts'][-1],{'name':'text-state','mountPath':'/text-state'})
+        self.assertEqual(job['metadata']['annotations']['eqarchives.org/work-kind'],'missing-website-text')
+
+    def test_invalid_scope_or_mixed_vision_writer_is_refused(self):
+        for kw in ({'text_hosts':['../site']},{'text_hosts':['site.example'],'images':True}):
+            with self.assertRaises(ValueError):handoff.render(self.previous(),'reindex-missing-text','eqarchives-indexer:rtx3080-'+'a'*40,**kw)
+
+if __name__ == '__main__':unittest.main()

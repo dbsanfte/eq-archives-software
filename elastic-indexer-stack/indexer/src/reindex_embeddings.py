@@ -26,6 +26,7 @@ from reindex_text import completed_records, source_path
 
 LOG = logging.getLogger(__name__)
 FIELDS = ["id", "file_type", "text_full", "text.text_chunk", "text_extraction_version",
+          "text.title", "text.context", "text.kind", "text.source_start", "text.source_end",
           "embedding_model", "text_chunking_version", "mime_type", "title",
           "llm_summary", "llm_image_text_full", "llm_image_text", "text_passage_provenance"]
 
@@ -137,10 +138,19 @@ def migrate_record(client, index, hit, repo, embedder, preparation_pool=None, *,
     # A decoding checkpoint is not a new embedding model or passage policy.
     # Reuse vectors when the full reader and exact source-bound search plans
     # are unchanged; do not pay GPU work to mark clean historical sources.
-    reuse=(complete and not missing and patch.get('text_full',source.get('text_full'))==source.get('text_full')
-           and previous.get('version')==passages.VERSION and previous.get('sources')==provenance['sources'])
+    prior_version=source.get('text_chunking_version')
+    same_sources=([{k:v for k,v in p.items() if k!='version'} for p in previous.get('sources',[])]
+                  ==[{k:v for k,v in p.items() if k!='version'} for p in provenance['sources']])
+    expected=[(p.text,p.title,p.context,p.kind,p.start,p.end) for _,plan in groups for p in plan.passages]
+    saved=[tuple(p.get(k) for k in ('text_chunk','title','context','kind','source_start','source_end'))
+           for p in source.get('text') or []]
+    reuse=(source.get('embedding_model')==gemma.MODEL and not missing
+           and prior_version in ('eq-passages-480-v4',passages.VERSION) and previous.get('version')==prior_version
+           and patch.get('text_full',source.get('text_full'))==source.get('text_full')
+           and same_sources and expected==saved)
     if reuse:
         patch['text_passage_provenance']=provenance
+        patch['text_chunking_version']=passages.VERSION
         response=client.update(index=index,id=hit['_id'],doc=patch,if_seq_no=hit['_seq_no'],if_primary_term=hit['_primary_term'])
         if response.get('result') not in ('updated','noop'):raise ValueError('Elasticsearch did not update the record')
         if diagnostics is not None:diagnostics['reused_embeddings']=1

@@ -18,7 +18,7 @@ from .chunking import SourceChunk, chunk_source
 from .html_extraction import website_markdown
 from . import passage_forums
 
-VERSION = "eq-passages-480-v4"
+VERSION = "eq-passages-480-v5"
 MAX_TOKENS = 480
 ASSETS = {".js", ".css", ".map", ".ico", ".svg", ".woff", ".woff2"}
 CONTROLS = re.compile(r"^(?:reply(?: to (?:item|topic))?(?: with quote)?|quote|edit|delete|"
@@ -113,11 +113,84 @@ class Plan:
                 "method": self.method, "exclusions": list(self.exclusions)}
 
 
+def _encoded_advertising(soup,excluded):
+    for node in list(soup.find_all(string=re.compile(r'<(?:script|noscript|iframe)\b',re.I))):
+        if node.find_parent(['pre','code','blockquote']):continue
+        if any(p.get('class') and set(p['class']) & {'postbody','posttext','msg_text_cell'}
+               or str(p.get('id','')).startswith('post_message_') for p in node.parents):continue
+        fragment=BeautifulSoup(str(node),'html.parser')
+        scripts=fragment.find_all(['script','iframe'],src=True)
+        fallback=fragment.find('noscript')
+        # An external script plus image-only noscript fallback is an ad-code
+        # fragment, not ordinary prose explaining HTML. Never decode/evaluate JS.
+        if not scripts or fallback is None or not fallback.find('img'):continue
+        for tag in list(fragment.find_all(['script','iframe','noscript'])):tag.decompose()
+        if fragment.get_text(strip=True):continue
+        node.extract();excluded.append('encoded_advertising_markup')
+
+
+def _allakhazam(soup,title,excluded):
+    navigation=re.compile(r'^(?:Bestiary|Jump|Search(?: Comments)?|Statistics|Allakhazam.s|Buy [A-Za-z ]+|Search Results)\s*:',re.I)
+    for table in reversed(list(soup.find_all('table'))):
+        if not table.parent:continue
+        labels=[c.get_text(' ',strip=True) for c in table.select('[id=headerrow]')]
+        if (sum(bool(navigation.match(t)) for t in labels)>=3 and all(navigation.match(t) for t in labels)
+                and len(table.find_all('form'))>=2 and not table.find(['h1','h2'])):
+            table.decompose();excluded.append('legacy_aggregator_navigation')
+    headers=[c for c in soup.select('[id=headerrow]') if not c.find_parent(class_='mform')]
+    entity=next((c.get_text(' ',strip=True) for c in headers if c.get_text(strip=True)
+                 and not navigation.match(c.get_text(' ',strip=True))
+                 and not re.search(r'By:|Posted @',c.get_text(' ',strip=True))),None)
+    heading=next((h.get_text(' ',strip=True) for h in soup.find_all(['h1','h2'])
+                  if not h.find_parent(class_='mform') and not navigation.match(h.get_text(' ',strip=True))
+                  and not h.get_text(' ',strip=True).startswith('Post by ')),None)
+    title=entity or heading or title
+    # Gossamer-style directory navigation and search forms are controls. Keep
+    # actual category/site links and descriptions, including empty categories.
+    menu={'home','add a link','modify a link','new links','cool links','top rated','random link','search'}
+    for node in reversed(list(soup.find_all(['p','td','div']))):
+        if not node.parent:continue
+        links=node.find_all('a');labels={a.get_text(' ',strip=True).lower() for a in links}
+        text=node.get_text(' ',strip=True)
+        if len(labels & menu)>=5 and len(text)<500 and sum(len(a.get_text(strip=True)) for a in links)/max(1,len(text))>.65:
+            node.decompose();excluded.append('directory_navigation')
+    for form in list(soup.find_all('form')):
+        if form.find('input',attrs={'name':re.compile(r'^(?:query|q)$',re.I)}) and len(form.get_text(strip=True))<200 and not form.find(['table','article','blockquote']):
+            form.decompose();excluded.append('directory_search_control')
+    for table in list(soup.find_all('table')):
+        if not table.parent:continue
+        rows=[r for r in table.find_all('tr') if r.find_parent('table') is table]
+        cells=[c for r in rows for c in r.find_all(['td','th'],recursive=False)]
+        posted=next((c for c in cells if c.get_text(' ',strip=True).startswith('Posted @')),None)
+        author=next((c for c in cells if c.get_text(' ',strip=True).startswith('By:')),None)
+        if author is None:continue
+        if posted is None:
+            posted=next((n for c in cells for n in c.find_all(['small','span']) if n.get_text(' ',strip=True).startswith('Posted @')),None)
+        if posted is None:continue
+        # Newer comments put author and body side by side on the same row.
+        author_cells=author.find_parent('tr').find_all('td',recursive=False)
+        if len(author_cells)==2 and author_cells[0] is author and author_cells[1] is not posted and author_cells[1].get_text(strip=True):
+            bodies=[author_cells[1]]
+        else:
+            after=rows.index(posted.find_parent('tr'))+1
+            bodies=[cell for row in rows[after:] for cell in row.find_all('td',recursive=False)
+                    if cell.get_text(' ',strip=True) not in ('','Top','[Top]')]
+        if not bodies:continue
+        subject=cells[0].get_text(' ',strip=True).split('Posted @',1)[0].strip()
+        author_link=author.find('a',href=re.compile(r'(?:poster|user)'))
+        name=author_link.get_text(' ',strip=True) if author_link else author.get_text(' ',strip=True).removeprefix('By:').strip()
+        body=''.join(str(c) for c in bodies)
+        replacement=BeautifulSoup(passage_forums.section(name,posted.get_text(' ',strip=True),body,subject),'html.parser')
+        table.replace_with(replacement);excluded.append('allakhazam_comment_controls')
+    return title
+
+
 def _html_view(raw, host, _preserve_layout=False, path=""):
     soup = BeautifulSoup(raw, "html.parser")
     excluded = []
     title = soup.title.get_text(" ", strip=True) if soup.title else ""
-    thread=passage_forums.extract(soup,host)
+    thread=passage_forums.extract(soup,host,path)
+    if not thread:_encoded_advertising(soup,excluded)
     reason=None if thread else passage_forums.excluded_page(soup,title,path)
     if reason:
         return "",title,"archive_status",[reason]
@@ -126,6 +199,12 @@ def _html_view(raw, host, _preserve_layout=False, path=""):
         soup=BeautifulSoup(thread.html,"html.parser")
         excluded.append(thread.engine+"_posts")
         if thread.engine=='ezboard':excluded.append('ezboard_author_comment_structure')
+    # Unknown posting templates can retain both a visible message preview and
+    # a populated quoted-message field. Preserve both before removing controls.
+    if not thread and re.search(r'(?:^|/)(?:post|posting|newreply|newpost)\.(?:asp|php|pl)$',path,re.I):
+        for field in list(soup.find_all('textarea')):
+            if field.get_text(strip=True):
+                quote=soup.new_tag('blockquote');quote.string=field.get_text();field.replace_with(quote)
     for node in list(soup.find_all("title")):
         if not node.find_parent(["item","entry","rss","feed"]):
             node.decompose()
@@ -192,9 +271,7 @@ def _html_view(raw, host, _preserve_layout=False, path=""):
                 excluded.append("legacy_aggregator_navigation")
                 node.decompose()
     if host.endswith("allakhazam.com"):
-        entity = soup.find(id="headerrow")
-        if entity and entity.get_text(" ", strip=True):
-            title = entity.get_text(" ", strip=True)
+        title = _allakhazam(soup,title,excluded)
     elif host.endswith("everlore.com"):
         heading = soup.find(["h1", "h2"])
         if heading:
@@ -222,31 +299,6 @@ def _html_view(raw, host, _preserve_layout=False, path=""):
                 section.append(heading);cells[1].name="div";section.append(cells[1].extract());collection.append(section)
             if collection.contents:
                 table.replace_with(collection);excluded.append("ezboard_author_comment_structure")
-    # Allakhazam puts each comment in its own table, with explicit attribution
-    # and date rows. Inspect only a table's own rows, never its nested comments.
-    if host.endswith("allakhazam.com"):
-        for table in list(soup.find_all("table")):
-            if not table.parent:
-                continue
-            rows=[r for r in table.find_all("tr") if r.find_parent("table") is table]
-            cells=[c for r in rows for c in r.find_all(["td","th"]) if c.find_parent("table") is table]
-            posted=next((c for c in cells if c.get_text(" ",strip=True).startswith("Posted @")),None)
-            author=next((c for c in cells if c.get_text(" ",strip=True).startswith("By:")),None)
-            if posted is None or author is None:
-                continue
-            after=rows.index(posted.find_parent("tr"))+1
-            body=[r for r in rows[after:] if r.get_text(" ",strip=True) not in ("","[Top]","Top")]
-            if not body:
-                continue
-            subject=cells[0].get_text(" ",strip=True)
-            section=soup.new_tag("section");heading=soup.new_tag("h2")
-            heading.string=" | ".join((subject,author.get_text(" ",strip=True),posted.get_text(" ",strip=True)))
-            section.append(heading)
-            for row in body:
-                for cell in list(row.find_all("td",recursive=False)):
-                    cell.name="div";section.append(cell.extract())
-            table.replace_with(section)
-            excluded.append("allakhazam_comment_controls")
     # Modern forum engines and many Ezboard mirrors expose the message body.
     # Replace a single-post presentation table, retaining its source author/date.
     for node in ([] if thread else list(soup.select("[id^=post_message_],.postbody,.post-content,.postText"))):
