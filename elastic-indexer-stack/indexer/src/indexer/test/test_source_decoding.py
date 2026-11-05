@@ -86,6 +86,17 @@ def test_title_repair_requires_an_exact_source_title_roundtrip():
     assert repaired_title(broken,expected,decode_source(expected.encode('utf-8')))==broken
 
 
+def test_repaired_html_title_can_cross_a_process_boundary():
+    import pickle
+    from bs4 import BeautifulSoup
+    expected='ギルド冒険記録'
+    decoded=decode_source((expected+'こんにちは。'*3).encode('cp932'))
+    soup=BeautifulSoup('<title>'+expected+'</title>'+'<div>'*800+'body'+'</div>'*800,'html.parser')
+    repaired=repaired_title(expected.encode('cp932').decode('latin-1'),soup.title.string,decoded)
+    assert pickle.loads(pickle.dumps(repaired))==expected
+    assert type(repaired) is str
+
+
 def test_latin1_html_label_keeps_windows_smart_punctuation_readable():
     text='<html><meta charset="ISO-8859-1"><p>“Guild” … £50</p></html>'
     assert decode_source(text.encode('cp1252')).text==text
