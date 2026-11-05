@@ -13,6 +13,34 @@ cleanup() {
   rm -rf "$curation_runtime"
 }
 trap cleanup EXIT
+# Match the production seeder's restricted capabilities, including restarts
+# with service-owned state. Unit tests alone cannot check Linux capabilities.
+docker run --rm -i --network none --user 0:10001 --entrypoint python \
+  --read-only --tmpfs /data:rw,mode=700 \
+  --cap-drop ALL --cap-add CHOWN --cap-add DAC_OVERRIDE --security-opt no-new-privileges \
+  "$image" - <<'PY'
+import os
+from pathlib import Path
+from seed import seed
+assert os.getuid()==0 and os.getgid()==10001
+caps=int(next(line.split()[1] for line in Path('/proc/self/status').read_text().splitlines() if line.startswith('CapEff:')),16)
+assert not caps & (1<<3), 'The seed regression must run without FOWNER'
+for name,mode in [('fresh',None),('interrupted',0o700),('restart',0o2770)]:
+    root=Path('/data')/name;root.mkdir(mode=0o700)
+    (root/'seed-complete').touch();(root/'preserved').write_bytes(b'existing private state')
+    os.chown(root,10001,10001)
+    indexing=root/'indexing-state'
+    if mode is not None:
+        indexing.mkdir();indexing.chmod(mode);os.chown(indexing,10001,10001)
+    for _ in range(2):
+        seed('/absent-pilot',root,10001)
+        info=indexing.stat()
+        assert info.st_uid==info.st_gid==10001 and info.st_mode&0o7777==0o2770
+        assert (root/'preserved').read_bytes()==b'existing private state'
+        assert not (root/'crawl.sqlite3').exists()
+        assert root.stat().st_uid==10001 and root.stat().st_mode&0o777==0o700
+print('Production seed capabilities, first start, interrupted ownership and repeated restart verified')
+PY
 mkdir "$curation_runtime/credentials" "$curation_runtime/kubernetes"
 printf '%s\n' dummy-paid-key > "$curation_runtime/credentials/luna_api_key"
 printf '%s\n' dummy-service-token > "$curation_runtime/kubernetes/token"

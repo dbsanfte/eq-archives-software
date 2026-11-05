@@ -16,8 +16,11 @@ def seed(source, root, owner=None):
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
     # A small shared cache/diagnostic directory, never an archive-tree walk.
     indexing=root/'indexing-state';indexing.mkdir(mode=0o2770,exist_ok=True)
-    if owner is not None:os.chown(indexing,owner,owner)
+    # CHOWN permits taking ownership, but does not grant FOWNER. Keep the
+    # requested group throughout and chmod as the owner, including on restart.
+    if owner is not None:os.chown(indexing,os.geteuid(),owner)
     indexing.chmod(0o2770)
+    if owner is not None:os.chown(indexing,owner,owner)
     marker = root / "seed-complete"
     if marker.exists():
         return
