@@ -1,5 +1,7 @@
 """Shared, offline source decoding; no hostname, URL or corpus-specific rules."""
 import codecs
+from contextvars import ContextVar
+import html
 from dataclasses import dataclass
 import hashlib
 import re
@@ -10,6 +12,37 @@ KANJI=re.compile(r'[\u4e00-\u9fff]')
 HALF_KANA=re.compile(r'[\uff61-\uff9f]')
 BAD=re.compile(r'[\udc80-\udcff]')
 JAPANESE={'shift_jis','cp932','euc_jp','iso2022_jp'}
+_DAMAGE=ContextVar('source_decode_damage',default=None)
+
+
+def _count_damage(error):
+    counter=_DAMAGE.get()
+    if counter is None:raise error
+    counter[0]+=error.end-error.start
+    return '\ufffd',error.end
+
+
+codecs.register_error('eqarchives_source_damage',_count_damage)
+
+
+def iso2022_text(raw):
+    # Old HTML generators escaped bytes while the stream was in JIS mode.
+    # Restore ASCII entities only inside explicitly shifted runs, before the
+    # stateful codec sees them; entities in ordinary HTML remain untouched.
+    entities=0
+    def restore(match):
+        nonlocal entities
+        value=html.unescape(match[0].decode('ascii'))
+        if len(value)==1 and 0x21<=ord(value)<=0x7e:
+            entities+=1;return value.encode('ascii')
+        return match[0]
+    def shifted(match):
+        return re.sub(rb'&(?:quot|apos|amp|lt|gt|#[0-9]+|#x[0-9a-fA-F]+);',restore,match[0])
+    restored=re.sub(rb'\x1b\$(?:@|B|\(D).*?(?=\x1b\([BJ]|$)',shifted,raw,flags=re.S)
+    damage=[0];token=_DAMAGE.set(damage)
+    try:text=restored.decode('iso2022_jp',errors='eqarchives_source_damage')
+    finally:_DAMAGE.reset(token)
+    return text,damage[0],entities
 
 
 @dataclass(frozen=True)
@@ -22,6 +55,7 @@ class Decoded:
     punctuation_bytes:int=0
     segment_encodings:tuple=()
     regions:tuple=()
+    restored_entities:int=0
 
     def provenance(self):
         value={'version':VERSION,'encoding':self.encoding,'invalid_bytes':self.invalid_bytes,
@@ -34,6 +68,8 @@ class Decoded:
                 {'encoding':encoding,'kind':'text_regions','segments':count}
                 for encoding,count in self.segment_encodings)
         if self.regions:value['regions']=list(self.regions)
+        if self.restored_entities:value.setdefault('recoveries',[]).append(
+            {'encoding':'iso2022_jp','kind':'escaped_jis_bytes','entities':self.restored_entities})
         return value
 
 
@@ -68,8 +104,9 @@ def mixed_punctuation(text):
 def regional_decode(data,limit,base_encoding,*,hints=()):
     """Decode local byte regions using Unicode/script evidence and inheritance.
 
-    ASCII markup and whitespace are safe boundaries for the supported legacy
-    codecs. A text node supplies context for short/ambiguous words. Require
+    ASCII markup supplies regions; whitespace can divide stateless codecs.
+    Stateful ISO-2022 runs stay intact within each text node. Nodes supply
+    context for short/ambiguous words. Require
     independent evidence for multiple encodings before changing the file-level
     interpretation; retain bounded replacement markers for uncertain bytes.
     """
@@ -81,7 +118,11 @@ def regional_decode(data,limit,base_encoding,*,hints=()):
         codecs_to_try=list(dict.fromkeys(('utf-8','shift_jis','cp932','euc_jp',base_encoding,*hints)))
         if b'\x1b$' in raw:codecs_to_try.insert(0,'iso2022_jp')
         for encoding in codecs_to_try:
-            try:text=raw.decode(encoding)
+            try:
+                if encoding=='iso2022_jp':
+                    text,damaged,_=iso2022_text(raw)
+                    if damaged>limit:continue
+                else:text=raw.decode(encoding)
             except UnicodeDecodeError:continue
             kana=len(KANA.findall(text));kanji=len(KANJI.findall(text));half=len(HALF_KANA.findall(text))
             if encoding=='utf-8':
@@ -104,21 +145,21 @@ def regional_decode(data,limit,base_encoding,*,hints=()):
         return result
     regions=[];anchors=set();offset=0
     for i,node in enumerate(nodes):
-        # Delimiters and markup inherit the file codec without voting.
+        # Markup attributes can carry their own evidence; separators cannot.
         text_or_tag=not i%2 or node.startswith(b'<')
         encoded=not node.isascii() or b'\x1b' in node
         options=candidates(node) if text_or_tag and encoded else []
         parent=max(options,key=lambda c:c[:2]) if options else None
         if parent and parent[0]>=10:anchors.add('shift_jis' if parent[2]=='cp932' else parent[2])
-        chunks=re.split(rb'([ \t]+)',node) if not i%2 else [node]
+        chunks=re.split(rb'([ \t]+)',node) if not i%2 and b'\x1b' not in node else [node]
         for chunk in chunks:
             options=candidates(chunk) if text_or_tag and (not chunk.isascii() or b'\x1b' in chunk) else []
             best=max(options,key=lambda c:c[:2]) if options else None
             if best and best[0]>=10:
                 anchors.add('shift_jis' if best[2]=='cp932' else best[2])
             regions.append((offset,chunk,parent,best));offset+=len(chunk)
-    if len(anchors)<2:return None
-    output=[];counts={};saved=[];invalid=0
+    if len(anchors)<2 and not (base_encoding=='iso2022_jp' and anchors=={'iso2022_jp'}):return None
+    output=[];counts={};saved=[];invalid=0;entities=0
     for start,raw,parent,best in regions:
         if raw.isascii() and b'\x1b' not in raw:output.append(raw.decode('ascii'));continue
         inherited=parent[2] if parent and parent[0]>=10 else base_encoding
@@ -128,20 +169,26 @@ def regional_decode(data,limit,base_encoding,*,hints=()):
             # Short ambiguous runs follow their node's evidence. A strict
             # unique alternative can recover a short label in another codec.
             encoding=inherited;reason='inherited_context'
-            try:text=raw.decode(encoding)
-            except UnicodeDecodeError:
-                if best:encoding,text=best[2:];reason='local_evidence'
-                else:text=raw.decode(encoding,errors='surrogateescape')
-        damaged=len(BAD.findall(text));invalid+=damaged
+            if encoding=='iso2022_jp':text,_,_=iso2022_text(raw)
+            else:
+                try:text=raw.decode(encoding)
+                except UnicodeDecodeError:
+                    if best:encoding,text=best[2:];reason='local_evidence'
+                    else:text=raw.decode(encoding,errors='surrogateescape')
+        restored=0
+        if encoding=='iso2022_jp':text,damaged,restored=iso2022_text(raw)
+        else:damaged=len(BAD.findall(text))
+        invalid+=damaged;entities+=restored
         output.append(BAD.sub('\ufffd',text));counts[encoding]=counts.get(encoding,0)+1
-        if (saved and saved[-1]['encoding']==encoding and saved[-1]['reason']==reason
+        if (encoding!='iso2022_jp' and saved and saved[-1]['encoding']==encoding and saved[-1]['reason']==reason
                 and data[saved[-1]['raw_end']:start].isascii()):
             saved[-1]['raw_end']=start+len(raw);saved[-1]['invalid_bytes']+=damaged
         else:
             saved.append({'raw_start':start,'raw_end':start+len(raw),'encoding':encoding,
                           'reason':reason,'invalid_bytes':damaged})
+        if restored:saved[-1]['restored_entities']=saved[-1].get('restored_entities',0)+restored
     if invalid>limit:return None
-    return ''.join(output),invalid,tuple(sorted(counts.items())),tuple(saved)
+    return ''.join(output),invalid,tuple(sorted(counts.items())),tuple(saved),entities
 
 
 def decode_source(data,content_type='',*,detection=None):
@@ -154,14 +201,15 @@ def decode_source(data,content_type='',*,detection=None):
     bytes or convert an entire Japanese page to Latin-1 for one damaged byte.
     """
     source_hash=hashlib.sha256(data).hexdigest();byte_offset=0;declared=[]
-    def result(text,encoding,reason,invalid=0,punctuation=0,segments=(),regions=()):
+    def result(text,encoding,reason,invalid=0,punctuation=0,segments=(),regions=(),entities=0):
         if byte_offset:regions=tuple({**r,'raw_start':r['raw_start']+byte_offset,'raw_end':r['raw_end']+byte_offset} for r in regions)
-        return Decoded(text,encoding,invalid,reason,source_hash,punctuation,segments,regions)
+        return Decoded(text,encoding,invalid,reason,source_hash,punctuation,segments,regions,entities)
     def local(encoding,limit):
         recovered=regional_decode(data,limit,encoding,hints=declared)
         if recovered:
-            text,invalid,segments,regions=recovered
-            return result(text,'mixed','regional_evidence',invalid,segments=segments,regions=regions)
+            text,invalid,segments,regions,entities=recovered
+            chosen='iso2022_jp' if {encoding for encoding,_ in segments}=={'iso2022_jp'} else 'mixed'
+            return result(text,chosen,'regional_evidence',invalid,segments=segments,regions=regions,entities=entities)
     for prefix,encoding in [(codecs.BOM_UTF32_LE,'utf-32'),(codecs.BOM_UTF32_BE,'utf-32'),
                             (codecs.BOM_UTF8,'utf-8-sig'),(codecs.BOM_UTF16_LE,'utf-16'),(codecs.BOM_UTF16_BE,'utf-16')]:
         if data.startswith(prefix):
@@ -169,23 +217,22 @@ def decode_source(data,content_type='',*,detection=None):
             except UnicodeDecodeError:
                 if encoding!='utf-8-sig':raise
                 data=data[len(prefix):];byte_offset=len(prefix)
-    # ISO-2022-JP is seven-bit; decoding it as ASCII/UTF-8 would retain its
-    # escape sequences rather than the actual Japanese characters.
-    if re.search(rb'\x1b\$(?:@|B|\(D)',data):
-        try:return result(data.decode('iso2022_jp'),'iso2022_jp','iso2022_escape')
-        except UnicodeDecodeError:pass
-    try:
-        text=data.decode('utf-8')
-        if b'\x1b$' in data:
-            recovered=local('utf-8',min(64,max(2,sum(b>=128 for b in data)//50)))
-            if recovered:return recovered
-        return result(text,'utf-8','valid_utf8')
-    except UnicodeDecodeError:pass
-    declared=[]
     for blob in [content_type.encode('ascii','ignore'),data[:8192]]:
         for match in re.finditer(rb'(?:charset\s*=\s*[\"\x27]?|<\?xml[^>]*encoding\s*=\s*[\"\x27])([a-zA-Z0-9_.-]+)',blob,re.I):
             value=canonical(match[1].decode('ascii'))
             if value and value not in declared:declared.append(value)
+    # Stateful escape runs must be decoded before the ordinary UTF-8 fast path.
+    if re.search(rb'\x1b\$(?:@|B|\(D)',data):
+        limit=min(64,max(2,sum(b>=128 for b in data)//50))
+        recovered=local('iso2022_jp',limit)
+        if recovered:return recovered
+        text,invalid,entities=iso2022_text(data)
+        if invalid>limit:raise UnicodeError('Japanese source exceeds bounded decoding damage; source bytes retained')
+        return result(text,'iso2022_jp','iso2022_escape',invalid,entities=entities)
+    try:
+        text=data.decode('utf-8')
+        return result(text,'utf-8','valid_utf8')
+    except UnicodeDecodeError:pass
     detection=detection or {}
     detected=canonical(detection.get('encoding'))
     hints=[c for c in declared+[detected] if c in JAPANESE]
@@ -194,7 +241,8 @@ def decode_source(data,content_type='',*,detection=None):
     candidates=[];damaged_japanese=False
     high=sum(byte>=128 for byte in data)
     for encoding in list(dict.fromkeys(hints+['shift_jis','cp932','euc_jp'])):
-        text=data.decode(encoding,errors='surrogateescape')
+        try:text=data.decode(encoding,errors='surrogateescape')
+        except UnicodeDecodeError:continue
         invalid=len(BAD.findall(text));kana=len(KANA.findall(text));kanji=len(KANJI.findall(text));half=len(HALF_KANA.findall(text))
         hinted=encoding in hints or encoding=='cp932' and 'shift_jis' in hints
         enough=(kana>=2 or kanji>=4) if hinted else kana>=8 and kana+kanji>=16 and kana*4>=kana+kanji+half

@@ -390,8 +390,11 @@ runs in the same text node and plain-text lines. Strict codec success alone does
 not establish the correct interpretation. Independent local evidence is required
 before switching encodings; ambiguous short runs inherit context, and unknown
 bytes retain visible replacement markers within the existing damage bounds.
-Provenance records the exact source hash, byte ranges, encoding decisions and
-replacement counts. Compatible adjacent ranges are coalesced to bound metadata.
+ISO-2022 escape runs retain their state within each text node. HTML-escaped
+ASCII bytes are restored only inside shifted JIS runs before decoding; ordinary
+HTML entities remain untouched. Repairs and genuine truncated sequences have
+separate counters, isolated across concurrent workers. Provenance records the
+exact source hash, byte ranges, encoding decisions and replacement counts. Compatible adjacent ranges are coalesced to bound metadata.
 
 `source-decoding-v2` and `html-2026-11-05-regional-decoding` let the text Job revisit
 older website extraction, including mixed pages that previously passed a single

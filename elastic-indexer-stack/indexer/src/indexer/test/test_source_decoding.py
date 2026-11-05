@@ -218,3 +218,41 @@ def test_adjacent_compatible_regions_are_coalesced_without_losing_original_byte_
     assert decoded.text==unicode+'\n'+western
     assert len(decoded.regions)==2
     assert raw[decoded.regions[1]['raw_start']:decoded.regions[1]['raw_end']].decode('cp1252') in western
+
+
+@pytest.mark.parametrize('other_encoding',['utf-8','cp932','euc_jp'])
+def test_html_escaped_stateful_bytes_are_recovered_before_decoding_each_post(other_encoding):
+    import html
+    japanese='ありがとう。あの人は日本語を学びたい。'
+    other='こんにちは世界。ギルドのみんなで冒険に行きましょう。'
+    escaped=html.escape(japanese.encode('iso2022_jp').decode('ascii'),quote=True).encode('ascii')
+    raw=b'<html><p>&quot;Outside quote&quot;</p><p>'+escaped+b'</p><p>'+other.encode(other_encoding)+b'</p></html>'
+    decoded=decode_source(raw)
+    assert decoded.text=='<html><p>&quot;Outside quote&quot;</p><p>'+japanese+'</p><p>'+other+'</p></html>'
+    assert '\x1b' not in decoded.text and decoded.invalid_bytes==0
+    assert decoded.restored_entities>0
+    assert decoded.source_sha256==hashlib.sha256(raw).hexdigest()
+    assert any(p['kind']=='escaped_jis_bytes' for p in decoded.provenance()['recoveries'])
+
+
+def test_escaped_iso2022_only_and_truncation_keep_entity_recovery_and_damage_separate():
+    import html
+    japanese='ありがとう。あの人は日本語を学びたい。'
+    escaped=html.escape(japanese.encode('iso2022_jp').decode('ascii'),quote=True).encode('ascii')
+    raw=b'<html><p>'+escaped+b'\x1b$B$</p></html>'
+    decoded=decode_source(raw)
+    assert japanese in decoded.text and decoded.text.count('\ufffd')==1
+    assert decoded.invalid_bytes==1 and decoded.restored_entities>0 and '\x1b' not in decoded.text
+    with pytest.raises(UnicodeError,match='bounded decoding damage'):
+        decode_source(b'<html>'+escaped+b'\x1b$B$\x1b(B'*10+b'</html>')
+
+
+def test_concurrent_stateful_decodes_keep_each_sources_damage_counts_isolated():
+    from concurrent.futures import ThreadPoolExecutor
+    japanese='こんにちは世界。'
+    def read(i):
+        data=japanese.encode('iso2022_jp')+(b'\x1b$B$' if i%2 else b'')
+        result=decode_source(data)
+        return result.invalid_bytes,result.text
+    with ThreadPoolExecutor(max_workers=4) as pool:results=list(pool.map(read,range(20)))
+    assert results==[(i%2,japanese+('\ufffd' if i%2 else '')) for i in range(20)]
