@@ -334,6 +334,8 @@ def _html_view(raw, host, _preserve_layout=False, path=""):
         if sections:
             return "\n\n".join(sections), title, "feed_entries", excluded
     for node in list(soup.find_all("a")):
+        if node.parent is None:
+            continue  # A malformed enclosing control link was already removed.
         if CONTROLS.fullmatch(node.get_text(" ", strip=True)):
             node.decompose()
             excluded.append("forum_or_account_control")

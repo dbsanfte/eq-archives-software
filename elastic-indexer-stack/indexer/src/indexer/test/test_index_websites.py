@@ -81,6 +81,33 @@ def test_existing_enriched_records_are_not_overwritten_or_sent_for_embedding(tmp
     finally:inv.close()
 
 
+def test_malformed_nested_control_links_import_completely_and_resume_without_replay(tmp_path):
+    repo,keys=repository(tmp_path)
+    (repo/keys[0]).write_text('<title>Guild history</title><p>Opening raid testimony.</p>'
+        '<a href="reply"><a href="nested">Reply</a></a>'
+        '<p>Complete closing testimony with <a href="guide">a useful guide</a>.</p>')
+    git(repo,'add',keys[0]);git(repo,'commit','-qm','Malformed captured links')
+    state=tmp_path/'state/x.sqlite';client=Client();e=embedder()
+    inv=job.TextInventory(repo,state)
+    try:
+        first=job.index_websites(client,'eq',inv,e,hosts=[HOST],limit=1)
+        assert first.created==1 and first.failed==0
+    finally:inv.close()
+    inv=job.TextInventory(repo,state)
+    try:
+        rest=job.index_websites(client,'eq',inv,e,hosts=[HOST])
+        assert rest.created==1 and rest.failed==0 and rest.remaining_gaps==0
+        assert not list(inv.pending_hosts([HOST]))
+    finally:inv.close()
+    assert set(client.docs)==set(keys) and e.get_chunks_and_embeddings.call_count==2
+    source=client.docs[keys[0]]
+    assert 'Opening raid testimony.' in source['text_full']
+    assert 'Complete closing testimony' in source['text_full']
+    chunks=' '.join(chunk['text_chunk'] for chunk in source['text'])
+    assert 'Opening raid testimony.' in chunks and 'a useful guide' in chunks
+    e.call_openai_api_text.assert_not_called()
+
+
 def test_limit_at_a_metadata_batch_boundary_does_not_rewind_completed_files(tmp_path):
     repo,keys=repository(tmp_path,count=55);inv=job.TextInventory(repo,tmp_path/'state/x.sqlite');client=Client();e=embedder()
     try:
