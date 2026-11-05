@@ -202,7 +202,7 @@ not hold other workers. Missing sources are counted, retain original text/chunks
 and never claim repaired extraction. Unusable old vectors with no corresponding
 text are cleared during replacement. Empty sources are not invented.
 
-`embedding_model` and `text_chunking_version=eq-passages-480-v5` together are the
+`embedding_model` and `text_chunking_version=eq-passages-480-v6` together are the
 text resume checkpoint. Older Gemma records remain eligible for the passage
 upgrade; `REINDEX_PRIORITIZE_UNCONVERTED=true` finishes the old model frontier
 first, then upgrades previously converted Gemma records. Count model conversion
@@ -219,7 +219,7 @@ extensions, Shift-JIS, EUC-JP and ISO-2022-JP using actual byte/script evidence.
 Misdeclared UTF-8 archive wrappers do not override validated bytes. Bounded damaged
 sequences remain visible as U+FFFD and have counted source-hash-bound provenance;
 excessive damage fails visibly. Original capture bytes are unchanged. The migration
-keeps the v4 passage checkpoint and reuses vectors when reader text and the complete
+retains completed passage checkpoints as history and reuses vectors when reader text and the complete
 search plan are unchanged. Corrupted reader text and searched vectors are replaced
 atomically, preserving enrichment/dates and correcting only source-proven garbled
 titles. Mail/newsgroup and binary-document extraction checkpoints remain intact.
@@ -245,7 +245,7 @@ have separate boundaries. Table chunks retain complete rows where possible and
 repeat column context. Oversized rows/prose split with overlap. Every complete
 request is checked with the pinned Gemma tokenizer against 480 tokens.
 
-Policy `eq-passages-480-v5` recognizes phpBB, WWWThreads, Snitz and vBulletin by cooperating
+Policy `eq-passages-480-v6` recognizes phpBB, WWWThreads, Snitz and vBulletin by cooperating
 HTML features across domains, along with Ezboard's Author/Comment rows. Each post
 keeps its own speaker/date, quotes and authored data tables. Signature separators,
 profiles and thread controls stay outside those message bodies. Partial/damaged
@@ -322,7 +322,7 @@ state and exact source commit across retries; a changed revision is rejected.
 
 ### Forum template and missing-text recovery
 
-Policy `eq-passages-480-v5` extends shared vBulletin recognition to guest menus,
+Policy `eq-passages-480-v6` extends shared vBulletin recognition to guest menus,
 word-form dates, numbered post boundaries in malformed themed wrappers, and paired
 vB 2 collapsed/expanded views. UBB.classic uses cooperating Author/Topic columns,
 posted timestamps and body separators; missing cell closures are recovered only
@@ -337,7 +337,7 @@ visible text, data cells, code and image links, under extraction checkpoint
 `html-2026-11-05-regional-decoding`.
 
 The upgrade checks exact saved text/title/context/kind/offset tuples as well as
-source/view provenance before reusing v4 vectors. Matching records get the new
+source/view provenance before reusing v4/v5 vectors. Matching records get the new
 checkpoint without inference; changed records replace all searched vectors in one
 optimistic update. Existing enrichment and capture/index dates remain intact.
 
@@ -415,3 +415,29 @@ model, passage-policy or extraction checkpoints change for this transport repair
 The operator Dockerfile coalesces source updates into two additional layers so
 an exact-predecessor update can be built without a layer for each copied module.
 Use the normal pending-Job handoff and retain the previous image and Jobs.
+
+### Localized forum and advertising projection repairs
+
+Policy `eq-passages-480-v6` recognizes Ezboard column skins from profile/reply
+links, dates and header structure instead of translated label lists. Threaded
+single-message views keep their own author/date/body, and separate reply indexes
+remain in the archival reader. Guests, damaged headers, attachments and real
+nested tables are retained; ambiguous layouts fall back to complete content.
+Deleted-post notices receive no semantic vectors.
+
+Allakhazam's side-by-side comments keep an empty body separate from profile and
+rating panels. Surviving authored subjects remain searchable; anonymous authors
+do not inherit moderation scores. Real body tables, quotations and attachments
+remain intact.
+
+A bounded, non-executing script scanner repairs prematurely closed inline scripts
+across all sites. Only a quoted closing tag followed by a proven outer boundary
+is isolated; uncertain or truncated markup stays unchanged. Source readers and
+bytes are untouched, and authored escaped code/quotations remain searchable.
+
+Use the normal protected deployment and pending-Job handoff, preserving sources,
+import cursors and prior Jobs. Exact unchanged v4/v5 request metadata and source/view
+provenance permit checkpoint-only updates without reembedding. A matching original
+byte hash also permits equivalent CRLF/LF HTML representations when the full
+reader, selected view and every request field are identical; changed passages
+replace all searched vectors atomically. No paid enrichment runs in this repair.

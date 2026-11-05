@@ -318,21 +318,55 @@ def ubbclassic(soup):
 
 def ezboard(soup,host):
     if not host.endswith('ezboard.com'):return None
-    posts=[]
+    posts=[];covered=set()
     for table in soup.find_all('table'):
+        if any(id(parent) in covered for parent in table.parents):continue
         rows=[r for r in table.find_all('tr') if r.find_parent('table') is table]
         if not rows:continue
-        cells=rows[0].find_all(['td','th'],recursive=False)
-        if [words(c).lower() for c in cells][:2]!=['author','comment']:continue
-        for row in rows[1:]:
-            cells=row.find_all('td',recursive=False)
-            if len(cells)!=2:continue
-            author=nonempty_link(cells[0],r'showUserPublicProfile')
-            if author is None:author=next((a for a in cells[0].find_all('a') if words(a)),None)
-            name=words(author) or words(cells[0].select_one('.title'))
-            if not name:name=re.split(r'\b(?:Member|Posts:)\b',words(cells[0]),maxsplit=1)[0].strip()
-            date=DATE.search(words(cells[0]))
-            posts.append(section(name,date[0] if date else '',body_copy(cells[1])))
+        cells=[row_cells(row) for row in rows]
+        # Threaded mode shows one message above a directory of other replies.
+        # Bind all three metadata rows and the explicit body, without treating
+        # the reply-title directory as additional messages by this author.
+        if (len(cells)>=4 and all(len(row)==2 for row in cells[:3])
+                and [words(row[0]).lower() for row in cells[:3]]==['subject:','posted by:','posted at:']):
+            stamp=DATE.search(words(cells[2][1]))
+            bodies=[row[0] for row in cells[3:] if len(row)==1 and 'm' in row[0].get('class',[])]
+            if stamp and len(bodies)==1:
+                author=nonempty_link(cells[1][1],r'\.show(?:User)?PublicProfile(?:[?/#]|$)')
+                author=author or cells[1][1].select_one('.title')
+                posts.append(section(words(author),stamp[0],body_copy(bodies[0]),words(cells[0][1])))
+                covered.add(id(table));continue
+        header=next((i for i,row in enumerate(cells[:4])
+                     if [words(c).lower() for c in row][:2]==['author','comment']),None)
+        def metadata(row):
+            if len(row)!=2:return False
+            profile=nonempty_link(row[0],r'\.show(?:User)?PublicProfile(?:[?/#]|$)')
+            reply=row[0].find('a',href=re.compile(r'\.showAddReplyScreen(?:FromWeb)?(?:[?/#]|$)',re.I))
+            direct=lambda node:node is not None and node.find_parent('table') is table
+            return bool(DATE.search(words(row[0])) and
+                        (direct(profile) or direct(reply) and row[0].select_one('.title,.usertitle')))
+        if header is None:
+            # Localized skins retain the platform's DOM and action links.
+            # An ordinary two-column data table is not sufficient evidence.
+            if not any(metadata(row) for row in cells):continue
+            header=next((i for i,row in enumerate(cells[:4]) if len(row)==2 and
+                         all(c.name=='th' or 'headings' in c.get('class',[]) for c in row)),None)
+            if header is None:
+                if not metadata(cells[0]):continue
+                header=-1  # Captured thread starts directly with a message.
+        bodies=[]
+        for row in cells[header+1:]:
+            if len(row)!=2:
+                if any(words(c) for c in row):return None
+                continue
+            if all(c.name=='th' or 'headings' in c.get('class',[]) for c in row):continue
+            author=nonempty_link(row[0],r'\.show(?:User)?PublicProfile(?:[?/#]|$)')
+            if author is None:author=next((a for a in row[0].find_all('a') if words(a)),None)
+            name=words(row[0].select_one('.title')) or words(author)
+            if not name:name=re.split(r'\b(?:Member|Posts:)\b',words(row[0]),maxsplit=1)[0].strip()
+            date=DATE.search(words(row[0]))
+            bodies.append(section(name,date[0] if date else '',body_copy(row[1])))
+        if bodies:posts.extend(bodies);covered.add(id(table))
     if posts:return Thread('\n'.join(posts),'ezboard')
 
 
@@ -371,12 +405,17 @@ def excluded_page(soup,title,path):
     if len(text)>6000:return None
     known_title=re.fullmatch(r'(?:System Message:\s*Error|404(?: Not Found)?|403(?: Forbidden)?|Access Denied|Page Not Found|Site Temporarily Disabled)',title,re.I)
     disabled=heading.lower()=='site temporarily disabled' and 'this site has been disabled' in text.lower()
+    body=words(soup.body or soup)
+    deleted_ezboard=(re.search(r'\.show(?:Message|NextMessage|PrevMessage)$',path,re.I)
+                     and 'ezboard' in text.lower()
+                     and re.match(r'^ERROR\s+The post you selected no longer exists\.',body,re.I)
+                     and not soup.find(['pre','code','blockquote']))
     engine_error=(re.search(r'phpBB\s*:\s*Critical Error\s+Could not (?:connect to the database|query config information)',text,re.I)
                   or 'vBulletin Message' in text and 'You are not logged in or you do not have permission to access this page' in text
                   or 'phpBB' in text and 'The topic or post you requested does not exist' in text
                   or heading.lower()=='error' and 'The post you selected no longer exists' in text
                   or 'requested access to a private forum' in text and 'ezboard' in text.lower())
-    if known_title or disabled or engine_error:return 'archived_access_or_error_page'
+    if known_title or disabled or engine_error or deleted_ezboard:return 'archived_access_or_error_page'
     if soup.find(['pre','code','blockquote']):return None
     # Reply forms can contain the only surviving quotation. Do not classify a
     # populated message field as an empty utility page.
