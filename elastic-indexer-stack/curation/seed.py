@@ -14,6 +14,10 @@ from state import connect
 def seed(source, root, owner=None):
     source, root = Path(source), Path(root)
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    # A small shared cache/diagnostic directory, never an archive-tree walk.
+    indexing=root/'indexing-state';indexing.mkdir(mode=0o2770,exist_ok=True)
+    if owner is not None:os.chown(indexing,owner,owner)
+    indexing.chmod(0o2770)
     marker = root / "seed-complete"
     if marker.exists():
         return

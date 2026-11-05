@@ -18,7 +18,7 @@ from .chunking import SourceChunk, chunk_source
 from .html_extraction import website_markdown, repair_script_markup
 from . import passage_forums
 
-VERSION = "eq-passages-480-v7"
+VERSION = "eq-passages-480-v8"
 MAX_TOKENS = 480
 ASSETS = {".js", ".css", ".map", ".ico", ".svg", ".woff", ".woff2"}
 CONTROLS = re.compile(r"^(?:reply(?: to (?:item|topic))?(?: with quote)?|quote|edit|delete|"
@@ -261,11 +261,21 @@ def _html_view(raw, host, _preserve_layout=False, path=""):
     if repaired:excluded.append('repaired_script_boundaries')
     title = soup.title.get_text(" ", strip=True) if soup.title else ""
     source_title = title
+    # Damaged generators can append <body> elements without closing <head>.
+    # Preserve these explicit bodies before discarding document metadata.
+    for head in list(soup.find_all('head')):
+        roots=[body for body in head.find_all('body') if body.find_parent('head') is head
+               and not any(p.name=='body' and head in p.parents for p in body.parents)]
+        for body in reversed(roots):head.insert_after(body.extract())
+        if roots:excluded.append('recovered_body_from_head')
     thread=passage_forums.extract(soup,host,path,projection)
     if not thread:_encoded_advertising(soup,excluded)
     reason=None if thread else passage_forums.excluded_page(soup,title,path)
     if reason:
         return "",title,"archive_status",[reason]
+    if not thread and soup.select_one('.postbody'):
+        for diagnostic in passage_forums.database_error_tables(soup):
+            diagnostic.decompose();excluded.append('generated_forum_diagnostic')
     if thread:
         title=thread.title or title
         soup=BeautifulSoup(thread.html,"html.parser")

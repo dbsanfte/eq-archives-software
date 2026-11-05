@@ -792,7 +792,7 @@ dismissal is fabricated and no Luna request is made to classify this known adver
 
 ## Imported search content
 
-Imported text uses the shared `eq-passages-480-v7` search policy: real titles,
+Imported text uses the shared `eq-passages-480-v8` search policy: real titles,
 section/table context and attributed forum/mail quotations, with full reader
 content retained separately. Verified raster assets also receive local Gemma
 visual vectors through `gemma-image-embeddings`. This does not call Luna or change
@@ -850,3 +850,13 @@ approvals do not widen. Completed approved boards publish and index automaticall
 AI enrichment under the original capture approval. See the
 [SitePowerUp guide](../../scripts/archive-crawler/SITEPOWERUP.md) for format
 evidence, operator commands, supported views and limitations.
+
+Text imports share a bounded local embedding cache at
+`/indexing-state/embeddings.sqlite`, backed by the existing PVC's private
+`indexing-state` subdirectory. It reuses exact model/title/context/text requests
+across captures. Frequently hit entries retain decaying heat; entries expire
+after seven idle days. Defaults are a 512 MiB database and up to 100,000 vectors,
+with a one-day heat half-life. Source occurrences, readers, date identity,
+manifest verification and enrichment budgets remain independent of reuse.
+Invalid model responses cannot populate the cache, and unavailable cache storage
+falls back to inference. See the [cache and diagnostic runbook](../../scripts/embedding-service/README.md#bounded-shared-text-embedding-cache-and-rejection-ledger).

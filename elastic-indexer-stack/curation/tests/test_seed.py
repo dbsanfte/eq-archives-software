@@ -14,6 +14,7 @@ def test_seed_only_copies_manifest_files_and_preserves_source_and_review_on_rest
     (source/'orphan.html').write_text('not listed')
     destination=tmp_path/'production'
     seed(source,destination)
+    assert (destination/'indexing-state').stat().st_mode&0o7777==0o2770
     assert (destination/row['captures'][0]['path']).read_bytes() == (source/row['captures'][0]['path']).read_bytes()
     assert not (destination/'orphan.html').exists()
     assert not (destination/'git-reader').exists()
@@ -25,6 +26,13 @@ def test_seed_only_copies_manifest_files_and_preserves_source_and_review_on_rest
         assert store.db.execute('SELECT state FROM candidates').fetchone()[0] == 'deferred'
     with connect(source) as store:
         assert store.db.execute('SELECT state FROM candidates').fetchone()[0] == 'approval_pending'
+
+
+def test_existing_seed_marker_still_prepares_private_shared_indexing_state_without_reseeding(tmp_path):
+    source=tmp_path/'absent-pilot';root=tmp_path/'production';root.mkdir();(root/'seed-complete').touch()
+    seed(source,root)
+    assert (root/'indexing-state').is_dir() and (root/'indexing-state').stat().st_mode&0o7777==0o2770
+    assert not (root/'crawl.sqlite3').exists()
 
 
 def test_interrupted_seed_rechecks_artifacts_before_marking_complete(tmp_path):

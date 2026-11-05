@@ -6,13 +6,20 @@ from dataclasses import dataclass
 import hashlib
 import re
 
-VERSION='source-decoding-v2'
+VERSION='source-decoding-v3'
 KANA=re.compile(r'[\u3040-\u30ff]')
 KANJI=re.compile(r'[\u4e00-\u9fff]')
 HALF_KANA=re.compile(r'[\uff61-\uff9f]')
 BAD=re.compile(r'[\udc80-\udcff]')
 JAPANESE={'shift_jis','cp932','euc_jp','iso2022_jp'}
 _DAMAGE=ContextVar('source_decode_damage',default=None)
+
+
+def varied_japanese(text):
+    # A run of Western currency bytes can become dozens of the SAME kana in
+    # EUC-JP. Repetition alone cannot establish a language or a second codec.
+    # Short ambiguous labels can still inherit their surrounding region.
+    return len(set(KANA.findall(text)+KANJI.findall(text)))>=3
 
 
 def _count_damage(error):
@@ -129,7 +136,7 @@ def regional_decode(data,limit,base_encoding,*,hints=()):
                 high=sum(ord(c)>127 for c in text)
                 if high:result.append((100 if high>=2 or any(ord(c)>2047 for c in text) else 1,high,encoding,text))
             elif encoding in JAPANESE and kana and kana*4>=kana+kanji+half:
-                result.append((10 if kana>=2 and kana+kanji>=4 else 1,kana+kanji,encoding,text))
+                result.append((10 if kana>=2 and kana+kanji>=4 and varied_japanese(text) else 1,kana+kanji,encoding,text))
             elif encoding not in JAPANESE:
                 scripts=((0x370,0x3ff),(0x400,0x52f),(0x590,0x5ff),(0x600,0x6ff),(0x3400,0x9fff),(0xac00,0xd7af))
                 letters=max(sum(low<=ord(c)<=high for c in text) for low,high in scripts)
@@ -245,7 +252,9 @@ def decode_source(data,content_type='',*,detection=None):
         except UnicodeDecodeError:continue
         invalid=len(BAD.findall(text));kana=len(KANA.findall(text));kanji=len(KANJI.findall(text));half=len(HALF_KANA.findall(text))
         hinted=encoding in hints or encoding=='cp932' and 'shift_jis' in hints
-        enough=(kana>=2 or kanji>=4) if hinted else kana>=8 and kana+kanji>=16 and kana*4>=kana+kanji+half
+        explicit=encoding in declared or encoding=='cp932' and 'shift_jis' in declared
+        enough=((kana>=2 or kanji>=4) if hinted else kana>=8 and kana+kanji>=16 and kana*4>=kana+kanji+half)
+        enough=enough and (explicit or varied_japanese(text))
         limit=min(64,max(2,high//50));punctuation=0
         if enough and invalid>limit:
             recovered,count=mixed_punctuation(text)
@@ -268,7 +277,10 @@ def decode_source(data,content_type='',*,detection=None):
     # Do not turn the previously readable punctuation into C1 control characters.
     if 'iso8859-1' in declared and ('html' in content_type.lower() or re.search(rb'<(?:!doctype|html|body)\b',data[:8192],re.I)):
         declared.insert(declared.index('iso8859-1'),'cp1252')
-    for encoding in list(dict.fromkeys(declared+([detected] if detected else [])+['cp1252','iso8859-1'])):
+    # A detector hint that failed the script-evidence check cannot silently
+    # return through the fallback path and reinterpret Western symbols as kana.
+    legacy_hint=[detected] if detected and detected not in JAPANESE else []
+    for encoding in list(dict.fromkeys(declared+legacy_hint+['cp1252','iso8859-1'])):
         try:
             text=data.decode(encoding)
             return local(encoding,limit) or result(text,encoding,'legacy_fallback')

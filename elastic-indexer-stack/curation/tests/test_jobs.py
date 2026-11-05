@@ -13,6 +13,15 @@ from conftest import manifest_for
 IMAGE='dbsanfte/frontend@sha256:'+'1'*64
 
 
+def test_imports_share_only_the_private_embedding_cache_subdirectory():
+    batch={'id':'a'*32,'manifest_sha256':'b'*64}
+    job=import_job(batch,IMAGE);pod=job['spec']['template']['spec'];container=pod['containers'][0]
+    env={row['name']:row.get('value') for row in container['env']}
+    assert env['EMBEDDING_CACHE_PATH']=='/indexing-state/embeddings.sqlite'
+    assert {'name':'staging','mountPath':'/indexing-state','subPath':'indexing-state'} in container['volumeMounts']
+    assert container['volumeMounts'][0]['readOnly'] and pod['securityContext']['runAsUser']==10001
+
+
 def test_controller_credentials_mounts_start_without_nested_readonly_volumes(tmp_path,monkeypatch):
     import ssl
     import yaml

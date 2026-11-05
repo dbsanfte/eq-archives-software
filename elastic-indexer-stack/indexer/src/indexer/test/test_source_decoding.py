@@ -61,6 +61,28 @@ def test_short_hinted_japanese_is_not_required_to_fill_a_chunk():
     assert decode_source(text.encode('cp932'),'text/html; charset=Shift_JIS').text==text
 
 
+@pytest.mark.parametrize('detection',[{}, {'encoding':'EUC-JP','confidence':.99},
+                                     {'encoding':'SHIFT_JIS','confidence':.99}])
+def test_repeated_western_symbols_are_not_evidence_of_damaged_japanese(detection):
+    text='<html><p>Guild discussion '+('¤'*140)+'</p><footer>ezboard® Copyright ©1999-2002</footer></html>'
+    raw=text.encode('cp1252')
+    result=decode_source(raw,detection=detection)
+    assert result.text==text and result.encoding=='cp1252' and result.invalid_bytes==0
+    assert result.source_sha256==hashlib.sha256(raw).hexdigest()
+
+
+def test_repetitive_japanese_with_an_explicit_charset_retains_its_declared_script():
+    text='<html><meta charset="EUC-JP"><p>'+('あ'*100)+'</p></html>'
+    result=decode_source(text.encode('euc_jp'))
+    assert result.text==text and result.encoding=='euc_jp'
+
+
+def test_western_decoration_cannot_create_spurious_japanese_regional_anchors():
+    text='<html><p>Server '+('¤'*12)+'</p><p>Guild '+('¤'*10)+'</p><footer>ezboard® Copyright ©1999-2002</footer></html>'
+    result=decode_source(text.encode('cp1252'))
+    assert result.text==text and result.encoding=='cp1252' and not result.regions
+
+
 def test_late_non_ascii_bytes_are_validated_beyond_detector_sample():
     text=' '*12000+'<p>こんにちは。冒険に行きましょう。①番の髙い山です。</p>'
     assert decode_source(text.encode('cp932'),detection={'encoding':'ascii','confidence':1}).text==text
