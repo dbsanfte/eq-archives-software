@@ -129,3 +129,38 @@ def test_punctuation_fallback_does_not_guess_at_damaged_japanese_characters():
     japanese='こんにちは。ギルドのみんなで冒険に行きましょう。'*10
     with pytest.raises(UnicodeError,match='bounded decoding damage'):
         decode_source((japanese+'<br>').encode('cp932')+b'\x96 <br>'*40)
+
+
+def mixed_posts(tail=b''):
+    euc='<p>私は寛の大学入学を喜んだ。</p><p>（わたしは ひろし の だいがくにゅうがく を よろこんだ）</p>'
+    sjis='<p>コレア/ジャパン ワールドカップサッカーは ことしは かんこくとにほんで かいさいされます。</p>'
+    footer='<footer>ezboard® Copyright ©1999-2002</footer>'
+    raw=b'<html><title>Language discussion</title><p>\xa5\xf2</p>'+euc.encode('euc_jp')+sjis.encode('cp932')+footer.encode('cp1252')+tail+b'</html>'
+    return raw,'<html><title>Language discussion</title><p>ヲ</p>'+euc+sjis+footer
+
+
+def test_mixed_html_posts_preserve_both_japanese_encodings_and_western_footer():
+    raw,expected=mixed_posts()
+    decoded=decode_source(raw)
+    assert decoded.text==expected+'</html>' and decoded.invalid_bytes==0
+    assert decoded.reason=='mixed_japanese_html_segments' and decoded.encoding=='mixed'
+    assert decoded.source_sha256==hashlib.sha256(raw).hexdigest()
+    assert decoded.provenance()['recoveries']==[
+        {'encoding':'cp1252','kind':'html_text_segments','segments':1},
+        {'encoding':'euc_jp','kind':'html_text_segments','segments':3},
+        {'encoding':'shift_jis','kind':'html_text_segments','segments':1}]
+
+
+def test_mixed_html_retains_small_damage_and_rejects_unbounded_damage():
+    raw,expected=mixed_posts(b'<p>\x82 </p>')
+    decoded=decode_source(raw)
+    assert decoded.text==expected+'<p>\ufffd </p></html>' and decoded.invalid_bytes==1
+    with pytest.raises(UnicodeError,match='bounded decoding damage'):
+        decode_source(mixed_posts(b'<p>'+b'\x82 '*20+b'</p>')[0])
+
+
+def test_mixed_recovery_requires_html_and_strong_independent_encoding_evidence():
+    from indexer.source_encoding import mixed_html
+    raw,_=mixed_posts()
+    assert mixed_html(raw.replace(b'<html>',b'').replace(b'</html>',b''),4) is None
+    assert mixed_html('<html><p>こんにちは。冒険に行きましょう。</p></html>'.encode('cp932'),4) is None

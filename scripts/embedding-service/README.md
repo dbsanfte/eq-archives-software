@@ -390,6 +390,13 @@ counts and the secondary encoding are recorded alongside the original source
 hash. Previously accepted decoding is unchanged, so completed source/passages
 checkpoints remain valid.
 
+HTML rejected by those bounds can also contain independently encoded forum
+posts. A final fallback requires substantial, strictly decoded kana evidence for
+both EUC-JP and Shift-JIS in separate text segments before decoding each segment.
+It preserves markup, short Japanese labels, Western footer text and the original
+damage bounds; source hashes and segment encoding counts remain in provenance.
+It cannot turn a damaged single-encoding page into a successful mixed decode.
+
 Indexer and curation writes use `indexer.vector_json` to encode dense vectors with
 nine significant digits after a float32 conversion. Every finite float32,
 including signed zero, round-trips exactly; metadata keeps its ordinary precision.
