@@ -278,3 +278,21 @@ def test_concurrent_stateful_decodes_keep_each_sources_damage_counts_isolated():
         return result.invalid_bytes,result.text
     with ThreadPoolExecutor(max_workers=4) as pool:results=list(pool.map(read,range(20)))
     assert results==[(i%2,japanese+('\ufffd' if i%2 else '')) for i in range(20)]
+
+
+@pytest.mark.parametrize('wrapper',[
+    b'<script><!-- %s --></script>',b'<style>/* %s */</style>',b'<!-- %s -->'])
+def test_hidden_generator_comments_cannot_establish_the_readers_language(wrapper):
+    # Old page generators paste partially escaped Japanese comments into an
+    # otherwise Western page. Damage there must not reject its readable body.
+    comment='ステータス行に文字列を表示します'.encode('cp932')+b'\x82 '*4
+    raw=b'<html><head>'+wrapper%comment+b'</head><body><p>Guild caf\xe9 guide. Copyright \xa9 2002.</p></body></html>'
+    result=decode_source(raw,detection={'encoding':'SHIFT_JIS','confidence':.99})
+    assert result.text==raw.decode('iso8859-1') and result.invalid_bytes==0
+    assert result.source_sha256==hashlib.sha256(raw).hexdigest()
+
+
+def test_visible_japanese_evidence_remains_valid_alongside_hidden_generator_code():
+    body='こんにちは。ギルドのみんなで冒険に行きましょう。'
+    text='<html><script>// hidden status text</script><p>'+body+'</p></html>'
+    assert decode_source(text.encode('cp932')).text==text

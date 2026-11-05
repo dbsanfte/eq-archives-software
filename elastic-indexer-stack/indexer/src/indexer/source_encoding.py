@@ -243,6 +243,13 @@ def decode_source(data,content_type='',*,detection=None):
     detection=detection or {}
     detected=canonical(detection.get('encoding'))
     hints=[c for c in declared+[detected] if c in JAPANESE]
+    # Generator comments can contain damaged Japanese even on Western pages.
+    # Only reader-bearing markup establishes the page language; retain every
+    # original byte in decoding and hashing, including these opaque regions.
+    evidence_data=data
+    if re.search(rb'<(?:!doctype|html|body)\b',data[:8192],re.I):
+        evidence_data=re.sub(rb'<!--.*?-->|<(script|style)\b[^>]*>.*?</\1\s*>',
+                             b' ',data,flags=re.I|re.S)
     # Require actual Japanese script evidence. Strict CP932 alone can decode
     # some Western bytes too, so mere codec success is insufficient.
     candidates=[];damaged_japanese=False
@@ -250,11 +257,12 @@ def decode_source(data,content_type='',*,detection=None):
     for encoding in list(dict.fromkeys(hints+['shift_jis','cp932','euc_jp'])):
         try:text=data.decode(encoding,errors='surrogateescape')
         except UnicodeDecodeError:continue
-        invalid=len(BAD.findall(text));kana=len(KANA.findall(text));kanji=len(KANJI.findall(text));half=len(HALF_KANA.findall(text))
+        evidence=text if evidence_data is data else evidence_data.decode(encoding,errors='surrogateescape')
+        invalid=len(BAD.findall(text));kana=len(KANA.findall(evidence));kanji=len(KANJI.findall(evidence));half=len(HALF_KANA.findall(evidence))
         hinted=encoding in hints or encoding=='cp932' and 'shift_jis' in hints
         explicit=encoding in declared or encoding=='cp932' and 'shift_jis' in declared
         enough=((kana>=2 or kanji>=4) if hinted else kana>=8 and kana+kanji>=16 and kana*4>=kana+kanji+half)
-        enough=enough and (explicit or varied_japanese(text))
+        enough=enough and (explicit or varied_japanese(evidence))
         limit=min(64,max(2,high//50));punctuation=0
         if enough and invalid>limit:
             recovered,count=mixed_punctuation(text)
