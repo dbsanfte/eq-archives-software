@@ -37,7 +37,9 @@ def repaired_title(previous,expected,decoded):
     for western in ('iso8859-1','cp1252'):
         try:
             if previous.encode(western).decode(decoded.encoding,errors='replace')==expected:
-                return expected
+                # HTML text nodes retain their entire parent/sibling tree.
+                # Return plain text so preparation results can be pickled.
+                return str(expected)
         except UnicodeError:pass
     return previous
 

@@ -24,6 +24,23 @@ def test_spawned_preparation_reads_complete_source_without_network_or_writes(tmp
     assert path.read_bytes() == original
 
 
+def test_spawned_gemma_preparation_returns_repaired_title_without_html_tree(tmp_path):
+    from reindex_embeddings import prepare
+    expected='ギルド冒険記録'
+    key='websites/example.org/20000101000000/index.html'
+    path=tmp_path/key;path.parent.mkdir(parents=True)
+    raw=('<meta charset="Shift_JIS"><title>'+expected+'</title>'+'<div>'*200+
+         '<p>こんにちは。ギルドのみんなで蘇生の相談をしましょう。</p>'+'</div>'*200).encode('cp932')
+    path.write_bytes(raw)
+    source={'id':key,'file_type':'text','mime_type':'text/html',
+            'title':expected.encode('cp932').decode('latin-1'),'text_full':'old text'}
+    with ProcessPoolExecutor(max_workers=1,mp_context=multiprocessing.get_context('spawn')) as pool:
+        groups,patch,missing=pool.submit(prepare,source,str(tmp_path)).result(timeout=30)
+    assert patch['title']==expected and type(patch['title']) is str
+    assert not missing and 'こんにちは。' in groups[0][0]
+    assert path.read_bytes()==raw
+
+
 def test_missing_source_preserves_original_and_preparation_failures_are_sanitized(tmp_path):
     text, chunks = prepare_source('websites/x', str(tmp_path/'missing'), False, 'preserved original')
     assert text == 'preserved original' and chunks == chunk_source(text)
