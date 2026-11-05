@@ -12,6 +12,33 @@ from test_server import call
 from worker import campaign
 
 
+@pytest.mark.parametrize('url',['http://www.guild.example/another/page','https://guild.example:443/'])
+def test_duplicate_probe_uses_url_metadata_without_loading_all_candidate_bodies(candidate,monkeypatch,url):
+    from discovery_run import owned_or_new,merge_site
+    root,existing=candidate;monkeypatch.delenv('ARCHIVE_REPO',raising=False)
+    with connect(root) as store:source=dict(store.candidates()[0])
+    incoming={**source,'id':'f'*24,'url':url}
+    def forbidden(*args):raise AssertionError('Duplicate probes must not load every full candidate')
+    monkeypatch.setattr(Store,'candidates',forbidden)
+    operation={'id':'e'*32}
+    assert owned_or_new(root,operation,incoming)=='duplicate'
+    assert merge_site(root,operation,incoming,2) is False
+
+
+def test_new_site_and_published_alias_checks_use_metadata_without_full_candidate_load(candidate,monkeypatch):
+    from discovery_run import owned_or_new
+    from coverage_check import require_new
+    root,row=candidate;monkeypatch.delenv('ARCHIVE_REPO',raising=False)
+    with connect(root) as store:
+        store.db.execute("UPDATE candidates SET state='published' WHERE id=?",(row['id'],));store.db.commit()
+    def forbidden(*args):raise AssertionError('Metadata lookup loaded full candidate bodies')
+    monkeypatch.setattr(Store,'candidates',forbidden)
+    assert owned_or_new(root,{'id':'e'*32},{'id':'f'*24,'url':'http://different.example/'})=='new'
+    with connect(root) as store:
+        with pytest.raises(CrawlError,match='already published'):
+            require_new(store,'https://www.guild.example/')
+
+
 @pytest.fixture
 def run_fixture(tmp_path, monkeypatch):
     root = tmp_path / 'state'

@@ -13,7 +13,9 @@ EDITABLE = {'approval_pending', 'approved_waiting_batch', 'deferred', 'rejected'
             'already_archived', 'duplicate_candidate', 'coverage_unverified', 'grade_error'}
 
 
-def published_sites(store, rows):
+def published_sites(store, rows=None):
+    if rows is None:
+        rows=store.db.execute("SELECT id,url,state FROM candidates WHERE state IN ('published','indexed')")
     known = {site_identity(row['url'], store): row['id'] for row in rows if row['state'] in ('published', 'indexed')}
     # A missing-file retry temporarily moves the candidate out of Published.
     # Its immutable publication still excludes new aliases of the same site.
@@ -103,7 +105,7 @@ def refresh(root, candidate_id=None, force=False):
 
 
 def require_new(store, url, force=False):
-    if site_identity(url, store) in published_sites(store, store.candidates()):
+    if site_identity(url, store) in published_sites(store):
         raise CrawlError('Website/account was already published by another batch')
     repository = os.environ.get('ARCHIVE_REPO')
     if not repository:

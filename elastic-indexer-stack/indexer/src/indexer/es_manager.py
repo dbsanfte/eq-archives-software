@@ -4,6 +4,7 @@ import os
 import logging
 import datetime
 from elasticsearch import Elasticsearch, exceptions
+from .es_serialization import serializers
 
 # A single dictionary describing each field and its ES mapping configuration
 ES_FIELDS = {
@@ -202,6 +203,7 @@ class ElasticsearchManager:
         
         es = Elasticsearch(
             f"{self._host}:{self._port}",
+            serializers=serializers(),
             verify_certs=self._ssl_verify_certs,
             ssl_show_warn=self._ssl_show_warn,
             retry_on_timeout=self._es_retry_on_timeout,

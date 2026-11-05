@@ -214,7 +214,7 @@ progress, count remaining documents using `remaining_query()` and count the exac
 Do not equate a Job exit or a process-local processed count with total completion.
 
 Website source repair also requires extraction checkpoint
-`html-2026-11-04-safe-structure`. The shared offline decoder handles CP932 Windows
+`html-2026-11-05-regional-decoding`. The shared offline decoder handles CP932 Windows
 extensions, Shift-JIS, EUC-JP and ISO-2022-JP using actual byte/script evidence.
 Misdeclared UTF-8 archive wrappers do not override validated bytes. Bounded damaged
 sequences remain visible as U+FFFD and have counted source-hash-bound provenance;
@@ -334,7 +334,7 @@ fragments and verified empty posting forms are excluded only from the search vie
 quoted code, tables, attachment labels, biographies and surviving quotations remain.
 The reader converter flattens excessive formatting/container nesting while keeping
 visible text, data cells, code and image links, under extraction checkpoint
-`html-2026-11-04-safe-structure`.
+`html-2026-11-05-regional-decoding`.
 
 The upgrade checks exact saved text/title/context/kind/offset tuples as well as
 source/view provenance before reusing v4 vectors. Matching records get the new
@@ -380,3 +380,38 @@ New records carry archive/source hashes, exact source identity, capture date,
 complete reader, current Gemma/passages/extraction checkpoints and local vectors.
 This is source recovery, so normal curation approval and daily Luna policies are
 unchanged. Existing-document reindexing alone cannot repair absent records.
+
+### Mixed legacy punctuation and large vector writes
+
+The shared offline decoder uses local evidence and inherited text-node context,
+with declarations/detection as hints. It can mix UTF-8, Shift-JIS/CP932, EUC-JP,
+ISO-2022-JP and a declared legacy script within a file, including whitespace-bound
+runs in the same text node and plain-text lines. Strict codec success alone does
+not establish the correct interpretation. Independent local evidence is required
+before switching encodings; ambiguous short runs inherit context, and unknown
+bytes retain visible replacement markers within the existing damage bounds.
+ISO-2022 escape runs retain their state within each text node. HTML-escaped
+ASCII bytes are restored only inside shifted JIS runs before decoding; ordinary
+HTML entities remain untouched. Repairs and genuine truncated sequences have
+separate counters, isolated across concurrent workers. Provenance records the
+exact source hash, byte ranges, encoding decisions and replacement counts. Compatible adjacent ranges are coalesced to bound metadata.
+
+`source-decoding-v2` and `html-2026-11-05-regional-decoding` let the text Job revisit
+older website extraction, including mixed pages that previously passed a single
+codec. The model and passage policy stay unchanged. Identical reader/passage
+requests reuse existing vectors and update only the extraction/provenance
+checkpoint; changed readers/views replace vectors atomically. Existing
+mail/newsgroup checkpoints, enrichment, source identity and dates remain intact.
+
+Indexer and curation writes use `indexer.vector_json` to encode dense vectors with
+nine significant digits after a float32 conversion. Every finite float32,
+including signed zero, round-trips exactly; metadata keeps its ordinary precision.
+This avoids expanding each float32 into a long Python double spelling and keeps
+large complete documents within the existing Elasticsearch HTTP bound. JSON,
+bulk NDJSON and create-only capture imports share the encoding. Nonfinite or
+unrepresentable vectors fail before transport. No passages are dropped and no
+model, passage-policy or extraction checkpoints change for this transport repair.
+
+The operator Dockerfile coalesces source updates into two additional layers so
+an exact-predecessor update can be built without a layer for each copied module.
+Use the normal pending-Job handoff and retain the previous image and Jobs.

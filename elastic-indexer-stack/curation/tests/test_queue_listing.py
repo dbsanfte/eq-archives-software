@@ -114,3 +114,47 @@ def test_approval_still_rechecks_archive_after_a_fast_portal_read(candidate, tmp
     with connect(root) as store:
         assert store.candidates()[0]['state'] == 'already_archived'
         assert not store.db.execute('SELECT 1 FROM operations').fetchone()
+
+
+def test_compact_read_plans_cover_metadata_and_follow_concurrent_updates(candidate):
+    root,row=candidate
+    from portal import listing_rows
+    with connect(root) as store:
+        store.db.execute('UPDATE candidates SET evidence=? WHERE id=?',
+                         (json.dumps(['large discovery evidence '*50000]),row['id']))
+        store.db.commit()
+        statements=[];store.db.set_trace_callback(statements.append)
+        first=listing_rows(store)
+        store.db.set_trace_callback(None)
+        select=next(s for s in statements if 'NULL evidence' in s)
+        plan=store.db.execute('EXPLAIN QUERY PLAN '+select).fetchall()
+        assert any('COVERING INDEX' in p[3] for p in plan)
+        assert first[0]['evidence'] is None
+        assert first[0]['stage']=='candidates'
+        with connect(root) as other:
+            other.db.execute("UPDATE candidates SET state='deferred' WHERE id=?",(row['id'],))
+            other.db.commit()
+        assert listing_rows(store)[0]['stage']=='saved'
+        plan=store.db.execute('EXPLAIN QUERY PLAN SELECT id,state,manifest_sha256,publication,job,error,created,updated '
+                              'FROM batches INDEXED BY batch_metadata ORDER BY created DESC LIMIT 100').fetchall()
+        assert any('COVERING INDEX' in p[3] for p in plan)
+
+
+def test_repeated_poll_reuses_unchanged_rows_but_redecorates_current_batch_state(candidate,monkeypatch):
+    from portal import listing_rows,cached_metadata
+    import review
+    root,row=candidate;cached_metadata.cache_clear();calls=[];real=review.metadata
+    def decode(value):calls.append(value['id']);return real(value)
+    monkeypatch.setattr(review,'metadata',decode)
+    with connect(root) as store:
+        first=listing_rows(store);second=listing_rows(store)
+        assert first==second and calls==[row['id']]
+        first[0]['stage']='changed by a prior response'
+        assert listing_rows(store)[0]['stage']=='candidates'
+        store.db.execute("UPDATE candidates SET coverage=? WHERE id=?",(json.dumps({'capture':{'review_id':'batch'}}),row['id']))
+        store.db.execute("INSERT INTO batches(id,state) VALUES('batch','indexing')");store.db.commit()
+        assert listing_rows(store)[0]['stage']=='indexing'
+        assert len(calls)==2
+        store.db.execute("UPDATE batches SET state='indexed' WHERE id='batch'");store.db.commit()
+        final=listing_rows(store)
+        assert final[0]['stage']=='history' and len(calls)==2

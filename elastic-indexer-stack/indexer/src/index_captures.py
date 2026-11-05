@@ -18,6 +18,7 @@ import time
 from urllib.parse import quote, urlsplit
 
 import httpx
+from indexer.vector_json import dumps as vector_json
 
 from common import CrawlError, decode, digest, now
 from captures import check_manifest, indexable, verified_source, verified_path
@@ -145,7 +146,8 @@ class Services:
         raise CrawlError("Embedding service is busy; batch remains resumable")
 
     def create(self, record_id, document):
-        response = self.client.put(f"{self.es_url}/{quote(self.index, safe='')}/_create/{quote(record_id, safe='')}", json=document)
+        response = self.client.put(f"{self.es_url}/{quote(self.index, safe='')}/_create/{quote(record_id, safe='')}",
+                                   content=vector_json(document),headers={'Content-Type':'application/json'})
         if response.status_code == 409:
             return False  # Another writer won; preserve its document/enrichment.
         if response.status_code != 201 or response.json().get("result") != "created":

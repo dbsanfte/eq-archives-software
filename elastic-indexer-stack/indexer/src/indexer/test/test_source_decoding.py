@@ -100,3 +100,159 @@ def test_repaired_html_title_can_cross_a_process_boundary():
 def test_latin1_html_label_keeps_windows_smart_punctuation_readable():
     text='<html><meta charset="ISO-8859-1"><p>“Guild” … £50</p></html>'
     assert decode_source(text.encode('cp1252')).text==text
+
+
+@pytest.mark.parametrize('punctuation',['–','—','•'])
+def test_over_budget_japanese_page_recovers_isolated_western_list_punctuation(punctuation):
+    japanese='<meta charset="Shift_JIS"><p>こんにちは。ギルドのみんなで冒険に行きましょう。</p>'
+    english=''.join(f'<br>{i} {punctuation} Guild guide {i}' for i in range(20))
+    raw=japanese.encode('cp932')+english.encode('cp1252')
+    result=decode_source(raw)
+    assert result.text==japanese+english and result.invalid_bytes==0
+    assert result.provenance()['recoveries']==[
+        {'encoding':'cp1252','kind':'isolated_ascii_punctuation','bytes':20}]
+    assert result.source_sha256==hashlib.sha256(raw).hexdigest()
+
+
+def test_mixed_recovery_keeps_unknown_bytes_visible_and_old_bounded_decoding_stable():
+    japanese='<p>こんにちは。みんなで蘇生の相談をしましょう。</p>'
+    raw=japanese.encode('cp932')+b'\x82..'+b'<br>1 \x96 Guild guide'*20
+    result=decode_source(raw)
+    assert result.text==japanese+'\ufffd..'+'<br>1 – Guild guide'*20
+    assert result.invalid_bytes==1 and result.punctuation_bytes==20
+    # Already accepted decoding retains its checkpoint behavior.
+    previous=decode_source(japanese.encode('cp932')+b' 1 \x96 Guild')
+    assert previous.invalid_bytes==1 and 'recoveries' not in previous.provenance()
+
+
+def test_punctuation_fallback_does_not_guess_at_damaged_japanese_characters():
+    japanese='こんにちは。ギルドのみんなで冒険に行きましょう。'*10
+    with pytest.raises(UnicodeError,match='bounded decoding damage'):
+        decode_source((japanese+'<br>').encode('cp932')+b'\x96 <br>'*40)
+
+
+def mixed_posts(tail=b''):
+    euc='<p>私は寛の大学入学を喜んだ。</p><p>（わたしは ひろし の だいがくにゅうがく を よろこんだ）</p>'
+    sjis='<p>コレア/ジャパン ワールドカップサッカーは ことしは かんこくとにほんで かいさいされます。</p>'
+    footer='<footer>ezboard® Copyright ©1999-2002</footer>'
+    raw=b'<html><title>Language discussion</title><p>\xa5\xf2</p>'+euc.encode('euc_jp')+sjis.encode('cp932')+footer.encode('cp1252')+tail+b'</html>'
+    return raw,'<html><title>Language discussion</title><p>ヲ</p>'+euc+sjis+footer
+
+
+def test_mixed_html_posts_preserve_both_japanese_encodings_and_western_footer():
+    raw,expected=mixed_posts()
+    decoded=decode_source(raw)
+    assert decoded.text==expected+'</html>' and decoded.invalid_bytes==0
+    assert decoded.reason=='regional_evidence' and decoded.encoding=='mixed'
+    assert decoded.source_sha256==hashlib.sha256(raw).hexdigest()
+    assert {p['encoding'] for p in decoded.provenance()['recoveries']}=={'cp1252','euc_jp','shift_jis'}
+    for region in decoded.provenance()['regions']:
+        assert 0<=region['raw_start']<region['raw_end']<=len(raw)
+        assert raw[region['raw_start']:region['raw_end']].decode(region['encoding']) in decoded.text
+
+
+
+def test_mixed_html_retains_small_damage_and_rejects_unbounded_damage():
+    raw,expected=mixed_posts(b'<p>\x82 </p>')
+    decoded=decode_source(raw)
+    assert decoded.text==expected+'<p>\ufffd </p></html>' and decoded.invalid_bytes==1
+    with pytest.raises(UnicodeError,match='bounded decoding damage'):
+        decode_source(mixed_posts(b'<p>'+b'\x82 '*20+b'</p>')[0])
+
+
+def test_regional_recovery_requires_independent_encoding_evidence():
+    from indexer.source_encoding import regional_decode
+    assert regional_decode('<html><p>こんにちは。冒険に行きましょう。</p></html>'.encode('cp932'),4,'cp932') is None
+
+
+@pytest.mark.parametrize('separator',[b'</p><p>',b' ',b'\n'])
+def test_locally_encoded_runs_are_recovered_even_when_one_codec_accepts_the_entire_file(separator):
+    euc='こんにちはみんなで冒険';sjis='ギルドのみんなで蘇生の相談をしましょう。'
+    raw=b'<html><p>'+euc.encode('euc_jp')+separator+sjis.encode('cp932')+b'</p></html>'
+    raw.decode('cp932')  # Codec success alone previously hid the mixed bytes.
+    decoded=decode_source(raw)
+    assert decoded.text=='<html><p>'+euc+separator.decode()+sjis+'</p></html>'
+    assert decoded.encoding=='mixed' and decoded.invalid_bytes==0
+
+
+@pytest.mark.parametrize('wrapper',[b'',codecs.BOM_UTF8])
+def test_utf8_islands_and_western_text_decode_locally_with_exact_original_offsets(wrapper):
+    unicode='こんにちは世界。';western='A café guide with “quotes”.'
+    raw=wrapper+b'<html><p>'+unicode.encode('utf-8')+b'</p><p>'+western.encode('cp1252')+b'</p></html>'
+    decoded=decode_source(raw)
+    assert decoded.text=='<html><p>'+unicode+'</p><p>'+western+'</p></html>'
+    assert decoded.source_sha256==hashlib.sha256(raw).hexdigest()
+    for region in decoded.regions:
+        assert region['raw_start']>=len(wrapper)
+        assert raw[region['raw_start']:region['raw_end']].decode(region['encoding']) in decoded.text
+
+
+@pytest.mark.parametrize('encoding,text',[
+    ('cp1251','Привет миром'),('iso8859_7','Καλημέρα κόσμε'),('gb18030','你好世界新的冒险')])
+def test_declared_legacy_script_can_coexist_with_unicode_posts(encoding,text):
+    header=f'<html><meta charset="{encoding}"><p>'
+    unicode='Unicode: こんにちは世界。'
+    raw=header.encode()+text.encode(encoding)+b'</p><p>'+unicode.encode('utf-8')+b'</p></html>'
+    assert decode_source(raw).text==header+text+'</p><p>'+unicode+'</p></html>'
+
+
+def test_plain_text_lines_and_iso2022_posts_keep_their_local_encodings():
+    first='こんにちは世界。';second='ギルドのみんなで蘇生の相談をしましょう。'
+    raw=first.encode('iso2022_jp')+b'\n'+second.encode('utf-8')
+    assert decode_source(raw).text==first+'\n'+second
+
+
+def test_regional_metadata_preserves_unicode_attributes_and_exact_title_repairs():
+    title='ギルド冒険記録';footer='A café guide with “quotes”.'
+    raw=('<html><title>'+title+'</title><img alt="日本語の画像">').encode('utf-8')+footer.encode('cp1252')+b'</html>'
+    decoded=decode_source(raw)
+    assert decoded.text=='<html><title>'+title+'</title><img alt="日本語の画像">'+footer+'</html>'
+    assert repaired_title(title.encode('utf-8').decode('latin1'),title,decoded)==title
+    assert repaired_title('Operator title',title,decoded)=='Operator title'
+
+
+def test_adjacent_compatible_regions_are_coalesced_without_losing_original_byte_coverage():
+    unicode='こんにちは世界。';western='café '*100
+    raw=unicode.encode('utf-8')+b'\n'+western.encode('cp1252')
+    decoded=decode_source(raw)
+    assert decoded.text==unicode+'\n'+western
+    assert len(decoded.regions)==2
+    assert raw[decoded.regions[1]['raw_start']:decoded.regions[1]['raw_end']].decode('cp1252') in western
+
+
+@pytest.mark.parametrize('other_encoding',['utf-8','cp932','euc_jp'])
+def test_html_escaped_stateful_bytes_are_recovered_before_decoding_each_post(other_encoding):
+    import html
+    japanese='ありがとう。あの人は日本語を学びたい。'
+    other='こんにちは世界。ギルドのみんなで冒険に行きましょう。'
+    escaped=html.escape(japanese.encode('iso2022_jp').decode('ascii'),quote=True).encode('ascii')
+    raw=b'<html><p>&quot;Outside quote&quot;</p><p>'+escaped+b'</p><p>'+other.encode(other_encoding)+b'</p></html>'
+    decoded=decode_source(raw)
+    assert decoded.text=='<html><p>&quot;Outside quote&quot;</p><p>'+japanese+'</p><p>'+other+'</p></html>'
+    assert '\x1b' not in decoded.text and decoded.invalid_bytes==0
+    assert decoded.restored_entities>0
+    assert decoded.source_sha256==hashlib.sha256(raw).hexdigest()
+    assert any(p['kind']=='escaped_jis_bytes' for p in decoded.provenance()['recoveries'])
+
+
+def test_escaped_iso2022_only_and_truncation_keep_entity_recovery_and_damage_separate():
+    import html
+    japanese='ありがとう。あの人は日本語を学びたい。'
+    escaped=html.escape(japanese.encode('iso2022_jp').decode('ascii'),quote=True).encode('ascii')
+    raw=b'<html><p>'+escaped+b'\x1b$B$</p></html>'
+    decoded=decode_source(raw)
+    assert japanese in decoded.text and decoded.text.count('\ufffd')==1
+    assert decoded.invalid_bytes==1 and decoded.restored_entities>0 and '\x1b' not in decoded.text
+    with pytest.raises(UnicodeError,match='bounded decoding damage'):
+        decode_source(b'<html>'+escaped+b'\x1b$B$\x1b(B'*10+b'</html>')
+
+
+def test_concurrent_stateful_decodes_keep_each_sources_damage_counts_isolated():
+    from concurrent.futures import ThreadPoolExecutor
+    japanese='こんにちは世界。'
+    def read(i):
+        data=japanese.encode('iso2022_jp')+(b'\x1b$B$' if i%2 else b'')
+        result=decode_source(data)
+        return result.invalid_bytes,result.text
+    with ThreadPoolExecutor(max_workers=4) as pool:results=list(pool.map(read,range(20)))
+    assert results==[(i%2,japanese+('\ufffd' if i%2 else '')) for i in range(20)]

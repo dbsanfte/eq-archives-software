@@ -11,6 +11,17 @@ def plan(raw,rid=RID):
     return result
 
 
+@pytest.mark.parametrize('inner',['','Reply'])
+def test_nested_control_links_keep_surrounding_content_after_parent_removal(inner):
+    raw=('<title>Guild history</title><p>Opening guild raid testimony.</p>'
+         '<a href="reply"><a href="nested">'+inner+'</a>'+('Reply' if not inner else '')+'</a>'
+         '<p>Complete closing testimony with <a href="guide">a useful guide</a>.</p>')
+    result=plan(raw)
+    assert 'Opening guild raid testimony.' in result.view
+    assert 'Complete closing testimony' in result.view and 'a useful guide' in result.view
+    assert 'forum_or_account_control' in result.exclusions
+
+
 def test_skinned_vbulletin_word_dates_and_guest_menus_have_independent_posts():
     raw='<title>Epic discussion</title><p>Search Home FAQ</p>'
     for i,name in enumerate(('Guest Healer','Guild Ranger')):

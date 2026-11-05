@@ -1,25 +1,38 @@
-# Checkpoint-preserving operator update, retaining the running Job's dependencies.
-# Pass the exact locally verified predecessor image (record its image ID privately).
+# Checkpoint-preserving update of the exact verified predecessor image.
+# Coalesce source copies to avoid exhausting OverlayFS depth during handoffs.
 ARG BASE_IMAGE
 FROM ${BASE_IMAGE}
-COPY scripts/embedding-service/image-requirements.txt /app/image-requirements.txt
-RUN pip install --no-cache-dir --require-hashes -r /app/image-requirements.txt
-COPY elastic-indexer-stack/indexer/src/reindex_text.py /app/src/reindex_text.py
-COPY elastic-indexer-stack/indexer/src/indexer/openai_manager.py /app/src/indexer/openai_manager.py
-COPY elastic-indexer-stack/indexer/src/indexer/reindex_preparation.py /app/src/indexer/reindex_preparation.py
-RUN python -m compileall -b -f -o 2 /app/src/reindex_text.py /app/src/indexer/openai_manager.py /app/src/indexer/reindex_preparation.py && \
-    rm /app/src/reindex_text.py /app/src/indexer/openai_manager.py /app/src/indexer/reindex_preparation.py
-COPY elastic-indexer-stack/indexer/src/reindex_embeddings.py /app/src/reindex_embeddings.py
-COPY elastic-indexer-stack/indexer/src/indexer/gemma.py elastic-indexer-stack/indexer/src/indexer/chunking.py elastic-indexer-stack/indexer/src/indexer/es_manager.py /app/src/indexer/
-COPY elastic-indexer-stack/indexer/src/indexer/passages.py elastic-indexer-stack/indexer/src/indexer/image_embeddings.py elastic-indexer-stack/indexer/src/indexer/archive_images.py elastic-indexer-stack/indexer/src/indexer/text_handler.py elastic-indexer-stack/indexer/src/indexer/image_handler.py /app/src/indexer/
-COPY elastic-indexer-stack/indexer/src/indexer/passage_forums.py /app/src/indexer/passage_forums.py
-COPY elastic-indexer-stack/indexer/src/indexer/source_encoding.py elastic-indexer-stack/indexer/src/indexer/html_extraction.py /app/src/indexer/
-RUN python -m compileall -b -f -o 2 /app/src/indexer/source_encoding.py /app/src/indexer/html_extraction.py && rm /app/src/indexer/source_encoding.py /app/src/indexer/html_extraction.py
-RUN python -m compileall -b -f -o 2 /app/src/indexer/passage_forums.py && rm /app/src/indexer/passage_forums.py
-COPY elastic-indexer-stack/indexer/src/index_images.py /app/src/index_images.py
-COPY elastic-indexer-stack/indexer/src/index_websites.py /app/src/index_websites.py
-COPY elastic-indexer-stack/indexer/src/indexer/other_handler.py /app/src/indexer/other_handler.py
-RUN python -m compileall -b -f -o 2 /app/src/indexer/other_handler.py && rm /app/src/indexer/other_handler.py && \
+COPY scripts/embedding-service/image-requirements.txt \
+    elastic-indexer-stack/indexer/src/reindex_text.py \
+    elastic-indexer-stack/indexer/src/reindex_embeddings.py \
+    elastic-indexer-stack/indexer/src/index_images.py \
+    elastic-indexer-stack/indexer/src/index_websites.py \
+    elastic-indexer-stack/indexer/src/indexer/openai_manager.py \
+    elastic-indexer-stack/indexer/src/indexer/reindex_preparation.py \
+    elastic-indexer-stack/indexer/src/indexer/gemma.py \
+    elastic-indexer-stack/indexer/src/indexer/chunking.py \
+    elastic-indexer-stack/indexer/src/indexer/es_manager.py \
+    elastic-indexer-stack/indexer/src/indexer/es_serialization.py \
+    elastic-indexer-stack/indexer/src/indexer/vector_json.py \
+    elastic-indexer-stack/indexer/src/indexer/passages.py \
+    elastic-indexer-stack/indexer/src/indexer/passage_forums.py \
+    elastic-indexer-stack/indexer/src/indexer/image_embeddings.py \
+    elastic-indexer-stack/indexer/src/indexer/archive_images.py \
+    elastic-indexer-stack/indexer/src/indexer/text_handler.py \
+    elastic-indexer-stack/indexer/src/indexer/image_handler.py \
+    elastic-indexer-stack/indexer/src/indexer/other_handler.py \
+    elastic-indexer-stack/indexer/src/indexer/source_encoding.py \
+    elastic-indexer-stack/indexer/src/indexer/html_extraction.py /updates/
+RUN cp /updates/image-requirements.txt /app/image-requirements.txt && \
+    pip install --no-cache-dir --require-hashes -r /app/image-requirements.txt && \
+    for update_source in /updates/*.py; do \
+      update_name=${update_source##*/}; \
+      case "$update_name" in \
+        reindex_text.py|reindex_embeddings.py|index_images.py|index_websites.py) update_target=/app/src/$update_name ;; \
+        *) update_target=/app/src/indexer/$update_name ;; \
+      esac; \
+      cp "$update_source" "$update_target" && \
+      python -m compileall -b -f -o 2 "$update_target" && rm "$update_target" || exit 1; \
+    done && \
     python -m indexer.gemma --download-tokenizer /opt/eqarchives/gemma-tokenizer.json && \
-    python -m compileall -b -f -o 2 /app/src/reindex_embeddings.py /app/src/index_images.py /app/src/index_websites.py /app/src/indexer/gemma.py /app/src/indexer/chunking.py /app/src/indexer/es_manager.py /app/src/indexer/passages.py /app/src/indexer/image_embeddings.py /app/src/indexer/archive_images.py /app/src/indexer/text_handler.py /app/src/indexer/image_handler.py && \
-    rm /app/src/reindex_embeddings.py /app/src/index_images.py /app/src/index_websites.py /app/src/indexer/gemma.py /app/src/indexer/chunking.py /app/src/indexer/es_manager.py /app/src/indexer/passages.py /app/src/indexer/image_embeddings.py /app/src/indexer/archive_images.py /app/src/indexer/text_handler.py /app/src/indexer/image_handler.py
+    rm -rf /updates

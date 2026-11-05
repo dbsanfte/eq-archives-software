@@ -148,6 +148,22 @@ def test_es_requests_are_exact_create_only_and_conflicts_preserve_other_writer(t
     finally: instance.close()
 
 
+def test_create_sends_compact_float32_vectors_without_rounding_other_metadata(tmp_path):
+    from array import array
+    values=array('f',[.123456789,-.987654321,-0.])
+    document={'id':'sample','text':[{'vector':list(values),'text_chunk':'EverQuest guild'}],
+              'score':.12345678901234567}
+    def handler(request):
+        assert request.headers['content-type']=='application/json'
+        saved=json.loads(request.content)
+        assert array('f',saved['text'][0]['vector']).tobytes()==values.tobytes()
+        assert saved['score']==document['score'] and saved['text'][0]['text_chunk']=='EverQuest guild'
+        return httpx.Response(201,json={'result':'created'})
+    instance=service(tmp_path,handler)
+    try:assert instance.create('sample',document)
+    finally:instance.close()
+
+
 @pytest.mark.parametrize('vector',[[0.1]*767,[float('inf')]*768,[0.0]*768,['bad']*768,None,42,{}])
 def test_bad_vectors_fail_without_indexing(tmp_path,vector):
     instance=service(tmp_path,lambda request:httpx.Response(200,content=json.dumps({'data':[{'embedding':vector}]})))

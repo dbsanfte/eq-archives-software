@@ -42,7 +42,7 @@ def snapshot(store, worker=None):
         WHERE o.state='interrupted' AND r.paused=0 AND r.retry_at IS NOT NULL ORDER BY r.retry_at LIMIT 1""").fetchone()
     # Publication has its own uncapped active operation. A publication_requested
     # batch may instead be paused, so it is not evidence of a busy worker.
-    index = store.db.execute("""SELECT id,state,job,error,updated FROM batches
+    index = store.db.execute("""SELECT id,state,job,error,updated FROM batches INDEXED BY batch_metadata
         WHERE state IN ('awaiting_review','published_waiting_index','indexing','index_budget_waiting')
         ORDER BY CASE state WHEN 'indexing' THEN 0 ELSE 1 END,created LIMIT 1""").fetchone()
     index = unpack(index) if index else None
@@ -57,7 +57,7 @@ def snapshot(store, worker=None):
         recent.append({'id': op['id'], 'state': op['state'], 'at': op['updated'],
                        'label': KINDS.get(op['kind'], 'Operation') + (' completed' if op['state'] == 'completed' else ' paused'),
                        'site': op['site'], 'error': op['error']})
-    for row in store.db.execute("""SELECT id,state,updated FROM batches WHERE state IN ('indexed','index_failed','index_preflight_failed')
+    for row in store.db.execute("""SELECT id,state,updated FROM batches INDEXED BY batch_metadata WHERE state IN ('indexed','index_failed','index_preflight_failed')
             ORDER BY updated DESC,rowid DESC LIMIT 8"""):
         recent.append({'id': row['id'], 'state': row['state'], 'at': row['updated'],
                        'label': 'Indexing completed' if row['state'] == 'indexed' else 'Indexing needs attention'})
