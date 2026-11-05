@@ -437,5 +437,7 @@ bytes are untouched, and authored escaped code/quotations remain searchable.
 
 Use the normal protected deployment and pending-Job handoff, preserving sources,
 import cursors and prior Jobs. Exact unchanged v4/v5 request metadata and source/view
-provenance permit checkpoint-only updates without reembedding; changed passages
+provenance permit checkpoint-only updates without reembedding. A matching original
+byte hash also permits equivalent CRLF/LF HTML representations when the full
+reader, selected view and every request field are identical; changed passages
 replace all searched vectors atomically. No paid enrichment runs in this repair.

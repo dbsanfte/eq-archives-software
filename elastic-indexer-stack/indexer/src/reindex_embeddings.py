@@ -7,6 +7,7 @@ import logging
 import multiprocessing
 import os
 from pathlib import Path
+import re
 import threading
 
 from elastic_transport import TransportError
@@ -139,8 +140,15 @@ def migrate_record(client, index, hit, repo, embedder, preparation_pool=None, *,
     # Reuse vectors when the full reader and exact source-bound search plans
     # are unchanged; do not pay GPU work to mark clean historical sources.
     prior_version=source.get('text_chunking_version')
-    same_sources=([{k:v for k,v in p.items() if k!='version'} for p in previous.get('sources',[])]
-                  ==[{k:v for k,v in p.items() if k!='version'} for p in provenance['sources']])
+    raw_hash=(decoding or {}).get('source_sha256')
+    same_raw=(isinstance(raw_hash,str) and re.fullmatch(r'[0-9a-f]{64}',raw_hash)
+              and raw_hash==(previous.get('decoding') or {}).get('source_sha256'))
+    # Imports preserve CRLF while the legacy reader normalizes it. A verified
+    # identical byte source plus identical reader/view/request data is stronger
+    # evidence than the intermediate decoded-HTML representation's hash.
+    ignored={'version','html_sha256'} if same_raw else {'version'}
+    same_sources=([{k:v for k,v in p.items() if k not in ignored} for p in previous.get('sources',[])]
+                  ==[{k:v for k,v in p.items() if k not in ignored} for p in provenance['sources']])
     expected=[(p.text,p.title,p.context,p.kind,p.start,p.end) for _,plan in groups for p in plan.passages]
     saved=[tuple(p.get(k) for k in ('text_chunk','title','context','kind','source_start','source_end'))
            for p in source.get('text') or []]

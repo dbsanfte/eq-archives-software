@@ -306,3 +306,29 @@ def test_source_upgrade_reuses_only_identical_passage_requests_and_advances_chec
     embedder.reset_mock();job.migrate_record(client,'eq',hit,tmp_path,embedder)
     embedder.get_chunks_and_embeddings.assert_called()
     assert client.update.call_args.kwargs['doc']['text'][0]['text_chunk'].strip()=='Preserved complete guild instructions.'
+
+
+@pytest.mark.parametrize('binding',['same','different','missing'])
+def test_import_newline_normalization_reuses_only_with_verified_same_raw_bytes(tmp_path,binding):
+    import hashlib
+    from indexer.html_extraction import WEBSITE_EXTRACTION_VERSION
+    hit,client,embedder=fixture();source=hit['_source'];source.update(mime_type='text/html',text_extraction_version='old')
+    raw='<title>Guild</title>\r\n<p>Complete preserved raid testimony.</p>\r\n'
+    path=tmp_path/hit['_id'];path.parent.mkdir(parents=True);path.write_bytes(raw.encode())
+    groups,patch,_=job.prepare(source,tmp_path)
+    source.update(text_full=patch['text_full'],text_extraction_version=WEBSITE_EXTRACTION_VERSION,
+                  embedding_model=gemma.MODEL,text_chunking_version='eq-passages-480-v5')
+    old=passages.prepare(source['text_full'],source['id'],html_source=raw,mime_type='text/html')
+    assert old.html_sha256!=groups[0][1].html_sha256 and old.view==groups[0][1].view
+    source['text_passage_provenance']={'version':'eq-passages-480-v5','sources':[{**old.provenance(),'version':'eq-passages-480-v5'}]}
+    if binding!='missing':source['text_passage_provenance']['decoding']={'source_sha256':hashlib.sha256(raw.encode()).hexdigest() if binding=='same' else '0'*64}
+    source['text']=[{'text_chunk':p.text,'title':p.title,'context':p.context,'kind':p.kind,'source_start':p.start,'source_end':p.end} for p in old.passages]
+    stats={};job.migrate_record(client,'eq',hit,tmp_path,embedder,diagnostics=stats)
+    update=client.update.call_args.kwargs['doc']
+    if binding=='same':
+        assert stats=={'reused_embeddings':1} and 'text' not in update
+        embedder.get_chunks_and_embeddings.assert_not_called();embedder.embed_text.assert_not_called()
+        assert update['text_passage_provenance']['decoding']['source_sha256']==hashlib.sha256(raw.encode()).hexdigest()
+    else:
+        embedder.get_chunks_and_embeddings.assert_called_once()
+        assert 'text' in update
