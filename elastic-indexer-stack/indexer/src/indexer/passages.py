@@ -596,8 +596,18 @@ def _chunks(view, title, document_context="", strict_sections=False):
 def prepare(text, record_id="", title="", *, html_source=None, mime_type=""):
     host,path=identity(record_id)
     excluded=[];method="source_text";raw_hash=None
+    fragment_reason=None
+    # Captured PHP diagnostics are often HTML fragments labelled text/plain,
+    # with no <html> wrapper. Apply the same strict whole-error classifier;
+    # an intervening article or quoted example retains the normal text path.
+    if (host and html_source and len(html_source)<=32768
+            and re.match(r'\s*(?:<br\s*/?>\s*)*<(?:b|strong)\b[^>]*>\s*(?:Warning|Fatal error)\b',html_source,re.I)):
+        fragment=BeautifulSoup(html_source,'html.parser')
+        fragment_reason=passage_forums.excluded_page(fragment,'',path)
     if host and (any(path.lower().endswith(suffix) for suffix in ASSETS) or path.lower().endswith("/robots.txt")):
         view="";excluded.append("supporting_asset")
+    elif fragment_reason:
+        view="";method="archive_status";raw_hash=digest(html_source);excluded.append(fragment_reason)
     elif host and html_source and len(html_source)<=8*1024*1024 and ("html" in mime_type or "xml" in mime_type or re.match(r"\s*(?:<!DOCTYPE[^>]*>\s*)?<(?:html|body|rss|feed)\b",html_source,re.I)):
         view,extracted,method,excluded=_html_view(html_source,host,path=path)
         raw_hash=digest(html_source)

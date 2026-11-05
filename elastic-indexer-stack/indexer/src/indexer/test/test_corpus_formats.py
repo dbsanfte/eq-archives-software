@@ -272,6 +272,23 @@ def test_generated_forum_and_php_error_layouts_do_not_create_search_passages(raw
     assert not p.passages and 'archived_access_or_error_page' in p.exclusions
 
 
+def test_vbulletin_webmaster_variant_uses_the_same_generated_error_rule():
+    p=plan('<title>Forum</title><h1>vBulletin Message</h1><blockquote>No Thread specified. If you followed a valid link, please notify the webmaster.</blockquote>')
+    assert not p.passages and p.method=='archive_status'
+
+
+@pytest.mark.parametrize('article',[False,True])
+def test_php_diagnostic_fragments_mislabeled_plain_text_require_a_complete_error(article):
+    warning='<br><b>Warning</b>: main(./functions.php): failed to open stream: No such file or directory in /srv/archive.php on line 27<br>'
+    fatal='<br><b>Fatal error</b>: main(): Failed opening required functions.php in /srv/archive.php on line 27<br>'
+    raw=warning+('<h1>Raid recovery</h1><p>Useful surviving instructions.</p>' if article else '')+fatal
+    reader='Preserved complete reader with useful surviving instructions.'
+    p=passages.prepare(reader,'websites/unrelated.example/20000101000000/archive.php',html_source=raw,mime_type='text/plain')
+    passages.verify(reader,p)
+    if article:assert p.passages and p.method=='source_text'
+    else:assert not p.passages and p.method=='archive_status' and p.html_sha256==passages.digest(raw)
+
+
 @pytest.mark.parametrize('error',['No Thread specified.','Unregistered Users Restricted from Viewing','Fatal error: Failed opening required functions.php'])
 def test_genuine_articles_and_quoted_troubleshooting_are_not_treated_as_server_errors(error):
     p=plan('<title>Troubleshooting</title><article><h1>How to recover a forum</h1><blockquote>'+error+'</blockquote><p>These are my recovery instructions.</p></article>')

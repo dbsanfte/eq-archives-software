@@ -720,7 +720,7 @@ def excluded_page(soup,title,path):
                          and 'ezboard' in text.lower() and 'System Message' in text)
     message=soup.find(string=re.compile(r'^\s*vBulletin Message\s*$',re.I))
     missing_thread=(message is not None and not message.find_parent(['blockquote','pre','code'])
-                     and re.search(r'No Thread specified\.\s*If you followed a valid link, please notify the administrator',text,re.I))
+                     and re.search(r'No Thread specified\.\s*If you followed a valid link, please notify the (?:administrator|webmaster)\b',text,re.I))
     function=r'(?:[\w:]+\([^)]{0,1000}\)\s*:\s*)?'
     warning=r'Warning\s*:\s*'+function+r'failed to open stream:\s*No such file or directory\s+in\s+\S+\s+on line \d+\s*'
     required=r"(?:'[^']{1,1000}'|\"[^\"]{1,1000}\"|\S{1,1000})"
