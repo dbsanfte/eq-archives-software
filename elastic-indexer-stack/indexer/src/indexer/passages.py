@@ -18,7 +18,7 @@ from .chunking import SourceChunk, chunk_source
 from .html_extraction import website_markdown, repair_script_markup
 from . import passage_forums
 
-VERSION = "eq-passages-480-v6"
+VERSION = "eq-passages-480-v7"
 MAX_TOKENS = 480
 ASSETS = {".js", ".css", ".map", ".ico", ".svg", ".woff", ".woff2"}
 CONTROLS = re.compile(r"^(?:reply(?: to (?:item|topic))?(?: with quote)?|quote|edit|delete|"
@@ -113,6 +113,21 @@ class Plan:
                 "method": self.method, "exclusions": list(self.exclusions)}
 
 
+def embedding_inputs(plan):
+    """Unique exact requests plus positions for every original source passage.
+
+    A title or author/context change is a different request. Reuse is confined
+    to this plan and model call; offsets and repeated archival content remain.
+    """
+    unique=[];indices={};positions=[]
+    for passage in plan.passages:
+        request=passage.request
+        if request not in indices:
+            indices[request]=len(unique);unique.append(passage)
+        positions.append(indices[request])
+    return tuple(unique),tuple(positions)
+
+
 def _encoded_advertising(soup,excluded):
     for node in list(soup.find_all(string=re.compile(r'<(?:script|noscript|iframe)\b',re.I))):
         if node.find_parent(['pre','code','blockquote']):continue
@@ -200,6 +215,45 @@ def _allakhazam(soup,title,excluded):
     return title
 
 
+def _everlore(soup,excluded):
+    """Keep database entities while pairing the site's submission rows."""
+    def external_host(link):
+        try:
+            url=urlsplit(link.get('href',''))
+            return url.hostname if url.scheme in ('http','https') else None
+        except ValueError:return None
+    for node in reversed(list(soup.find_all(['td','table']))):
+        if not node.parent:continue
+        text=passage_forums.words(node);links=node.find_all('a')
+        if len(text)>6000 or len(links)<6 or re.search(r'Subm(?:it|itt)ed by:',text,re.I):continue
+        if node.find(['h1','h2','th','caption']):continue
+        labels={passage_forums.words(a).lower() for a in links}
+        menu=len(labels & {'search forums','server status','guild database','news archives','forum rules'})>=3
+        network=(len(links)>=6 and all(len(passage_forums.words(a))<=24 for a in links)
+                 and any('link' in a.get('class',[]) for a in links)
+                 and len({host for a in links if (host:=external_host(a))})>=6)
+        numeric=any(re.fullmatch(r'[+\-]?\d[\d,.]*',passage_forums.words(c)) for c in node.find_all(['td','th']))
+        if (menu or network) and not numeric and sum(len(passage_forums.words(a)) for a in links)/max(1,len(text))>.55:
+            node.decompose();excluded.append('legacy_aggregator_navigation')
+    for row in list(soup.find_all('tr')):
+        if not row.parent:continue
+        cells=passage_forums.row_cells(row)
+        if not cells:continue
+        marker=next((b for b in cells[0].find_all(['b','strong'])
+                     if re.match(r'^Subm(?:it|itt)ed by:',passage_forums.words(b),re.I)),None)
+        if marker is None:continue
+        metadata=passage_forums.words(cells[0]);stamp=re.search(r'\bOn:\s*(.*?)(?:\s+Rank:|$)',metadata,re.I)
+        body_row=row.find_next_sibling('tr');bodies=passage_forums.row_cells(body_row) if body_row else []
+        if not stamp or not passage_forums.dated(stamp[1]) or len(bodies)!=1 or bodies[0].get('colspan')!='2':continue
+        author=re.sub(r'^Subm(?:it|itt)ed by:\s*','',passage_forums.words(marker),flags=re.I)
+        body=bodies[0]
+        if body.get_text(strip=True) or body.find(['img','object','video','audio']) or body.find('a',href=True):
+            replacement=BeautifulSoup(passage_forums.section(author,stamp[1],passage_forums.body_copy(body)),'html.parser')
+            row.replace_with(replacement)
+        else:row.decompose()
+        body_row.decompose();excluded.append('everlore_comment_structure')
+
+
 def _html_view(raw, host, _preserve_layout=False, path=""):
     projection,repaired=repair_script_markup(raw)
     soup = BeautifulSoup(projection, "html.parser")
@@ -207,7 +261,7 @@ def _html_view(raw, host, _preserve_layout=False, path=""):
     if repaired:excluded.append('repaired_script_boundaries')
     title = soup.title.get_text(" ", strip=True) if soup.title else ""
     source_title = title
-    thread=passage_forums.extract(soup,host,path)
+    thread=passage_forums.extract(soup,host,path,projection)
     if not thread:_encoded_advertising(soup,excluded)
     reason=None if thread else passage_forums.excluded_page(soup,title,path)
     if reason:
@@ -294,6 +348,7 @@ def _html_view(raw, host, _preserve_layout=False, path=""):
         heading = soup.find(["h1", "h2"])
         if heading:
             title = heading.get_text(" ", strip=True)
+        _everlore(soup,excluded)
     # Modern forum engines and many Ezboard mirrors expose the message body.
     # Replace a single-post presentation table, retaining its source author/date.
     for node in ([] if thread else list(soup.select("[id^=post_message_],.postbody,.post-content,.postText"))):
@@ -517,9 +572,16 @@ def _chunks(view, title, document_context="", strict_sections=False):
         if packed and not strict_sections:
             previous=packed[-1]
             punctuation=(not any(c.isalnum() for c in passage.text) or not any(c.isalnum() for c in previous.text)) and not {previous.kind,passage.kind}&{'post','quote'}
-            merge=previous.kind==passage.kind=='prose' or punctuation
+            # An authored subheading can separate the generated post heading
+            # from its first body paragraph. Pack that metadata-only fragment,
+            # never the heading that starts the next post (even the same user).
+            post_header=(previous.kind==passage.kind=='post' and
+                         re.fullmatch(r'Post(?: by [^\n]*| \|[^\n]*)?(?:\n[-=]+)?',previous.text.strip()) and
+                         not re.match(r'Post(?: by | \||\n|$)',passage.text.lstrip()))
+            merge=previous.kind==passage.kind=='prose' or punctuation or post_header
             if not any(c.isalnum() for c in passage.text):context=previous.context
             elif not any(c.isalnum() for c in previous.text):context=passage.context
+            elif post_header:context=passage.context
             else:context=previous.context if previous.context==passage.context else document_context
             if merge and previous.end==passage.start:
                 body=view[previous.start:passage.end]
@@ -534,8 +596,18 @@ def _chunks(view, title, document_context="", strict_sections=False):
 def prepare(text, record_id="", title="", *, html_source=None, mime_type=""):
     host,path=identity(record_id)
     excluded=[];method="source_text";raw_hash=None
+    fragment_reason=None
+    # Captured PHP diagnostics are often HTML fragments labelled text/plain,
+    # with no <html> wrapper. Apply the same strict whole-error classifier;
+    # an intervening article or quoted example retains the normal text path.
+    if (host and html_source and len(html_source)<=32768
+            and re.match(r'\s*(?:<br\s*/?>\s*)*<(?:b|strong)\b[^>]*>\s*(?:Warning|Fatal error)\b',html_source,re.I)):
+        fragment=BeautifulSoup(html_source,'html.parser')
+        fragment_reason=passage_forums.excluded_page(fragment,'',path)
     if host and (any(path.lower().endswith(suffix) for suffix in ASSETS) or path.lower().endswith("/robots.txt")):
         view="";excluded.append("supporting_asset")
+    elif fragment_reason:
+        view="";method="archive_status";raw_hash=digest(html_source);excluded.append(fragment_reason)
     elif host and html_source and len(html_source)<=8*1024*1024 and ("html" in mime_type or "xml" in mime_type or re.match(r"\s*(?:<!DOCTYPE[^>]*>\s*)?<(?:html|body|rss|feed)\b",html_source,re.I)):
         view,extracted,method,excluded=_html_view(html_source,host,path=path)
         raw_hash=digest(html_source)

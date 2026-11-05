@@ -4,16 +4,18 @@ Recognize engines by several cooperating DOM features. Unknown layouts return
 None and keep the generic content-preserving path. Archival readers are untouched.
 """
 from dataclasses import dataclass
+from html.parser import HTMLParser
 import re
 from bs4 import BeautifulSoup, Comment
 
 DATE = re.compile(r'\b\d{1,2}/\d{1,2}/\d{2,4}(?:\s*:\s*|\s+)\d{1,2}:\d{2}(?::\d{2})?(?:\s*[ap]m)?', re.I)
 POST_DATE = re.compile(r'\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}(?:,?\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s*[ap]m)?)?',re.I)
 LONG_DATE = re.compile(r'\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}(?:,?\s+\d{1,2}:\d{2}\s*[ap]m)?',re.I)
+SHORT_DATE = re.compile(r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+(?:\d{4}|\d{2})(?:\s+\d{1,2}:\d{2}(?::\d{2})?\s*(?:[ap]\.?m\.?)?)?',re.I)
 
 
 def dated(text):
-    match=LONG_DATE.search(text) or POST_DATE.search(text)
+    match=LONG_DATE.search(text) or SHORT_DATE.search(text) or POST_DATE.search(text)
     return match[0] if match else ''
 
 
@@ -38,7 +40,7 @@ def nonempty_link(node, pattern):
     return next((a for a in node.find_all('a',href=re.compile(pattern,re.I)) if words(a)),None)
 
 
-def body_copy(node):
+def body_copy(node, *, signature_rule=False):
     body=BeautifulSoup(str(node),'html.parser')
     root=body.find()
     # Unclosed WWWThreads <p class=post> tags can contain the entire next
@@ -53,16 +55,17 @@ def body_copy(node):
         boundary.extract()
     for signature in list(body.select('.signature,.postsignature')):
         signature.decompose()
-    # phpBB's explicit signature separator, excluding quoted examples/code.
-    for marker in list(body.find_all(string=re.compile(r'^\s*_{5,}\s*$'))):
-        if marker.find_parent(['blockquote','pre','code']) or any('quote' in p.get('class',[]) for p in marker.parents):
-            continue
-        cursor=marker
-        while cursor.parent is not None and cursor.parent is not body:
-            for sibling in list(cursor.next_siblings):sibling.extract()
-            cursor=cursor.parent
-        marker.extract()
-        break
+    if signature_rule:
+        # phpBB's explicit signature separator, excluding quoted examples/code.
+        for marker in list(body.find_all(string=re.compile(r'^\s*_{5,}\s*$'))):
+            if marker.find_parent(['blockquote','pre','code']) or any('quote' in p.get('class',[]) for p in marker.parents):
+                continue
+            cursor=marker
+            while cursor.parent is not None and cursor.parent is not body:
+                for sibling in list(cursor.next_siblings):sibling.extract()
+                cursor=cursor.parent
+            marker.extract()
+            break
     # phpBB renders quotations as presentation tables with a quote cell.
     for cell in list(body.select('td.quote')):
         table=cell.find_parent('table')
@@ -80,8 +83,128 @@ def section(author,date,body,subject=''):
     soup=BeautifulSoup('','html.parser');tag=soup.new_tag('section');heading=soup.new_tag('h2')
     heading.string=' | '.join(v for v in ('Post by '+author if author else 'Post',date,subject) if v)
     tag.append(heading)
-    for node in list(BeautifulSoup(body,'html.parser').contents):tag.append(node.extract())
+    fragment=BeautifulSoup(body,'html.parser')
+    # A template cell/row is a container, not an authored data grid. Keep real
+    # nested tables while preventing an orphan <td> from becoming a fake row.
+    while any(getattr(n,'name',None) in ('td','th','tr') for n in fragment.contents):
+        for node in list(fragment.contents):
+            if getattr(node,'name',None) in ('td','th','tr'):node.unwrap()
+    for text in list(fragment.find_all(string=True)):
+        if isinstance(text,Comment) or text.find_parent(['pre','code']):continue
+        escaped=re.sub(r'(?m)^( {0,3})(`{3,}|~{3,})',lambda m:m[1]+''.join('\\'+c for c in m[2]),str(text))
+        if escaped!=str(text):text.replace_with(escaped)
+    for node in list(fragment.contents):tag.append(node.extract())
     return str(tag)
+
+
+class SourceRanges(HTMLParser):
+    """Map DOM starts to original markup, including text outside damaged rows.
+
+    HTMLParser supplies token boundaries without repairing table nesting or
+    executing scripts. The DOM still supplies the cooperating format evidence.
+    """
+    def __init__(self, raw):
+        super().__init__(convert_charrefs=False)
+        self.raw=raw
+        self.lines=[0]+[m.end() for m in re.finditer('\n',raw)]
+        self.opens={};self.tables={};self.stack=[];self.tags=[];self.ends={}
+        self.feed(raw);self.close()
+
+    def position(self):
+        line,column=self.getpos()
+        return self.lines[line-1]+column
+
+    def handle_starttag(self, tag, attrs):
+        start=self.position()
+        self.opens[start]=start+len(self.get_starttag_text())
+        if tag=='table':self.stack.append(start)
+        if tag not in {'area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr'}:
+            self.tags.append((tag,start))
+
+    def handle_endtag(self, tag):
+        stop=self.raw.find('>',self.position())+1
+        for i in range(len(self.tags)-1,-1,-1):
+            if self.tags[i][0]==tag:
+                self.ends[self.tags[i][1]]=stop
+                del self.tags[i:]
+                break
+        if tag=='table' and self.stack:
+            self.tables[self.stack.pop()]=stop
+
+    def start(self, node):
+        if node.sourceline is None:return None
+        return self.lines[node.sourceline-1]+node.sourcepos
+
+    def after(self, node):
+        return self.opens.get(self.start(node))
+
+
+def review_header(soup):
+    return next((n for n in soup.find_all(['td','th'])
+                 if not n.find_parent(['blockquote','pre','code','textarea'])
+                 and re.sub(r'\s','',words(n)).lower()=='topicreview'),None)
+
+
+def reply_quotes(soup):
+    result=[]
+    for field in soup.find_all('textarea'):
+        if not words(field):continue
+        fragment=BeautifulSoup('','html.parser');quote=fragment.new_tag('blockquote')
+        quote.string=field.get_text();fragment.append(quote);result.append(str(fragment))
+    return result
+
+
+def after_rule(node):
+    """Remove the proven leading metadata region, keeping all later content."""
+    body=BeautifulSoup(str(node),'html.parser');rule=body.find('hr')
+    if rule is None:return None
+    current=rule
+    while current.parent is not None:
+        for previous in list(current.previous_siblings):previous.extract()
+        current=current.parent
+    rule.extract()
+    return body_copy(body)
+
+
+def snitz_review(soup, raw):
+    header=review_header(soup)
+    if header is None or not soup.select_one('textarea,input[type=password]'):return None
+    if not (re.search(r'Snitz\s+Forums',words(soup),re.I)
+            or soup.find('a',href=re.compile(r'forum\.snitz\.com|pop_profile\.asp',re.I))):return None
+    table=header.find_parent('table')
+    if table is None:return None
+    # Some old captures close a row before its authored paragraphs. The next
+    # proven author row, rather than the repaired DOM cell, bounds each body.
+    source=SourceRanges(raw);start=source.start(header);rows=[]
+    for row in soup.find_all('tr'):
+        if source.start(row)<=start or row.find_parent(['blockquote','pre','code','textarea']):continue
+        cells=row_cells(row)
+        if len(cells)!=2 or not cells[0].has_attr('nowrap') or cells[0].get('valign','').lower()!='top':continue
+        author=cells[0].find(['b','strong'])
+        if not author and words(cells[0]):return None
+        if source.after(cells[1]) is None:return None
+        rows.append((row,cells,words(author)))
+    if not rows:return None
+    final_start=source.start(rows[-1][0])
+    end=next((source.tables.get(source.start(t)) for t in [table,*table.find_parents('table')]
+              if source.tables.get(source.start(t),0)>final_start),None)
+    if end is None:return None
+    posts=reply_quotes(soup)
+    for i,(row,cells,author) in enumerate(rows):
+        stop=source.start(rows[i+1][0]) if i+1<len(rows) else end
+        body=BeautifulSoup(raw[source.after(cells[1]):stop],'html.parser')
+        stamp=body.find(string=re.compile(r'^\s*Posted\s*[-:]\s*\d',re.I))
+        date=DATE.search(' '.join(str(stamp).split())) if stamp else None
+        # Only the leading platform metadata precedes this separator; genuine
+        # tables, quotations and paragraphs after it remain in the body.
+        if stamp and (separator:=stamp.find_next('hr')) is not None:
+            if len(str(stamp))<100:
+                parent=stamp.parent
+                if parent.name in ('small','font','span') and words(parent)==' '.join(str(stamp).split()):parent.extract()
+                else:stamp.extract()
+            separator.extract()
+        posts.append(section(author,date[0] if date else '',body_copy(body)))
+    return Thread('\n'.join(posts),'snitz')
 
 
 def phpbb(soup):
@@ -100,9 +223,25 @@ def phpbb(soup):
         stamp=next(words(d) for d in row.select('.postdetails') if words(d).startswith('Posted:'))
         stamp=re.split(r'\s*Post subject:',stamp.removeprefix('Posted:').strip(),maxsplit=1)[0]
         bodies=[p for p in row.select('.postbody') if not any('postbody' in a.get('class',[]) for a in p.parents)]
-        posts.append(section(author,stamp,''.join(body_copy(p) for p in bodies)))
+        posts.append(section(author,stamp,''.join(body_copy(p,signature_rule=True) for p in bodies)))
     if posts and recognized:
         return Thread('\n'.join(posts),'phpbb',words(soup.select_one('.maintitle')))
+
+
+def phpbb_print(soup):
+    posts=[];recognized=False
+    for body in soup.select('.postbody'):
+        if any('postbody' in p.get('class',[]) for p in body.parents):continue
+        row=body.find_parent('tr')
+        header=row.find_previous_sibling('tr') if row else None
+        if row is None or not row.select_one('td.printline'):return None
+        metadata=words(header)
+        author=re.search(r'\bAuthor:\s*(.*?)\s*,?\s*(?:Post)?Posted:',metadata,re.I)
+        stamp=re.search(r'(?:Post)?Posted:\s*(.+)$',metadata,re.I)
+        if author and stamp and dated(stamp[1]):recognized=True
+        else:author=stamp=None
+        posts.append(section(author[1].rstrip(', ') if author else '',stamp[1] if stamp else '',body_copy(body,signature_rule=True)))
+    if posts and recognized:return Thread('\n'.join(posts),'phpbb',words(soup.select_one('.maintitle')))
 
 
 def wwwthreads(soup):
@@ -127,13 +266,26 @@ def wwwthreads(soup):
     if posts:return Thread('\n'.join(posts),'wwwthreads')
 
 
-def snitz(soup):
+def snitz(soup,raw=None):
+    if review_header(soup) is not None:
+        return snitz_review(soup,raw) if raw is not None else None
     posts=[];recognized=False
-    for body in soup.select('span.spnMessageText[id=msg]'):
-        if any(p.get('id')=='msg' and 'spnMessageText' in p.get('class',[]) for p in body.parents):continue
+    spans=soup.select('span.spnMessageText')
+    # Snitz uses this class for profile links as well as messages. Counting
+    # those links as bodies rejects the real post row, particularly when
+    # missing closing cells attach later profile-stat rows to the same row.
+    bodies=[]
+    for node in spans:
+        profile=nonempty_link(node,r'pop_profile\.asp')
+        if node.get('id')!='msg' and profile and words(node)==words(profile):continue
+        bodies.append(node)
+    body_ids={id(node) for node in bodies}
+    bodies=[node for node in bodies if not any(id(p) in body_ids for p in node.parents)]
+    body_ids={id(node) for node in bodies}
+    for body in bodies:
         row=None;author=None;date=None
         for candidate in body.find_parents('tr'):
-            if len(candidate.select('span.spnMessageText[id=msg]'))!=1:continue
+            if sum(id(n) in body_ids for n in candidate.select('span.spnMessageText'))!=1:continue
             author=next((a for a in candidate.find_all('a',href=re.compile(r'pop_profile\.asp',re.I))
                          if words(a) and body not in a.parents),None)
             stamp=candidate.find(string=re.compile(r'Posted\s*[\-:]\s*\d',re.I))
@@ -142,7 +294,68 @@ def snitz(soup):
         if row is not None:
             recognized=True;posts.append(section(words(author),date[0],body_copy(body)))
         else:posts.append(section('','',body_copy(body)))
-    if posts and recognized:return Thread('\n'.join(posts),'snitz')
+    if posts and recognized:
+        for row in soup.find_all('tr'):
+            cells=row_cells(row)
+            if (len(cells)==2 and not cells[1].select_one('span.spnMessageText')
+                    and words(cells[1]).startswith('Posted') and cells[1].find('hr')
+                    and (nonempty_link(cells[0],r'pop_profile\.asp') or cells[0].find(['b','strong']))):
+                return None  # Mixed/damaged templates retain the complete view.
+        return Thread('\n'.join(reply_quotes(soup)+posts),'snitz')
+    # A body-bearing template that could not be fully attributed must keep
+    # the generic view, rather than partially match the older row adapter.
+    if bodies:return None
+    if not (re.search(r'Snitz\s+Forums',words(soup),re.I)
+            or soup.find('a',href=re.compile(r'forum\.snitz\.com',re.I))):return None
+    # Older Snitz topics have author/body cells and a metadata rule, without
+    # the later spnMessageText wrapper. Match the row, not an arbitrary date.
+    posts=[]
+    for row in soup.find_all('tr'):
+        cells=row_cells(row)
+        if len(cells)!=2 or row.find_parent(['blockquote','pre','code']):continue
+        author=nonempty_link(cells[0],r'pop_profile\.asp') or cells[0].find(['b','strong'])
+        body=cells[1];stamp=body.find(string=re.compile(r'^\s*Posted\s*[-:]\s*\d',re.I))
+        if stamp and stamp.find_parent(['blockquote','pre','code']):continue
+        date=DATE.search(' '.join(str(stamp).split())) if stamp else None
+        if not author or not words(body).startswith('Posted'):continue
+        content=after_rule(body)
+        if content is None:return None
+        posts.append(section(words(author),date[0] if date else '',content))
+    if posts:return Thread('\n'.join(reply_quotes(soup)+posts),'snitz')
+
+
+def vbulletin_source(soup,raw):
+    """Pair vB2's source comment regions despite broken table nesting."""
+    if not raw or not re.search(r'<!--\s*Main\s+Post\s+Body\s*-->',raw,re.I):return None
+    def regions(label):
+        pattern=r'<!--\s*'+r'\s+'.join(map(re.escape,label.split()))+r'\s*-->'
+        matches=list(re.finditer(pattern,raw,re.I))
+        comments=[c for c in soup.find_all(string=lambda n:isinstance(n,Comment))
+                  if ' '.join(str(c).split()).lower()==label.lower()
+                  and not c.find_parent(['blockquote','pre','code','textarea'])]
+        if len(matches)!=len(comments) or len(matches)%2:return []
+        return [(a.start(),a.end(),b.start(),b.end()) for a,b in zip(matches[::2],matches[1::2])]
+    bodies=regions('Main Post Body');users=regions('Postbit User Info');headers=regions('Postbit Header')
+    if not bodies or len(bodies)!=len(users) or len(users)!=len(headers):return None
+    source=SourceRanges(raw)
+    stamps=[n for n in soup.find_all(string=re.compile(r'^\s*Posted\s+\d',re.I))
+            if not n.find_parent(['blockquote','pre','code'])]
+    posts=[]
+    for i,(body,user,header) in enumerate(zip(bodies,users,headers)):
+        if not header[3]<=user[0]<user[3]<=body[0] or i+1<len(headers) and body[3]>headers[i+1][0]:return None
+        heading=BeautifulSoup(raw[header[1]:header[2]],'html.parser')
+        if not heading.find('a',href=re.compile(r'showthread\.php\?.*postid=',re.I)) or not re.search(r'Post\s*#\d+\s+of\s+\d+',words(heading),re.I):return None
+        profile=BeautifulSoup(raw[user[1]:user[2]],'html.parser');author=profile.find(['b','strong'])
+        stamp=next((n for n in stamps if body[1]<=source.start(n.parent)<body[2]),None)
+        if stamp is None:return None
+        metadata=stamp.find_parent('td')
+        if metadata is None or len(words(metadata))>120:return None
+        date=dated(words(metadata))
+        end=source.ends.get(source.start(metadata))
+        if not date or end is None or not body[1]<end<=body[2]:return None
+        content=BeautifulSoup(raw[end:body[2]],'html.parser')
+        posts.append(section(words(author),date,body_copy(content),words(heading.find(['b','strong']))))
+    return Thread('\n'.join(posts),'vbulletin')
 
 
 def comment_region(start, label):
@@ -205,6 +418,23 @@ def vbulletin_header(body):
 
 
 def vbulletin(soup):
+    # vbHome's vBulletin archive skin uses explicit header/body row pairs,
+    # without IDs or captured dates. It is shared software, not a host rule.
+    legacy=soup.select('tr.archivebody')
+    original=soup.select_one('.tbarchive a[href*="showthread.php"]')
+    if legacy and original:
+        posts=[];recognized=False
+        for row in legacy:
+            if any('archivebody' in p.get('class',[]) for p in row.parents):continue
+            cells=row_cells(row)
+            if len(cells)!=1:return None
+            header=row.find_previous_sibling('tr');author=header.select_one('.archiveheader') if header else None
+            if author:recognized=True
+            posts.append(section(words(author),'',body_copy(cells[0])))
+        if posts and recognized:
+            caption=original.find_parent('tr')
+            title=re.split(r'\s*-\s*Click\b',words(caption),maxsplit=1,flags=re.I)[0]
+            return Thread('\n'.join(posts),'vbulletin',title)
     archive=soup.select('div.posttext')
     thread_link=soup.select_one('.largefont a[href*="showthread.php"]')
     if archive and thread_link:
@@ -212,11 +442,14 @@ def vbulletin(soup):
         for body in archive:
             if any('posttext' in p.get('class',[]) for p in body.parents):continue
             container=body.find_parent('div',class_='post')
-            author=container.find('div',class_='username',recursive=False) if container else None
-            if author and re.fullmatch(r'p\d+',body.get('id','')) and author.get('id')=='u'+body['id'][1:]:
+            author=container.select_one('.posttop > .username') if container else None
+            date=container.select_one('.posttop > .date') if container else None
+            if author is None:author=container.find('div',class_='username',recursive=False) if container else None
+            numbered=(author and re.fullmatch(r'p\d+',body.get('id','')) and author.get('id')=='u'+body['id'][1:])
+            if author and (numbered or date and dated(words(date))):
                 recognized=True
             else:author=None
-            posts.append(section(words(author),'',body_copy(body)))
+            posts.append(section(words(author),words(date) if author else '',body_copy(body)))
         if recognized:return Thread('\n'.join(posts),'vbulletin',words(thread_link))
     markers=[c for c in soup.find_all(string=lambda n:isinstance(n,Comment))
              if str(c).strip()=='message' and not c.find_parent(['blockquote','pre','code'])]
@@ -274,11 +507,71 @@ def lithium(soup):
         if table is None:return None
         user=table.select_one('.msg_user_cell')
         author=nonempty_link(user,r'view_profile\?user\.id=') or user.select_one('.auth_text')
+        if author is None:
+            author=user.find(['b','strong']) or user.find('span',style=re.compile(r'font-weight\s*:\s*bold',re.I))
         subject=next((c for c in table.select('td.subjectbar') if c.get('width')=='100%'),None)
+        if subject is None:
+            first=table.find('tr');cells=row_cells(first) if first else []
+            if len(cells)==2 and not words(cells[0]):subject=cells[1]
         stamp=words(table.select_one('.msg_date_cell'))
         if author and dated(stamp):recognized=True
         posts.append(section(words(author),stamp,body_copy(body),words(subject)))
     if posts and recognized:return Thread('\n'.join(posts),'lithium')
+
+
+def aspnet(soup):
+    """ASP.NET Forums' PostList, profile and message-table roles across hosts."""
+    tables=soup.find_all('table',id=re.compile(r'(?:^|_)PostList$',re.I));posts=[]
+    for table in tables:
+        headings=[words(c).lower() for c in table.select('th.PanelHeader')]
+        if not headings or headings[0]!='author' or not any(h.startswith('thread:') for h in headings):continue
+        for row in table.find_all('tr'):
+            if row.find_parent('table') is not table:continue
+            cells=row_cells(row)
+            roles=[bool(set(c.get('class',[])) & {'PanelBody','PanelBodyAlternate'}) for c in cells]
+            if len(cells)!=2:
+                if any(roles) and words(row):return None
+                continue
+            if not all(roles):continue
+            profile,content=cells;inner=content.find('table')
+            rows=[r for r in inner.find_all('tr') if r.find_parent('table') is inner] if inner else []
+            if len(rows)<2:return None
+            subject=rows[0].select_one('.SmallBoldText')
+            if subject is None or not subject.find('a',attrs={'name':re.compile(r'^\d+$')}):return None
+            stamp=words(rows[0]).partition('Posted:')[2].strip()
+            if not dated(stamp):return None
+            author=nonempty_link(profile,r'UserProfile\.aspx\?UserName=')
+            bodies=[]
+            for i,body_row in enumerate(rows[1:]):
+                # The explicit SmallText + leading rule is the signature slot;
+                # genuine tables/quotes/attachments inside message rows remain.
+                body_cells=row_cells(body_row)
+                signature=body_cells[0].find('span',class_='SmallText',recursive=False) if len(body_cells)==1 else None
+                if i and signature and signature.find('hr',recursive=False):break
+                links=body_row.find_all('a')
+                if links and all(re.search(r'/(?:AddPost|EditPost)\.aspx\?',a.get('href',''),re.I) for a in links) and not words(body_row):continue
+                bodies.append(body_copy(body_row))
+            posts.append(section(words(author),stamp,''.join(bodies),words(subject)))
+    if posts:return Thread('\n'.join(posts),'aspnet')
+
+
+def ultraboard(soup):
+    if not soup.find('a',href=re.compile(r'UltraBoard\.cgi\?',re.I)):return None
+    posts=[];seen=set()
+    for row in soup.find_all('tr'):
+        cells=row_cells(row)
+        if len(cells)!=3 or row.find_parent(['blockquote','pre','code']):continue
+        if not cells[0].find('img',alt=re.compile(r'^(?:New|Old) Message$',re.I)):continue
+        subject=words(cells[1]);subject=re.sub(r'\s*\(modified \d+ times?\)\s*$','',subject,flags=re.I)
+        if subject==words(cells[1]):continue
+        inner=row.find_parent('table');table=inner.find_parent('table') if inner else None
+        if table is None or id(table) in seen:return None
+        rows=[r for r in table.find_all('tr') if r.find_parent('table') is table]
+        if len(rows)!=4 or not rows[1].find('a',href=re.compile(r'UltraBoard\.cgi\?.*Action=ShowProfile',re.I)):return None
+        stamp=dated(words(rows[3]))
+        if not stamp:return None
+        posts.append(section(words(cells[2]),stamp,body_copy(rows[2]),subject));seen.add(id(table))
+    if posts:return Thread('\n'.join(posts),'ultraboard')
 
 
 def ubbclassic(soup):
@@ -374,9 +667,17 @@ def reply_form(soup,path):
     if not re.search(r'(?:^|/)(?:post|posting|newreply|newpost)\.(?:asp|php|pl)$',path,re.I):return None
     fields=soup.find_all('textarea')
     if not fields or not soup.select_one('input[type=password],input[name=Username]'):return None
+    # An unrecognized review is still authored content. Selecting only the
+    # quote textarea would silently discard every other reviewed message.
+    if review_header(soup) is not None:return None
+    for row in soup.find_all('tr'):
+        cells=row_cells(row)
+        if (len(cells)==2 and cells[0].has_attr('nowrap') and cells[0].get('valign','').lower()=='top'
+                and cells[0].find(['b','strong']) and words(cells[1]) and not cells[1].find('textarea')):
+            return None
     if not re.search(r'Snitz Forums|vBulletin|phpBB|Ultimate Bulletin Board',words(soup),re.I):return None
     if soup.find(['blockquote','pre','code']):return None
-    if soup.select_one('.postbody,.msg_text_cell,[id^=post_message_],p.post'):return None
+    if soup.select_one('.postbody,.posttext,span.spnMessageText,.msg_text_cell,[id^=post_message_],p.post'):return None
     captured=[]
     for field in fields:
         if not words(field):continue
@@ -385,13 +686,17 @@ def reply_form(soup,path):
     if captured:return Thread('\n'.join(captured),'forum_reply_field')
 
 
-def extract(soup,host,path=''):
+def extract(soup,host,path='',raw=None):
     # A forum widget can be embedded beside an independent article. The
     # engine view must not replace that page's unique non-message content.
     bodies='.postbody,span.spnMessageText[id=msg],p.post,.posttext,[id^=post_message_],.msg_text_cell'
     if any(words(node) and not node.select_one(bodies) for node in soup.select('article,main,[role=main]')):
         return None
-    for parser in (phpbb,wwwthreads,snitz,vbulletin,lithium,ubbclassic):
+    source_thread=vbulletin_source(soup,raw)
+    if source_thread:return source_thread
+    reviewed=snitz(soup,raw) if (soup.select_one('span.spnMessageText') or raw and re.search(r'Snitz|pop_profile\.asp',raw,re.I)) else None
+    if reviewed:return reviewed
+    for parser in (phpbb_print,phpbb,wwwthreads,vbulletin,lithium,ubbclassic,aspnet,ultraboard):
         result=parser(soup)
         if result:return result
     return ezboard(soup,host) or reply_form(soup,path)
@@ -399,23 +704,35 @@ def extract(soup,host,path=''):
 
 def excluded_page(soup,title,path):
     """Require page/engine evidence; a discussion of an error is still content."""
-    if soup.find(['article','main']) or soup.select_one('.postbody,.post-content,[id^=post_message_],span.spnMessageText[id=msg],p.post,.msg_text_cell'):
+    if soup.find(['article','main']) or soup.select_one('.postbody,.post-content,.posttext,.archivebody,[id^=post_message_],span.spnMessageText,p.post,.msg_text_cell'):
         return None
+    if any(words(t) for t in soup.find_all('textarea')):return None
     text=words(soup);heading=words(soup.find(['h1','h2']))
     if len(text)>6000:return None
     known_title=re.fullmatch(r'(?:System Message:\s*Error|404(?: Not Found)?|403(?: Forbidden)?|Access Denied|Page Not Found|Site Temporarily Disabled)',title,re.I)
     disabled=heading.lower()=='site temporarily disabled' and 'this site has been disabled' in text.lower()
     body=words(soup.body or soup)
-    deleted_ezboard=(re.search(r'\.show(?:Message|NextMessage|PrevMessage)$',path,re.I)
-                     and 'ezboard' in text.lower()
-                     and re.match(r'^ERROR\s+The post you selected no longer exists\.',body,re.I)
+    deleted_ezboard=('ezboard' in text.lower()
+                     and re.match(r'^(?:(?:www\.)?ezboard\.com\s+)?ERROR\s+The post you selected no longer exists\.',body,re.I)
                      and not soup.find(['pre','code','blockquote']))
+    state=soup.find(string=re.compile(r'^\s*Unregistered Users Restricted from Viewing\s*$',re.I))
+    restricted_ezboard=(state is not None and not state.find_parent(['blockquote','pre','code'])
+                         and 'ezboard' in text.lower() and 'System Message' in text)
+    message=soup.find(string=re.compile(r'^\s*vBulletin Message\s*$',re.I))
+    missing_thread=(message is not None and not message.find_parent(['blockquote','pre','code'])
+                     and re.search(r'No Thread specified\.\s*If you followed a valid link, please notify the (?:administrator|webmaster)\b',text,re.I))
+    function=r'(?:[\w:]+\([^)]{0,1000}\)\s*:\s*)?'
+    warning=r'Warning\s*:\s*'+function+r'failed to open stream:\s*No such file or directory\s+in\s+\S+\s+on line \d+\s*'
+    required=r"(?:'[^']{1,1000}'|\"[^\"]{1,1000}\"|\S{1,1000})"
+    fatal=(r'Fatal error\s*:\s*'+function+r'Failed opening required\s+'+required+
+           r'(?:\s+\(include_path=[^)]{0,1000}\))?\s+in\s+\S+\s+on line \d+\s*')
+    php_failure=not soup.find(['pre','code','blockquote']) and re.fullmatch(r'(?:'+warning+r')*'+fatal,body,re.I)
     engine_error=(re.search(r'phpBB\s*:\s*Critical Error\s+Could not (?:connect to the database|query config information)',text,re.I)
                   or 'vBulletin Message' in text and 'You are not logged in or you do not have permission to access this page' in text
                   or 'phpBB' in text and 'The topic or post you requested does not exist' in text
                   or heading.lower()=='error' and 'The post you selected no longer exists' in text
                   or 'requested access to a private forum' in text and 'ezboard' in text.lower())
-    if known_title or disabled or engine_error or deleted_ezboard:return 'archived_access_or_error_page'
+    if known_title or disabled or engine_error or deleted_ezboard or restricted_ezboard or missing_thread or php_failure:return 'archived_access_or_error_page'
     if soup.find(['pre','code','blockquote']):return None
     # Reply forms can contain the only surviving quotation. Do not classify a
     # populated message field as an empty utility page.

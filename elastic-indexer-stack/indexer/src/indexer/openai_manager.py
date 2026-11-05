@@ -502,16 +502,20 @@ class OpenAIManager:
         if setting not in {str(n) for n in range(1, maximum + 1)}:
             raise ValueError("Invalid Gemma embedding batch capacity")
         size = int(setting)
-        result = []
-        for offset in range(0, len(plan.passages), size):
-            batch = plan.passages[offset:offset+size]
+        unique, positions = passages.embedding_inputs(plan)
+        vectors = []
+        for offset in range(0, len(unique), size):
+            batch = unique[offset:offset+size]
             values = self._embed_nomic_batch([p.request for p in batch])
             for passage, value in zip(batch, values, strict=True):
                 row = np.asarray(value, dtype=np.float32)
                 gemma.vector(row.tolist())
-                result.append({"text_chunk": passage.text, "vector": row,
-                               "source_start": passage.start, "source_end": passage.end,
-                               "title": passage.title, "context": passage.context, "kind": passage.kind})
+                vectors.append(row)
+        result = []
+        for passage, position in zip(plan.passages, positions, strict=True):
+            result.append({"text_chunk": passage.text, "vector": vectors[position].copy(),
+                           "source_start": passage.start, "source_end": passage.end,
+                           "title": passage.title, "context": passage.context, "kind": passage.kind})
         self.chunking_version = passages.VERSION
         self.passage_provenance = plan.provenance()
         return result

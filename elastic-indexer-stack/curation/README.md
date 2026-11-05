@@ -792,7 +792,7 @@ dismissal is fabricated and no Luna request is made to classify this known adver
 
 ## Imported search content
 
-Imported text uses the shared `eq-passages-480-v6` search policy: real titles,
+Imported text uses the shared `eq-passages-480-v7` search policy: real titles,
 section/table context and attributed forum/mail quotations, with full reader
 content retained separately. Verified raster assets also receive local Gemma
 visual vectors through `gemma-image-embeddings`. This does not call Luna or change
@@ -800,6 +800,13 @@ approved text-enrichment budgets. Existing IDs remain create-only; unusable
 rasters have a typed `image_embedding_status` and do not block the remaining
 site. Supporting-file browsing remains available. See the
 [image and passage runbook](../../scripts/embedding-service/README.md#content-aware-passages-and-images).
+
+Forum composers retain their draft quote and reviewed messages separately.
+Legacy/archived/printer forum layouts and Everlore comments receive attributed
+message boundaries. Exact duplicate title/context/text requests reuse local
+inference within the capture while retaining all source offsets and vectors;
+this does not change Luna enrichment or approval policies. Recognized generated
+error pages are preserved without calling enrichment or embedding services.
 
 Discovery, source browsing and imports share the dependency-free source decoder.
 Validated Japanese byte/script evidence selects Shift-JIS/CP932, EUC-JP or

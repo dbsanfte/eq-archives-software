@@ -223,7 +223,7 @@ extraction checkpoints, enrichment, source identity, dates and last_indexed. No
 paid enrichment during this backfill. Do not reuse Nomic checkpoints as Gemma
 completion. The Nomic repair entry point remains for historical recovery only.
 Follow the embedding-service migration runbook for operator-authorized handoffs.
-Gemma text uses `eq-passages-480-v6`: budget title/context with every 480-token
+Gemma text uses `eq-passages-480-v7`: budget title/context with every 480-token
 request, retain full reader text, verify source-bound selected-view coverage and
 store view offsets/provenance separately. Unknown layouts retain content;
 format-specific navigation/post/table handling needs regression evidence. Resume
@@ -253,13 +253,23 @@ bytes, enrichment, dates and image Jobs; no paid enrichment for decoding repairs
 New format-specific exceptions require evidence of a major site or widely used
 structured engine; prefer broadly applicable source/DOM rules for other content.
 
-The v6 forum upgrade uses source-bound vBulletin numbered/paired boundaries,
+The forum policy retains source-bound vBulletin numbered/paired boundaries,
 UBB.classic Author/Topic rows and Lithium message/user/date cells across hosts.
 Retain damaged-header fallbacks and real quotes/tables/attachments. Allakhazam
 entity/comment projections may specialize the major site; unrelated layouts keep
 content. Deep reader formatting is flattened without losing visible source data.
-Version upgrades may reuse v4/v5 vectors only after exact request metadata and
+Version upgrades may reuse v4/v5/v6 vectors only after exact request metadata and
 source/view checks, never from version or body hash alone.
+Snitz composers retain their populated quote and every topic-review message,
+including text outside damaged rows; an uncertain review cannot select only its
+textarea. Legacy vBulletin source regions and archive pairs, ASP.NET Forums,
+UltraBoard and phpBB/Lithium printer views use cooperating format roles across
+hosts. Everlore pairs database comment headers/bodies without replacing entity
+data. Uncertain layouts preserve content and authored code/tables/attachments.
+Generated error layouts clear semantic fields independently of URL action;
+authored troubleshooting remains searchable. Exact per-plan embedding inputs
+may share inference only with their complete title/context/model request;
+return every original offset and validate all vectors before saving anything.
 Missing website text uses `index_websites.py`: explicit pinned host scope, remote-free
 Git metadata, verified local blobs, persistent private SQLite cursors/gaps,
 create-only writes and CUDA only. No paid enrichment or repeated source preparation.

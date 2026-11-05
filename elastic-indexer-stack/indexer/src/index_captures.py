@@ -215,9 +215,11 @@ def index_batch(root, batch, services, chunker=chunk_source):
             preserved += 1
             continue
         metadata = services.enrich(capture, source if capture.get('content_type', '').split(';')[0] == 'text/plain' else website_markdown(source))
+        unique, positions = passages.embedding_inputs(plan)
+        vectors = [services.embedding(p.text, title=p.title, context=p.context) for p in unique]
         chunks = [{"text_chunk": p.text, "source_start": p.start, "source_end": p.end,
                    "title": p.title, "context": p.context, "kind": p.kind,
-                   "vector": services.embedding(p.text, title=p.title, context=p.context)} for p in plan.passages]
+                   "vector": vectors[position].copy()} for p,position in zip(plan.passages,positions,strict=True)]
         if not chunks:
             raise CrawlError("Capture has no source chunks")
         summary_vectors = [services.embedding(chunk.text) for chunk in chunker(metadata["llm_summary"])]
