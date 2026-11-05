@@ -137,14 +137,6 @@ def _allakhazam(soup,title,excluded):
         if (sum(bool(navigation.match(t)) for t in labels)>=3 and all(navigation.match(t) for t in labels)
                 and len(table.find_all('form'))>=2 and not table.find(['h1','h2'])):
             table.decompose();excluded.append('legacy_aggregator_navigation')
-    headers=[c for c in soup.select('[id=headerrow]') if not c.find_parent(class_='mform')]
-    entity=next((c.get_text(' ',strip=True) for c in headers if c.get_text(strip=True)
-                 and not navigation.match(c.get_text(' ',strip=True))
-                 and not re.search(r'By:|Posted @',c.get_text(' ',strip=True))),None)
-    heading=next((h.get_text(' ',strip=True) for h in soup.find_all(['h1','h2'])
-                  if not h.find_parent(class_='mform') and not navigation.match(h.get_text(' ',strip=True))
-                  and not h.get_text(' ',strip=True).startswith('Post by ')),None)
-    title=entity or heading or title
     # Gossamer-style directory navigation and search forms are controls. Keep
     # actual category/site links and descriptions, including empty categories.
     menu={'home','add a link','modify a link','new links','cool links','top rated','random link','search'}
@@ -182,6 +174,16 @@ def _allakhazam(soup,title,excluded):
         body=''.join(str(c) for c in bodies)
         replacement=BeautifulSoup(passage_forums.section(name,posted.get_text(' ',strip=True),body,subject),'html.parser')
         table.replace_with(replacement);excluded.append('allakhazam_comment_controls')
+    headers=[c for c in soup.select('[id=headerrow]') if not c.find_parent(class_='mform')]
+    entity=next((c.get_text(' ',strip=True) for c in headers if c.get_text(strip=True)
+                 and not navigation.match(c.get_text(' ',strip=True))
+                 and not COLUMN_NAMES.fullmatch(c.get_text(' ',strip=True)) and not c.get_text(' ',strip=True).endswith(':')
+                 and not re.search(r'By:|Posted @',c.get_text(' ',strip=True))),None)
+    heading=next((h.get_text(' ',strip=True) for h in soup.find_all(['h1','h2'])
+                  if not h.find_parent(class_='mform') and not navigation.match(h.get_text(' ',strip=True))
+                  and not COLUMN_NAMES.fullmatch(h.get_text(' ',strip=True)) and not h.get_text(' ',strip=True).endswith(':')
+                  and not re.match(r'^Post(?: by | \||$)',h.get_text(' ',strip=True))),None)
+    title=entity or heading or title
     return title
 
 
@@ -189,6 +191,7 @@ def _html_view(raw, host, _preserve_layout=False, path=""):
     soup = BeautifulSoup(raw, "html.parser")
     excluded = []
     title = soup.title.get_text(" ", strip=True) if soup.title else ""
+    source_title = title
     thread=passage_forums.extract(soup,host,path)
     if not thread:_encoded_advertising(soup,excluded)
     reason=None if thread else passage_forums.excluded_page(soup,title,path)
@@ -271,7 +274,7 @@ def _html_view(raw, host, _preserve_layout=False, path=""):
                 excluded.append("legacy_aggregator_navigation")
                 node.decompose()
     if host.endswith("allakhazam.com"):
-        title = _allakhazam(soup,title,excluded)
+        title = _allakhazam(soup,source_title,excluded)
     elif host.endswith("everlore.com"):
         heading = soup.find(["h1", "h2"])
         if heading:

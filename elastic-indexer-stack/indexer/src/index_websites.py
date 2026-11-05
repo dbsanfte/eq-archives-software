@@ -33,11 +33,21 @@ from reindex_text import source_path
 
 LOG=logging.getLogger(__name__)
 MAX_BYTES=8*1024*1024
-TEXT_PATH=re.compile(r'\.(?:html?|shtml?|php\d*|aspx?|cgi|pl|jspa?|txt|csv|md|xml|json)(?:[?;&_/]|$)|/(?:[^/.?]+)(?:\?|$)',re.I)
+# Wayback routes such as fboard.showMessage are text candidates too. File
+# extensions cannot establish page types; only skip obvious static assets and
+# use the verified bytes/MIME for dynamic endpoints (including avatar.php).
+NON_TEXT=re.compile(r'\.(?:png|jpe?g|gif|webp|bmp|tiff?|ico|svg|css|js|map|woff2?|ttf|eot|zip|gz|bz2|7z|rar|exe|dll|pdf|docx?|xlsx?|pptx?|mp3|wav|ogg|avi|mov|mp4|swf)$',re.I)
+
+
+class TextPaths:
+    @staticmethod
+    def search(name):
+        return not NON_TEXT.search(name.split('?',1)[0].rsplit('/',1)[-1])
+
 
 
 class TextInventory(Inventory):
-    pattern=TEXT_PATH
+    pattern=TextPaths
 
     def select_hosts(self,hosts):
         hosts=list(dict.fromkeys(hosts or []))
@@ -141,7 +151,7 @@ def index_websites(client,index,inventory,embedder,*,hosts,limit=0,retry_failed=
         for position,key,blob in batch:
             if limit and attempted>=limit:
                 if host is not None and last:inventory.checkpoint(host,last,False)
-                inventory.db.commit();progress.remaining_gaps=inventory.db.execute('SELECT COUNT(*) FROM gaps').fetchone()[0]
+                inventory.db.commit();progress.remaining_gaps=inventory.db.execute("SELECT COUNT(*) FROM gaps WHERE reason NOT LIKE 'unsupported_media:%'").fetchone()[0]
                 return progress
             attempted+=1;last=position
             if key in existing:
@@ -171,7 +181,7 @@ def index_websites(client,index,inventory,embedder,*,hosts,limit=0,retry_failed=
         if host is not None:inventory.checkpoint(host,ordinal,complete)
         else:inventory.db.commit()
         LOG.info('Website import host=%s ordinal=%s complete=%s progress %s',host,ordinal,complete,asdict(progress))
-    progress.remaining_gaps=inventory.db.execute('SELECT COUNT(*) FROM gaps').fetchone()[0]
+    progress.remaining_gaps=inventory.db.execute("SELECT COUNT(*) FROM gaps WHERE reason NOT LIKE 'unsupported_media:%'").fetchone()[0]
     return progress
 
 

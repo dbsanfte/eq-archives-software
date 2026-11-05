@@ -252,3 +252,20 @@ def test_backfill_uses_the_shared_japanese_decoder_with_the_legacy_detection_hin
         assert 'こんにちは①' in client.docs[keys[0]]['text_full']
         assert client.docs[keys[0]]['text_passage_provenance']['decoding']['encoding']=='cp932'
     finally:inv.close()
+
+
+def test_opaque_forum_routes_are_imported_and_dynamic_image_responses_are_typed_exclusions(tmp_path):
+    from PIL import Image
+    import io
+    repo,keys=repository(tmp_path,count=1);folder=repo/keys[0];folder=folder.parent
+    opaque=folder/'fclerics.showMessage?topicID=1.topic';opaque.write_text('<title>Cleric testimony</title><p>Every original message must be recovered.</p>')
+    image=io.BytesIO();Image.new('RGB',(8,8),'blue').save(image,format='GIF');(folder/'avatar.php?userid=1').write_bytes(image.getvalue())
+    git(repo,'add','.');git(repo,'commit','-qm','Opaque dynamic routes')
+    inv=job.TextInventory(repo,tmp_path/'state/x.sqlite');client=Client()
+    try:
+        p=job.index_websites(client,'eq',inv,embedder(),hosts=[HOST])
+        assert p.created==2 and p.unsupported==1 and p.remaining_gaps==0
+        assert str(opaque.relative_to(repo)) in client.docs
+        assert 'original message must be recovered' in client.docs[str(opaque.relative_to(repo))]['text_full']
+        assert inv.db.execute('SELECT reason FROM gaps').fetchone()[0]=='unsupported_media:image/gif'
+    finally:inv.close()

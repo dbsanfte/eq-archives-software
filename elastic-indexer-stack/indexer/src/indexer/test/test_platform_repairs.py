@@ -219,3 +219,13 @@ def test_ubb_header_and_posts_in_sibling_tables_use_the_same_logical_rows():
     p=plan(raw)
     assert 'ubbclassic_posts' in p.exclusions
     assert 'Firsthand observation 0' in p.view and 'Firsthand observation 1' in p.view
+
+
+def test_allakhazam_catalogue_columns_sidebar_labels_and_comment_subjects_are_not_entity_titles():
+    raw='''<title>Illia's Everquest Bestiary</title><h1>Name</h1><table><tr><td id=headerrow>C Net Links:</td></tr></table>
+    <table><tr><td id=headerrow>Name</td><td id=headerrow>Level</td></tr><tr><td>Ancient Dragon</td><td>60</td></tr></table>
+    <table><tr><td id=headerrow>A comment subject</td><td>By: A Healer</td></tr><tr><td>Posted @ Jan 1 2000</td></tr><tr><td>Useful zone testimony.</td></tr></table>'''
+    p=plan(raw,'websites/eqbeastiary.allakhazam.com/20000101000000/search.shtml?zone=1')
+    assert p.title=="Illia's Everquest Bestiary"
+    assert 'Ancient Dragon' in p.view and 'Useful zone testimony' in p.view
+    assert any('A Healer' in c.context for c in p.passages if 'Useful zone testimony' in c.text)

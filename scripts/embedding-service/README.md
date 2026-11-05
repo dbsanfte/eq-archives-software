@@ -350,8 +350,11 @@ state retains the selected hosts/revision, per-host metadata cursors and per-fil
 diagnostics. A failed extraction or oversized write does not stop later files;
 authentication, transport and invalid embedding responses remain visible. The
 recovery wrapper retries temporary dependency outages with checkpoints intact.
-Files above the explicit 8 MiB source bound and unsupported/invalid captures remain
-in the diagnostic ledger; no truncated content is marked complete. `--retry-failed`
+Opaque routes such as Ezboard `.showMessage` are candidates; extensions never
+establish HTML identity. MIME-confirmed non-text responses (including dynamic
+avatars) are counted as exclusions, with private diagnostic reasons. Files above
+the explicit 8 MiB bound and invalid captures remain unresolved source gaps; no
+truncated content is marked complete. `--retry-failed`
 explicitly revisits saved gaps after correction. A nonzero final gap count is an
 incomplete import, never a successful full repair.
 
