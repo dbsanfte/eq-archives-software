@@ -202,7 +202,7 @@ not hold other workers. Missing sources are counted, retain original text/chunks
 and never claim repaired extraction. Unusable old vectors with no corresponding
 text are cleared during replacement. Empty sources are not invented.
 
-`embedding_model` and `text_chunking_version=eq-passages-480-v6` together are the
+`embedding_model` and `text_chunking_version=eq-passages-480-v7` together are the
 text resume checkpoint. Older Gemma records remain eligible for the passage
 upgrade; `REINDEX_PRIORITIZE_UNCONVERTED=true` finishes the old model frontier
 first, then upgrades previously converted Gemma records. Count model conversion
@@ -245,7 +245,7 @@ have separate boundaries. Table chunks retain complete rows where possible and
 repeat column context. Oversized rows/prose split with overlap. Every complete
 request is checked with the pinned Gemma tokenizer against 480 tokens.
 
-Policy `eq-passages-480-v6` recognizes phpBB, WWWThreads, Snitz and vBulletin by cooperating
+Policy `eq-passages-480-v7` recognizes phpBB, WWWThreads, Snitz and vBulletin by cooperating
 HTML features across domains, along with Ezboard's Author/Comment rows. Each post
 keeps its own speaker/date, quotes and authored data tables. Signature separators,
 profiles and thread controls stay outside those message bodies. Partial/damaged
@@ -441,3 +441,37 @@ provenance permit checkpoint-only updates without reembedding. A matching origin
 byte hash also permits equivalent CRLF/LF HTML representations when the full
 reader, selected view and every request field are identical; changed passages
 replace all searched vectors atomically. No paid enrichment runs in this repair.
+
+### Corpus forum and database format repairs
+
+Policy `eq-passages-480-v7` extends the shared format adapters with complete
+Snitz topic-review/composer rows and older normal topics. A captured quote is
+preserved alongside reviewed messages; damaged or mixed layouts cannot select
+only the textarea. Original source positions bound text outside broken table
+rows. Legacy vBulletin comment regions use their header/profile/body pairs and
+source token boundaries; archive author/date/body pairs need no numeric IDs.
+ASP.NET Forums PostList roles, UltraBoard message blocks and phpBB/Lithium
+printer layouts receive separate attributed posts across hosts. Everlore's
+submission/date/body rows retain their surrounding entity data while isolating
+rating widgets and navigation. Unknown content keeps the conservative fallback.
+
+Template cells do not become invented data grids, and literal fence-like forum
+signatures cannot absorb later authors. Genuine tables, quotations, attachments
+and code remain. Generated deleted/restricted/missing-thread/PHP failure layouts
+produce no semantic vectors, regardless of their URL action. Platform/body
+evidence protects real discussions of those errors; reader text stays intact.
+
+Both capture imports and legacy workers deduplicate exact embedding requests
+within each passage plan. The complete document prefix/title, author/context
+and body are part of the identity; reuse never crosses model calls. Every source
+occurrence still receives a separate offset-bound result and vector copy.
+Incomplete or nonfinite unique batches fail before a document can be saved.
+This reduces inference for captured repetition without truncating content.
+
+Use the protected deployment and pending-Job handoff above; retain prepared
+sources, import cursors, all previous Jobs and the independent image backfill.
+Both the model and v7 passage checkpoint are required for completion. Exact
+unchanged v4/v5/v6 requests can upgrade their checkpoint after the existing full
+reader/source/view checks; changed plans replace all searched vectors atomically.
+The unfinished model frontier retains priority. No paid enrichment runs during
+this repair, and existing corrupt/missing-source diagnostics remain visible.

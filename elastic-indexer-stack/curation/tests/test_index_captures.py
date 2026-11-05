@@ -60,6 +60,30 @@ def test_entire_manifest_is_verified_before_any_index_or_embedding_request(candi
     with pytest.raises(CrawlError): index_batch(root,batch,Forbidden())
 
 
+def test_duplicate_passage_inputs_share_inference_without_dropping_source_occurrences(candidate,monkeypatch):
+    from indexer import passages
+    root,row=candidate
+    source='Repeated raid evidence.\n\n'*4
+    body='Repeated raid evidence.\n\n'
+    chunks=tuple(passages.Passage(i*len(body),(i+1)*len(body),body,'Raid notes',
+                                 'Post by Other' if i==2 else 'Post by Healer','post') for i in range(4))
+    plan=passages.Plan(passages.digest(source),None,source,'Raid notes','source_text',(),chunks)
+    monkeypatch.setattr('index_captures.passages.prepare',lambda *a,**k:plan)
+    class FakeServices:
+        def __init__(self):self.inputs=[];self.docs=[]
+        def exists(self,*a):return False
+        def enrich(self,*a):return {'llm_summary':'A guild raid history.'}
+        def embedding(self,text,**kwargs):self.inputs.append((text,kwargs));return [1.]+[0.]*767
+        def create(self,key,doc):self.docs.append(doc);return True
+    services=FakeServices()
+    assert index_batch(root,published(row),services)['created']==1
+    passage_calls=[x for x in services.inputs if x[1]]
+    assert len(passage_calls)==2 and len(services.docs[0]['text'])==4
+    saved=services.docs[0]['text']
+    assert [(p['source_start'],p['source_end']) for p in saved]==[(p.start,p.end) for p in chunks]
+    assert saved[0]['vector']==saved[1]['vector'] and saved[0]['vector'] is not saved[1]['vector']
+
+
 def test_new_capture_uses_same_japanese_decoder_for_reader_enrichment_and_embeddings(candidate):
     root,row=candidate;capture=row['captures'][0]
     phrase='こんにちは。ギルドのみんなで①番の髙い山へ行きましょう。'

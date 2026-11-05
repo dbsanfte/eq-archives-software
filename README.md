@@ -243,7 +243,7 @@ semantic branches only use completed Gemma documents. Existing enrichment, OCR,
 provenance and dates remain intact, with **no paid Luna calls** during backfill.
 See the [model migration runbook](scripts/embedding-service/README.md#embeddinggemma-migration).
 
-Gemma's `eq-passages-480-v6` policy embeds real titles, section and table context,
+Gemma's `eq-passages-480-v7` policy embeds real titles, section and table context,
 forum posts and attributed quotations. It removes identifiable navigation and
 supporting scripts from a separate hashed search view, retaining full reader
 text and source files. Unknown site layouts use conservative fallbacks. The
@@ -253,6 +253,13 @@ space. Both search and MCP can retrieve images. Image indexing has no Luna cost;
 normal text import enrichment retains its existing approval/budget policy. See
 the [passage and image runbook](scripts/embedding-service/README.md#content-aware-passages-and-images)
 for input bounds, provenance, model pins and checkpoint-preserving rollout.
+
+Shared forum adapters retain message authors, dates and bodies across legacy,
+archive and printer layouts; Snitz composers preserve both the quote and topic
+review. Everlore comments retain their database entity context. Exact repeated
+embedding inputs share inference within a document while every original source
+occurrence remains indexed. Generated error pages retain their reader/source
+without contributing semantic vectors.
 
 Japanese source decoding is shared across discovery, imports and reindexing.
 CP932 Windows extensions and bounded truncated sequences retain readable Japanese

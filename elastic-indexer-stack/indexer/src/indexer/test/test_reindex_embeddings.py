@@ -285,7 +285,7 @@ def test_operator_entrypoint_only_adds_mapping_and_runs_checkpointed_migration(t
         job.main()
 
 
-@pytest.mark.parametrize('previous_policy',['eq-passages-480-v4','eq-passages-480-v5',passages.VERSION])
+@pytest.mark.parametrize('previous_policy',['eq-passages-480-v4','eq-passages-480-v5','eq-passages-480-v6',passages.VERSION])
 def test_source_upgrade_reuses_only_identical_passage_requests_and_advances_checkpoint(tmp_path,previous_policy):
     hit,client,embedder=fixture();source=hit['_source'];source.update(mime_type='text/html',text_extraction_version='old')
     path=tmp_path/hit['_id'];path.parent.mkdir(parents=True);path.write_text('<title>Guild</title><p>Preserved complete guild instructions.</p>')
