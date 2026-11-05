@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import sqlite3
 import time
 
 from .sqlite_state import SQLiteState
@@ -89,14 +90,25 @@ class Ledger:
         return [r[0] for r in self.state.connection().execute("SELECT DISTINCT id FROM exceptions WHERE status='pending' ORDER BY id LIMIT ?",(limit,)).fetchall()]
 
     def report(self,*,limit=100,status='pending'):
-        if not 1<=limit<=1000 or status not in ('pending','resolved','all'):raise ValueError('Invalid diagnostic report bounds')
-        db=self.state.connection();summary={state:count for state,count in db.execute('SELECT status,COUNT(*) FROM exceptions GROUP BY status')}
-        cursor=db.execute('SELECT * FROM exceptions '+("WHERE status=? " if status!='all' else '')+'ORDER BY last_seen DESC,id LIMIT ?',
-                          (status,limit) if status!='all' else (limit,))
-        columns=[v[0] for v in cursor.description]
-        return {'summary':summary,'records':[dict(zip(columns,row)) for row in cursor.fetchall()],'limit':limit}
+        return database_report(self.state.connection(),limit=limit,status=status)
 
     def close(self):self.state.close()
+
+
+def database_report(db,*,limit=100,status='pending'):
+    if not 1<=limit<=1000 or status not in ('pending','resolved','all'):raise ValueError('Invalid diagnostic report bounds')
+    summary={state:count for state,count in db.execute('SELECT status,COUNT(*) FROM exceptions GROUP BY status')}
+    cursor=db.execute('SELECT * FROM exceptions '+("WHERE status=? " if status!='all' else '')+'ORDER BY last_seen DESC,id LIMIT ?',
+                      (status,limit) if status!='all' else (limit,))
+    columns=[v[0] for v in cursor.description]
+    return {'summary':summary,'records':[dict(zip(columns,row)) for row in cursor.fetchall()],'limit':limit}
+
+
+def existing_report(path,*,limit=100,status='pending'):
+    # Inspection must never create an empty ledger at a mistyped/missing mount.
+    db=sqlite3.connect(Path(path).absolute().as_uri()+'?mode=ro',uri=True,timeout=.25)
+    try:return database_report(db,limit=limit,status=status)
+    finally:db.close()
 
 
 def main():
@@ -106,9 +118,9 @@ def main():
     parser.add_argument('--limit',type=int,default=100)
     args=parser.parse_args()
     if not args.path:parser.error('Set REINDEX_DIAGNOSTICS_PATH or --path')
-    ledger=Ledger(args.path)
-    try:print(json.dumps(ledger.report(limit=args.limit,status=args.status),indent=2))
-    finally:ledger.close()
+    try:print(json.dumps(existing_report(args.path,limit=args.limit,status=args.status),indent=2))
+    except (sqlite3.Error,OSError,ValueError) as error:
+        parser.error('Persistent diagnostic ledger is unavailable or invalid ('+type(error).__name__+')')
 
 
 if __name__=='__main__':main()

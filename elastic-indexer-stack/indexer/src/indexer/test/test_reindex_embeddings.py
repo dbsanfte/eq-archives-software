@@ -285,12 +285,17 @@ def test_old_reader_with_changed_decoding_is_repaired_even_when_original_bytes_a
 
 
 def test_empty_failed_id_retry_never_starts_an_unbounded_scan(tmp_path,monkeypatch):
+    from indexer.reindex_diagnostics import Ledger
+    Ledger(tmp_path/'empty.sqlite').close()
     monkeypatch.setattr('sys.argv',['reindex_embeddings','--retry-failed','--diagnostics',str(tmp_path/'empty.sqlite')])
     manager=MagicMock();manager._index_name='eq';monkeypatch.setattr(job,'ElasticsearchManager',lambda **kw:manager)
     reindex=MagicMock();monkeypatch.setattr(job,'reindex',reindex)
     assert job.main()==0;reindex.assert_not_called()
     monkeypatch.setattr('sys.argv',['reindex_embeddings','--retry-failed'])
     with pytest.raises(SystemExit):job.main()
+    monkeypatch.setattr('sys.argv',['reindex_embeddings','--retry-failed','--diagnostics',str(tmp_path/'missing.sqlite')])
+    with pytest.raises(SystemExit):job.main()
+    assert not (tmp_path/'missing.sqlite').exists()
 
 
 def test_handoff_finishes_unconverted_records_before_upgrading_existing_gemma_passages(tmp_path):

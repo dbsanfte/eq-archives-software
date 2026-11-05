@@ -548,7 +548,9 @@ work; other ledger failures stay visible. A small pending-ID index avoids hashin
 or querying SQLite for every successful record. Existing import gaps retain their
 own persistent inventory.
 
-Inspect without running inference or changing archive documents:
+Inspect an existing ledger read-only, without running inference or changing archive
+documents. Missing/unreadable storage is an error; inspection and retry commands
+never create an empty replacement ledger:
 
 ```bash
 python -m indexer.reindex_diagnostics --status pending --limit 100

@@ -89,6 +89,9 @@ def test_operator_cli_reports_persistent_pending_and_resolved_records(tmp_path,m
     path=tmp_path/'failures.sqlite';ledger=Ledger(path);ledger.record('source',model='m',policy='p',error=ValueError())
     monkeypatch.setattr('sys.argv',['diagnostics','--path',str(path),'--status','all','--limit','10']);main()
     assert json.loads(capsys.readouterr().out)['records'][0]['id']=='source'
+    monkeypatch.setattr('sys.argv',['diagnostics','--path',str(tmp_path/'missing.sqlite')])
+    with pytest.raises(SystemExit):main()
+    assert not (tmp_path/'missing.sqlite').exists()
     monkeypatch.delenv('REINDEX_DIAGNOSTICS_PATH',raising=False);monkeypatch.setattr('sys.argv',['diagnostics'])
     with pytest.raises(SystemExit):main()
 

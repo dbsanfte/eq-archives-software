@@ -21,7 +21,7 @@ from indexer import passages
 from indexer.es_manager import ElasticsearchManager
 from indexer.html_extraction import extraction_version, WEBSITE_EXTRACTION_VERSION
 from indexer.openai_manager import OpenAIManager
-from indexer.reindex_diagnostics import Ledger,source_hash
+from indexer.reindex_diagnostics import Ledger,source_hash,existing_report
 from indexer.reindex_preparation import handler, verify_prepared
 from indexer.source_encoding import repaired_title
 from reindex_text import completed_records, source_path
@@ -321,6 +321,9 @@ def main():
         parser.error("Preparation workers must be 0–4")
     if args.retry_failed and not args.diagnostics:parser.error('--retry-failed requires persistent diagnostics')
     if args.retry_failed and args.ids:parser.error('Choose --retry-failed or explicit --id records')
+    if args.retry_failed:
+        try:existing_report(args.diagnostics,limit=1)
+        except Exception as error:parser.error('Existing retry diagnostics are unavailable ('+type(error).__name__+')')
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("elastic_transport").setLevel(logging.WARNING)
