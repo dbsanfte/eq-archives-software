@@ -9,6 +9,12 @@ from bs4 import BeautifulSoup, Comment
 
 DATE = re.compile(r'\b\d{1,2}/\d{1,2}/\d{2,4}(?:\s*:\s*|\s+)\d{1,2}:\d{2}(?::\d{2})?(?:\s*[ap]m)?', re.I)
 POST_DATE = re.compile(r'\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}(?:,?\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s*[ap]m)?)?',re.I)
+LONG_DATE = re.compile(r'\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4}(?:,?\s+\d{1,2}:\d{2}\s*[ap]m)?',re.I)
+
+
+def dated(text):
+    match=LONG_DATE.search(text) or POST_DATE.search(text)
+    return match[0] if match else ''
 
 
 @dataclass(frozen=True)
@@ -20,6 +26,12 @@ class Thread:
 
 def words(node):
     return ' '.join(node.get_text(' ',strip=True).split()) if node else ''
+
+
+def row_cells(row):
+    # html.parser retains a missing </td> as nested cells. Their nearest row
+    # still identifies the two logical columns; nested authored tables do not.
+    return [c for c in row.find_all(['td','th']) if c.find_parent('tr') is row]
 
 
 def nonempty_link(node, pattern):
@@ -146,13 +158,35 @@ def comment_region(start, label):
 
 
 def vbulletin_header(body):
+    # vB's numbered comments remain reliable when a damaged theme nests several
+    # posts inside one table. Bind the anchor AND author menu to that same ID;
+    # a missing current header cannot inherit a preceding post's identity.
+    boundary=body.find_previous(string=lambda n:isinstance(n,Comment) and re.fullmatch(r'\s*post #\d+\s*',str(n)))
+    if boundary:
+        number=re.search(r'\d+',str(boundary))[0]
+        anchor=body.find_previous('a',attrs={'name':'post'+number})
+        author=body.find_previous(id='postmenu_'+number)
+        if anchor and author:
+            same=lambda n:n.find_previous(string=lambda x:isinstance(x,Comment) and re.fullmatch(r'\s*post #\d+\s*',str(x))) is boundary
+            stamp=dated(words(anchor.find_parent('td')))
+            if same(anchor) and same(author) and stamp:return words(author),stamp
     container=next((p for p in body.parents if re.fullmatch(r'post\d+',p.get('id',''))),None)
+    if boundary and container is not None and container['id']!='post'+number:return None
     if container is not None:
-        author=container.select_one('.bigusername,.username')
+        author=container.select_one('.bigusername,.username,[id="postmenu_'+container['id'][4:]+'"]')
         anchor=container.find('a',attrs={'name':re.compile(r'^post\d+$')})
-        stamp=POST_DATE.search(words(anchor.find_parent('td'))) if anchor and anchor.find_parent('td') else None
-        if author and stamp:return words(author),stamp[0]
+        stamp=dated(words(anchor.find_parent('td'))) if anchor and anchor.find_parent('td') else ''
+        if author and stamp:return words(author),stamp
         return None
+    # Skinned vB 3 tables omit the table ID but retain a matching post anchor
+    # and author-menu ID. Require both within the same, single-post container.
+    for table in body.find_parents('table'):
+        anchors=table.find_all('a',attrs={'name':re.compile(r'^post\d+$')})
+        if len(anchors)!=1:continue
+        anchor=anchors[0];author=table.find(id='postmenu_'+anchor['name'][4:])
+        if boundary and anchor['name']!='post'+number:continue
+        stamp=dated(words(anchor.find_parent('td')))
+        if author and stamp:return words(author),stamp
     # Early vB 3 beta themes put every post in ONE presentation table. The
     # preceding header row and the body's own profile cell identify the post;
     # looking for an author in the whole table assigns every reply to user one.
@@ -163,9 +197,10 @@ def vbulletin_header(body):
     header=next((p for p in row.previous_siblings if getattr(p,'name',None)=='tr'
                  and p.find('a',attrs={'name':re.compile(r'^post\d+$')})),None)
     if header is None:return None
-    stamp=POST_DATE.search(words(header))
+    if boundary and not header.find('a',attrs={'name':'post'+number}):return None
+    stamp=dated(words(header))
     author=cells[0].select_one('.bigusername,.username') or cells[0].find(['b','strong'])
-    if stamp and words(author):return words(author),stamp[0]
+    if stamp and words(author):return words(author),stamp
     return None
 
 
@@ -215,6 +250,70 @@ def vbulletin(soup):
             if header is None:return None
             posts.append(section(*header,body_copy(body)))
     if posts:return Thread('\n'.join(posts),'vbulletin')
+    # vB 2 uses paired collapsed/expanded post divs instead of message comments.
+    # Ignore the duplicate collapsed copy; preserve each complete body cell.
+    for expanded in soup.find_all('div',id=re.compile(r'^p\d+e$')):
+        number=expanded['id'][1:-1]
+        anchor=expanded.find('a',attrs={'name':'post'+number})
+        row=anchor.find_parent('tr') if anchor else None
+        cells=row.find_all('td',recursive=False) if row else []
+        collapsed=soup.find('div',id='p'+number+'h')
+        author=cells[0].find(['b','strong']) if len(cells)==2 else None
+        stamp=dated(words(collapsed))
+        if len(cells)!=2 or not author or not stamp:return None
+        posts.append(section(words(author),stamp,body_copy(cells[1])))
+    if posts:return Thread('\n'.join(posts),'vbulletin')
+
+
+def lithium(soup):
+    bodies=soup.select('td.msg_text_cell');posts=[];recognized=False
+    for body in bodies:
+        if body.find_parent('td',class_='msg_text_cell'):continue
+        table=next((t for t in body.find_parents('table') if len(t.select('td.msg_text_cell'))==1
+                    and t.select_one('.msg_user_cell') and t.select_one('.msg_date_cell')),None)
+        if table is None:return None
+        user=table.select_one('.msg_user_cell')
+        author=nonempty_link(user,r'view_profile\?user\.id=') or user.select_one('.auth_text')
+        subject=next((c for c in table.select('td.subjectbar') if c.get('width')=='100%'),None)
+        stamp=words(table.select_one('.msg_date_cell'))
+        if author and dated(stamp):recognized=True
+        posts.append(section(words(author),stamp,body_copy(body),words(subject)))
+    if posts and recognized:return Thread('\n'.join(posts),'lithium')
+
+
+def ubbclassic(soup):
+    if not (re.search(r'Ultimate\s+Bulletin\s+Board|UBB\.classic',words(soup),re.I)
+            or soup.find('a',href=re.compile(r'(?:ultimatebb|Ultimate)\.cgi\?.*ubb=',re.I))):return None
+    headers=[]
+    for row in soup.find_all('tr'):
+        if row.find_parent(['blockquote','pre','code']):continue
+        cells=row_cells(row)
+        if len(cells)==2 and words(cells[0]).lower()=='author' and words(cells[1]).lower().startswith('topic:'):
+            headers.append(words(cells[1]).partition(':')[2].strip())
+    if not headers or len(set(headers))!=1:return None
+    posts=[]
+    # UBB variants put the column header and each post in sibling tables, or
+    # wrap all post tables inside one header table. The logical row and posted
+    # metadata identify the same unit in both layouts.
+    for row in soup.find_all('tr'):
+        if row.find_parent(['blockquote','pre','code']):continue
+        cells=row_cells(row)
+        if len(cells)!=2:continue
+        profile,body=cells;stamp_node=body.find(string=re.compile(r'^\s*posted\s+',re.I))
+        separators=body.find_all('hr',recursive=False)
+        if not separators:continue
+        if stamp_node is not None and stamp_node.find_parent('tr') is not row:continue
+        if stamp_node is None:
+            if re.search(r'Member\s*#|Unregistered|Rate Member',words(profile),re.I) and words(body):return None
+            continue
+        stamp=dated(str(stamp_node));author=profile.find(['b','strong'])
+        if not stamp or not author:return None
+        nodes=[]
+        for node in separators[0].next_siblings:
+            if getattr(node,'name',None)=='hr' and re.match(r'\s*Posts:',words(node.find_next_sibling()),re.I):break
+            nodes.append(str(node))
+        posts.append(section(words(author),stamp,body_copy(BeautifulSoup(''.join(nodes),'html.parser'))))
+    if posts:return Thread('\n'.join(posts),'ubbclassic',headers[0])
 
 
 def ezboard(soup,host):
@@ -237,33 +336,52 @@ def ezboard(soup,host):
     if posts:return Thread('\n'.join(posts),'ezboard')
 
 
-def extract(soup,host):
+def reply_form(soup,path):
+    if not re.search(r'(?:^|/)(?:post|posting|newreply|newpost)\.(?:asp|php|pl)$',path,re.I):return None
+    fields=soup.find_all('textarea')
+    if not fields or not soup.select_one('input[type=password],input[name=Username]'):return None
+    if not re.search(r'Snitz Forums|vBulletin|phpBB|Ultimate Bulletin Board',words(soup),re.I):return None
+    if soup.find(['blockquote','pre','code']):return None
+    if soup.select_one('.postbody,.msg_text_cell,[id^=post_message_],p.post'):return None
+    captured=[]
+    for field in fields:
+        if not words(field):continue
+        fragment=BeautifulSoup('','html.parser');quote=fragment.new_tag('blockquote')
+        quote.string=field.get_text();fragment.append(quote);captured.append(str(fragment))
+    if captured:return Thread('\n'.join(captured),'forum_reply_field')
+
+
+def extract(soup,host,path=''):
     # A forum widget can be embedded beside an independent article. The
     # engine view must not replace that page's unique non-message content.
-    bodies='.postbody,span.spnMessageText[id=msg],p.post,.posttext,[id^=post_message_]'
+    bodies='.postbody,span.spnMessageText[id=msg],p.post,.posttext,[id^=post_message_],.msg_text_cell'
     if any(words(node) and not node.select_one(bodies) for node in soup.select('article,main,[role=main]')):
         return None
-    for parser in (phpbb,wwwthreads,snitz,vbulletin):
+    for parser in (phpbb,wwwthreads,snitz,vbulletin,lithium,ubbclassic):
         result=parser(soup)
         if result:return result
-    return ezboard(soup,host)
+    return ezboard(soup,host) or reply_form(soup,path)
 
 
 def excluded_page(soup,title,path):
     """Require page/engine evidence; a discussion of an error is still content."""
-    if soup.find(['article','main','pre','code']) or soup.select_one('.postbody,.post-content,[id^=post_message_],span.spnMessageText[id=msg],p.post'):
+    if soup.find(['article','main']) or soup.select_one('.postbody,.post-content,[id^=post_message_],span.spnMessageText[id=msg],p.post,.msg_text_cell'):
         return None
     text=words(soup);heading=words(soup.find(['h1','h2']))
     if len(text)>6000:return None
     known_title=re.fullmatch(r'(?:System Message:\s*Error|404(?: Not Found)?|403(?: Forbidden)?|Access Denied|Page Not Found|Site Temporarily Disabled)',title,re.I)
     disabled=heading.lower()=='site temporarily disabled' and 'this site has been disabled' in text.lower()
-    engine_error=(re.search(r'phpBB\s*:\s*Critical Error\s+Could not connect to the database',text,re.I)
+    engine_error=(re.search(r'phpBB\s*:\s*Critical Error\s+Could not (?:connect to the database|query config information)',text,re.I)
                   or 'vBulletin Message' in text and 'You are not logged in or you do not have permission to access this page' in text
                   or 'phpBB' in text and 'The topic or post you requested does not exist' in text
                   or heading.lower()=='error' and 'The post you selected no longer exists' in text
                   or 'requested access to a private forum' in text and 'ezboard' in text.lower())
     if known_title or disabled or engine_error:return 'archived_access_or_error_page'
-    utility_path=re.search(r'(?:^|/)(?:newpost|newuser|register|login|posting)\.(?:pl|php|asp)$',path,re.I)
+    if soup.find(['pre','code','blockquote']):return None
+    # Reply forms can contain the only surviving quotation. Do not classify a
+    # populated message field as an empty utility page.
+    if any(words(t) for t in soup.find_all('textarea')):return None
+    utility_path=re.search(r'(?:^|/)(?:newpost|newuser|register|login|posting|post|newreply)\.(?:pl|php|asp)$',path,re.I)
     utility_title=re.match(r'(?:Make a New Post|New user|Register|Log ?in)(?:\b|\s*-)',title,re.I)
     if (utility_path or utility_title) and soup.find('form') and soup.select_one('textarea,input[type=password],input[name=Username],input[name=Subject]'):
         return 'forum_utility_page'

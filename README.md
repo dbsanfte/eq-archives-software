@@ -243,7 +243,7 @@ semantic branches only use completed Gemma documents. Existing enrichment, OCR,
 provenance and dates remain intact, with **no paid Luna calls** during backfill.
 See the [model migration runbook](scripts/embedding-service/README.md#embeddinggemma-migration).
 
-Gemma's `eq-passages-480-v4` policy embeds real titles, section and table context,
+Gemma's `eq-passages-480-v5` policy embeds real titles, section and table context,
 forum posts and attributed quotations. It removes identifiable navigation and
 supporting scripts from a separate hashed search view, retaining full reader
 text and source files. Unknown site layouts use conservative fallbacks. The

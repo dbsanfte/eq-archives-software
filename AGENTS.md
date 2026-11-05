@@ -223,7 +223,7 @@ extraction checkpoints, enrichment, source identity, dates and last_indexed. No
 paid enrichment during this backfill. Do not reuse Nomic checkpoints as Gemma
 completion. The Nomic repair entry point remains for historical recovery only.
 Follow the embedding-service migration runbook for operator-authorized handoffs.
-Gemma text uses `eq-passages-480-v4`: budget title/context with every 480-token
+Gemma text uses `eq-passages-480-v5`: budget title/context with every 480-token
 request, retain full reader text, verify source-bound selected-view coverage and
 store view offsets/provenance separately. Unknown layouts retain content;
 format-specific navigation/post/table handling needs regression evidence. Resume
@@ -245,13 +245,28 @@ hostname exceptions. Validate full bytes, support CP932/Shift-JIS, EUC-JP and
 ISO-2022-JP using declaration/script evidence, and preserve unaffected encodings.
 Bounded damaged Japanese sequences retain U+FFFD markers and a counted, hashed
 decoding provenance; excessive damage fails visibly. Website extraction uses
-`html-2026-11-04-source-decoding`; retain mail/newsgroup checkpoints. The Gemma
+`html-2026-11-04-safe-structure`; retain mail/newsgroup checkpoints. The Gemma
 resume query also requires that checkpoint for textual websites. Reuse vectors
 when the reader and source-bound passage plan are identical; repair corrupted
 readers/vectors atomically and source-proven garbled titles only. Retain original
 bytes, enrichment, dates and image Jobs; no paid enrichment for decoding repairs.
 New format-specific exceptions require evidence of a major site or widely used
 structured engine; prefer broadly applicable source/DOM rules for other content.
+
+The v5 forum upgrade uses source-bound vBulletin numbered/paired boundaries,
+UBB.classic Author/Topic rows and Lithium message/user/date cells across hosts.
+Retain damaged-header fallbacks and real quotes/tables/attachments. Allakhazam
+entity/comment projections may specialize the major site; unrelated layouts keep
+content. Deep reader formatting is flattened without losing visible source data.
+Version upgrades may reuse v4 vectors only after exact request metadata and
+source/view checks, never from version or body hash alone.
+Missing website text uses `index_websites.py`: explicit pinned host scope, remote-free
+Git metadata, verified local blobs, persistent private SQLite cursors/gaps,
+create-only writes and CUDA only. No paid enrichment or repeated source preparation.
+One bad file advances into diagnostics while later files proceed; transient outages
+resume safely, integrity/auth failures stay visible. Preserve old Jobs, image state,
+enrichment and archive files. A remaining gap count is incomplete recovery.
+
 The separate CUDA vision companion uses the pinned projector in `vision.env`,
 one image slot and the same Gemma space. Keep text/live services independent.
 Install additive image/passages mappings before querying new vector fields.

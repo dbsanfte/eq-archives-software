@@ -189,6 +189,7 @@ def test_clean_completed_record_reuses_vectors_when_only_decoding_checkpoint_is_
     groups,patch,_=job.prepare(source,tmp_path)
     source.update(text_full=patch['text_full'],text_passage_provenance={'version':passages.VERSION,'sources':[p.provenance() for _,p in groups]},
                   embedding_model=gemma.MODEL,text_chunking_version=passages.VERSION)
+    source['text']=[{'text_chunk':p.text,'title':p.title,'context':p.context,'kind':p.kind,'source_start':p.start,'source_end':p.end} for _,plan in groups for p in plan.passages]
     diagnostics={}
     assert job.migrate_record(client,'eq',hit,tmp_path,embedder,diagnostics=diagnostics)==(1,0)
     update=client.update.call_args.kwargs['doc']
@@ -280,3 +281,23 @@ def test_operator_entrypoint_only_adds_mapping_and_runs_checkpointed_migration(t
     monkeypatch.setattr('sys.argv', ['reindex_embeddings', '--preparation-workers', '5'])
     with pytest.raises(SystemExit):
         job.main()
+
+
+def test_v4_upgrade_reuses_only_identical_passage_requests_and_advances_checkpoint(tmp_path):
+    hit,client,embedder=fixture();source=hit['_source'];source.update(mime_type='text/html',text_extraction_version='old')
+    path=tmp_path/hit['_id'];path.parent.mkdir(parents=True);path.write_text('<title>Guild</title><p>Preserved complete guild instructions.</p>')
+    groups,patch,_=job.prepare(source,tmp_path);source.update(text_full=patch['text_full'],embedding_model=gemma.MODEL,text_chunking_version='eq-passages-480-v4')
+    old=[{**plan.provenance(),'version':'eq-passages-480-v4'} for _,plan in groups]
+    source['text_passage_provenance']={'version':'eq-passages-480-v4','sources':old}
+    source['text']=[{'text_chunk':p.text,'title':p.title,'context':p.context,'kind':p.kind,'source_start':p.start,'source_end':p.end} for _,plan in groups for p in plan.passages]
+    stats={};job.migrate_record(client,'eq',hit,tmp_path,embedder,diagnostics=stats)
+    update=client.update.call_args.kwargs['doc']
+    assert stats=={'reused_embeddings':1} and update['text_chunking_version']==passages.VERSION
+    assert 'text' not in update and 'llm_summary_vector' not in update
+    embedder.get_chunks_and_embeddings.assert_not_called()
+    # A changed title/context changes the embedding request even if body text
+    # and the old provenance hashes are identical. It must get new vectors.
+    source['text'][0]['context']='Stale or unrelated context'
+    embedder.reset_mock();job.migrate_record(client,'eq',hit,tmp_path,embedder)
+    embedder.get_chunks_and_embeddings.assert_called()
+    assert client.update.call_args.kwargs['doc']['text'][0]['text_chunk'].strip()=='Preserved complete guild instructions.'
