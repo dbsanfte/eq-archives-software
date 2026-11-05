@@ -80,6 +80,20 @@ def test_guest_snitz_topic_with_a_damaged_timestamp_keeps_its_message():
     attributed(p,'Important guest testimony.','Guest Scholar')
 
 
+@pytest.mark.parametrize('damaged',[False,True])
+def test_snitz_profile_spans_cannot_hide_later_replies_in_damaged_tables(damaged):
+    raw='<p>Snitz Forums</p><table>'
+    for i in range(3):
+        closing='' if damaged and i else '</td>'
+        raw+=f'''<tr><td><span class=spnMessageText><a href="pop_profile.asp?id={i}">Scholar{i}</a></span>{closing}
+        <td colspan=2>Posted - 01/02/2000 : 03:04:05<hr><table><tr><td>
+        <span class=spnMessageText id=msg>Complete hunting advice {i}.</span>
+        </td></tr><tr><td>Country: somewhere | Posts: 900</td></tr></table></td></tr>'''
+    p=plan(raw+'</table>','topic.asp?TOPIC_ID=1')
+    for i in range(3):attributed(p,f'Complete hunting advice {i}.',f'Scholar{i}')
+    assert 'Country:' not in p.view and '900' not in p.view
+
+
 def vb2(shared_metadata_table=False):
     raw='<title>Cleric discussion</title><p>Powered by vBulletin 2.3.0</p>'
     metadata_end='</td></tr><tr><td colspan=2>' if shared_metadata_table else '</td></table>'

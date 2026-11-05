@@ -270,11 +270,22 @@ def snitz(soup,raw=None):
     if review_header(soup) is not None:
         return snitz_review(soup,raw) if raw is not None else None
     posts=[];recognized=False
-    for body in soup.select('span.spnMessageText'):
-        if any('spnMessageText' in p.get('class',[]) for p in body.parents):continue
+    spans=soup.select('span.spnMessageText')
+    # Snitz uses this class for profile links as well as messages. Counting
+    # those links as bodies rejects the real post row, particularly when
+    # missing closing cells attach later profile-stat rows to the same row.
+    bodies=[]
+    for node in spans:
+        profile=nonempty_link(node,r'pop_profile\.asp')
+        if node.get('id')!='msg' and profile and words(node)==words(profile):continue
+        bodies.append(node)
+    body_ids={id(node) for node in bodies}
+    bodies=[node for node in bodies if not any(id(p) in body_ids for p in node.parents)]
+    body_ids={id(node) for node in bodies}
+    for body in bodies:
         row=None;author=None;date=None
         for candidate in body.find_parents('tr'):
-            if len(candidate.select('span.spnMessageText'))!=1:continue
+            if sum(id(n) in body_ids for n in candidate.select('span.spnMessageText'))!=1:continue
             author=next((a for a in candidate.find_all('a',href=re.compile(r'pop_profile\.asp',re.I))
                          if words(a) and body not in a.parents),None)
             stamp=candidate.find(string=re.compile(r'Posted\s*[\-:]\s*\d',re.I))
@@ -291,6 +302,9 @@ def snitz(soup,raw=None):
                     and (nonempty_link(cells[0],r'pop_profile\.asp') or cells[0].find(['b','strong']))):
                 return None  # Mixed/damaged templates retain the complete view.
         return Thread('\n'.join(reply_quotes(soup)+posts),'snitz')
+    # A body-bearing template that could not be fully attributed must keep
+    # the generic view, rather than partially match the older row adapter.
+    if bodies:return None
     if not (re.search(r'Snitz\s+Forums',words(soup),re.I)
             or soup.find('a',href=re.compile(r'forum\.snitz\.com',re.I))):return None
     # Older Snitz topics have author/body cells and a metadata rule, without
