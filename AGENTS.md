@@ -245,7 +245,7 @@ hostname exceptions. Validate full bytes, support CP932/Shift-JIS, EUC-JP and
 ISO-2022-JP using declaration/script evidence, and preserve unaffected encodings.
 Bounded damaged Japanese sequences retain U+FFFD markers and a counted, hashed
 decoding provenance; excessive damage fails visibly. Website extraction uses
-`html-2026-11-04-safe-structure`; retain mail/newsgroup checkpoints. The Gemma
+`html-2026-11-05-regional-decoding`; retain mail/newsgroup checkpoints. The Gemma
 resume query also requires that checkpoint for textual websites. Reuse vectors
 when the reader and source-bound passage plan are identical; repair corrupted
 readers/vectors atomically and source-proven garbled titles only. Retain original

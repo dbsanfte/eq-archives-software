@@ -143,12 +143,13 @@ def test_mixed_html_posts_preserve_both_japanese_encodings_and_western_footer():
     raw,expected=mixed_posts()
     decoded=decode_source(raw)
     assert decoded.text==expected+'</html>' and decoded.invalid_bytes==0
-    assert decoded.reason=='mixed_japanese_html_segments' and decoded.encoding=='mixed'
+    assert decoded.reason=='regional_evidence' and decoded.encoding=='mixed'
     assert decoded.source_sha256==hashlib.sha256(raw).hexdigest()
-    assert decoded.provenance()['recoveries']==[
-        {'encoding':'cp1252','kind':'html_text_segments','segments':1},
-        {'encoding':'euc_jp','kind':'html_text_segments','segments':3},
-        {'encoding':'shift_jis','kind':'html_text_segments','segments':1}]
+    assert {p['encoding'] for p in decoded.provenance()['recoveries']}=={'cp1252','euc_jp','shift_jis'}
+    for region in decoded.provenance()['regions']:
+        assert 0<=region['raw_start']<region['raw_end']<=len(raw)
+        assert raw[region['raw_start']:region['raw_end']].decode(region['encoding']) in decoded.text
+
 
 
 def test_mixed_html_retains_small_damage_and_rejects_unbounded_damage():
@@ -159,8 +160,61 @@ def test_mixed_html_retains_small_damage_and_rejects_unbounded_damage():
         decode_source(mixed_posts(b'<p>'+b'\x82 '*20+b'</p>')[0])
 
 
-def test_mixed_recovery_requires_html_and_strong_independent_encoding_evidence():
-    from indexer.source_encoding import mixed_html
-    raw,_=mixed_posts()
-    assert mixed_html(raw.replace(b'<html>',b'').replace(b'</html>',b''),4) is None
-    assert mixed_html('<html><p>こんにちは。冒険に行きましょう。</p></html>'.encode('cp932'),4) is None
+def test_regional_recovery_requires_independent_encoding_evidence():
+    from indexer.source_encoding import regional_decode
+    assert regional_decode('<html><p>こんにちは。冒険に行きましょう。</p></html>'.encode('cp932'),4,'cp932') is None
+
+
+@pytest.mark.parametrize('separator',[b'</p><p>',b' ',b'\n'])
+def test_locally_encoded_runs_are_recovered_even_when_one_codec_accepts_the_entire_file(separator):
+    euc='こんにちはみんなで冒険';sjis='ギルドのみんなで蘇生の相談をしましょう。'
+    raw=b'<html><p>'+euc.encode('euc_jp')+separator+sjis.encode('cp932')+b'</p></html>'
+    raw.decode('cp932')  # Codec success alone previously hid the mixed bytes.
+    decoded=decode_source(raw)
+    assert decoded.text=='<html><p>'+euc+separator.decode()+sjis+'</p></html>'
+    assert decoded.encoding=='mixed' and decoded.invalid_bytes==0
+
+
+@pytest.mark.parametrize('wrapper',[b'',codecs.BOM_UTF8])
+def test_utf8_islands_and_western_text_decode_locally_with_exact_original_offsets(wrapper):
+    unicode='こんにちは世界。';western='A café guide with “quotes”.'
+    raw=wrapper+b'<html><p>'+unicode.encode('utf-8')+b'</p><p>'+western.encode('cp1252')+b'</p></html>'
+    decoded=decode_source(raw)
+    assert decoded.text=='<html><p>'+unicode+'</p><p>'+western+'</p></html>'
+    assert decoded.source_sha256==hashlib.sha256(raw).hexdigest()
+    for region in decoded.regions:
+        assert region['raw_start']>=len(wrapper)
+        assert raw[region['raw_start']:region['raw_end']].decode(region['encoding']) in decoded.text
+
+
+@pytest.mark.parametrize('encoding,text',[
+    ('cp1251','Привет миром'),('iso8859_7','Καλημέρα κόσμε'),('gb18030','你好世界新的冒险')])
+def test_declared_legacy_script_can_coexist_with_unicode_posts(encoding,text):
+    header=f'<html><meta charset="{encoding}"><p>'
+    unicode='Unicode: こんにちは世界。'
+    raw=header.encode()+text.encode(encoding)+b'</p><p>'+unicode.encode('utf-8')+b'</p></html>'
+    assert decode_source(raw).text==header+text+'</p><p>'+unicode+'</p></html>'
+
+
+def test_plain_text_lines_and_iso2022_posts_keep_their_local_encodings():
+    first='こんにちは世界。';second='ギルドのみんなで蘇生の相談をしましょう。'
+    raw=first.encode('iso2022_jp')+b'\n'+second.encode('utf-8')
+    assert decode_source(raw).text==first+'\n'+second
+
+
+def test_regional_metadata_preserves_unicode_attributes_and_exact_title_repairs():
+    title='ギルド冒険記録';footer='A café guide with “quotes”.'
+    raw=('<html><title>'+title+'</title><img alt="日本語の画像">').encode('utf-8')+footer.encode('cp1252')+b'</html>'
+    decoded=decode_source(raw)
+    assert decoded.text=='<html><title>'+title+'</title><img alt="日本語の画像">'+footer+'</html>'
+    assert repaired_title(title.encode('utf-8').decode('latin1'),title,decoded)==title
+    assert repaired_title('Operator title',title,decoded)=='Operator title'
+
+
+def test_adjacent_compatible_regions_are_coalesced_without_losing_original_byte_coverage():
+    unicode='こんにちは世界。';western='café '*100
+    raw=unicode.encode('utf-8')+b'\n'+western.encode('cp1252')
+    decoded=decode_source(raw)
+    assert decoded.text==unicode+'\n'+western
+    assert len(decoded.regions)==2
+    assert raw[decoded.regions[1]['raw_start']:decoded.regions[1]['raw_end']].decode('cp1252') in western

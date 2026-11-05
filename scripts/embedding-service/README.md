@@ -214,7 +214,7 @@ progress, count remaining documents using `remaining_query()` and count the exac
 Do not equate a Job exit or a process-local processed count with total completion.
 
 Website source repair also requires extraction checkpoint
-`html-2026-11-04-safe-structure`. The shared offline decoder handles CP932 Windows
+`html-2026-11-05-regional-decoding`. The shared offline decoder handles CP932 Windows
 extensions, Shift-JIS, EUC-JP and ISO-2022-JP using actual byte/script evidence.
 Misdeclared UTF-8 archive wrappers do not override validated bytes. Bounded damaged
 sequences remain visible as U+FFFD and have counted source-hash-bound provenance;
@@ -334,7 +334,7 @@ fragments and verified empty posting forms are excluded only from the search vie
 quoted code, tables, attachment labels, biographies and surviving quotations remain.
 The reader converter flattens excessive formatting/container nesting while keeping
 visible text, data cells, code and image links, under extraction checkpoint
-`html-2026-11-04-safe-structure`.
+`html-2026-11-05-regional-decoding`.
 
 The upgrade checks exact saved text/title/context/kind/offset tuples as well as
 source/view provenance before reusing v4 vectors. Matching records get the new
@@ -383,19 +383,22 @@ unchanged. Existing-document reindexing alone cannot repair absent records.
 
 ### Mixed legacy punctuation and large vector writes
 
-Over-budget Japanese decodes can recover isolated Windows-1252 list dashes and
-bullets between ASCII words/numbers. Valid multibyte characters stay intact;
-unknown damaged bytes retain the existing replacement/error bounds. Recovery
-counts and the secondary encoding are recorded alongside the original source
-hash. Previously accepted decoding is unchanged, so completed source/passages
-checkpoints remain valid.
+The shared offline decoder uses local evidence and inherited text-node context,
+with declarations/detection as hints. It can mix UTF-8, Shift-JIS/CP932, EUC-JP,
+ISO-2022-JP and a declared legacy script within a file, including whitespace-bound
+runs in the same text node and plain-text lines. Strict codec success alone does
+not establish the correct interpretation. Independent local evidence is required
+before switching encodings; ambiguous short runs inherit context, and unknown
+bytes retain visible replacement markers within the existing damage bounds.
+Provenance records the exact source hash, byte ranges, encoding decisions and
+replacement counts. Compatible adjacent ranges are coalesced to bound metadata.
 
-HTML rejected by those bounds can also contain independently encoded forum
-posts. A final fallback requires substantial, strictly decoded kana evidence for
-both EUC-JP and Shift-JIS in separate text segments before decoding each segment.
-It preserves markup, short Japanese labels, Western footer text and the original
-damage bounds; source hashes and segment encoding counts remain in provenance.
-It cannot turn a damaged single-encoding page into a successful mixed decode.
+`source-decoding-v2` and `html-2026-11-05-regional-decoding` let the text Job revisit
+older website extraction, including mixed pages that previously passed a single
+codec. The model and passage policy stay unchanged. Identical reader/passage
+requests reuse existing vectors and update only the extraction/provenance
+checkpoint; changed readers/views replace vectors atomically. Existing
+mail/newsgroup checkpoints, enrichment, source identity and dates remain intact.
 
 Indexer and curation writes use `indexer.vector_json` to encode dense vectors with
 nine significant digits after a float32 conversion. Every finite float32,
