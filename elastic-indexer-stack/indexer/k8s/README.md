@@ -225,7 +225,7 @@ Infrastructure recovery is automatic; application/integrity failures remain
 visible for a correction. Inspect Job conditions and logs rather than assuming
 that a Running pod has made progress.
 
-The current Gemma passage upgrade uses `eq-passages-480-v7`, with both model and
+The current Gemma passage upgrade uses `eq-passages-480-v8`, with both model and
 passage policy required for completion. Its pending handoff prioritizes the
 unfinished model frontier, then upgrades older Gemma passages. Retain the old
 Job and prepared checkout. A separate `render-reindex.py --images` Job can index
@@ -246,3 +246,10 @@ cursors survive restarts. It uses one CUDA worker, no paid enrichment, no source
 preparation and no archive Git writes. Existing IDs and their enrichment are
 preserved. Run this separately from the checkpoint-preserving passage upgrade;
 neither job replaces the independent image workflow.
+
+The current v8 handoff adds only the small shared `indexing-state` mount for the
+bounded text-embedding cache and persistent broad-reindex exception ledger.
+Retain the prepared archive mount, existing missing-text SQLite inventory,
+immutable recovery runner, previous Jobs and independent image Job. See the
+[cache and diagnostic runbook](../../../scripts/embedding-service/README.md#bounded-shared-text-embedding-cache-and-rejection-ledger)
+for heat/idle expiry, bounds, safe failure categories and bounded pending-ID retry.

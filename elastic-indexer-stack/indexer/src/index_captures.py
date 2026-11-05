@@ -25,6 +25,7 @@ from captures import check_manifest, indexable, verified_source, verified_path
 from capture_budget import budget_identity
 from indexer.gemma import CHUNKING_VERSION, DOCUMENT_PREFIX, MODEL, chunk_source
 from indexer import passages
+from indexer.embedding_cache import optional_cache
 from indexer.image_embeddings import ImageUnavailable, MAX_BYTES, VERSION as IMAGE_VERSION, prepare_image, response_vector
 from indexer.html_extraction import WEBSITE_EXTRACTION_VERSION, website_markdown
 from indexer.source_encoding import decode_source, repaired_title
@@ -74,6 +75,7 @@ class Services:
         self.embedding_url = os.environ.get("EMBEDDING_URL", "http://nomic-embeddings-rtx3080.eqarchives-es.svc.cluster.local:8080").rstrip("/")
         self.image_url = os.environ.get("IMAGE_EMBEDDING_URL", "http://gemma-image-embeddings.eqarchives-es.svc.cluster.local:8080").rstrip("/")
         self.visual_cache = {}
+        self.embedding_cache = optional_cache()
         self.client = httpx.Client(auth=(directory.joinpath("es_username").read_text().strip(),
                                         directory.joinpath("es_password").read_text().strip()),
                                    timeout=httpx.Timeout(120, connect=10), trust_env=False)
@@ -83,6 +85,9 @@ class Services:
     def close(self):
         self.client.close()
         self.embedder.close()
+        if self.embedding_cache:
+            print(json.dumps({'embedding_cache':dict(self.embedding_cache.stats)}),flush=True)
+            self.embedding_cache.close()
         if self.enricher:
             self.enricher.close()
 
@@ -122,22 +127,31 @@ class Services:
         raise CrawlError("Image embedding service busy; import remains resumable")
 
     def embedding(self, text, *, title="", context=""):
+        request=passages.document_prefix(title)+context+text
+        if self.embedding_cache:
+            return self.embedding_cache.embed([request],lambda values:[self._embedding_request(values[0])])[0]
+        return self._embedding_request(request)
+
+    def _embedding_request(self, request):
         for attempt in range(3):
             try:
-                response = self.embedder.post(self.embedding_url + "/v1/embeddings", json={"model": self.model, "input": passages.document_prefix(title) + context + text})
+                response = self.embedder.post(self.embedding_url + "/v1/embeddings", json={"model": self.model, "input": request})
             except httpx.HTTPError:
                 if attempt == 2:
                     raise CrawlError("Embedding service request failed; batch remains resumable") from None
             else:
                 if response.status_code == 200:
                     try:
-                        vector = response.json()["data"][0]["embedding"]
+                        payload=response.json();rows=payload['data']
+                        if not isinstance(rows,list) or len(rows)!=1 or not isinstance(rows[0],dict) or type(rows[0].get('index')) is not int or rows[0]['index']!=0:
+                            raise ValueError('Embedding response index differs from its input')
+                        vector = rows[0]["embedding"]
                     except (ValueError, KeyError, IndexError, TypeError):
-                        raise CrawlError("Embedding service returned an invalid embedding") from None
+                        raise CrawlError("Embedding service returned an invalid embedding vector response") from None
                     if (not isinstance(vector, list) or len(vector) != 768 or any(type(value) not in (int, float) or not math.isfinite(value) for value in vector)
                             or not any(vector)):
                         raise CrawlError("Embedding service returned an invalid 768-dimensional vector")
-                    if response.json().get("model") != self.model:
+                    if payload.get("model") != self.model:
                         raise CrawlError("Embedding service returned a different model; import remains pending")
                     return vector
                 if response.status_code not in (429, 502, 503, 504):

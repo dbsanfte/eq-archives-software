@@ -202,7 +202,7 @@ not hold other workers. Missing sources are counted, retain original text/chunks
 and never claim repaired extraction. Unusable old vectors with no corresponding
 text are cleared during replacement. Empty sources are not invented.
 
-`embedding_model` and `text_chunking_version=eq-passages-480-v7` together are the
+`embedding_model` and `text_chunking_version=eq-passages-480-v8` together are the
 text resume checkpoint. Older Gemma records remain eligible for the passage
 upgrade; `REINDEX_PRIORITIZE_UNCONVERTED=true` finishes the old model frontier
 first, then upgrades previously converted Gemma records. Count model conversion
@@ -245,7 +245,7 @@ have separate boundaries. Table chunks retain complete rows where possible and
 repeat column context. Oversized rows/prose split with overlap. Every complete
 request is checked with the pinned Gemma tokenizer against 480 tokens.
 
-Policy `eq-passages-480-v7` recognizes phpBB, WWWThreads, Snitz and vBulletin by cooperating
+Policy `eq-passages-480-v8` recognizes phpBB, WWWThreads, Snitz and vBulletin by cooperating
 HTML features across domains, along with Ezboard's Author/Comment rows. Each post
 keeps its own speaker/date, quotes and authored data tables. Signature separators,
 profiles and thread controls stay outside those message bodies. Partial/damaged
@@ -475,3 +475,93 @@ unchanged v4/v5/v6 requests can upgrade their checkpoint after the existing full
 reader/source/view checks; changed plans replace all searched vectors atomically.
 The unfinished model frontier retains priority. No paid enrichment runs during
 this repair, and existing corrupt/missing-source diagnostics remain visible.
+
+### Bounded shared text-embedding cache and rejection ledger
+
+The v8 passage repair recognizes complete phpBB database-error layouts before
+applying the small-error-page limit, retaining readers and genuine SQL articles,
+quotes and forum posts. Explicit bodies nested inside malformed heads are
+recovered before metadata removal. A separate generated diagnostic can be removed
+without erasing real appended replies or quoted troubleshooting. `source-decoding-v3` requires varied Japanese script
+before trusting an undeclared detector hint; repeated Western symbols cannot
+establish Japanese or a second regional codec. Explicit Japanese declarations,
+local mixed-encoding recovery and bounded damage checks remain. The website
+reader checkpoint is `html-2026-11-05-script-evidence`. Verified identical raw
+bytes and decoding provenance can advance the previous regional-reader checkpoint
+without extracting the reader again; exact unchanged v4/v5/v6/v7 passage requests
+can reuse their vectors. Changed readers/views replace searched fields atomically.
+
+Text workers and newly submitted curation imports share private SQLite state at
+`/mnt/samsung/eqarchives-curation/indexing-state`, mounted as `/indexing-state`.
+It uses the existing Samsung-backed curation PVC; continuations mount the same
+host directory without changing their source checkout or import cursor. The seed
+init step creates only this small directory, including on previously seeded
+volumes. It is owned by 10001:10001, mode 2770; workers retain their existing UID
+and gain supplemental group 10001. Database files are mode 0660. No archive-tree
+ownership walk, source preparation or copy is required.
+
+`EMBEDDING_CACHE_PATH=/indexing-state/embeddings.sqlite` enables the optional
+cache. It stores hashes and checksummed 768-dimensional float32 vectors, not
+source text or credentials. Keys bind the entire prefixed title/context/text
+request to the model alias, immutable weight/runtime pins and tokenizer checksum.
+Both image builds copy the authoritative model `runtime.env` and indexing
+`cuda.env` for that identity; a CUDA-runtime upgrade invalidates reuse independently
+of the live Vulkan runtime. Every
+source occurrence retains its own offsets and vector; a hit never bypasses source
+validation, complete-response checks or the document's atomic model checkpoint.
+
+Defaults and environment overrides:
+
+| Variable | Default | Purpose |
+| --- | ---: | --- |
+| `EMBEDDING_CACHE_MAX_BYTES` | 536870912 | 512 MiB SQLite database page cap |
+| `EMBEDDING_CACHE_MAX_ENTRIES` | 100000 | Maximum live vectors, further bounded by the byte cap |
+| `EMBEDDING_CACHE_HALF_LIFE_SECONDS` | 86400 | One-day half-life for accumulated heat |
+| `EMBEDDING_CACHE_MAX_IDLE_SECONDS` | 604800 | Expire an entry seven days after its last hit |
+
+On a hit, heat decays exponentially over the elapsed idle time, gains one hit,
+and refreshes last-use time. Capacity eviction uses an indexed equivalent of the
+current decayed heat, retaining frequently used inputs over colder ones without
+scanning all cached vectors. Old heat fades; hard idle expiry applies even to a
+formerly hot entry. Expired entries are unusable immediately and reclaimed in
+bounded batches during cache activity. SQLite reuses freed pages instead of
+vacuuming the entire file. An 8 MiB WAL high-water mark gates further writes and
+attempts a bounded checkpoint; journal growth is limited to that threshold plus
+one bounded transaction. A long-lived reader cannot grow the journal indefinitely.
+
+Use consistent bounds across clients. A changed heat half-life needs a fresh
+cache path for all clients; incompatible policy is reported and bypassed.
+Contention, corrupt entries or unavailable optional cache storage fall back to
+inference, with counters/warnings. Invalid or incomplete inference responses fail
+before entering the cache. No SQLite transaction holds an inference/ES call.
+Cache hits/misses/evictions appear in acknowledged reindex progress; imports print
+their cache counters. This adds no paid enrichment.
+
+`REINDEX_DIAGNOSTICS_PATH=/indexing-state/reindex-failures.sqlite` is independent
+of the disposable cache. It persists rejected IDs, actual source hashes when
+available, model/policy, safe reason categories, exception type, first/last times,
+attempts and originating Job. It never stores exception payloads or source text.
+Successful acknowledged repairs retain the rejection history and record the
+resolution policy/hash/Job. Missing sources and failed optimistic updates remain
+pending. Metadata contention retries only the ledger transaction after external
+work; other ledger failures stay visible. A small pending-ID index avoids hashing
+or querying SQLite for every successful record. Existing import gaps retain their
+own persistent inventory.
+
+Inspect an existing ledger read-only, without running inference or changing archive
+documents. Missing/unreadable storage is an error; inspection and retry commands
+never create an empty replacement ledger:
+
+```bash
+python -m indexer.reindex_diagnostics --status pending --limit 100
+python -m indexer.reindex_diagnostics --status all --limit 100
+```
+
+During an explicit operator retry window, the same pinned worker can run
+`python reindex_embeddings.pyc --retry-failed --limit 1000`. This selects at most
+1,000 distinct pending IDs and never turns an empty exception list into a broad
+scan. Already-complete IDs can resolve their diagnostics without inference.
+Content/integrity failures retain their failure status and never hold later
+records; the ledger does not pretend they completed. Continue using the prepared,
+pending-Job handoff, preserve all predecessors/cursors and leave the independent
+image Job unchanged.

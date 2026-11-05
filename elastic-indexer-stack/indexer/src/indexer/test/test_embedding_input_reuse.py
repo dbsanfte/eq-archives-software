@@ -64,3 +64,17 @@ def test_reuse_does_not_cross_plan_or_model_calls(monkeypatch):
     source,plan=repeated_plan(('same','same'));service,seen=manager(monkeypatch)
     for _ in range(2):service.get_passages_and_embeddings(Document(page_content=source),plan)
     assert len(seen)==2
+
+
+def test_enabled_persistent_cache_reuses_requests_across_independent_managers_and_plans(tmp_path,monkeypatch):
+    monkeypatch.setenv('EMBEDDING_CACHE_PATH',str(tmp_path/'shared.sqlite'))
+    monkeypatch.setenv('GEMMA_EMBEDDING_PROFILE','cuda');monkeypatch.setenv('GEMMA_EMBEDDING_BATCH_SIZE','8')
+    source,plan=repeated_plan();calls=[];results=[]
+    for _ in range(2):
+        service=OpenAIManager.__new__(OpenAIManager);service._embedding_model_name=gemma.MODEL
+        service._fetch_nomic_batch=lambda inputs:calls.extend(inputs) or [[1.]+[0.]*767 for _ in inputs]
+        results.append(service.get_passages_and_embeddings(Document(page_content=source),plan))
+        service._embedding_cache.close()
+    assert len(calls)==2 and len(results[0])==len(results[1])==4
+    assert [(p['source_start'],p['source_end']) for p in results[1]]==[(p.start,p.end) for p in plan.passages]
+    assert np.array_equal(results[0][0]['vector'],results[1][0]['vector'])

@@ -243,7 +243,7 @@ semantic branches only use completed Gemma documents. Existing enrichment, OCR,
 provenance and dates remain intact, with **no paid Luna calls** during backfill.
 See the [model migration runbook](scripts/embedding-service/README.md#embeddinggemma-migration).
 
-Gemma's `eq-passages-480-v7` policy embeds real titles, section and table context,
+Gemma's `eq-passages-480-v8` policy embeds real titles, section and table context,
 forum posts and attributed quotations. It removes identifiable navigation and
 supporting scripts from a separate hashed search view, retaining full reader
 text and source files. Unknown site layouts use conservative fallbacks. The
@@ -260,6 +260,11 @@ review. Everlore comments retain their database entity context. Exact repeated
 embedding inputs share inference within a document while every original source
 occurrence remains indexed. Generated error pages retain their reader/source
 without contributing semantic vectors.
+
+Text workers and approved imports share a bounded, persistent embedding cache.
+Recent and frequent inputs retain decaying heat; idle entries expire after seven
+days. A separate reindex ledger retains rejected source IDs/hashes and tracks
+retries and verified resolutions. See the [cache and diagnostic runbook](scripts/embedding-service/README.md#bounded-shared-text-embedding-cache-and-rejection-ledger).
 
 Japanese source decoding is shared across discovery, imports and reindexing.
 CP932 Windows extensions and bounded truncated sequences retain readable Japanese

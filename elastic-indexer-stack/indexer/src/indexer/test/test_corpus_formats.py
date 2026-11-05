@@ -306,3 +306,37 @@ def test_php_warning_prefix_and_fatal_footer_do_not_erase_an_intervening_article
 def test_error_heading_cannot_erase_a_populated_reply_quote():
     p=plan('<title>System Message: Error</title><h1>Error</h1><textarea>Only surviving healing testimony.</textarea>','post.asp')
     assert p.passages and 'Only surviving healing testimony.' in p.view
+
+
+def sql_error():
+    return '''<title>Forum</title><table class=forumline><tr><th class=thHead><b>General Error</b></th></tr>
+    <tr><td><span class=gen>Could not delete old search id sessions <b><u>DEBUG MODE</u></b><br>
+    SQL Error : 2006 MySQL server has gone away<br>DELETE FROM phpbb_search_results WHERE session_id IN ('''+','.join("'archived-session'" for _ in range(2000))+''')</span></td></tr></table>
+    <span class=copyright>Powered by <a href="https://www.phpbb.com/">phpBB</a></span>'''
+
+
+def test_large_phpbb_sql_dumps_do_not_bypass_generated_error_classification():
+    p=plan(sql_error(),'search.php?search_author=Scholar')
+    assert p.method=='archive_status' and not p.passages
+
+
+@pytest.mark.parametrize('wrapper',['<article>{}</article>','<blockquote>{}</blockquote>','<pre>{}</pre>',
+                                   '<p>'+('Independent recovery advice. '*10)+'</p>{}'])
+def test_authored_sql_troubleshooting_keeps_its_evidence_and_instructions(wrapper):
+    p=plan(wrapper.format(sql_error()))
+    assert p.passages and 'SQL Error' in p.view
+
+
+def test_appended_bodies_inside_a_damaged_head_keep_all_real_messages_after_an_error():
+    raw='<html><head><title>Forum search</title><body>'+sql_error()+'</body>'
+    raw+='<body><table><tr><td><span class=postbody>First surviving reply.</span></td></tr></table></body>'
+    raw+='<body><table><tr><td><span class=postbody>Second surviving reply.</span></td></tr></table></body></html>'
+    p=plan(raw,'search.php?search_author=Scholar')
+    assert all(t in p.view for t in ('First surviving reply.','Second surviving reply.'))
+    assert 'SQL Error' not in p.view and 'DELETE FROM' not in p.view
+    assert 'recovered_body_from_head' in p.exclusions and 'generated_forum_diagnostic' in p.exclusions
+
+
+def test_unknown_html_with_a_body_inside_head_keeps_its_authored_text():
+    p=plan('<html><head><title>Guild archive</title><body><p>Complete guild testimony.</p></body></html>')
+    assert 'Complete guild testimony.' in p.view

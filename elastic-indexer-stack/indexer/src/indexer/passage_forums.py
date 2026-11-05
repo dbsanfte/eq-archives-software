@@ -702,11 +702,35 @@ def extract(soup,host,path='',raw=None):
     return ezboard(soup,host) or reply_form(soup,path)
 
 
+def database_error_tables(soup):
+    """Complete generated phpBB diagnostics outside authored message bodies."""
+    tables=[]
+    # phpBB can print an enormous SQL statement after a generated database
+    # error. Recognize its complete engine layout before the small-page bound;
+    # length itself must never turn a diagnostic dump into authored content.
+    if (not soup.find(['article','main','blockquote','pre','code'])
+            and soup.find('a',href=re.compile(r'(?:^|/)www\.phpbb\.com|https?://phpbb\.com',re.I))):
+        for table in soup.select('table.forumline'):
+            heading=table.select_one('th.thHead')
+            if words(heading).lower()!='general error':continue
+            diagnostic=table.select_one('span.gen')
+            if diagnostic is None:continue
+            if table.select_one('.postbody') or any('postbody' in p.get('class',[]) for p in table.parents):continue
+            prefix=words(diagnostic)[:4096]
+            debug=next((n for n in diagnostic.find_all(['b','u']) if words(n)=='DEBUG MODE'),None)
+            authored=any(len(words(n))>100 and table not in n.parents for n in soup.find_all('p'))
+            if (debug and not authored and re.search(r'\bSQL Error\s*:\s*\d+\b',prefix,re.I)
+                    and re.search(r'\b(?:DELETE\s+FROM|SELECT\s+|INSERT\s+INTO|UPDATE\s+)\b',prefix,re.I)):
+                tables.append(table)
+    return tables
+
+
 def excluded_page(soup,title,path):
     """Require page/engine evidence; a discussion of an error is still content."""
     if soup.find(['article','main']) or soup.select_one('.postbody,.post-content,.posttext,.archivebody,[id^=post_message_],span.spnMessageText,p.post,.msg_text_cell'):
         return None
     if any(words(t) for t in soup.find_all('textarea')):return None
+    if database_error_tables(soup):return 'archived_access_or_error_page'
     text=words(soup);heading=words(soup.find(['h1','h2']))
     if len(text)>6000:return None
     known_title=re.fullmatch(r'(?:System Message:\s*Error|404(?: Not Found)?|403(?: Forbidden)?|Access Denied|Page Not Found|Site Temporarily Disabled)',title,re.I)

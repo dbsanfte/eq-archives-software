@@ -61,6 +61,28 @@ def test_short_hinted_japanese_is_not_required_to_fill_a_chunk():
     assert decode_source(text.encode('cp932'),'text/html; charset=Shift_JIS').text==text
 
 
+@pytest.mark.parametrize('detection',[{}, {'encoding':'EUC-JP','confidence':.99},
+                                     {'encoding':'SHIFT_JIS','confidence':.99}])
+def test_repeated_western_symbols_are_not_evidence_of_damaged_japanese(detection):
+    text='<html><p>Guild discussion '+('¤'*140)+'</p><footer>ezboard® Copyright ©1999-2002</footer></html>'
+    raw=text.encode('cp1252')
+    result=decode_source(raw,detection=detection)
+    assert result.text==text and result.encoding=='cp1252' and result.invalid_bytes==0
+    assert result.source_sha256==hashlib.sha256(raw).hexdigest()
+
+
+def test_repetitive_japanese_with_an_explicit_charset_retains_its_declared_script():
+    text='<html><meta charset="EUC-JP"><p>'+('あ'*100)+'</p></html>'
+    result=decode_source(text.encode('euc_jp'))
+    assert result.text==text and result.encoding=='euc_jp'
+
+
+def test_western_decoration_cannot_create_spurious_japanese_regional_anchors():
+    text='<html><p>Server '+('¤'*12)+'</p><p>Guild '+('¤'*10)+'</p><footer>ezboard® Copyright ©1999-2002</footer></html>'
+    result=decode_source(text.encode('cp1252'))
+    assert result.text==text and result.encoding=='cp1252' and not result.regions
+
+
 def test_late_non_ascii_bytes_are_validated_beyond_detector_sample():
     text=' '*12000+'<p>こんにちは。冒険に行きましょう。①番の髙い山です。</p>'
     assert decode_source(text.encode('cp932'),detection={'encoding':'ascii','confidence':1}).text==text
@@ -256,3 +278,21 @@ def test_concurrent_stateful_decodes_keep_each_sources_damage_counts_isolated():
         return result.invalid_bytes,result.text
     with ThreadPoolExecutor(max_workers=4) as pool:results=list(pool.map(read,range(20)))
     assert results==[(i%2,japanese+('\ufffd' if i%2 else '')) for i in range(20)]
+
+
+@pytest.mark.parametrize('wrapper',[
+    b'<script><!-- %s --></script>',b'<style>/* %s */</style>',b'<!-- %s -->'])
+def test_hidden_generator_comments_cannot_establish_the_readers_language(wrapper):
+    # Old page generators paste partially escaped Japanese comments into an
+    # otherwise Western page. Damage there must not reject its readable body.
+    comment='ステータス行に文字列を表示します'.encode('cp932')+b'\x82 '*4
+    raw=b'<html><head>'+wrapper%comment+b'</head><body><p>Guild caf\xe9 guide. Copyright \xa9 2002.</p></body></html>'
+    result=decode_source(raw,detection={'encoding':'SHIFT_JIS','confidence':.99})
+    assert result.text==raw.decode('iso8859-1') and result.invalid_bytes==0
+    assert result.source_sha256==hashlib.sha256(raw).hexdigest()
+
+
+def test_visible_japanese_evidence_remains_valid_alongside_hidden_generator_code():
+    body='こんにちは。ギルドのみんなで冒険に行きましょう。'
+    text='<html><script>// hidden status text</script><p>'+body+'</p></html>'
+    assert decode_source(text.encode('cp932')).text==text

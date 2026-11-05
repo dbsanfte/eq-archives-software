@@ -416,7 +416,20 @@ class OpenAIManager:
             self._logger.error("Error fetching embedding (%s)", type(e).__name__)
             raise
         
+    def embedding_cache_metrics(self):
+        cache = getattr(self, "_embedding_cache", None)
+        return dict(cache.stats) if cache is not None else {}
+
     def _embed_nomic_batch(self, texts: list[str]) -> list:
+        if self._embedding_model_name == gemma.MODEL:
+            from .embedding_cache import optional_cache
+            if not hasattr(self, "_embedding_cache"):
+                self._embedding_cache = optional_cache()
+            if self._embedding_cache is not None:
+                return self._embedding_cache.embed(texts, self._fetch_nomic_batch)
+        return self._fetch_nomic_batch(texts)
+
+    def _fetch_nomic_batch(self, texts: list[str]) -> list:
         """Bind each returned vector to its input index before accepting a batch."""
         try:
             encoding = getattr(self, "_nomic_encoding", os.environ.get("NOMIC_EMBEDDING_ENCODING", "float"))

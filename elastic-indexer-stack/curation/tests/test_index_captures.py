@@ -190,7 +190,7 @@ def test_create_sends_compact_float32_vectors_without_rounding_other_metadata(tm
 
 @pytest.mark.parametrize('vector',[[0.1]*767,[float('inf')]*768,[0.0]*768,['bad']*768,None,42,{}])
 def test_bad_vectors_fail_without_indexing(tmp_path,vector):
-    instance=service(tmp_path,lambda request:httpx.Response(200,content=json.dumps({'data':[{'embedding':vector}]})))
+    instance=service(tmp_path,lambda request:httpx.Response(200,content=json.dumps({'data':[{'index':0,'embedding':vector}]})))
     try:
         with pytest.raises(CrawlError,match='vector'): instance.embedding('EQ source')
     finally: instance.close()
@@ -200,7 +200,7 @@ def test_embeddings_are_serial_prefixed_and_retry_transient_busy_response(tmp_pa
     requests=[]
     def handler(request):
         requests.append(json.loads(request.content))
-        return httpx.Response(503) if len(requests)==1 else httpx.Response(200,json={'model':MODEL,'data':[{'embedding':[0.1]*768}]})
+        return httpx.Response(503) if len(requests)==1 else httpx.Response(200,json={'model':MODEL,'data':[{'index':0,'embedding':[0.1]*768}]})
     instance=service(tmp_path,handler)
     try:
         with patch('index_captures.time.sleep'):
@@ -217,7 +217,7 @@ def test_default_embedding_requests_use_cuda_and_leave_vulkan_for_live_queries(t
     seen=[]
     def handler(request):
         seen.append(request)
-        return httpx.Response(200, json={'model':MODEL,'data':[{'embedding':[1.0]+[0.0]*767}]})
+        return httpx.Response(200, json={'model':MODEL,'data':[{'index':0,'embedding':[1.0]+[0.0]*767}]})
     services=service(tmp_path,handler)
     try:
         assert len(services.embedding('EverQuest cleric guild'))==768
@@ -230,7 +230,7 @@ def test_default_embedding_requests_use_cuda_and_leave_vulkan_for_live_queries(t
 
 def test_successful_model_requests_have_no_intentional_throttle(tmp_path):
     instance=service(tmp_path,lambda request:httpx.Response(200,json={
-        'model':MODEL,'data':[{'embedding':[1.]+[0.]*767}]}))
+        'model':MODEL,'data':[{'index':0,'embedding':[1.]+[0.]*767}]}))
     try:
         with patch('index_captures.time.sleep') as sleep:
             instance.embedding('A complete guide.')
@@ -240,9 +240,37 @@ def test_successful_model_requests_have_no_intentional_throttle(tmp_path):
 
 def test_model_mismatch_cannot_index_vectors_from_old_backend(tmp_path):
     instance=service(tmp_path, lambda request: httpx.Response(200, json={
-        'model':'old-nomic', 'data':[{'embedding':[1.0]+[0.0]*767}]}))
+        'model':'old-nomic', 'data':[{'index':0,'embedding':[1.0]+[0.0]*767}]}))
     try:
         with pytest.raises(CrawlError, match='different model'):
             instance.embedding('Cleric')
     finally:
         instance.close()
+
+
+def test_embedding_cache_is_shared_between_independent_import_instances(tmp_path,monkeypatch):
+    monkeypatch.setenv('EMBEDDING_CACHE_PATH',str(tmp_path/'shared-cache.sqlite'))
+    calls=[]
+    def handler(request):
+        calls.append(json.loads(request.content))
+        return httpx.Response(200,json={'model':MODEL,'data':[{'index':0,'embedding':[1.]+[0.]*767}]})
+    for _ in range(2):
+        instance=service(tmp_path,handler)
+        try:
+            assert instance.embedding('Guild testimony.',title='Raid history',context='Post by Scholar\n')==[1.]+[0.]*767
+        finally:instance.close()
+    assert len(calls)==1 and calls[0]['input']=='title: Raid history | text: Post by Scholar\nGuild testimony.'
+
+
+@pytest.mark.parametrize('rows',[
+    [{'index':1,'embedding':[1.]+[0.]*767}],
+    [{'index':0,'embedding':[1.]+[0.]*767}]*2,
+    [{'embedding':[1.]+[0.]*767}],
+])
+def test_invalid_response_identity_cannot_poison_the_shared_cache(tmp_path,monkeypatch,rows):
+    monkeypatch.setenv('EMBEDDING_CACHE_PATH',str(tmp_path/'shared-cache.sqlite'))
+    instance=service(tmp_path,lambda request:httpx.Response(200,json={'model':MODEL,'data':rows}))
+    try:
+        with pytest.raises(CrawlError,match='vector'):instance.embedding('Guild evidence.')
+        assert instance.embedding_cache.get_many(['title: none | text: Guild evidence.'])=={}
+    finally:instance.close()

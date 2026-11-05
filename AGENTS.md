@@ -223,7 +223,7 @@ extraction checkpoints, enrichment, source identity, dates and last_indexed. No
 paid enrichment during this backfill. Do not reuse Nomic checkpoints as Gemma
 completion. The Nomic repair entry point remains for historical recovery only.
 Follow the embedding-service migration runbook for operator-authorized handoffs.
-Gemma text uses `eq-passages-480-v7`: budget title/context with every 480-token
+Gemma text uses `eq-passages-480-v8`: budget title/context with every 480-token
 request, retain full reader text, verify source-bound selected-view coverage and
 store view offsets/provenance separately. Unknown layouts retain content;
 format-specific navigation/post/table handling needs regression evidence. Resume
@@ -245,7 +245,7 @@ hostname exceptions. Validate full bytes, support CP932/Shift-JIS, EUC-JP and
 ISO-2022-JP using declaration/script evidence, and preserve unaffected encodings.
 Bounded damaged Japanese sequences retain U+FFFD markers and a counted, hashed
 decoding provenance; excessive damage fails visibly. Website extraction uses
-`html-2026-11-05-regional-decoding`; retain mail/newsgroup checkpoints. The Gemma
+`html-2026-11-05-script-evidence`; retain mail/newsgroup checkpoints. The Gemma
 resume query also requires that checkpoint for textual websites. Reuse vectors
 when the reader and source-bound passage plan are identical; repair corrupted
 readers/vectors atomically and source-proven garbled titles only. Retain original
@@ -258,7 +258,7 @@ UBB.classic Author/Topic rows and Lithium message/user/date cells across hosts.
 Retain damaged-header fallbacks and real quotes/tables/attachments. Allakhazam
 entity/comment projections may specialize the major site; unrelated layouts keep
 content. Deep reader formatting is flattened without losing visible source data.
-Version upgrades may reuse v4/v5/v6 vectors only after exact request metadata and
+Version upgrades may reuse v4/v5/v6/v7 vectors only after exact request metadata and
 source/view checks, never from version or body hash alone.
 Snitz composers retain their populated quote and every topic-review message,
 including text outside damaged rows; an uncertain review cannot select only its
@@ -270,6 +270,23 @@ Generated error layouts clear semantic fields independently of URL action;
 authored troubleshooting remains searchable. Exact per-plan embedding inputs
 may share inference only with their complete title/context/model request;
 return every original offset and validate all vectors before saving anything.
+The v8 repair requires varied script evidence for undeclared Japanese hints and
+recognizes complete large phpBB SQL-error layouts; retain explicit Japanese,
+mixed regions, authored troubleshooting and full readers. Byte/provenance-equal
+regional reader checkpoints may advance without extracting them again.
+Optional text-embedding cache state is shared with imports under the existing
+Samsung-backed curation PVC's `indexing-state` directory (10001:10001, 2770;
+database files 0660). Continuations add supplemental group 10001 and retain all
+other source/cursor/recovery mounts. Cache identity includes the full request,
+model weights/runtime pins and tokenizer. Defaults: 512 MiB database, 100,000
+entries, one-day heat half-life, seven-day hard idle expiry. Keep indexed decaying
+heat eviction, bounded cleanup/journal growth, independent vectors and complete
+batch validation. Optional cache failures bypass reuse visibly; mandatory
+diagnostic failures remain visible. Persist rejected IDs, hashes, safe reason
+categories and retry/resolution history independently of cache eviction. Resolve
+only after an acknowledged repair; retry metadata alone after external success.
+Explicit failed-ID retries stay bounded and an empty list cannot start a broad
+scan. Preserve missing-source visibility and the existing worker failure status.
 Missing website text uses `index_websites.py`: explicit pinned host scope, remote-free
 Git metadata, verified local blobs, persistent private SQLite cursors/gaps,
 create-only writes and CUDA only. No paid enrichment or repeated source preparation.

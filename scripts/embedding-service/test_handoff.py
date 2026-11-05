@@ -42,6 +42,14 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(env['GEMMA_EMBEDDING_BATCH_SIZE'], '8')
         self.assertEqual(env['SKIP_LLM_ENRICHMENT'], 'true')
         self.assertEqual(job['spec']['parallelism'], 0)
+        self.assertEqual(env['EMBEDDING_CACHE_PATH'],'/indexing-state/embeddings.sqlite')
+        self.assertEqual(env['REINDEX_DIAGNOSTICS_PATH'],'/indexing-state/reindex-failures.sqlite')
+        pod=job['spec']['template']['spec']
+        self.assertIn(10001,pod['securityContext']['supplementalGroups'])
+        self.assertEqual(pod['volumes'][-1]['hostPath']['path'],'/mnt/samsung/eqarchives-curation/indexing-state')
+        job['metadata']['uid']='new-uid'
+        resumed=handoff.render(job,'reindex-gemma-next','eqarchives-indexer:rtx3080-'+'b'*40,gemma=True)
+        self.assertEqual(resumed['spec']['template']['spec']['volumes'],pod['volumes'])
 
     def test_cuda_handoff_removes_inherited_secondary_and_embedding_overrides(self):
         previous = self.previous()
@@ -99,5 +107,15 @@ class TextImportHandoffTests(unittest.TestCase):
     def test_invalid_scope_or_mixed_vision_writer_is_refused(self):
         for kw in ({'text_hosts':['../site']},{'text_hosts':['site.example'],'images':True}):
             with self.assertRaises(ValueError):handoff.render(self.previous(),'reindex-missing-text','eqarchives-indexer:rtx3080-'+'a'*40,**kw)
+
+    def test_repeated_handoffs_preserve_single_cache_and_import_cursor_mounts(self):
+        old=self.previous()
+        first=handoff.render(old,'reindex-missing-text','eqarchives-indexer:rtx3080-'+'a'*40,text_hosts=['necro.eqclasses.com'])
+        first['metadata']['uid']='first-uid'
+        second=handoff.render(first,'reindex-missing-text-next','eqarchives-indexer:rtx3080-'+'b'*40,text_hosts=['necro.eqclasses.com'])
+        self.assertEqual(first['spec']['template']['spec']['volumes'],second['spec']['template']['spec']['volumes'])
+        self.assertEqual(first['spec']['template']['spec']['containers'][0]['volumeMounts'],second['spec']['template']['spec']['containers'][0]['volumeMounts'])
+        first['spec']['template']['spec']['volumes'][-1]['hostPath']['path']='/wrong-cursor'
+        with self.assertRaises(ValueError):handoff.render(first,'reindex-refused','eqarchives-indexer:rtx3080-'+'c'*40,text_hosts=['necro.eqclasses.com'])
 
 if __name__ == '__main__':unittest.main()

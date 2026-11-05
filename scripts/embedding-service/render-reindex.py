@@ -40,6 +40,19 @@ def render(previous, name, image, *, gemma=False, images=False, text_hosts=None)
         values.update(OPENAI_EMBEDDING_MODEL_NAME='embeddinggemma-2-768-v1',
                       REINDEX_ENTRYPOINT='reindex_embeddings.pyc', GEMMA_EMBEDDING_PROFILE='cuda',
                       GEMMA_EMBEDDING_BATCH_SIZE='8', REINDEX_PRIORITIZE_UNCONVERTED='true')
+    if (gemma or text_hosts) and not images:
+        values.update(EMBEDDING_CACHE_PATH='/indexing-state/embeddings.sqlite',
+                      REINDEX_DIAGNOSTICS_PATH='/indexing-state/reindex-failures.sqlite',REINDEX_JOB_NAME=name)
+        state={'name':'indexing-state','hostPath':{'path':'/mnt/samsung/eqarchives-curation/indexing-state','type':'Directory'}}
+        mount={'name':'indexing-state','mountPath':'/indexing-state'}
+        existing=next((v for v in pod['volumes'] if v['name']=='indexing-state'),None)
+        existing_mount=next((v for v in container['volumeMounts'] if v['name']=='indexing-state'),None)
+        if existing is not None and existing!=state or existing_mount is not None and existing_mount!=mount:
+            raise ValueError('Preserve the shared private indexing state location')
+        if existing is None:pod['volumes'].append(state)
+        if existing_mount is None:container['volumeMounts'].append(mount)
+        security=pod.setdefault('securityContext',{})
+        security['supplementalGroups']=list(dict.fromkeys(security.get('supplementalGroups',[])+[10001]))
     if images:
         vision='http://gemma-image-embeddings.eqarchives-es.svc.cluster.local:8080/v1'
         values.update(REINDEX_ENTRYPOINT='index_images.pyc', OPENAI_ENDPOINT=vision,
@@ -50,8 +63,14 @@ def render(previous, name, image, *, gemma=False, images=False, text_hosts=None)
     if text_hosts:
         values.update(REINDEX_ENTRYPOINT='index_websites.pyc',REINDEX_WORKERS='1',REINDEX_PREPARATION_WORKERS='0',
                       TEXT_IMPORT_HOSTS=','.join(dict.fromkeys(text_hosts)),TEXT_IMPORT_STATE='/text-state/inventory.sqlite')
-        pod['volumes'].append({'name':'text-state','hostPath':{'path':'/mnt/samsung/eqarchives-text-import','type':'Directory'}})
-        container['volumeMounts'].append({'name':'text-state','mountPath':'/text-state'})
+        state={'name':'text-state','hostPath':{'path':'/mnt/samsung/eqarchives-text-import','type':'Directory'}}
+        mount={'name':'text-state','mountPath':'/text-state'}
+        existing=next((v for v in pod['volumes'] if v['name']=='text-state'),None)
+        existing_mount=next((v for v in container['volumeMounts'] if v['name']=='text-state'),None)
+        if existing is not None and existing!=state or existing_mount is not None and existing_mount!=mount:
+            raise ValueError('Preserve the existing text import cursor mount')
+        if existing is None:pod['volumes'].append(state)
+        if existing_mount is None:container['volumeMounts'].append(mount)
     env.update({key: {'name': key, 'value': value} for key, value in values.items()})
     container['env'] = list(env.values())
     container['image'] = image

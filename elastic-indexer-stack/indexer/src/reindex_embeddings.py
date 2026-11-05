@@ -21,6 +21,7 @@ from indexer import passages
 from indexer.es_manager import ElasticsearchManager
 from indexer.html_extraction import extraction_version, WEBSITE_EXTRACTION_VERSION
 from indexer.openai_manager import OpenAIManager
+from indexer.reindex_diagnostics import Ledger,source_hash,existing_report
 from indexer.reindex_preparation import handler, verify_prepared
 from indexer.source_encoding import repaired_title
 from reindex_text import completed_records, source_path
@@ -61,6 +62,9 @@ class Progress:
     short_passages: int = 0
     excluded_documents: int = 0
     reused_embeddings: int = 0
+    cache_hits: int = 0
+    cache_misses: int = 0
+    cache_evictions: int = 0
 
 
 def remaining_query(ids=None):
@@ -90,7 +94,23 @@ def prepare(source, repo):
     record_id = source["id"]
     mime=source.get("mime_type") or ""
     textual=not mime or mime.startswith("text/") or mime in ("application/xhtml+xml","application/xml","application/json")
-    if source.get("file_type") == "text" and textual and source.get("text_extraction_version") != extraction_version(record_id):
+    decoded=None;reuse_reader=False
+    previous_plan=source.get('text_passage_provenance') or {}
+    previous=previous_plan.get('decoding') or {}
+    bindings=previous_plan.get('sources',[previous_plan])
+    bound_reader=(isinstance(bindings,list) and len(bindings)==1 and isinstance(bindings[0],dict)
+                  and bindings[0].get('source_sha256')==passages.digest(text))
+    if (record_id.startswith('websites/') and source.get('file_type')=='text' and textual and text.strip()
+            and source.get('text_extraction_version')=='html-2026-11-05-regional-decoding'
+            and previous.get('version') in ('source-decoding-v2','source-decoding-v3') and bound_reader
+            and re.fullmatch('[0-9a-f]{64}',previous.get('source_sha256',''))):
+        path=source_path(Path(repo),record_id)
+        if path.is_file():
+            decoded=handler()._read_decoded_file(str(path))
+            reuse_reader=({k:v for k,v in previous.items() if k!='version'}==
+                          {k:v for k,v in decoded.provenance().items() if k!='version'})
+            if reuse_reader:patch['text_extraction_version']=WEBSITE_EXTRACTION_VERSION
+    if source.get("file_type") == "text" and textual and source.get("text_extraction_version") != extraction_version(record_id) and not reuse_reader:
         path = source_path(Path(repo), record_id)
         if path.is_file():
             documents = handler()._get_documents_from_file(record_id, str(path))
@@ -110,7 +130,7 @@ def prepare(source, repo):
     if record_id.startswith("websites/") and textual:
         path = source_path(Path(repo), record_id)
         if path.is_file():
-            decoded=handler()._read_decoded_file(str(path))
+            decoded=decoded or handler()._read_decoded_file(str(path))
             raw=decoded.text;decoding=decoded.provenance()
             title=BeautifulSoup(raw,'html.parser').title
             corrected=repaired_title(source.get('title'),title.string if title else None,decoded)
@@ -153,7 +173,7 @@ def migrate_record(client, index, hit, repo, embedder, preparation_pool=None, *,
     saved=[tuple(p.get(k) for k in ('text_chunk','title','context','kind','source_start','source_end'))
            for p in source.get('text') or []]
     reuse=(source.get('embedding_model')==gemma.MODEL and not missing
-           and prior_version in ('eq-passages-480-v4','eq-passages-480-v5','eq-passages-480-v6',passages.VERSION) and previous.get('version')==prior_version
+           and prior_version in ('eq-passages-480-v4','eq-passages-480-v5','eq-passages-480-v6','eq-passages-480-v7',passages.VERSION) and previous.get('version')==prior_version
            and patch.get('text_full',source.get('text_full'))==source.get('text_full')
            and same_sources and expected==saved)
     if reuse:
@@ -200,10 +220,13 @@ def migrate_record(client, index, hit, repo, embedder, preparation_pool=None, *,
 
 
 def reindex(client, index, repo, *, ids=None, limit=0, workers=4, batch_size=100,
-            preparation_pool=None, factory=OpenAIManager, prioritize_unconverted=False):
+            preparation_pool=None, factory=OpenAIManager, prioritize_unconverted=False,ledger=None,include_completed=False):
     if not 1 <= workers <= 8 or limit < 0 or not 1 <= batch_size <= 1000:
         raise ValueError("Invalid migration bounds")
     query = remaining_query(ids)
+    if include_completed:
+        if not ids:raise ValueError('Completed-record retries require bounded explicit IDs')
+        query['bool']['must_not']=[]
     LOG.info("Starting Gemma migration: model=%s policy=%s remaining=%s workers=%s", gemma.MODEL, passages.VERSION,
              client.count(index=index, query=query)["count"], workers)
     progress = Progress()
@@ -211,8 +234,13 @@ def reindex(client, index, repo, *, ids=None, limit=0, workers=4, batch_size=100
     def execute(hit):
         if not hasattr(local, "embedder"):
             local.embedder = factory(embedding_model_name=gemma.MODEL)
+        metrics=getattr(local.embedder,'embedding_cache_metrics',lambda:{})
+        before=metrics();before=before if isinstance(before,dict) else {}
         diagnostics={}
         result=migrate_record(client, index, hit, repo, local.embedder, preparation_pool,diagnostics=diagnostics)
+        after=metrics()
+        if result[0] and isinstance(after,dict):
+            diagnostics.update({'cache_'+key:after.get(key,0)-before.get(key,0) for key in ('hits','misses','evictions')})
         return *result,diagnostics
     def scan():
         scanned = 0
@@ -244,22 +272,32 @@ def reindex(client, index, repo, *, ids=None, limit=0, workers=4, batch_size=100
         for hit, result, _ in completed_records(scan(), execute, pool, workers):
             try:
                 updated, missing, diagnostics = result()
-                progress.updated += updated
-                progress.unchanged += not updated
-                progress.unavailable_sources += missing
-                for key,value in diagnostics.items():
-                    setattr(progress,key,getattr(progress,key)+value)
-                failures = 0
-            except ConflictError:
+            except ConflictError as error:
                 progress.failed += 1
                 LOG.warning("Concurrent update retained: %s", hit["_id"])
+                if ledger:ledger.record(hit['_id'],model=gemma.MODEL,policy=passages.VERSION,
+                                        source_sha256=source_hash(hit['_source'],repo),error=error,job=os.environ.get('REINDEX_JOB_NAME',''))
             except Exception as error:
                 progress.failed += 1
                 LOG.error("Migration failed (%s): %s", type(error).__name__, hit["_id"])
+                if ledger:ledger.record(hit['_id'],model=gemma.MODEL,policy=passages.VERSION,
+                                        source_sha256=source_hash(hit['_source'],repo),error=error,job=os.environ.get('REINDEX_JOB_NAME',''))
                 if isinstance(error, (OpenAIError, TransportError)):
                     failures += 1
                     if failures >= 5:
                         raise RuntimeError("Repeated upstream failures; retry resumes completed versions") from None
+            else:
+                progress.updated += updated
+                progress.unchanged += not updated
+                progress.unavailable_sources += missing
+                for key,value in diagnostics.items():setattr(progress,key,getattr(progress,key)+value)
+                failures = 0
+                if ledger:
+                    if missing:ledger.record(hit['_id'],model=gemma.MODEL,policy=passages.VERSION,
+                                             category='source_unavailable',job=os.environ.get('REINDEX_JOB_NAME',''))
+                    elif ledger.has_pending(hit['_id']):
+                        ledger.resolve(hit['_id'],policy=passages.VERSION,source_sha256=source_hash(hit['_source'],repo),
+                                       job=os.environ.get('REINDEX_JOB_NAME',''))
             progress.processed += 1
             if progress.processed % batch_size == 0:
                 LOG.info("Progress %s", asdict(progress))
@@ -276,9 +314,16 @@ def main():
     parser.add_argument("--preparation-workers", type=int, default=int(os.getenv("REINDEX_PREPARATION_WORKERS", "2")))
     parser.add_argument("--prioritize-unconverted",action="store_true",
                         default=os.getenv('REINDEX_PRIORITIZE_UNCONVERTED','false')=='true')
+    parser.add_argument('--diagnostics',type=Path,default=os.environ.get('REINDEX_DIAGNOSTICS_PATH'))
+    parser.add_argument('--retry-failed',action='store_true',help='Retry at most 1000 persistent pending exceptions')
     args = parser.parse_args()
     if not 0 <= args.preparation_workers <= 4:
         parser.error("Preparation workers must be 0–4")
+    if args.retry_failed and not args.diagnostics:parser.error('--retry-failed requires persistent diagnostics')
+    if args.retry_failed and args.ids:parser.error('Choose --retry-failed or explicit --id records')
+    if args.retry_failed:
+        try:existing_report(args.diagnostics,limit=1)
+        except Exception as error:parser.error('Existing retry diagnostics are unavailable ('+type(error).__name__+')')
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("elastic_transport").setLevel(logging.WARNING)
@@ -287,11 +332,17 @@ def main():
     client.indices.put_mapping(index=manager._index_name, properties={
         "embedding_model": {"type": "keyword"}, "text_chunking_version": {"type": "keyword"},
         "text_passage_provenance": {"type": "object", "enabled": False}})
-    with ProcessPoolExecutor(max_workers=max(1, args.preparation_workers),
-                             mp_context=multiprocessing.get_context("spawn")) as preparation_pool:
-        progress = reindex(client, manager._index_name, args.repo, ids=args.ids, limit=args.limit,
-                           workers=args.workers, preparation_pool=preparation_pool if args.preparation_workers else None,
-                           prioritize_unconverted=args.prioritize_unconverted)
+    ledger=Ledger(args.diagnostics) if args.diagnostics else None
+    try:
+        ids=ledger.pending_ids() if args.retry_failed else args.ids
+        if args.retry_failed and not ids:return 0
+        with ProcessPoolExecutor(max_workers=max(1, args.preparation_workers),
+                                 mp_context=multiprocessing.get_context("spawn")) as preparation_pool:
+            progress = reindex(client, manager._index_name, args.repo, ids=ids, limit=args.limit,
+                               workers=args.workers, preparation_pool=preparation_pool if args.preparation_workers else None,
+                               prioritize_unconverted=args.prioritize_unconverted,ledger=ledger,include_completed=args.retry_failed)
+    finally:
+        if ledger:ledger.close()
     return 1 if progress.failed else 0
 
 

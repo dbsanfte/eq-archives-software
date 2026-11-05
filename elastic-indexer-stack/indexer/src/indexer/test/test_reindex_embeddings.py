@@ -196,7 +196,7 @@ def test_clean_completed_record_reuses_vectors_when_only_decoding_checkpoint_is_
     assert diagnostics=={'reused_embeddings':1}
     assert 'text' not in update and 'llm_summary_vector' not in update
     assert update['text_extraction_version']==extraction_version(source['id'])
-    assert update['text_passage_provenance']['decoding']['version']=='source-decoding-v2' and 'llm_image_text_vector' not in update
+    assert update['text_passage_provenance']['decoding']['version']=='source-decoding-v3' and 'llm_image_text_vector' not in update
     embedder.get_chunks_and_embeddings.assert_not_called();embedder.embed_text.assert_not_called()
     client.update.return_value={'result':'unexpected'}
     with pytest.raises(ValueError,match='did not update'):job.migrate_record(client,'eq',hit,tmp_path,embedder)
@@ -217,6 +217,85 @@ def test_scan_advances_and_content_errors_do_not_block_later_records(tmp_path):
     result = job.reindex(client, 'eq', tmp_path, workers=2, batch_size=1, factory=lambda **kw: embedder)
     assert result.failed == result.updated == 1 and result.processed == 2
     assert client.search.call_args_list[1].kwargs['search_after'] == hit['sort']
+
+
+def test_record_failures_are_persisted_and_acknowledged_retries_resolve_them(tmp_path,monkeypatch):
+    from indexer.reindex_diagnostics import Ledger
+    hit,client,embedder=fixture();ledger=Ledger(tmp_path/'failures.sqlite')
+    path=tmp_path/hit['_id'];path.parent.mkdir(parents=True);path.write_text('Verified source bytes')
+    client.search.side_effect=[{'hits':{'hits':[hit]}},{'hits':{'hits':[]}}]
+    migrate=MagicMock(side_effect=ValueError('Could not decode file /private/source with any encoding.'))
+    monkeypatch.setattr(job,'migrate_record',migrate)
+    progress=job.reindex(client,'eq',tmp_path,workers=1,ledger=ledger,factory=lambda **kw:embedder)
+    assert progress.failed==1 and ledger.pending_ids()==[hit['_id']]
+    row=ledger.report()['records'][0];assert row['reason']=='source_decoding_rejected' and len(row['source_sha256'])==64
+    client.search.side_effect=[{'hits':{'hits':[hit]}},{'hits':{'hits':[]}}]
+    migrate.side_effect=None;migrate.return_value=(1,0)
+    progress=job.reindex(client,'eq',tmp_path,workers=1,ledger=ledger,factory=lambda **kw:embedder,ids=[hit['_id']],include_completed=True)
+    assert progress.updated==1 and not ledger.pending_ids()
+    assert ledger.report(status='resolved')['records'][0]['resolution_policy']==passages.VERSION
+    assert client.count.call_args.kwargs['query']['bool']['must_not']==[]
+
+
+def test_completed_retry_can_resolve_diagnostics_without_writing_or_inference(tmp_path):
+    from indexer.reindex_diagnostics import Ledger
+    hit,client,embedder=fixture();source=hit['_source']
+    source.update(embedding_model=gemma.MODEL,text_chunking_version=passages.VERSION)
+    ledger=Ledger(tmp_path/'failures.sqlite');ledger.record(hit['_id'],model=gemma.MODEL,policy='old',error=ValueError())
+    client.search.side_effect=[{'hits':{'hits':[hit]}},{'hits':{'hits':[]}}]
+    result=job.reindex(client,'eq',tmp_path,ids=[hit['_id']],include_completed=True,workers=1,
+                       ledger=ledger,factory=lambda **kw:embedder)
+    assert result.unchanged==1 and not ledger.pending_ids()
+    client.update.assert_not_called();embedder.get_chunks_and_embeddings.assert_not_called()
+    with pytest.raises(ValueError,match='explicit IDs'):job.reindex(client,'eq',tmp_path,include_completed=True)
+
+
+def test_reader_checkpoint_upgrade_reuses_verified_unchanged_decoding(tmp_path,monkeypatch):
+    from indexer.source_encoding import decode_source
+    hit,client,embedder=fixture();source=hit['_source'];raw=b'<html><p>Complete historical testimony.</p></html>'
+    path=tmp_path/hit['_id'];path.parent.mkdir(parents=True);path.write_bytes(raw)
+    decoded=decode_source(raw)
+    source.update(text_extraction_version='html-2026-11-05-regional-decoding',
+                  text_passage_provenance={'sources':[{'source_sha256':passages.digest(source['text_full'])}],
+                                          'decoding':{**decoded.provenance(),'version':'source-decoding-v2'}})
+    reader=MagicMock();reader._read_decoded_file.return_value=decoded
+    reader._get_documents_from_file.side_effect=AssertionError('Verified unchanged reader must not be extracted again')
+    monkeypatch.setattr(job,'handler',lambda:reader)
+    groups,patch,missing=job.prepare(source,tmp_path)
+    assert patch['text_extraction_version']==extraction_version(hit['_id']) and 'text_full' not in patch and not missing
+    assert groups[0][0]==source['text_full']
+    original=source['text_full'];source['text_full']+=' Unbound later edit.'
+    with pytest.raises(AssertionError,match='extracted again'):job.prepare(source,tmp_path)
+    source['text_full']=original
+    source['text_passage_provenance']['decoding']['source_sha256']='a'*64
+    with pytest.raises(AssertionError,match='extracted again'):job.prepare(source,tmp_path)
+
+
+def test_old_reader_with_changed_decoding_is_repaired_even_when_original_bytes_are_unchanged(tmp_path):
+    from indexer.source_encoding import decode_source
+    hit,client,embedder=fixture();source=hit['_source'];raw=('<html><p>Guild discussion '+('¤'*140)+'</p></html>').encode('cp1252')
+    path=tmp_path/hit['_id'];path.parent.mkdir(parents=True);path.write_bytes(raw)
+    current=decode_source(raw);broken='Old reader with wrongly interpreted いいいい symbols.'
+    source.update(text_full=broken,text_extraction_version='html-2026-11-05-regional-decoding',
+                  text_passage_provenance={'sources':[{'source_sha256':passages.digest(broken)}],
+                                          'decoding':{**current.provenance(),'version':'source-decoding-v2','encoding':'mixed'}})
+    groups,patch,missing=job.prepare(source,tmp_path)
+    assert not missing and patch['text_full'].count('¤')==140 and 'いい' not in patch['text_full']
+    assert patch['text_extraction_version']==extraction_version(hit['_id'])
+
+
+def test_empty_failed_id_retry_never_starts_an_unbounded_scan(tmp_path,monkeypatch):
+    from indexer.reindex_diagnostics import Ledger
+    Ledger(tmp_path/'empty.sqlite').close()
+    monkeypatch.setattr('sys.argv',['reindex_embeddings','--retry-failed','--diagnostics',str(tmp_path/'empty.sqlite')])
+    manager=MagicMock();manager._index_name='eq';monkeypatch.setattr(job,'ElasticsearchManager',lambda **kw:manager)
+    reindex=MagicMock();monkeypatch.setattr(job,'reindex',reindex)
+    assert job.main()==0;reindex.assert_not_called()
+    monkeypatch.setattr('sys.argv',['reindex_embeddings','--retry-failed'])
+    with pytest.raises(SystemExit):job.main()
+    monkeypatch.setattr('sys.argv',['reindex_embeddings','--retry-failed','--diagnostics',str(tmp_path/'missing.sqlite')])
+    with pytest.raises(SystemExit):job.main()
+    assert not (tmp_path/'missing.sqlite').exists()
 
 
 def test_handoff_finishes_unconverted_records_before_upgrading_existing_gemma_passages(tmp_path):
@@ -285,7 +364,7 @@ def test_operator_entrypoint_only_adds_mapping_and_runs_checkpointed_migration(t
         job.main()
 
 
-@pytest.mark.parametrize('previous_policy',['eq-passages-480-v4','eq-passages-480-v5','eq-passages-480-v6',passages.VERSION])
+@pytest.mark.parametrize('previous_policy',['eq-passages-480-v4','eq-passages-480-v5','eq-passages-480-v6','eq-passages-480-v7',passages.VERSION])
 def test_source_upgrade_reuses_only_identical_passage_requests_and_advances_checkpoint(tmp_path,previous_policy):
     hit,client,embedder=fixture();source=hit['_source'];source.update(mime_type='text/html',text_extraction_version='old')
     path=tmp_path/hit['_id'];path.parent.mkdir(parents=True);path.write_text('<title>Guild</title><p>Preserved complete guild instructions.</p>')
@@ -298,7 +377,7 @@ def test_source_upgrade_reuses_only_identical_passage_requests_and_advances_chec
     assert stats=={'reused_embeddings':1} and update['text_chunking_version']==passages.VERSION
     assert 'text' not in update and 'llm_summary_vector' not in update
     assert update['text_extraction_version']==extraction_version(source['id'])
-    assert update['text_passage_provenance']['decoding']['version']=='source-decoding-v2'
+    assert update['text_passage_provenance']['decoding']['version']=='source-decoding-v3'
     embedder.get_chunks_and_embeddings.assert_not_called()
     # A changed title/context changes the embedding request even if body text
     # and the old provenance hashes are identical. It must get new vectors.
