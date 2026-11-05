@@ -32,7 +32,11 @@ def repair_script_markup(raw):
     while match:=opening.search(raw,cursor):
         first=closing.search(raw,match.end())
         if first is None:break
-        cursor=first.end();i=match.end();limit=min(len(raw),i+65536)
+        cursor=first.end()
+        # Normal script boundaries need no JS scan. Only an immediately
+        # following quote can satisfy the repair proof below.
+        if cursor==len(raw) or raw[cursor] not in '\"\'`':continue
+        i=match.end();limit=min(len(raw),i+65536)
         state='code';quote='';bracket=False;previous='';proved=False
         while i<limit:
             char=raw[i]
