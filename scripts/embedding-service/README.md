@@ -380,3 +380,25 @@ New records carry archive/source hashes, exact source identity, capture date,
 complete reader, current Gemma/passages/extraction checkpoints and local vectors.
 This is source recovery, so normal curation approval and daily Luna policies are
 unchanged. Existing-document reindexing alone cannot repair absent records.
+
+### Mixed legacy punctuation and large vector writes
+
+Over-budget Japanese decodes can recover isolated Windows-1252 list dashes and
+bullets between ASCII words/numbers. Valid multibyte characters stay intact;
+unknown damaged bytes retain the existing replacement/error bounds. Recovery
+counts and the secondary encoding are recorded alongside the original source
+hash. Previously accepted decoding is unchanged, so completed source/passages
+checkpoints remain valid.
+
+Indexer and curation writes use `indexer.vector_json` to encode dense vectors with
+nine significant digits after a float32 conversion. Every finite float32,
+including signed zero, round-trips exactly; metadata keeps its ordinary precision.
+This avoids expanding each float32 into a long Python double spelling and keeps
+large complete documents within the existing Elasticsearch HTTP bound. JSON,
+bulk NDJSON and create-only capture imports share the encoding. Nonfinite or
+unrepresentable vectors fail before transport. No passages are dropped and no
+model, passage-policy or extraction checkpoints change for this transport repair.
+
+The operator Dockerfile coalesces source updates into two additional layers so
+an exact-predecessor update can be built without a layer for each copied module.
+Use the normal pending-Job handoff and retain the previous image and Jobs.

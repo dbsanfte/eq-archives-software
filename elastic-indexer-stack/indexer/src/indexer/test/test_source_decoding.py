@@ -100,3 +100,32 @@ def test_repaired_html_title_can_cross_a_process_boundary():
 def test_latin1_html_label_keeps_windows_smart_punctuation_readable():
     text='<html><meta charset="ISO-8859-1"><p>“Guild” … £50</p></html>'
     assert decode_source(text.encode('cp1252')).text==text
+
+
+@pytest.mark.parametrize('punctuation',['–','—','•'])
+def test_over_budget_japanese_page_recovers_isolated_western_list_punctuation(punctuation):
+    japanese='<meta charset="Shift_JIS"><p>こんにちは。ギルドのみんなで冒険に行きましょう。</p>'
+    english=''.join(f'<br>{i} {punctuation} Guild guide {i}' for i in range(20))
+    raw=japanese.encode('cp932')+english.encode('cp1252')
+    result=decode_source(raw)
+    assert result.text==japanese+english and result.invalid_bytes==0
+    assert result.provenance()['recoveries']==[
+        {'encoding':'cp1252','kind':'isolated_ascii_punctuation','bytes':20}]
+    assert result.source_sha256==hashlib.sha256(raw).hexdigest()
+
+
+def test_mixed_recovery_keeps_unknown_bytes_visible_and_old_bounded_decoding_stable():
+    japanese='<p>こんにちは。みんなで蘇生の相談をしましょう。</p>'
+    raw=japanese.encode('cp932')+b'\x82..'+b'<br>1 \x96 Guild guide'*20
+    result=decode_source(raw)
+    assert result.text==japanese+'\ufffd..'+'<br>1 – Guild guide'*20
+    assert result.invalid_bytes==1 and result.punctuation_bytes==20
+    # Already accepted decoding retains its checkpoint behavior.
+    previous=decode_source(japanese.encode('cp932')+b' 1 \x96 Guild')
+    assert previous.invalid_bytes==1 and 'recoveries' not in previous.provenance()
+
+
+def test_punctuation_fallback_does_not_guess_at_damaged_japanese_characters():
+    japanese='こんにちは。ギルドのみんなで冒険に行きましょう。'*10
+    with pytest.raises(UnicodeError,match='bounded decoding damage'):
+        decode_source((japanese+'<br>').encode('cp932')+b'\x96 <br>'*40)

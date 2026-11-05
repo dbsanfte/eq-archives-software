@@ -37,7 +37,8 @@ def merge_site(root, operation, row, minimum):
                 main.db.commit()
                 return accepted
             return detail['accepted']
-        if any(site_identity(item['url'], main) == site_identity(row['url'], main) for item in main.candidates()):
+        identity=site_identity(row['url'],main)
+        if any(site_identity(item['url'],main)==identity for item in main.db.execute('SELECT url FROM candidates')):
             return False
         saved = dict(row)
         saved['scope'] = capture_scope(saved['url'], json.loads(saved['coverage'] or '{}').get('scope_mode', 'directory'))
@@ -60,7 +61,8 @@ def owned_or_new(root, operation, row):
     with connect(root) as main:
         owned = main.db.execute("SELECT detail FROM events WHERE candidate=? AND action='discovery_result' AND json_extract(detail,'$.operation')=?",
                                 (row['id'], operation['id'])).fetchone()
-        exists = any(site_identity(item['url'], main) == site_identity(row['url'], main) for item in main.candidates())
+        identity=site_identity(row['url'],main)
+        exists=any(site_identity(item['url'],main)==identity for item in main.db.execute('SELECT url FROM candidates'))
         if owned:
             receipt = json.loads(owned[0])
             current = main.db.execute('SELECT * FROM candidates WHERE id=?', (row['id'],)).fetchone()

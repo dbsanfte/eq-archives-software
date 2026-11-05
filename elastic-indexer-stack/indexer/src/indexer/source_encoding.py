@@ -19,10 +19,15 @@ class Decoded:
     invalid_bytes:int
     reason:str
     source_sha256:str
+    punctuation_bytes:int=0
 
     def provenance(self):
-        return {'version':VERSION,'encoding':self.encoding,'invalid_bytes':self.invalid_bytes,
-                'reason':self.reason,'source_sha256':self.source_sha256}
+        value={'version':VERSION,'encoding':self.encoding,'invalid_bytes':self.invalid_bytes,
+               'reason':self.reason,'source_sha256':self.source_sha256}
+        if self.punctuation_bytes:
+            value['recoveries']=[{'encoding':'cp1252','kind':'isolated_ascii_punctuation',
+                                  'bytes':self.punctuation_bytes}]
+        return value
 
 
 def canonical(name):
@@ -44,6 +49,14 @@ def repaired_title(previous,expected,decoded):
     return previous
 
 
+def mixed_punctuation(text):
+    # Rejected Shift-JIS bytes can be Western list punctuation pasted into an
+    # otherwise Japanese page. Only recover isolated dashes/bullets between
+    # ASCII words/numbers; valid multibyte characters and damaged kana stay put.
+    pattern=r'(?<=[A-Za-z0-9])([ \t]+)([\udc95-\udc97])([ \t]+)(?=[A-Za-z0-9])'
+    return re.subn(pattern,lambda m:m[1]+chr(ord(m[2])-0xdc00).encode('latin1').decode('cp1252')+m[3],text)
+
+
 def decode_source(data,content_type='',*,detection=None):
     """Prefer Unicode, then source-backed legacy encodings over lossless gibberish.
 
@@ -54,8 +67,8 @@ def decode_source(data,content_type='',*,detection=None):
     bytes or convert an entire Japanese page to Latin-1 for one damaged byte.
     """
     source_hash=hashlib.sha256(data).hexdigest()
-    def result(text,encoding,reason,invalid=0):
-        return Decoded(text,encoding,invalid,reason,source_hash)
+    def result(text,encoding,reason,invalid=0,punctuation=0):
+        return Decoded(text,encoding,invalid,reason,source_hash,punctuation)
     for prefix,encoding in [(codecs.BOM_UTF32_LE,'utf-32'),(codecs.BOM_UTF32_BE,'utf-32'),
                             (codecs.BOM_UTF8,'utf-8-sig'),(codecs.BOM_UTF16_LE,'utf-16'),(codecs.BOM_UTF16_BE,'utf-16')]:
         if data.startswith(prefix):return result(data.decode(encoding),encoding,'byte_order_mark')
@@ -83,15 +96,20 @@ def decode_source(data,content_type='',*,detection=None):
         invalid=len(BAD.findall(text));kana=len(KANA.findall(text));kanji=len(KANJI.findall(text));half=len(HALF_KANA.findall(text))
         hinted=encoding in hints or encoding=='cp932' and 'shift_jis' in hints
         enough=(kana>=2 or kanji>=4) if hinted else kana>=8 and kana+kanji>=16 and kana*4>=kana+kanji+half
-        if enough and invalid<=min(64,max(2,high//50)):
-            candidates.append((invalid,-kana,encoding,text))
+        limit=min(64,max(2,high//50));punctuation=0
+        if enough and invalid>limit:
+            recovered,count=mixed_punctuation(text)
+            if count and invalid-count<=limit:
+                text=recovered;invalid-=count;punctuation=count
+        if enough and invalid<=limit:
+            candidates.append((invalid,-kana,encoding,text,punctuation))
         elif enough and invalid<=high*.2:
             damaged_japanese=True
     if candidates:
         # Prefer strict decoding, then more recovered Japanese. Stable ordering
         # keeps standard Shift-JIS code points when CP932 is unnecessary.
-        invalid,_,encoding,text=min(candidates,key=lambda row:row[:2])
-        return result(BAD.sub('\ufffd',text),encoding,'japanese_script_evidence',invalid)
+        invalid,_,encoding,text,punctuation=min(candidates,key=lambda row:row[:2])
+        return result(BAD.sub('\ufffd',text),encoding,'japanese_script_evidence',invalid,punctuation)
     if damaged_japanese:raise UnicodeError('Japanese source exceeds bounded decoding damage; source bytes retained')
     # Legacy HTML labelled Latin-1 commonly contains Windows smart punctuation.
     # Do not turn the previously readable punctuation into C1 control characters.

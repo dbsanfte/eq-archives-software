@@ -172,7 +172,8 @@ def create_app(root=None, origin=None, start_worker=True):
             operations = [unpack(row) for row in store.db.execute("SELECT * FROM operations ORDER BY CASE state WHEN 'running' THEN 0 WHEN 'queued' THEN 1 WHEN 'interrupted' THEN 2 ELSE 3 END,created DESC LIMIT 20")]
             workers = {lane.value: unpack(active) if (active := active_operation(store, lane)) else None for lane in Lane}
             fields = 'id,state,manifest_sha256,publication,job,error,created,updated' if compact else '*'
-            batches = [unpack(row) for row in store.db.execute(f"SELECT {fields} FROM batches WHERE state!='capture_group' ORDER BY created DESC LIMIT 100")]
+            batch_table='batches INDEXED BY batch_metadata' if compact else 'batches'
+            batches = [unpack(row) for row in store.db.execute(f"SELECT {fields} FROM {batch_table} WHERE state!='capture_group' ORDER BY created DESC LIMIT 100")]
             page_rows = rows[offset:offset + 50]
             if compact:
                 page_rows = attach_checks(store, decorate(store, [record(store, store.db.execute(

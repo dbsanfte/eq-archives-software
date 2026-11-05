@@ -315,6 +315,8 @@ class Store:
             CREATE TABLE IF NOT EXISTS candidates(id TEXT PRIMARY KEY, url TEXT UNIQUE, scope TEXT,
                 priority INTEGER, coverage TEXT, evidence TEXT, state TEXT DEFAULT 'discovered',
                 captures TEXT DEFAULT '[]', rating TEXT, error TEXT, decision TEXT);
+            CREATE INDEX IF NOT EXISTS candidate_metadata ON candidates(
+                id,url,scope,priority,coverage,state,captures,rating,error,decision);
             CREATE TABLE IF NOT EXISTS attempts(id INTEGER PRIMARY KEY, candidate TEXT,
                 signature TEXT, reserved REAL, actual REAL, status TEXT, created TEXT);
             CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, candidate TEXT, action TEXT, detail TEXT, created TEXT);

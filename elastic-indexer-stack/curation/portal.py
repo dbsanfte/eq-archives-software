@@ -1,5 +1,6 @@
 """Read-only portal stages over existing durable candidate/review transitions."""
 from enum import Enum
+from functools import lru_cache
 from common import CrawlError, digest
 
 
@@ -39,6 +40,14 @@ CANDIDATE_STAGES = {
     'duplicate_candidate': Stage.HISTORY,
 }
 
+METADATA_COLUMNS=('id','url','scope','priority','coverage','evidence','state','captures','rating','error','decision')
+
+
+@lru_cache(maxsize=65536)
+def cached_metadata(values):
+    from review import metadata
+    return metadata(dict(zip(METADATA_COLUMNS,values)))
+
 
 def listing_rows(store):
     """Stage/filter summaries; only the visible page needs full review records.
@@ -47,9 +56,13 @@ def listing_rows(store):
     discovery evidence or repeating source/scope validation for off-page sites.
     The caller holds a read transaction so claims cannot split this snapshot.
     """
-    from review import metadata, sort_key
-    rows = [metadata(row) for row in store.db.execute('''SELECT id,url,scope,priority,
-        coverage,NULL evidence,state,captures,rating,error,decision FROM candidates''')]
+    from review import sort_key
+    # Keys contain every saved value from this read snapshot. Unchanged rows
+    # reuse decoding/hashes across polls; stage decoration stays request-local.
+    # Nested metadata is read-only here; visible workspaces use fresh records.
+    rows = [dict(cached_metadata(tuple(row))) for row in store.db.execute('''SELECT id,url,scope,priority,
+        coverage,NULL evidence,state,captures,rating,error,decision
+        FROM candidates INDEXED BY candidate_metadata''')]
     rows.sort(key=sort_key)
     return decorate(store, rows)
 
@@ -59,7 +72,7 @@ def decorate(store, rows):
     from capture_queue import held
     failures = held(store)
     retries = {row['operation']: dict(row) for row in store.db.execute('SELECT * FROM capture_retries')}
-    states = dict(store.db.execute('SELECT id,state FROM batches'))
+    states = dict(store.db.execute('SELECT id,state FROM batches INDEXED BY batch_metadata'))
     captures = {row['candidate']: row for row in store.db.execute("""SELECT json_extract(site.value,'$.id') candidate,
         operations.id,operations.state,operations.error FROM operations,json_each(operations.payload,'$.sites') site
         WHERE kind='capture' ORDER BY operations.created,operations.rowid""")}

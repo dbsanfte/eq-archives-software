@@ -480,6 +480,15 @@ Automatic indexing preparation resumes after full acquisition completes.
 The source/hash-bound `POST /api/continue-capture` takes the review `id` and
 `manifest_sha256`; polling and deployment never queue regeneration automatically.
 
+Compact portal reads use covering SQLite indexes for candidate and batch metadata,
+keeping discovery evidence and capture manifests outside list polls. A bounded
+65,536-entry cache reuses unchanged row decoding and manifest hashes; its key
+contains every saved metadata field from the request's read snapshot. Stage and
+worker decoration is recomputed in that snapshot, and visible source workspaces
+use fresh records. Discovery duplicate checks read URLs instead of full candidate
+rows and compute the incoming site identity once. Approval and publication still
+perform their normal scope, source and archive-coverage checks.
+
 Already claimed legacy HTML traversal keeps its old 20-URL,
 100-file, 1-MiB response, 64-MiB/500-request/30-minute bounds and explicit subset
 notes. Discovery sampling is still small and prefers 1999–2001 evidence; this
