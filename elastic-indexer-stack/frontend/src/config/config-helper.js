@@ -82,6 +82,7 @@ export function stripUnnecessaryResultFields(resultFields) {
     if (
       [
         "_meta",
+        "discussion",
         "id",
         toLowerCase(getTitleField()),
         toLowerCase(getUrlField()),

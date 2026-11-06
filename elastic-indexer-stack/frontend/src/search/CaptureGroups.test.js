@@ -188,3 +188,35 @@ test('switching back to grouping suppresses obsolete failures from individual-ca
   reject(new Error('obsolete individual search'));
   await expect(old).resolves.toBeDefined();
 });
+
+const proof = (topic = '10', key = 'a'.repeat(64)) => ({ raw: {
+  version: 'forum-discussions-v1', key, platform: 'lithium', origin: 'http://example.org',
+  forum: '/eq/Veterans', topic, title: 'A verified discussion', source_sha256: 'b'.repeat(64), evidence_sha256: 'c'.repeat(64)
+} });
+
+test('folds verified discussion views across batches while retaining distinct matching excerpts and exact records', async () => {
+  const a = record('eq/board/message?message.id=10', undefined, { discussion: proof(), text_full: { snippet: 'A <em>matching</em> excerpt' } });
+  const b = record('rss/message?message.id=11', undefined, { discussion: proof(), text_full: { snippet: 'A matching excerpt' } });
+  const c = record('eq/board/print?message.id=12', undefined, { discussion: proof(), text_full: { snippet: 'Another useful excerpt' } });
+  const records = [a, ...Array.from({ length: 51 }, () => b), c, record('other')];
+  const search = createGroupedSearch(makeSearch(records), () => ({}));
+  const response = await search(state, {});
+  expect(response.results).toHaveLength(2);
+  expect(response.results[0]._meta.id).toBe(a._meta.id);
+  expect(response.results[0]._discussionGroup.matches.map(item => item._meta.id)).toEqual([a._meta.id, c._meta.id]);
+  expect(captureIdentity(a).key).not.toBe(captureIdentity(c).key);
+});
+
+test('keeps distinct verified discussions and unsupported proofs separate and honors individual-capture mode', async () => {
+  const a = record('a', undefined, { discussion: proof() });
+  const b = record('b', undefined, { discussion: proof('11', 'd'.repeat(64)) });
+  const unknown = record('c', undefined, { discussion: { raw: { ...proof().raw, origin: 'http://other.example.org' } } });
+  let enabled = true;
+  const search = createGroupedSearch(makeSearch([a, b, unknown]), () => ({ enabled }));
+  const grouped = await search({ ...state, resultsPerPage: 5 }, {});
+  expect(grouped.results).toHaveLength(3);
+  expect(grouped.results[0]._discussionGroup.matches).toHaveLength(1);
+  expect(grouped.results[2]._discussionGroup).toBeUndefined();
+  enabled = false;
+  expect((await search({ ...state, resultsPerPage: 5 }, {})).results[0]._discussionGroup).toBeUndefined();
+});

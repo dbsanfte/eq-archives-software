@@ -29,6 +29,7 @@ from indexer.openai_manager import OpenAIManager
 from indexer.source_encoding import decode_source
 from indexer.html_extraction import WEBSITE_EXTRACTION_VERSION,website_markdown
 from indexer import gemma,passages
+from indexer.discussions import optional_catalog, metadata as discussion_metadata
 from reindex_text import source_path
 
 LOG=logging.getLogger(__name__)
@@ -48,6 +49,14 @@ class TextPaths:
 
 class TextInventory(Inventory):
     pattern=TextPaths
+
+    def __init__(self,*args,**kwargs):
+        super().__init__(*args,**kwargs)
+        self.discussions=optional_catalog()
+
+    def close(self):
+        if getattr(self,'discussions',None):self.discussions.close()
+        super().close()
 
     def select_hosts(self,hosts):
         hosts=list(dict.fromkeys(hosts or []))
@@ -127,6 +136,8 @@ def prepare_document(inventory,record_id,blob):
             'text_extraction_version':WEBSITE_EXTRACTION_VERSION,'text_chunking_version':passages.VERSION,
             'text_passage_provenance':{'version':passages.VERSION,'sources':[plan.provenance()],'decoding':decoded.provenance()},
             'archive_source_sha256':decoded.source_sha256,'archive_commit':inventory.revision}
+    discussion=discussion_metadata(record_id,raw,url,catalog=getattr(inventory,'discussions',None))
+    if discussion:source['discussion']=discussion
     return source,plan
 
 

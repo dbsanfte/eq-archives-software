@@ -70,3 +70,15 @@ test('exports the date picker range contract instead of treating a range as a te
   expect(request.body.query.bool.filter).toEqual([{ bool: { filter: [range] } }]);
   for (const branch of request.body.knn) expect(branch.filter).toEqual([...request.body.query.bool.filter, { term: { embedding_model: 'embeddinggemma-2-768-v1' } }]);
 });
+
+test('benchmark grouping follows verified discussions without changing unknown topic identities', () => {
+  const proof = { version: 'forum-discussions-v1', key: 'a'.repeat(64), platform: 'lithium',
+    origin: 'http://forums.example.org', forum: '/eq/Veterans', topic: '10', title: 'A discussion',
+    source_sha256: 'b'.repeat(64), evidence_sha256: 'c'.repeat(64) };
+  const hit = (message, discussion) => ({ _id: `websites/forums.example.org/20060101000000/eq/board/print?message.id=${message}`,
+    _source: discussion ? { discussion } : {} });
+  const [keys] = exportRequests([{ op: 'keys', hits: [hit(10, proof), hit(20, proof), hit(30), hit(40)] }]);
+  expect(keys[0]).toBe(`discussion:${proof.key}`);
+  expect(keys[0]).toBe(keys[1]);
+  expect(new Set(keys).size).toBe(3);
+});

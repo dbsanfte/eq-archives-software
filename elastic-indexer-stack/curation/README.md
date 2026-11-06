@@ -860,3 +860,19 @@ with a one-day heat half-life. Source occurrences, readers, date identity,
 manifest verification and enrichment budgets remain independent of reuse.
 Invalid model responses cannot populate the cache, and unavailable cache storage
 falls back to inference. See the [cache and diagnostic runbook](../../scripts/embedding-service/README.md#bounded-shared-text-embedding-cache-and-rejection-ledger).
+
+### Verified forum discussion metadata
+
+New imports save source-verified discussion metadata for recognized Lithium,
+phpBB, vBulletin, Snitz and Ezboard pages. `DISCUSSION_CATALOG_PATH` points to
+`/indexing-state/discussions.sqlite` in the existing shared persistent directory.
+Before indexing a manifest, imports learn its verified Lithium RSS memberships,
+so a print view can precede its supporting RSS source. RSS assets remain preserved
+under the existing asset/indexability policy; this step makes no paid calls.
+Unavailable optional catalog storage leaves uncertain views separate and logs a
+warning. Unknown layouts never acquire a discussion identity based on title.
+
+The public portal groups only verified discussions. Exact source records, dated
+history and comparisons retain their original identity. For existing records,
+use the separate [metadata-only operator](../../scripts/embedding-service/README.md#verified-discussion-metadata);
+ordinary curation rollout does not restart any active reindex Job.

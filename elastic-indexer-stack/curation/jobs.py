@@ -100,6 +100,7 @@ def import_job(batch, image):
                                                        {"name": "IMPORT_JOB_NAME", "value": import_name(batch)},
                                                        {"name": "LUNA_DAILY_BUDGET_ROOT", "value": "/luna-budget"},
                                                        {"name": "EMBEDDING_CACHE_PATH", "value": "/indexing-state/embeddings.sqlite"},
+                                                       {"name": "DISCUSSION_CATALOG_PATH", "value": "/indexing-state/discussions.sqlite"},
                                                        {"name": "EMBEDDING_URL", "value": "http://nomic-embeddings-rtx3080.eqarchives-es.svc.cluster.local:8080"},
                                                        {"name": "EMBEDDING_MODEL", "value": "embeddinggemma-2-768-v1"}],
                                                "resources": {"requests": {"cpu": "100m", "memory": "128Mi"},

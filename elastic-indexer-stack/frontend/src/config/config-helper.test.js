@@ -72,7 +72,7 @@ test('supports legacy fields and empty configuration without inventing result fi
 test('omits metadata and displayed identity fields from additional result details', () => {
   configure({ indexName: 'archives', titleField: 'Subject', urlField: 'URL', thumbnailField: 'Thumb' });
   expect(helpers.stripUnnecessaryResultFields({
-    _meta: {}, id: {}, subject: {}, url: {}, thumb: {}, content: { raw: 'body' }
+    _meta: {}, discussion: {}, id: {}, subject: {}, url: {}, thumb: {}, content: { raw: 'body' }
   })).toEqual({ content: { raw: 'body' } });
   configure({ indexName: 'archives' });
   expect(helpers.stripUnnecessaryResultFields({ content: {} })).toEqual({ content: {} });

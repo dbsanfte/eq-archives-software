@@ -142,27 +142,50 @@ states, cancellation, timeouts and scope removal. Chromium exercises the
 navigation and search/reader/reload/history flow at 320, 390, 768 and 1280 px,
 including touch targets, long domain names and horizontal overflow.
 
-## Grouped captures
+## Grouped captures and forum discussions
 
 Search results group repeated website captures by original page by default. The
 first matching capture in the selected relevance/date order represents the group.
 **View captures** opens the dated versions, newest first, with archive links and
 full-text previews of each exact record. This history includes versions outside
-the current query and filters. Disable **Group repeated captures** to return to
+the current query and filters. Disable **Group captures and discussions** to return to
 individual results. The toggle applies to the current visit; grouping is the
 initial default.
 
 Identity comes from the original URL inside a timestamped Wayback URL, with the
 archive's `websites/<host>/<14-digit timestamp>/<path>` ID as a fallback. Hostname
 case and fragments are normalized; path case, protocol, query strings, trailing
-slashes, and `index.html` remain distinct. Messages, child attachments and records
-with unknown identity remain separate. Titles alone never identify a group.
+slashes, and `index.html` remain distinct. Mailing-list/newsgroup messages, child
+attachments and records with unknown identity remain separate. Titles alone never
+identify a group.
+
+Verified forum discussions get one card across their reply, print, feed and
+pagination views. **Show matches** reveals three distinct matching excerpts at a
+time; **Read from here** opens that excerpt's exact captured page. The first
+matching capture still follows the chosen relevance/date sort. Matching excerpts
+come only from the bounded search scan, not a reconstructed complete thread.
+
+Grouping requires `forum-discussions-v1` source proof: platform, origin, forum and
+numeric topic ID, plus source/evidence hashes. Lithium RSS item permalinks prove
+reply membership; print/HTML views need that membership and structural evidence.
+phpBB, vBulletin, Snitz and Ezboard need native topic links and recognized message
+structure. Ambiguous or unknown pages retain ordinary exact-page grouping; titles
+never establish identity. An additive `discussion` mapping and the bounded
+[metadata backfill](../../scripts/embedding-service/README.md#verified-discussion-metadata)
+can annotate existing records without changing text, embeddings or capture IDs.
+
+Discussion readers have one **Captured** date selector for that exact original
+page, including dates outside the search filters. Other pages in the discussion
+may have different available dates. **Archive details** contains provenance,
+citations, downloads and the existing exact-page history/comparison tools; it
+starts collapsed. Capture history and comparisons never merge different pages.
 
 `GroupedSearch.js` scans lightweight results in batches of 50, caching one active
 search and retaining unique groups across pages. It fills the requested page plus
 a lookahead group, up to the existing 1,000-capture Elasticsearch browsing window.
-This requires no index migration or vector rewrite. Previous/Next navigation and
-capture counts avoid claiming an exact total of unique pages. Counts and facets
+Exact-page grouping requires no index migration; discussion metadata needs no
+vector rewrite. Previous/Next navigation and capture counts avoid claiming an
+exact total of unique pages. Counts and facets
 still describe matching **captures**. Changing the query, filters, date filters,
 sort or semantic parameters invalidates the cache. Results come from the live
 index; this is not snapshot pagination.

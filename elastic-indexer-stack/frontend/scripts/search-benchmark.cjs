@@ -24,6 +24,7 @@ global.document = dom.window.document;
 const { createConnector } = require(path.join(frontend, 'src/search/Connector.js'));
 const { createConfig } = require(path.join(frontend, 'src/config/Config.js'));
 const { captureKey } = require(path.join(frontend, 'src/search/CaptureIdentity.js'));
+const { discussionIdentity } = require(path.join(frontend, 'src/search/DiscussionIdentity.js'));
 const { usesQuerySyntax } = require(path.join(frontend, 'src/search/QueryPolicy.js'));
 const { DEFAULT_KNN_PARAMS } = require(path.join(frontend, 'src/views/search/AdvancedSettings.js'));
 const { embeddingService } = require(path.join(frontend, 'src/search/EmbeddingService.js'));
@@ -36,7 +37,7 @@ async function handle(input) {
     const source = hit._source || {};
     const result = { _meta: { id: hit._id } };
     for (const [field, value] of Object.entries(source)) result[field] = { raw: value };
-    return captureKey(result);
+    return discussionIdentity(result)?.key || captureKey(result);
   });
   if (input.op !== 'build') throw new Error('Unknown bridge operation');
   const query = input.query;
@@ -72,7 +73,7 @@ async function handle(input) {
   delete captured.aggs;
   delete captured.highlight;
   captured._source = ['id', 'title', 'url', 'parent_id', 'domain_name', 'mailing_list_name', 'capture_date', 'llm_guessed_date',
-    'file_type', 'mime_type', 'llm_tags', 'llm_content_flavour'];
+    'file_type', 'mime_type', 'llm_tags', 'llm_content_flavour', 'discussion'];
   return { body: captured, semantic_allowed: !usesQuerySyntax(query.text) && Boolean(query.text.trim()) };
 }
 

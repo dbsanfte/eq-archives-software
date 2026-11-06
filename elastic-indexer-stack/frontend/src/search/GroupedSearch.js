@@ -1,4 +1,5 @@
 import { captureKey } from './CaptureIdentity';
+import { discussionIdentity, discussionMatchKey } from './DiscussionIdentity';
 
 export const CAPTURE_WINDOW = 1000;
 const BATCH_SIZE = 50;
@@ -32,8 +33,14 @@ export function createGroupedSearch(search, getContext) {
           const response = await search({ ...state, current: cache.scanned / BATCH_SIZE + 1, resultsPerPage: BATCH_SIZE }, queryConfig);
           cache.response = response;
           response.results.forEach((result, i) => {
-            const id = captureKey(result, cache.scanned + i);
-            if (!cache.groups.has(id)) cache.groups.set(id, result);
+            const discussion = discussionIdentity(result);
+            const id = discussion?.key || captureKey(result, cache.scanned + i);
+            if (!cache.groups.has(id)) cache.groups.set(id, { result, discussion, matches: new Map() });
+            const group = cache.groups.get(id);
+            if (discussion) {
+              const match = discussionMatchKey(result);
+              if (match && !group.matches.has(match)) group.matches.set(match, result);
+            }
           });
           cache.scanned += response.results.length;
           cache.done = response.results.length < BATCH_SIZE || cache.scanned >= response.totalResults || cache.scanned >= CAPTURE_WINDOW;
@@ -54,7 +61,9 @@ export function createGroupedSearch(search, getContext) {
     // Old links may point past the final page once duplicate captures collapse.
     const page = cache.done ? Math.min(current, Math.max(1, Math.ceil(cache.groups.size / resultsPerPage))) : current;
     const start = (page - 1) * resultsPerPage;
-    const results = Array.from(cache.groups.values()).slice(start, start + resultsPerPage);
+    const results = Array.from(cache.groups.values()).slice(start, start + resultsPerPage).map(group =>
+      group.discussion ? { ...group.result, _discussionGroup: { ...group.discussion,
+        matches: Array.from(group.matches.values()), scanned: cache.scanned } } : group.result);
     const hasNext = cache.groups.size > start + resultsPerPage;
     return {
       ...cache.response,

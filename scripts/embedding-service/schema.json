@@ -12,6 +12,18 @@
     "image_embedding_sha256": {"type": "keyword"},
     "image_embedding_status": {"type": "keyword"},
     "image_embedding_provenance": {"type": "object", "enabled": false},
-    "text_passage_provenance": {"type": "object", "enabled": false}
+    "text_passage_provenance": {"type": "object", "enabled": false},
+    "discussion": {"type": "object", "dynamic": "strict", "properties": {
+      "version": {"type": "keyword"},
+      "key": {"type": "keyword"},
+      "platform": {"type": "keyword"},
+      "origin": {"type": "keyword"},
+      "forum": {"type": "keyword"},
+      "topic": {"type": "keyword"},
+      "title": {"type": "text", "index": false},
+      "source_sha256": {"type": "keyword", "index": false, "doc_values": false},
+      "evidence_sha256": {"type": "keyword", "index": false, "doc_values": false},
+      "evidence_id": {"type": "keyword", "index": false, "doc_values": false}
+    }}
   }
 }

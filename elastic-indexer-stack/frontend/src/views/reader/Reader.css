@@ -69,3 +69,11 @@
   .reader-comparison { padding: 16px 12px; }
   .reader-diff-part { padding: 10px; }
 }
+
+.reader-capture-selector { margin: 0 0 20px; padding: 14px 16px; border: 1px solid var(--archive-border); border-radius: 6px; background: var(--archive-surface); }
+.reader-capture-selector label { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: .9rem; }
+.reader-capture-selector select { min-height: 44px; max-width: 100%; padding: 10px; border: 1px solid var(--archive-border); border-radius: 4px; color: var(--archive-ink); background: var(--archive-surface); font: inherit; }
+.reader-capture-selector .reader-note { margin-bottom: 0; }
+.reader-archive-details { margin: 0 0 20px; border: 1px solid var(--archive-border); border-radius: 6px; padding: 0 16px; }
+.reader-archive-details > summary { min-height: 44px; padding: 12px 0; cursor: pointer; }
+.reader-archive-details[open] { padding-bottom: 16px; }

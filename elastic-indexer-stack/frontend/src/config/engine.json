@@ -6,6 +6,7 @@
     "llm_image_text"
   ],
   "resultFields": [
+    "discussion",
     "title",
     "llm_summary",
     "llm_content_flavour",

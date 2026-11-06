@@ -4,6 +4,7 @@ import TagRow from "./TagRow";
 import ResultBody from "./ResultBody";
 import ButtonRow from "./ButtonRow";
 import CaptureHistory from "./CaptureHistory";
+import DiscussionResult from "./DiscussionResult";
 import { captureIdentity } from "../../search/CaptureIdentity";
 
 const CustomResultView = (context) => {
@@ -21,6 +22,8 @@ const CustomResultView = (context) => {
   if (text_full?.snippet) {
     textHTML = text_full.snippet;
   }
+
+  if (context.result._discussionGroup) return <DiscussionResult key={context.result._discussionGroup.key} result={context.result} returnTo={returnTo} />;
 
   return (
     <li className="sui-result">

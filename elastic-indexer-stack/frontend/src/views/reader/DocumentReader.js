@@ -4,6 +4,8 @@ import ArchiveStatusBar from '../ArchiveStatusBar';
 import HeaderContent from '../HeaderContent';
 import CaptureHistory from '../result/CaptureHistory';
 import { captureIdentity } from '../../search/CaptureIdentity';
+import { discussionIdentity } from '../../search/DiscussionIdentity';
+import CaptureDateSelector from './CaptureDateSelector';
 import { citation, downloadText, readerUrl, recordId, safeSearchReturnUrl, sourceLink, value } from './reader-utils';
 import useDocument from './useDocument';
 import ReaderText from './ReaderText';
@@ -52,6 +54,10 @@ function DocumentMeta({ record, heading, returnTo }) {
   </section>;
 }
 
+function ArchiveDetails({ collapsed, children }) {
+  return collapsed ? <details className="reader-archive-details"><summary>Archive details</summary>{children}</details> : <>{children}</>;
+}
+
 function TextKind({ part, setPart }) {
   return <label className="reader-text-kind">Text to view <select value={part} onChange={event => setPart(event.target.value)}>
     <option value="text">Extracted text</option><option value="ocr">Image transcription (OCR)</option>
@@ -70,6 +76,7 @@ export default function DocumentReader({ search = window.location.search }) {
   const record = first.record;
   const other = second.record;
   const identity = useMemo(() => record && captureIdentity(record), [record]);
+  const discussion = record && discussionIdentity(record);
   const otherIdentity = other && captureIdentity(other);
   const comparable = identity && identity.key === otherIdentity?.key;
   const part = chosenPart === 'auto' ? (!value(record, 'text_full') && value(record, 'llm_image_text_full') && (!compare || (!value(other, 'text_full') && value(other, 'llm_image_text_full'))) ? 'ocr' : 'text') : chosenPart;
@@ -83,10 +90,12 @@ export default function DocumentReader({ search = window.location.search }) {
     <div className="reader-shell"><ArchiveStatusBar /><HeaderContent compact />
       <nav className="reader-breadcrumb" aria-label="Reader navigation"><a href={returnTo}>{returnTo === '/' ? '← Search the archive' : '← Back to results'}</a>{compare && <a href={readerUrl(id, { find, returnTo })}>Back to document</a>}{record && <a href="#reader-content">{compare ? "Jump to changes" : "Jump to text"}</a>}</nav>
       <main id="reader-main">
-        <p className="archive-eyebrow">{compare ? 'Across the years' : 'From the archive'}</p>
-        <h1>{compare ? 'Compare captures' : record ? title : 'Document reader'}</h1>
+        <p className="archive-eyebrow">{compare ? 'Across the years' : discussion ? 'Forum discussion' : 'From the archive'}</p>
+        <h1>{compare ? 'Compare captures' : record ? discussion?.title || title : 'Document reader'}</h1>
         {!id ? <p role="alert">This link is missing a document ID. Open a document from the search results.</p>
           : !record ? <LoadState state={first} label="Document" /> : <>
+            {discussion && !compare && <CaptureDateSelector key={id} record={record} identity={identity} find={find} part={part === 'ocr' ? 'ocr' : ''} returnTo={returnTo} />}
+            <ArchiveDetails collapsed={Boolean(discussion && !compare)}>
             <div className={compare ? 'reader-capture-pair' : ''}>
               <DocumentMeta record={record} heading={compare ? 'From' : undefined} returnTo={returnTo} />
               {compare && (compare === id ? <p role="alert">Choose two different captures to compare.</p>
@@ -99,6 +108,8 @@ export default function DocumentReader({ search = window.location.search }) {
               {text && <Button onClick={() => downloadText(text, `${title}${compare ? '-from' : ''}${part === 'ocr' ? '-ocr' : ''}`)}>Download {compare ? 'from text' : 'text'}</Button>}
               {compare && otherText && <Button onClick={() => downloadText(otherText, `${value(other, 'title')}-to${part === 'ocr' ? '-ocr' : ''}`)}>Download to text</Button>}
             </div>
+            {discussion && !compare && <CaptureHistory key={identity.key} identity={identity} compareWith={record} returnTo={returnTo} />}
+            </ArchiveDetails>
             <div id="reader-content">
             {(!compare || (other && compare !== id && comparable)) && <>
               <TextKind part={part} setPart={setPart} />
@@ -110,7 +121,7 @@ export default function DocumentReader({ search = window.location.search }) {
             </>}
             {compare && other && !comparable && <p role="alert">These records are not captures of the same original page. Choose a version from this document’s capture history.</p>}
             </div>
-            {identity && <CaptureHistory key={identity.key} identity={identity} compareWith={record} returnTo={returnTo} />}
+            {identity && (!discussion || compare) && <CaptureHistory key={identity.key} identity={identity} compareWith={record} returnTo={returnTo} />}
           </>}
       </main>
       <footer className="reader-footer">Preserved source text from the EverQuest community. Formatting may differ from the original page.</footer>
