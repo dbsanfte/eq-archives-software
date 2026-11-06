@@ -223,7 +223,7 @@ extraction checkpoints, enrichment, source identity, dates and last_indexed. No
 paid enrichment during this backfill. Do not reuse Nomic checkpoints as Gemma
 completion. The Nomic repair entry point remains for historical recovery only.
 Follow the embedding-service migration runbook for operator-authorized handoffs.
-Gemma text uses `eq-passages-480-v8`: budget title/context with every 480-token
+Gemma text uses `eq-passages-480-v9`: budget title/context with every 480-token
 request, retain full reader text, verify source-bound selected-view coverage and
 store view offsets/provenance separately. Unknown layouts retain content;
 format-specific navigation/post/table handling needs regression evidence. Resume
@@ -270,7 +270,10 @@ Generated error layouts clear semantic fields independently of URL action;
 authored troubleshooting remains searchable. Exact per-plan embedding inputs
 may share inference only with their complete title/context/model request;
 return every original offset and validate all vectors before saving anything.
-The v8 repair requires varied script evidence for undeclared Japanese hints and
+The v9 projection repair adds source entity context, dated article boundaries,
+conservative generic navigation/utility filtering and canonical HTML newlines.
+Retain raw-reader hashes and decoder behavior. Older v8 requests may reuse vectors
+only after the full source/view/request checks. The v8 repair requires varied script evidence for undeclared Japanese hints and
 recognizes complete large phpBB SQL-error layouts; retain explicit Japanese,
 mixed regions, authored troubleshooting and full readers. Byte/provenance-equal
 regional reader checkpoints may advance without extracting them again.

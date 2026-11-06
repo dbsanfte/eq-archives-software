@@ -88,10 +88,14 @@ def test_binary_document_keeps_its_existing_extracted_text_and_extraction_checkp
     assert patch['text'][0]['text_chunk'].strip()==hit['_source']['text_full']
 
 
-def test_archived_error_clears_all_semantic_vectors_and_preserves_the_reader_and_enrichment(tmp_path):
+@pytest.mark.parametrize('raw',[
+    '<title>System Message: Error</title><h1>Error</h1><p>The post you selected no longer exists.</p>',
+    '<html><frameset><frame src="main.html"></frameset><noframes>This page requires frames.</noframes></html>',
+    '<html><title>Games</title><script>window.open("/exitpage/popup.php");</script>'+''.join(f'<a href="?term=Game{i}">Game {i}</a> | ' for i in range(40))+'</html>',
+])
+def test_archived_error_clears_all_semantic_vectors_and_preserves_the_reader_and_enrichment(tmp_path,raw):
     hit,client,embedder=fixture()
     source=hit['_source']
-    raw='<title>System Message: Error</title><h1>Error</h1><p>The post you selected no longer exists.</p>'
     path=tmp_path/source['id'];path.parent.mkdir(parents=True);path.write_text(raw)
     source.update(text_full='Original error reader',mime_type='text/html',llm_summary='Historical summary retained')
     diagnostics={}
@@ -364,7 +368,7 @@ def test_operator_entrypoint_only_adds_mapping_and_runs_checkpointed_migration(t
         job.main()
 
 
-@pytest.mark.parametrize('previous_policy',['eq-passages-480-v4','eq-passages-480-v5','eq-passages-480-v6','eq-passages-480-v7',passages.VERSION])
+@pytest.mark.parametrize('previous_policy',['eq-passages-480-v4','eq-passages-480-v5','eq-passages-480-v6','eq-passages-480-v7','eq-passages-480-v8',passages.VERSION])
 def test_source_upgrade_reuses_only_identical_passage_requests_and_advances_checkpoint(tmp_path,previous_policy):
     hit,client,embedder=fixture();source=hit['_source'];source.update(mime_type='text/html',text_extraction_version='old')
     path=tmp_path/hit['_id'];path.parent.mkdir(parents=True);path.write_text('<title>Guild</title><p>Preserved complete guild instructions.</p>')
@@ -398,7 +402,11 @@ def test_import_newline_normalization_reuses_only_with_verified_same_raw_bytes(t
     source.update(text_full=patch['text_full'],text_extraction_version=WEBSITE_EXTRACTION_VERSION,
                   embedding_model=gemma.MODEL,text_chunking_version='eq-passages-480-v5')
     old=passages.prepare(source['text_full'],source['id'],html_source=raw,mime_type='text/html')
-    assert old.html_sha256!=groups[0][1].html_sha256 and old.view==groups[0][1].view
+    assert old.html_sha256==groups[0][1].html_sha256 and old.view==groups[0][1].view
+    # Reproduce a legacy, unnormalized provenance hash explicitly.
+    from dataclasses import replace
+    old=replace(old,html_sha256=passages.digest(raw))
+    assert old.html_sha256!=groups[0][1].html_sha256
     source['text_passage_provenance']={'version':'eq-passages-480-v5','sources':[{**old.provenance(),'version':'eq-passages-480-v5'}]}
     if binding!='missing':source['text_passage_provenance']['decoding']={'source_sha256':hashlib.sha256(raw.encode()).hexdigest() if binding=='same' else '0'*64}
     source['text']=[{'text_chunk':p.text,'title':p.title,'context':p.context,'kind':p.kind,'source_start':p.start,'source_end':p.end} for p in old.passages]
