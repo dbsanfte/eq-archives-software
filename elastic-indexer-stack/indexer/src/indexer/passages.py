@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 import hashlib
 import re
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qs
 
 from bs4 import BeautifulSoup, Comment
 
@@ -18,7 +18,7 @@ from .chunking import SourceChunk, chunk_source
 from .html_extraction import website_markdown, repair_script_markup
 from . import passage_forums
 
-VERSION = "eq-passages-480-v8"
+VERSION = "eq-passages-480-v9"
 MAX_TOKENS = 480
 ASSETS = {".js", ".css", ".map", ".ico", ".svg", ".woff", ".woff2"}
 CONTROLS = re.compile(r"^(?:reply(?: to (?:item|topic))?(?: with quote)?|quote|edit|delete|"
@@ -144,7 +144,13 @@ def _encoded_advertising(soup,excluded):
         node.extract();excluded.append('encoded_advertising_markup')
 
 
-def _allakhazam(soup,title,excluded):
+def _allakhazam(soup,title,excluded,path=""):
+    class_title=""
+    if path.lower().endswith("/classes.html") and soup.find(string=re.compile(r"^\s*Class Strategy Discussions\s*$",re.I)):
+        for cell in soup.select('td[align="center"][colspan="2"]'):
+            bold=cell.find(["b","strong"],recursive=False)
+            if bold and re.fullmatch(r"The [A-Za-z ]{3,40}",passage_forums.words(cell)):
+                class_title=passage_forums.words(bold);break
     navigation=re.compile(r'^(?:Bestiary|Jump|Search(?: Comments)?|Statistics|Allakhazam.s|Buy [A-Za-z ]+|Search Results)\s*:',re.I)
     for table in reversed(list(soup.find_all('table'))):
         if not table.parent:continue
@@ -211,12 +217,26 @@ def _allakhazam(soup,title,excluded):
                   if not h.find_parent(class_='mform') and not navigation.match(h.get_text(' ',strip=True))
                   and not COLUMN_NAMES.fullmatch(h.get_text(' ',strip=True)) and not h.get_text(' ',strip=True).endswith(':')
                   and not re.match(r'^Post(?: by | \||$)',h.get_text(' ',strip=True))),None)
-    title=entity or heading or title
+    title=class_title or entity or heading or title
     return title
 
 
-def _everlore(soup,excluded):
+def _everlore(soup,excluded,path=""):
     """Keep database entities while pairing the site's submission rows."""
+    entity=""
+    if re.search(r"/(?:beastdetails|magic|items)\.asp$",path,re.I):
+        for link in soup.find_all("a",href=re.compile(r"(?:^|/)Subscribe\.asp\?DID=",re.I)):
+            if link.find_parent(["blockquote","pre","code","section"]):continue
+            # The database heading immediately owns its document subscription.
+            # Walk only small heading wrappers; never promote a sidebar/body.
+            for parent in list(link.parents)[:3]:
+                if parent.name not in ("p","td","font"):continue
+                copy=BeautifulSoup(str(parent),"html.parser")
+                for a in copy.find_all("a"):a.decompose()
+                candidate=passage_forums.words(copy)
+                if 2<len(candidate)<120 and not parent.find(["table","blockquote","pre"]):
+                    entity=candidate;break
+            if entity:break
     def external_host(link):
         try:
             url=urlsplit(link.get('href',''))
@@ -252,6 +272,96 @@ def _everlore(soup,excluded):
             row.replace_with(replacement)
         else:row.decompose()
         body_row.decompose();excluded.append('everlore_comment_structure')
+    return entity
+
+
+def _layout_utility(soup,path):
+    """Whole-page utility decisions require source structure, never host names."""
+    if soup.find(['pre','code','blockquote','article','main']):return None
+    text=passage_forums.words(soup.body or soup)
+    if soup.find('frameset') and soup.find('frame'):
+        noframes=soup.find('noframes')
+        fallback=passage_forums.words(BeautifulSoup(noframes.get_text(),'html.parser')) if noframes else ''
+        outside=BeautifulSoup(str(soup),'html.parser')
+        for node in outside.select('head,title,frameset,frame,noframes,script,style'):
+            if node.parent:node.decompose()
+        if not passage_forums.words(outside) and re.fullmatch(r'(?:This page (?:requires|uses) frames\.?|Your browser does not support frames\.?)',fallback,re.I):
+            return 'frames_only_shell'
+    if re.search(r'(?:^|/)calendar\.php$',path,re.I) and re.search(r'\bvBulletin\b',text,re.I):
+        # Empty day/month navigation is utility. Named event links or authored
+        # prose/quotes are evidence to keep the page, even on this route.
+        links=soup.find_all('a',href=True)
+        day_pattern=r'\d{1,2}(?:\s+(?:Sun|Mon|Tue|Wed|Thu|Fri|Sat))?'
+        cells=[c for c in soup.find_all(['td','th']) if not c.find('table')]
+        days=[c for c in cells if re.fullmatch(day_pattern,passage_forums.words(c),re.I)]
+        authored_day=any(re.match(r'^\d{1,2}\s+[A-Za-z]',passage_forums.words(c)) and not re.fullmatch(day_pattern,passage_forums.words(c),re.I) for c in cells)
+        event=any(re.search(r'(?:[?&](?:e|eventid)=|do=(?:getinfo|showevent))',a['href'],re.I) for a in links)
+        paragraphs=any(len(passage_forums.words(p))>20 for p in soup.find_all(['p','li']))
+        if len(days)>=14 and not event and not paragraphs and not authored_day and len(text)<6000:
+            return 'forum_utility_page'
+    # Redirect/pop-up subject directories have almost no text outside their
+    # query-only term links. An authored directory description vetoes this.
+    terms=[a for a in soup.find_all('a',href=True)
+           if a['href'].startswith('?') and set(parse_qs(a['href'][1:]))=={'term'}]
+    popup=any(re.search(r'window\.open\s*\(\s*[\'"][^\'"]*/(?:exitpage/)?popup\.php',script.get_text(),re.I)
+              for script in soup.find_all('script'))
+    if len(terms)>=30 and popup:
+        copy=BeautifulSoup(str(soup),'html.parser')
+        for node in copy.select('head,script,style,form,a'):node.decompose()
+        authored=any(len(passage_forums.words(p))>=20 for p in copy.find_all(['p','li']))
+        if not authored and len(re.sub(r'[^\w]','',passage_forums.words(copy)))<24:return 'archived_advertising_directory'
+    return None
+
+
+def _structured_navigation(soup,excluded):
+    for node in reversed(list(soup.find_all(['table','td','div']))):
+        if not node.parent or node.find_parent(['blockquote','pre','code','article']):continue
+        if node.find(['th','caption','blockquote','pre','code']):continue
+        links=node.find_all('a');text=passage_forums.words(node)
+        if len(links)<3 or len(text)>6000:continue
+        labels={passage_forums.words(a).lower() for a in links}
+        signals=sum(any(re.fullmatch(pattern,label) for label in labels) for pattern in
+                    (r'(?:current )?news',r'news archive',r'poll archive',r'submit news',
+                     r'contact(?: us)?',r'(?:log ?in|register)',r'(?:home|main)',r'search'))
+        linked=sum(len(passage_forums.words(a)) for a in links)
+        menu_roles=(len(node.select('a.menuItem'))>=3 and node.select_one('.menuSection') is not None)
+        data=any(len(cells:=passage_forums.row_cells(row))>1 and
+                 any(re.fullmatch(r'[+\-]?\d[\d,.]*',passage_forums.words(c)) for c in cells)
+                 for row in node.find_all('tr'))
+        # Require multiple exact UI roles and negligible authored descriptions.
+        unlinked=len(text)-linked
+        if (signals>=3 or menu_roles) and linked/max(1,len(text))>(.65 if menu_roles else .78) and unlinked<max(80,len(links)*(8 if menu_roles else 5)) and not data:
+            node.decompose();excluded.append('structured_navigation')
+
+
+def _news_articles(soup,excluded):
+    """WordPress skins and semantic articles with coherent title/date/body roles.
+
+    Reuse post boundaries so small stories cannot be packed across entries.
+    All content outside recognized entries stays in the selected view.
+    """
+    candidates=soup.select('article,.post,.entry')
+    selected=[]
+    candidate_ids={id(node) for node in candidates}
+    for node in candidates:
+        if node.find_parent(['blockquote','pre','code']):continue
+        heading=node.find(['h1','h2','h3'])
+        date=node.find('time')
+        byline=node.find('small',string=re.compile(r'Posted by .+ on .+',re.I))
+        if not heading or not (date or byline) or not node.find(['p','table','blockquote','pre','img']):continue
+        # Heading and timestamp must belong to this entry, not a nested story.
+        if any(next((p for p in role.parents if id(p) in candidate_ids),None) is not node for role in (heading,date or byline)):
+            continue
+        selected.append((node,heading,date or byline))
+    for node,heading,metadata in selected:
+        if not node.parent:continue
+        subject=passage_forums.words(heading);stamp=passage_forums.words(metadata)
+        if not subject or not (passage_forums.dated(stamp) or re.fullmatch(r"\d{4}-\d{2}-\d{2}(?:T.*)?",stamp)):continue
+        heading.decompose();metadata.decompose()
+        body=''.join(str(child) for child in node.contents)
+        section=BeautifulSoup(passage_forums.section('',stamp,body,subject),'html.parser')
+        section.h2.string='Article: '+subject+' | '+stamp
+        node.replace_with(section);excluded.append('dated_article_structure')
 
 
 def _html_view(raw, host, _preserve_layout=False, path=""):
@@ -270,7 +380,7 @@ def _html_view(raw, host, _preserve_layout=False, path=""):
         if roots:excluded.append('recovered_body_from_head')
     thread=passage_forums.extract(soup,host,path,projection)
     if not thread:_encoded_advertising(soup,excluded)
-    reason=None if thread else passage_forums.excluded_page(soup,title,path)
+    reason=None if thread else (passage_forums.excluded_page(soup,title,path) or _layout_utility(soup,path))
     if reason:
         return "",title,"archive_status",[reason]
     if not thread and soup.select_one('.postbody'):
@@ -353,12 +463,12 @@ def _html_view(raw, host, _preserve_layout=False, path=""):
                 excluded.append("legacy_aggregator_navigation")
                 node.decompose()
     if host.endswith("allakhazam.com"):
-        title = _allakhazam(soup,source_title,excluded)
+        title = _allakhazam(soup,source_title,excluded,path)
     elif host.endswith("everlore.com"):
         heading = soup.find(["h1", "h2"])
         if heading:
             title = heading.get_text(" ", strip=True)
-        _everlore(soup,excluded)
+        title = _everlore(soup,excluded,path) or title
     # Modern forum engines and many Ezboard mirrors expose the message body.
     # Replace a single-post presentation table, retaining its source author/date.
     for node in ([] if thread else list(soup.select("[id^=post_message_],.postbody,.post-content,.postText"))):
@@ -377,6 +487,9 @@ def _html_view(raw, host, _preserve_layout=False, path=""):
         else:
             section.append(node.extract());container.replace_with(section)
             excluded.append("forum_profile_controls")
+    if not thread:
+        if not _preserve_layout:_structured_navigation(soup,excluded)
+        _news_articles(soup,excluded)
     # HTML feeds are not prose articles: retain each title/date/body together.
     feed = soup.find("rss") or soup.find("feed")
     if feed:
@@ -518,7 +631,7 @@ def _sections(view):
     for start,end in zip(points,points[1:]):
         if start in headings:
             heading=headings[start]
-            if re.match(r'^Post(?: by |$| \|)',heading) or re.search(r'\bBy: .+ Posted @',heading):
+            if re.match(r'^(?:Post(?: by |$| \|)|Article: )',heading) or re.search(r'\bBy: .+ Posted @',heading):
                 post_scope=heading;section=''
             else:section=heading
         value = view[start:end]
@@ -586,8 +699,8 @@ def _chunks(view, title, document_context="", strict_sections=False):
             # from its first body paragraph. Pack that metadata-only fragment,
             # never the heading that starts the next post (even the same user).
             post_header=(previous.kind==passage.kind=='post' and
-                         re.fullmatch(r'Post(?: by [^\n]*| \|[^\n]*)?(?:\n[-=]+)?',previous.text.strip()) and
-                         not re.match(r'Post(?: by | \||\n|$)',passage.text.lstrip()))
+                         re.fullmatch(r'(?:Post(?: by [^\n]*| \|[^\n]*)?|Article: [^\n]*)(?:\n[-=]+)?',previous.text.strip()) and
+                         not re.match(r'(?:Post(?: by | \||\n|$)|Article: )',passage.text.lstrip()))
             merge=previous.kind==passage.kind=='prose' or punctuation or post_header
             if not any(c.isalnum() for c in passage.text):context=previous.context
             elif not any(c.isalnum() for c in previous.text):context=passage.context
@@ -605,6 +718,8 @@ def _chunks(view, title, document_context="", strict_sections=False):
 
 def prepare(text, record_id="", title="", *, html_source=None, mime_type=""):
     host,path=identity(record_id)
+    if html_source is not None:
+        html_source=html_source.replace("\r\n","\n").replace("\r","\n")
     excluded=[];method="source_text";raw_hash=None
     fragment_reason=None
     # Captured PHP diagnostics are often HTML fragments labelled text/plain,

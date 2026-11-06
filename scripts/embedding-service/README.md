@@ -202,7 +202,7 @@ not hold other workers. Missing sources are counted, retain original text/chunks
 and never claim repaired extraction. Unusable old vectors with no corresponding
 text are cleared during replacement. Empty sources are not invented.
 
-`embedding_model` and `text_chunking_version=eq-passages-480-v8` together are the
+`embedding_model` and `text_chunking_version=eq-passages-480-v9` together are the
 text resume checkpoint. Older Gemma records remain eligible for the passage
 upgrade; `REINDEX_PRIORITIZE_UNCONVERTED=true` finishes the old model frontier
 first, then upgrades previously converted Gemma records. Count model conversion
@@ -609,3 +609,29 @@ explicitly retries up to 1,000 gaps, and a recovered evidence source resets the
 affected annotation cursor. Exit 1 with pending gaps must remain visible. Transport
 and authentication failures stop visibly with checkpoints retained. Keep all
 catalogs, state, sources and credentials outside both Git repositories.
+
+
+### Entity, article and utility projection repair
+
+Policy `eq-passages-480-v9` carries source-labelled Everlore database entities
+and Allakhazam class subjects into reply requests. Generic link-menu detection
+requires several exact control roles and preserves authored descriptions, data
+grids and literal examples. Empty vBulletin calendars, structurally proven
+pop-up subject directories and frames-only fallback shells have no semantic
+passages; an authored event, directory description or noframes body keeps content.
+Whole-page utility exclusions clear text, summary and OCR search vectors together
+while preserving the reader and enrichment. WordPress skins and semantic articles
+with a source title/date/body get separate article contexts and boundaries.
+Unknown layouts keep the normal content-preserving fallback.
+
+Normalize CRLF and CR only at the HTML projection boundary, so missing-text
+imports, curation imports and reindexing produce identical source-bound views
+and requests. Preserve the exact reader/raw source hashes and decoder policy.
+Earlier v4–v8 passages can advance without inference only after the existing
+reader, source provenance and complete request/offset comparisons succeed.
+
+Use the protected deployment and prepared pending-Job handoff, retaining all
+predecessors, prepared sources, rejection/cache ledgers and completed import/image
+Jobs. Do not overlap v8 and v9 broad writers: the old policy considers newer
+passage checkpoints unfinished. The new run retains unfinished-model priority
+and then upgrades older passage policies; it does not call paid enrichment.
