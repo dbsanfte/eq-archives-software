@@ -16,11 +16,13 @@ single-node **k3s** directly (not k3d). It manages the existing four-replica
 cert-manager Certificates in `eqarchives-es`.
 
 The Kustomization also manages the cluster-local `nomic-embeddings` Deployment,
-Service, model-cache PVC, configuration, and Vulkan device plugin. Elasticsearch,
+Service, model-cache PVC, configuration, and Vulkan device plugin. The Elasticsearch StatefulSet and
 its data, Traefik, cert-manager, the `local-path` StorageClass, and the
 `letsencrypt-prod` ClusterIssuer are existing prerequisites.
 `00-elasticsearch.yaml` is a separate, manually managed backend reference;
-its secret placeholders must never be applied by this workflow.
+its secret placeholders must never be applied by this workflow. Only the existing
+Elasticsearch Service is now managed separately in `elasticsearch-service.yaml`,
+as ClusterIP on REST port 9200, with no NodePorts or transport service.
 
 The public read-only MCP server is Deployment/Service `eqarchives-mcp`, defined
 in [`mcp.yaml`](mcp.yaml). Its exact `/mcp` HTTPS route takes precedence over the
@@ -49,8 +51,8 @@ logical batch and physical batch are 1,024 tokens; each input remains limited to
 512 tokens through the per-slot context cap. All
 13 layers are offloaded through Vulkan. Requests use the existing alias
 `text-embedding-nomic-embed-text-v1.5@q8_0`. The frontend supplies Nomic's
-`search_query:` prefix. There is no new public ingress: NGINX forwards only the
-existing embedding route to `nomic-embeddings.eqarchives-es.svc.cluster.local:8080`.
+`search_query:` prefix. There is no new public ingress: NGINX forwards the existing embedding route to the bounded search API, which
+calls `nomic-embeddings.eqarchives-es.svc.cluster.local:8080`.
 The model server reads the same API key from a restricted Secret projection;
 it receives no Elasticsearch credentials. Health probes do not require a key.
 
@@ -167,13 +169,13 @@ it from a trusted secret store. Never put values in command arguments or git.
 | `DOCKERHUB_TOKEN` | Docker Hub token with image push/pull permission |
 | `FRONTEND_ES_USERNAME` | Elasticsearch user with read access to `eq-archive` |
 | `FRONTEND_ES_PASSWORD` | That user's password |
-| `FRONTEND_OPENAI_API_KEY` | Shared key for NGINX and the cluster-local Nomic server |
+| `FRONTEND_OPENAI_API_KEY` | Shared key for the search API and cluster-local embedding server |
 
 The deployment reconciles `search-eqarchives-secrets` and
 `dockerhub-pull-secret` from these values using a pipe and server-side apply.
 Secret values are never written to deployment manifests, workflow artifacts, or
 kubectl's last-applied annotation. Certificate private keys stay in Secrets
-managed by cert-manager. NGINX reads the application secrets at startup;
+managed by cert-manager. The MCP/search API reads the application secrets; the static NGINX pod receives none.
 Elasticsearch credentials must not be added to `src/config/engine.json` or any
 other browser asset.
 
@@ -247,3 +249,29 @@ limits. `/explore` itself remains a frontend SPA route. Deployment checks both
 JSON endpoints with `scripts/check-explore.py`; the isolated Traefik smoke test
 uses the same production manifest rules. This feature shares the read-only ES
 account and requires no new secrets, storage, mapping changes or indexing Jobs.
+
+### Public workload containment
+
+NGINX runs as UID 10001 on 8080, with no credentials, no service-account token,
+RuntimeDefault seccomp, no added capabilities, no privilege escalation and a
+read-only root filesystem. Only its bounded 64 MiB memory `/tmp` is writable.
+Its Service still exposes port 80. The search adapter deploys before the static
+frontend; isolation policies apply after all old frontend replicas retire.
+
+`public-network-policy.yaml` permits frontend -> DNS/search API, search API ->
+DNS/Elasticsearch/live embeddings, and ingress-controller -> public services.
+Database ingress permits the API and existing namespace Jobs identified by the
+standard `job-name` label; node-originated operations and host-network curation
+continue using Kubernetes' node-traffic rules. The policies do not select or
+restart ingestion Jobs, and do not alter database egress/snapshot traffic.
+A legacy frontend rollback needs its old database/model egress restored first;
+do not roll back blindly to a credential-bearing image under these policies.
+
+The operator's ingress security override is
+[`scripts/security-maintenance/traefik.yaml`](../../../scripts/security-maintenance/traefik.yaml).
+It uses the installed chart, a pinned patched Traefik 2.11 release and two rolling
+replicas, preserving existing unrelated ports/routes. CI tests that same image.
+Apply it separately after reviewing the rendered installed chart; do not overwrite
+the k3s-managed HelmChart. Database version/TLS and a multi-minor k3s/runtime upgrade
+require a separate checkpoint-preserving maintenance window; ordinary frontend
+CI never restarts Elasticsearch or an indexing Job.

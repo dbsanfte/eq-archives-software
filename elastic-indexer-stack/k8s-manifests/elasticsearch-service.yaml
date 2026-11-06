@@ -1,0 +1,19 @@
+# Manage only the existing Service, never the database StatefulSet or its data.
+# Single-node Elasticsearch needs no externally reachable transport service.
+apiVersion: v1
+kind: Service
+metadata:
+  name: elasticsearch
+  namespace: eqarchives-es
+  labels:
+    app: elasticsearch
+    app.kubernetes.io/part-of: eqarchives-public-isolation
+spec:
+  type: ClusterIP
+  ports:
+    - name: rest
+      port: 9200
+      targetPort: 9200
+      protocol: TCP
+  selector:
+    app: elasticsearch

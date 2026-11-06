@@ -247,3 +247,38 @@ calls, persistent credentials or indexing Jobs are involved.
 Run `python3 scripts/check-explore.py https://search.eqarchives.org` from the
 repository root to verify the deployed routes. CI exercises their actual
 production ingress paths in the isolated Traefik smoke test.
+
+## Bounded browser API
+
+The same process also serves the existing browser URLs. NGINX has no backend
+credentials and forwards only exact `/elasticsearch/eq-archive/_search` (POST),
+`/_count` (GET/HEAD at that index prefix) and `/openai/v1/embeddings` (POST).
+These are adapters for existing cached browsers, not raw Elasticsearch proxies.
+`web_api.py` reconstructs a closed subset of Search UI's query grammar. Unknown
+operations/options, scripts, runtime mappings, arbitrary aggregations, scroll
+parameters, duplicate JSON keys and invalid vectors are rejected before I/O.
+
+Search limits: 96 KiB streamed bodies with a two-second body deadline; 50 results,
+a 1,000-result window, 160 query nodes/eight nesting levels, eight text clauses,
+4,000 text characters/400 terms across the request, 900 facet buckets and four
+768-dimensional normalized finite vector branches (`k <= 50`, candidates <= 250).
+Every search has an eight-second ES timeout, ten-second total execution deadline,
+fixed result/reader projections and safe highlight encoding/markers. Full reader
+text is available only for one exact ID; vectors cannot be retrieved. Responses
+retain the existing 8 MiB limit. Two browser requests retain admission until response transfer finishes (30-second
+absolute deadline) and share the four-slot MCP retrieval budget; extra work fails promptly instead of waiting in an unbounded
+queue. Counts are cached for 30 seconds. Phrase/operator search uses safe simple
+query syntax; regexes, field selectors, wildcard expansion and fuzziness are not
+public query features. Capture history allows only a literal host/path around a
+14-digit timestamp, never caller-selected regex structure.
+
+Public embeddings accept one query, the deployed model alias and float encoding;
+query text is at most 600 characters. Server-side prefixing, the existing
+128-entry/five-minute cache, one shared embedding slot, three-second timeout,
+512-token upstream context limit and 15-second failure cooldown also apply.
+Batch/document embedding compatibility is tested directly against the private
+model service, not exposed through the public adapter.
+
+Run `python3 scripts/check-public-security.py https://search.eqarchives.org`
+from the repository root after deployment. Its small rejection tests do not
+execute supplied scripts, open scroll contexts or perform flooding.

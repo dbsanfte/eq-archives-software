@@ -3,6 +3,7 @@ import LabelRow from "./LabelRow";
 import TagRow from "./TagRow";
 import ResultBody from "./ResultBody";
 import ButtonRow from "./ButtonRow";
+import { sourceLink } from "../reader/reader-utils";
 import CaptureHistory from "./CaptureHistory";
 import DiscussionResult from "./DiscussionResult";
 import { captureIdentity } from "../../search/CaptureIdentity";
@@ -33,7 +34,7 @@ const CustomResultView = (context) => {
           <a
             className="sui-result__title sui-result__title-link"
             onClick={onClickLink}
-            href={context.result.url.raw}
+            href={sourceLink(context.result.url.raw) || undefined}
             target="_blank"
             rel="noopener noreferrer"
           >

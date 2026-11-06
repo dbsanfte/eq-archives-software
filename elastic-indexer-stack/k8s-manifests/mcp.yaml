@@ -2,6 +2,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: eqarchives-mcp
+  labels:
+    app.kubernetes.io/part-of: eqarchives-search-api
   namespace: eqarchives-es
 spec:
   replicas: 1
@@ -52,7 +54,7 @@ spec:
               memory: 128Mi
             limits:
               cpu: "1"
-              memory: 256Mi
+              memory: 512Mi
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -101,6 +103,8 @@ apiVersion: v1
 kind: Service
 metadata:
   name: eqarchives-mcp
+  labels:
+    app.kubernetes.io/part-of: eqarchives-search-api
   namespace: eqarchives-es
 spec:
   selector:
@@ -134,6 +138,8 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: eqarchives-mcp
+  labels:
+    app.kubernetes.io/part-of: eqarchives-search-api
   namespace: eqarchives-es
   annotations:
     # Traefik's default priority is rule-string length. The root PathPrefix

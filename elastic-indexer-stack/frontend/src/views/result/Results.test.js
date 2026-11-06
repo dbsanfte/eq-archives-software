@@ -15,7 +15,7 @@ const result = {
   id: { raw: 'archive/id with spaces' }, title: { raw: 'An archived guide' },
   url: { raw: 'https://example.org/guide' }, alternate_url: { raw: 'https://mirror.example/guide' },
   thumbnail: { raw: '/thumbnails/website.webp' },
-  llm_summary: { raw: '<p>A useful summary</p>' },
+  llm_summary: { raw: 'A useful summary' },
   text_full: { raw: '# Full archived text', snippet: '<em>A matching passage</em>' },
   llm_content_flavour: { raw: 'Guide' }, mailing_list_name: { raw: 'EverQuest' },
   domain_name: { raw: 'example.org' }, capture_date: { raw: '2000-01-01T00:00:00Z' },
@@ -31,6 +31,25 @@ beforeEach(() => {
   jest.spyOn(window, 'alert').mockImplementation(() => {});
 });
 afterEach(() => jest.restoreAllMocks());
+
+test('treats summaries and unexpected snippet markup as untrusted text', () => {
+  const payload = '<img src=x onerror="window.audit=1"><svg onload="window.audit=2">';
+  const { container } = render(<CustomResultView result={{ ...result, thumbnail: undefined,
+    llm_summary: { raw: payload }, text_full: { snippet: '<em>&lt;img&gt;</em>' + payload }
+  }} />);
+  expect(container.querySelectorAll('img,svg,script')).toHaveLength(0);
+  expect(container.querySelector('.result-text-snippet em')).toHaveTextContent('<img>');
+  expect(screen.getAllByText(payload).length).toBeGreaterThan(0);
+});
+
+test('renders Search UI array snippets as safe highlighted text', () => {
+  const { container } = render(<CustomResultView result={{ ...result,
+    text_full: { snippet: ['A <em>matching</em> passage', '&lt;img onerror=x&gt;'] }
+  }} />);
+  expect(container.querySelector('.result-text-snippet em')).toHaveTextContent('matching');
+  expect(screen.getByText(/<img onerror=x>/)).toBeInTheDocument();
+  expect(container.querySelector('.result-text-snippet img')).toBeNull();
+});
 
 test('renders source evidence before a collapsed AI summary, with full detail available', () => {
   const onClickLink = jest.fn(event => event.preventDefault());

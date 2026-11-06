@@ -51,7 +51,7 @@ class Fixture(BaseHTTPRequestHandler):
             assert len(body["knn"]) == 4
             assert any(branch["field"] == "image_vector" for branch in body["knn"])
             assert all(len(item["query_vector"]) == 768 for item in body["knn"])
-        else:
+        elif body["query"] != {"match_all": {}}:
             assert "bool" in body["query"], "Legacy search unexpectedly lost its embeddings"
             for clause in body["query"]["bool"]["filter"]:
                 if "terms" in clause:
