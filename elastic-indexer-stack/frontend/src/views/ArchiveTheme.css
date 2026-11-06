@@ -494,6 +494,6 @@
 .archive-discussion-matches ol { list-style: none; margin: 0; padding: 0; }
 .archive-discussion-matches li { padding: 12px 0; border-bottom: 1px solid var(--archive-border); }
 .archive-discussion-matches li:last-child { border-bottom: 0; }
-.archive-discussion-excerpt { margin: 0 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.archive-discussion-excerpt { margin: 0 0 8px; white-space: normal; overflow-wrap: anywhere; }
 .archive-discussion-matches a { display: inline-flex; flex-wrap: wrap; align-items: center; min-height: 44px; gap: 4px; }
 .archive-discussion-date { color: var(--archive-muted); font-size: .8rem; }

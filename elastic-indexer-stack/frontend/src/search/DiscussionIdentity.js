@@ -1,4 +1,8 @@
 import { captureIdentity } from './CaptureIdentity';
+import { unified } from 'unified';
+import remarkParse from 'remark-parse';
+import remarkGfm from 'remark-gfm';
+import remarkRehype from 'remark-rehype';
 
 export const DISCUSSION_VERSION = 'forum-discussions-v1';
 
@@ -27,6 +31,10 @@ export function snippetHtml(result) {
 
 export function excerptText(result) {
   const snippet = snippetHtml(result);
+  return decodeSnippet(snippet);
+}
+
+function decodeSnippet(snippet) {
   if (!snippet) return '';
   // Search snippets are HTML-escaped by Elasticsearch; em is its only markup.
   // Decode to text without mounting source HTML or executing any content.
@@ -38,4 +46,33 @@ export function excerptText(result) {
 export function discussionMatchKey(result) {
   const excerpt = excerptText(result).replace(/\s+/g, ' ').trim();
   return excerpt || result._meta?.id || result.id?.raw;
+}
+
+const excerptParser = unified().use(remarkParse).use(remarkGfm).use(remarkRehype);
+const excerptHints = new WeakMap();
+export function excerptFind(result) {
+  if (excerptHints.has(result)) return excerptHints.get(result);
+  // Use the reader's Markdown pipeline: destinations, markup and image alt
+  // attributes are not searchable text nodes. Partial table/line fragments
+  // remain separate so a snippet cannot join otherwise distinct reader nodes.
+  const tree = excerptParser.runSync(excerptParser.parse(excerptText(result)));
+  const terms = [...snippetHtml(result).matchAll(/<em>([\s\S]*?)<\/em>/giu)]
+    .map(match => decodeSnippet(match[1]).toLowerCase()).filter(Boolean);
+  let longest = '';
+  let mostTerms = -1;
+  function visit(node) {
+    if (node.type === 'text') {
+      for (const part of node.value.split(/[\r\n|]/u).map(value => value.trim())) {
+        const matches = terms.filter(term => part.toLowerCase().includes(term)).length;
+        if (matches > mostTerms || (matches === mostTerms && part.length > longest.length)) {
+          longest = part; mostTerms = matches;
+        }
+      }
+    }
+    node.children?.forEach(visit);
+  }
+  visit(tree);
+  const hint = Array.from(longest).slice(0, 240).join('');
+  excerptHints.set(result, hint);
+  return hint;
 }

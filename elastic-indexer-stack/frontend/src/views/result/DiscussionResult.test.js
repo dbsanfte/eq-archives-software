@@ -2,6 +2,7 @@ import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import DiscussionResult from './DiscussionResult';
 import { ReaderSearchContext } from '../reader/reader-utils';
+import ReaderText from '../reader/ReaderText';
 
 const match = i => ({ _meta: { id: `capture-${i}` }, capture_date: { raw: '2006-12-13T16:00:00Z' }, text_full: { snippet: `Passage <em>${i}</em> &amp; detail` } });
 const result = { ...match(0), domain_name: { raw: 'forum.example.org' }, _discussionGroup: {
@@ -32,4 +33,16 @@ test('keeps unknown dates and missing snippets explicit without treating them as
   fireEvent.click(screen.getByRole('button', { name: 'Show matches' }));
   expect(screen.getByText('Open this captured page to read the matching content.')).toBeVisible();
   expect(screen.getByRole('link', { name: /Read from here/ })).toHaveTextContent('date unknown');
+});
+
+test('a real archived Markdown snippet links to text that the formatted reader can highlight', async () => {
+  const passage = 'I dont find splitpaw to be that good of exp.';
+  const item = { ...match(1), text_full: { snippet: ['[](/i/p.gif) I dont find <em>splitpaw</em> to be that <em>good</em> of exp.'] } };
+  const card = render(<DiscussionResult result={{ ...result, _discussionGroup: { ...result._discussionGroup, matches: [item] } }} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Show matches' }));
+  const find = new URL(screen.getByRole('link', { name: /Read from here/ }).href).searchParams.get('find');
+  card.unmount();
+  render(<ReaderText text={'# Preserved forum\n\n[](/i/p.gif) ' + passage} find={find} onFind={() => {}} />);
+  expect(await screen.findByText('1 of 1 matches')).toBeVisible();
+  expect(document.querySelector('[data-reader-match]')).toHaveTextContent(passage);
 });

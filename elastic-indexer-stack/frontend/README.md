@@ -161,7 +161,8 @@ identify a group.
 
 Verified forum discussions get one card across their reply, print, feed and
 pagination views. **Show matches** reveals three distinct matching excerpts at a
-time; **Read from here** opens that excerpt's exact captured page. The first
+time; **Read from here** opens that excerpt's exact captured page, with a literal
+text span selected inside Markdown/line boundaries for the reader's Find control. The first
 matching capture still follows the chosen relevance/date sort. Matching excerpts
 come only from the bounded search scan, not a reconstructed complete thread.
 
