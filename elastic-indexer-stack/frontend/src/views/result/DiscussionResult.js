@@ -1,6 +1,6 @@
 import React, { useContext, useId, useState } from 'react';
 import { Button } from '@mui/material';
-import { excerptText, snippetHtml } from '../../search/DiscussionIdentity';
+import { excerptFind, excerptText, snippetHtml } from '../../search/DiscussionIdentity';
 import { readerUrl, recordId, ReaderSearchContext, searchReturnLinkHandlers } from '../reader/reader-utils';
 import ResultBody from './ResultBody';
 
@@ -24,7 +24,7 @@ export default function DiscussionResult({ result, returnTo }) {
       <p className="archive-capture-note">Distinct excerpts found in the searched captures. Each link opens its exact archived page.</p>
       <ol>{group.matches.slice(0, visible).map(match => <li key={recordId(match)}>
         <p className="archive-discussion-excerpt">{excerptText(match) || 'Open this captured page to read the matching content.'}</p>
-        <a href={readerUrl(recordId(match), { find: excerptText(match).slice(0, 240) || find, returnTo })} {...searchReturnLinkHandlers}>Read from here<span className="archive-discussion-date"> · captured {match.capture_date?.raw?.slice(0, 10) || 'date unknown'}</span></a>
+        <a href={readerUrl(recordId(match), { find: excerptFind(match) || find, returnTo })} {...searchReturnLinkHandlers}>Read from here<span className="archive-discussion-date"> · captured {match.capture_date?.raw?.slice(0, 10) || 'date unknown'}</span></a>
       </li>)}</ol>
       {visible < group.matches.length && <Button onClick={() => setVisible(value => value + 3)}>Show more matches</Button>}
     </section>}

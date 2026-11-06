@@ -992,7 +992,7 @@ class FrontendBrowserTests(unittest.TestCase):
                     for index in range(55):
                         path='eq/board/print?board.id=Veterans&message.id='+str(10+index)
                         identifier='websites/forum.example.org/20061213163803/'+path
-                        excerpt=texts[index%4]+' paw'
+                        excerpt=('[](/i/p.gif) ' if index%4==1 else '')+texts[index%4]+' paw'+('\n'*20+'| end |' if index%4==2 else '')
                         source={'title':'Re: Splitpaw field reports','url':'https://web.archive.org/web/20061213163803/http://forum.example.org/'+path,
                                 'domain_name':'forum.example.org','capture_date':'2006-12-13T16:38:03Z','discussion':proof}
                         records.append({'_id':identifier,'_score':1,'_source':source,'highlight':{'text_full':[excerpt]}})
@@ -1036,6 +1036,8 @@ class FrontendBrowserTests(unittest.TestCase):
                     for action in card.locator('.archive-result-actions a,.archive-result-actions button,.archive-discussion-matches a').all():
                         self.assertGreaterEqual(action.bounding_box()['height'],44)
                     self.assertTrue(page.evaluate('document.documentElement.scrollWidth<=innerWidth'))
+                    for excerpt in card.locator('.archive-discussion-excerpt').all():
+                        self.assertLess(excerpt.bounding_box()['height'],200)
                     search_url=page.url
                     artifacts=os.environ.get('BROWSER_ARTIFACT_DIR')
                     if artifacts:
@@ -1044,6 +1046,7 @@ class FrontendBrowserTests(unittest.TestCase):
                     card.get_by_role('link',name='Read from here',exact=False).nth(1).click()
                     expect(page.get_by_role('heading',name='Splitpaw field reports',exact=True)).to_be_visible()
                     expect(page.locator('.reader-body')).to_contain_text(texts[1])
+                    expect(page.locator('[data-reader-match]').first).to_contain_text(texts[1])
                     expect(page.get_by_role('combobox',name='Capture date')).to_be_enabled()
                     expect(page.get_by_role('combobox',name='Capture date').locator('option')).to_have_count(2)
                     self.assertFalse(page.locator('.reader-archive-details').evaluate('(element)=>element.open'))
