@@ -318,19 +318,19 @@ def _structured_navigation(soup,excluded):
         if not node.parent or node.find_parent(['blockquote','pre','code','article']):continue
         if node.find(['th','caption','blockquote','pre','code']):continue
         links=node.find_all('a');text=passage_forums.words(node)
-        if len(links)<5 or len(text)>6000:continue
+        if len(links)<3 or len(text)>6000:continue
         labels={passage_forums.words(a).lower() for a in links}
         signals=sum(any(re.fullmatch(pattern,label) for label in labels) for pattern in
                     (r'(?:current )?news',r'news archive',r'poll archive',r'submit news',
                      r'contact(?: us)?',r'(?:log ?in|register)',r'(?:home|main)',r'search'))
         linked=sum(len(passage_forums.words(a)) for a in links)
-        menu_roles=(len(node.select('a.menuItem'))>=5 and node.select_one('.menuSection') is not None)
+        menu_roles=(len(node.select('a.menuItem'))>=3 and node.select_one('.menuSection') is not None)
         data=any(len(cells:=passage_forums.row_cells(row))>1 and
                  any(re.fullmatch(r'[+\-]?\d[\d,.]*',passage_forums.words(c)) for c in cells)
                  for row in node.find_all('tr'))
         # Require multiple exact UI roles and negligible authored descriptions.
         unlinked=len(text)-linked
-        if (signals>=3 or menu_roles) and linked/max(1,len(text))>(.65 if menu_roles else .78) and unlinked<max(80,len(links)*5) and not data:
+        if (signals>=3 or menu_roles) and linked/max(1,len(text))>(.65 if menu_roles else .78) and unlinked<max(80,len(links)*(8 if menu_roles else 5)) and not data:
             node.decompose();excluded.append('structured_navigation')
 
 

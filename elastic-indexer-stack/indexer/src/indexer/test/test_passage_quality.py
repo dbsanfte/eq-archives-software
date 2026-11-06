@@ -138,9 +138,9 @@ def test_navigation_roles_with_authored_descriptions_are_retained():
     assert project(raw).view.count('carefully written description')==6
 
 
-def test_legacy_menu_roles_generalize_beyond_news_labels():
+@pytest.mark.parametrize("labels",[["Spell list","Zone atlas","Crafting","Bestiary","Maps","Guilds"],["Introduction","Players handbook","Monsters","Game master guide"]])
+def test_legacy_menu_roles_generalize_beyond_news_labels(labels):
     raw='<html><body><table><tr><td class="menuSection">Game information</td></tr>'+''.join(
-        f'<tr><td><a class="menuItem" href="/menu">{label}</a></td></tr>' for label in
-        ['Spell list','Zone atlas','Crafting','Bestiary','Maps','Guilds'])+'</table><h1>Raid report</h1><p>We defeated the dragon at dusk.</p></body></html>'
+        f'<tr><td><a class="menuItem" href="/menu">{label}</a></td></tr>' for label in labels)+'</table><h1>Raid report</h1><p>We defeated the dragon at dusk.</p></body></html>'
     result=project(raw)
-    assert 'Zone atlas' not in result.view and 'defeated the dragon' in result.view
+    assert all(label not in result.view for label in labels) and 'defeated the dragon' in result.view
