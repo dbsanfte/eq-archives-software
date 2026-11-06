@@ -202,7 +202,7 @@ not hold other workers. Missing sources are counted, retain original text/chunks
 and never claim repaired extraction. Unusable old vectors with no corresponding
 text are cleared during replacement. Empty sources are not invented.
 
-`embedding_model` and `text_chunking_version=eq-passages-480-v9` together are the
+`embedding_model` and `text_chunking_version=eq-passages-480-v10` together are the
 text resume checkpoint. Older Gemma records remain eligible for the passage
 upgrade; `REINDEX_PRIORITIZE_UNCONVERTED=true` finishes the old model frontier
 first, then upgrades previously converted Gemma records. Count model conversion
@@ -635,3 +635,37 @@ predecessors, prepared sources, rejection/cache ledgers and completed import/ima
 Jobs. Do not overlap v8 and v9 broad writers: the old policy considers newer
 passage checkpoints unfinished. The new run retains unfinished-model priority
 and then upgrades older passage policies; it does not call paid enrichment.
+
+
+### Lithium printer views and source-bound feed entries
+
+Policy `eq-passages-480-v10` extends Lithium's cooperating message/user/date roles
+to plain-text and coloured-span printer-view authors. Read only the author line
+before its first break; retain guest/damaged messages and complete body content,
+quotes, data tables and attachments. Proven empty `notification.body` report forms
+are utility pages; saved notes and authored reporting examples remain searchable.
+Utility repairs clear all semantic fields atomically, preserving reader/enrichment.
+
+RSS/Atom XML supplies explicit entry boundaries and source subject/author/date
+metadata. Render each body separately, retaining unique descriptions/full content,
+XHTML structure, quotes, authored code and data tables. Escape literal backtick/
+tilde decorations outside actual code before Markdown chunking so a patch-note
+separator cannot consume later entries. Keep entry metadata in every chunk's
+budgeted context, including sections/tables/quotes inside long posts. Unknown or
+malformed XML keeps the conservative reader-preserving fallback. No entity or
+remote-content retrieval is allowed. Discussion verification still uses original
+raw captures independently of these search projections.
+
+Use the protected deployment and prepared pending-Job handoff. Stop the predecessor
+before new-policy writes; preserve all prior Jobs, prepared sources, caches, rejection
+ledgers and completed image/import Jobs. The v10 continuation retains unfinished-model
+priority, then upgrades older passage checkpoints. Verified identical v9 requests can
+reuse vectors under the full existing source/view/request checks. No paid enrichment
+or source preparation is part of this update.
+
+When an operator image approaches OverlayFS's layer-depth limit, flatten the exact
+verified predecessor filesystem and restore its runtime configuration before
+applying `Dockerfile.reindex`. Retain the original image and verify the resulting
+compiled worker, pinned tokenizer, complete vectors and unchanged-record reuse
+before tagging it with the merged revision. Flattening is local image preparation;
+it does not alter running Jobs, archive sources or persistent state.

@@ -509,13 +509,24 @@ def lithium(soup):
         author=nonempty_link(user,r'view_profile\?user\.id=') or user.select_one('.auth_text')
         if author is None:
             author=user.find(['b','strong']) or user.find('span',style=re.compile(r'font-weight\s*:\s*bold',re.I))
+        name=words(author)
+        if not name:
+            # Printer views omit profile links and often use an unstyled name.
+            # Only the first source line is the author; rank/avatar/profile text
+            # below its first break must not enter the attribution.
+            first=[]
+            for node in user.descendants:
+                if getattr(node,'name',None)=='br':break
+                if isinstance(node,str) and not isinstance(node,Comment):first.append(str(node))
+            candidate=' '.join(' '.join(first).split())
+            if len(candidate)<=120:name=candidate
         subject=next((c for c in table.select('td.subjectbar') if c.get('width')=='100%'),None)
         if subject is None:
             first=table.find('tr');cells=row_cells(first) if first else []
             if len(cells)==2 and not words(cells[0]):subject=cells[1]
         stamp=words(table.select_one('.msg_date_cell'))
-        if author and dated(stamp):recognized=True
-        posts.append(section(words(author),stamp,body_copy(body),words(subject)))
+        if name and dated(stamp):recognized=True
+        posts.append(section(name,stamp,body_copy(body),words(subject)))
     if posts and recognized:return Thread('\n'.join(posts),'lithium')
 
 
@@ -761,6 +772,14 @@ def excluded_page(soup,title,path):
     # Reply forms can contain the only surviving quotation. Do not classify a
     # populated message field as an empty utility page.
     if any(words(t) for t in soup.find_all('textarea')):return None
+    # Lithium's empty report popup has a distinct form contract. Keep saved
+    # notes (protected above), quoted examples and authored reporting guides.
+    if re.search(r'(?:^|/)notification$',path,re.I) and re.match(r'Notify Moderator\b',title,re.I):
+        for form in soup.find_all('form'):
+            if (form.find('textarea',attrs={'name':'notification.body'}) is not None
+                    and all(form.find('input',attrs={'name':name}) is not None for name in ('board.id','message.id','notification.type'))
+                    and not any(len(words(p))>40 and not p.find_parent('form') for p in soup.find_all('p'))):
+                return 'forum_utility_page'
     utility_path=re.search(r'(?:^|/)(?:newpost|newuser|register|login|posting|post|newreply)\.(?:pl|php|asp)$',path,re.I)
     utility_title=re.match(r'(?:Make a New Post|New user|Register|Log ?in)(?:\b|\s*-)',title,re.I)
     if (utility_path or utility_title) and soup.find('form') and soup.select_one('textarea,input[type=password],input[name=Username],input[name=Subject]'):
