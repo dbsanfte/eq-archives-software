@@ -787,6 +787,19 @@ ChatGPT/Claude or Deep Research validation after actually performing it.
   current filters, with escaped exact-ID patterns and exact URL validation of
   legacy candidates. Keep metadata/full text separate, exact preview IDs, retries,
   cancellation, and the 1,000-record history bound. No index migration is needed.
+- Source-verified forum discussions may opt into a separate search grouping via
+  `discussion.version=forum-discussions-v1`. Require structural platform evidence
+  and source-bound topic identity; never infer membership from titles. Preserve
+  exact `CaptureIdentity` for history/comparisons, protocols and query strings.
+  Lithium print/reply membership needs locally verified RSS evidence; conflicting
+  memberships stay separate. Show distinct matching excerpts in increments of
+  three with exact reader IDs. Discussion readers use a page-specific capture
+  date selector and collapsed Archive details, without synthesizing whole-thread
+  snapshots. Keep the source catalog private and shared through indexing-state.
+  Existing records use the bounded, resumable `index_discussions.py` operator:
+  pinned prepared Git sources, explicit hosts, learn/annotate cursors, source
+  hashes and optimistic discussion-only updates. No inference, paid enrichment,
+  source preparation or running-Job handoff is needed for that metadata backfill.
 - Dedicated readers use `/document?id=<exact ES ID>`; comparisons add
   `compare=<second ID>`, with optional `find` and `part=ocr`. Route readers before
   mounting the search provider so they do not launch searches or embeddings.

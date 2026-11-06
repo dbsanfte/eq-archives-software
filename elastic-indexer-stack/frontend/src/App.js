@@ -174,7 +174,7 @@ function SearchApp() {
                 bodyHeader={
                   <>
                     {wasSearched && <div className="archive-group-controls">
-                      <FormControlLabel label="Group repeated captures" control={<Checkbox checked={knnParams.groupCaptures} onChange={event => {
+                      <FormControlLabel label="Group captures and discussions" control={<Checkbox checked={knnParams.groupCaptures} onChange={event => {
                         const next = { ...knnParamsRef.current, groupCaptures: event.target.checked };
                         knnParamsRef.current = next;
                         setKnnParams(next);

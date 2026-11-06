@@ -23,7 +23,7 @@ export async function fetchDocumentText(id, signal) {
 export const READER_FIELDS = [
   'title', 'url', 'alternate_url', 'capture_date', 'llm_guessed_date',
   'domain_name', 'mailing_list_name', 'file_type', 'mime_type', 'parent_id',
-  'text_full', 'llm_image_text_full'
+  'text_full', 'llm_image_text_full', 'discussion'
 ];
 
 export async function fetchDocumentRecord(id, signal) {

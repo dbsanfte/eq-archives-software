@@ -36,3 +36,10 @@ class SchemaTests(unittest.TestCase):
             with patch('sys.stdin',io.StringIO(json.dumps(secret))),patch.dict('os.environ',{'EMBEDDING_SCHEMA_ES_URL':'http://fixture'}),patch.object(schema.urllib.request,'urlopen',side_effect=failure),self.assertRaises(SystemExit) as caught:
                 schema.main()
             self.assertNotIn('private',str(caught.exception))
+
+    def test_verified_discussion_mapping_is_additive_and_keeps_proof_out_of_search_text(self):
+        properties=json.loads(Path(__file__).with_name('schema.json').read_text())['properties']['discussion']['properties']
+        self.assertEqual(properties['key']['type'],'keyword')
+        self.assertEqual(properties['version']['type'],'keyword')
+        for name in ('title','source_sha256','evidence_sha256','evidence_id'):
+            self.assertFalse(properties[name]['index'])

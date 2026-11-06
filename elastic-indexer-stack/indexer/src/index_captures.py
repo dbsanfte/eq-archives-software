@@ -26,6 +26,7 @@ from capture_budget import budget_identity
 from indexer.gemma import CHUNKING_VERSION, DOCUMENT_PREFIX, MODEL, chunk_source
 from indexer import passages
 from indexer.embedding_cache import optional_cache
+from indexer.discussions import optional_catalog, metadata as discussion_metadata, lithium_feed
 from indexer.image_embeddings import ImageUnavailable, MAX_BYTES, VERSION as IMAGE_VERSION, prepare_image, response_vector
 from indexer.html_extraction import WEBSITE_EXTRACTION_VERSION, website_markdown
 from indexer.source_encoding import decode_source, repaired_title
@@ -76,6 +77,7 @@ class Services:
         self.image_url = os.environ.get("IMAGE_EMBEDDING_URL", "http://gemma-image-embeddings.eqarchives-es.svc.cluster.local:8080").rstrip("/")
         self.visual_cache = {}
         self.embedding_cache = optional_cache()
+        self.discussions = optional_catalog()
         self.client = httpx.Client(auth=(directory.joinpath("es_username").read_text().strip(),
                                         directory.joinpath("es_password").read_text().strip()),
                                    timeout=httpx.Timeout(120, connect=10), trust_env=False)
@@ -88,6 +90,8 @@ class Services:
         if self.embedding_cache:
             print(json.dumps({'embedding_cache':dict(self.embedding_cache.stats)}),flush=True)
             self.embedding_cache.close()
+        if getattr(self, 'discussions', None):
+            self.discussions.close()
         if self.enricher:
             self.enricher.close()
 
@@ -197,6 +201,14 @@ def index_batch(root, batch, services, chunker=chunk_source):
     manifest = batch["manifest"]
     check_manifest(root, manifest)
     policy(manifest)
+    # Learn source-bound reply membership before any print views are indexed.
+    # Only RSS candidates are reread; existing archive documents remain create-only.
+    catalog = getattr(services, 'discussions', None)
+    if catalog:
+        for capture in manifest['captures']:
+            if urlsplit(capture['url']).path == '/rss/message':
+                catalog.learn_safe(lithium_feed(capture['archive_path'], verified_source(root, capture),
+                                          f"https://web.archive.org/web/{capture['timestamp']}/{capture['url']}"))
     created = skipped = preserved = 0
     for capture in manifest["captures"]:
         image = (capture.get('content_type') or '').split(';')[0].lower() in (
@@ -219,7 +231,8 @@ def index_batch(root, batch, services, chunker=chunk_source):
         replay, content = text_document(root, capture)
         # Model date extraction sees the original body, not our synthetic
         # provenance header or the capture timestamp embedded in its URL.
-        decoded=decode_source(verified_source(root,capture),capture.get('content_type') or '')
+        raw=verified_source(root,capture)
+        decoded=decode_source(raw,capture.get('content_type') or '')
         source=decoded.text
         title_node=BeautifulSoup(source,'html.parser').title
         title=repaired_title(capture.get('title'),title_node.string if title_node else None,decoded)
@@ -253,6 +266,8 @@ def index_batch(root, batch, services, chunker=chunk_source):
                     "embedding_model": MODEL, "archive_source_sha256": capture["sha256"],
                     "archive_source_manifest": batch["manifest_sha256"], "archive_commit": batch["publication"]["commit"],
                     **metadata, "llm_summary_vector": summary_vector}
+        discussion=discussion_metadata(record_id,raw,replay,catalog=catalog)
+        if discussion:document['discussion']=discussion
         if services.create(record_id, document):
             created += 1
         else:

@@ -274,3 +274,36 @@ def test_invalid_response_identity_cannot_poison_the_shared_cache(tmp_path,monke
         with pytest.raises(CrawlError,match='vector'):instance.embedding('Guild evidence.')
         assert instance.embedding_cache.get_many(['title: none | text: Guild evidence.'])=={}
     finally:instance.close()
+
+
+def test_discussion_feed_evidence_is_learned_before_print_views_without_extra_enrichment(candidate,tmp_path):
+    from copy import deepcopy
+    from captures import archive_path
+    from indexer.discussions import Catalog
+    root,row=candidate;batch=published(row);manifest=batch['manifest'];site=manifest['sites'][0]
+    site.update(url='http://guild.example/',scope='http://guild.example/',scope_mode='site')
+    feed=(b'<rss><channel><title>Re: Topic</title><link>http://guild.example/eq/board/message?board.id=Board&amp;message.id=20</link>'
+          b'<item><title>Topic</title><link>http://guild.example/eq/board/message?board.id=Board&amp;message.id=10#M10</link><description>EverQuest guild history.</description></item></channel></rss>')
+    printed=(b'<html><title>Topic</title><a href="/eq/board/message?board.id=Board&amp;message.id=20">Topic</a>'
+             b'<td class="msg_text_cell">EverQuest guild history.</td><td class="msg_user_cell">Author</td><td class="msg_date_cell">12-12-2006</td></html>')
+    captures=[]
+    for index,(url,body,mime) in enumerate([
+        ('http://guild.example/eq/board/print?board.id=Board&message.id=20',printed,'text/html'),
+        ('http://guild.example/rss/message?board.id=Board&message.id=20',feed,'application/xml')]):
+        capture=deepcopy(manifest['captures'][0]);capture.update(url=url,path=capture['path']+str(index),sha256=digest(body),bytes=len(body),content_type=mime)
+        capture['archive_path']=archive_path(capture);(root/capture['path']).write_bytes(body);captures.append(capture)
+    manifest['captures']=captures
+    class Import:
+        def __init__(self):self.discussions=Catalog(tmp_path/'catalog.sqlite');self.docs={};self.paid=0
+        def exists(self,key):return key in self.docs
+        def enrich(self,*args):self.paid+=1;return {'llm_summary':'A historical EverQuest discussion.'}
+        def embedding(self,*args,**kwargs):return [1.]+[0.]*767
+        def create(self,key,doc):self.docs[key]=doc;return True
+    services=Import()
+    result=index_batch(root,batch,services)
+    assert result['created']==1 and result['preserved_files']==1 and services.paid==1
+    document=services.docs[captures[0]['archive_path']]
+    assert document['discussion']['topic']=='10'
+    assert document['discussion']['source_sha256']==captures[0]['sha256']
+    assert document['discussion']['evidence_id']==captures[1]['archive_path']
+    services.discussions.close()

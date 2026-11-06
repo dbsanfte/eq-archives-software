@@ -5,9 +5,11 @@ import logging
 import datetime
 from elasticsearch import Elasticsearch, exceptions
 from .es_serialization import serializers
+from .discussions import MAPPING as DISCUSSION_MAPPING
 
 # A single dictionary describing each field and its ES mapping configuration
 ES_FIELDS = {
+    "discussion": {"mapping": DISCUSSION_MAPPING, "default": None},
     "embedding_model": {"mapping": {"type": "keyword"}, "default": None},
     "image_vector": {"mapping": {"type": "dense_vector", "dims": 768, "index": True,
                                  "index_options": {"type": "int8_hnsw"}}, "default": None},

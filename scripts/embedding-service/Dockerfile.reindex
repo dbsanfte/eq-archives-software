@@ -24,6 +24,7 @@ COPY scripts/embedding-service/image-requirements.txt \
     elastic-indexer-stack/indexer/src/indexer/image_handler.py \
     elastic-indexer-stack/indexer/src/indexer/other_handler.py \
     elastic-indexer-stack/indexer/src/indexer/source_encoding.py \
+    elastic-indexer-stack/indexer/src/indexer/discussions.py \
     elastic-indexer-stack/indexer/src/indexer/embedding_cache.py \
     elastic-indexer-stack/indexer/src/indexer/sqlite_state.py \
     elastic-indexer-stack/indexer/src/indexer/reindex_diagnostics.py \

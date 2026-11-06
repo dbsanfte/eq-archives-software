@@ -565,3 +565,47 @@ Content/integrity failures retain their failure status and never hold later
 records; the ledger does not pretend they completed. Continue using the prepared,
 pending-Job handoff, preserve all predecessors/cursors and leave the independent
 image Job unchanged.
+
+## Verified discussion metadata
+
+`index_discussions.py` adds only `discussion` metadata to already indexed forum
+captures. It uses the existing prepared archive checkout read-only and a private,
+remote-free Git-tree inventory. It never prepares/clones sources, fetches missing
+blobs, embeds text, pays for enrichment or restarts an indexing Job. Deploy the
+additive [schema](schema.json) through the normal frontend deployment first.
+
+The operator performs two independently checkpointed passes: learn source-proven
+Lithium RSS memberships, then annotate recognized forum pages. phpBB, vBulletin,
+Snitz and Ezboard require native topic links and structural message evidence.
+Conflicting memberships stay ambiguous. Proofs include exact source/evidence IDs
+and hashes; titles do not establish identity. Updates use Elasticsearch sequence
+numbers and primary terms and touch only `discussion`, preserving dates, reader
+text, enrichment, vectors and completion checkpoints during concurrent ingestion.
+
+Run the tested curation image as an operator with private credentials, the source
+checkout mounted read-only and a separate private writable state directory. The
+CLI requires `--repo`, `--state`, `--catalog` and one or more literal `--host`
+values. For example, inside that isolated environment:
+
+```bash
+python /app/index_discussions.py --repo /sources \
+  --state /work/sony-inventory.sqlite --catalog /work/sony-discussions.sqlite \
+  --host eqforums.station.sony.com --es-url http://elasticsearch:9200 \
+  --password-file /run/secrets/es_password \
+  --max-files 5000 --max-bytes 134217728 --max-seconds 120
+```
+
+Retain the exact same state, catalog, source revision and host scope on resume.
+Bounds apply per invocation; exit 2 means its bounded slice paused, not failure or
+completion. Failed source reads consume file attempts and retain their maximum
+byte reservation; `bytes` reports verified reads and `bytes_reserved` also
+includes those conservative failure charges. `--learn-only` prepares evidence
+without an ES client, credentials or network calls; subsequent normal runs retain
+the completed learn pass. Exit 0
+means both passes finished with no pending gaps (or learn-only prepared its
+catalog). Unindexed documents are skipped and never created. Source/integrity
+gaps and concurrent update conflicts are retained privately; `--retry-gaps`
+explicitly retries up to 1,000 gaps, and a recovered evidence source resets the
+affected annotation cursor. Exit 1 with pending gaps must remain visible. Transport
+and authentication failures stop visibly with checkpoints retained. Keep all
+catalogs, state, sources and credentials outside both Git repositories.

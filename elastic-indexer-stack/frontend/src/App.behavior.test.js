@@ -83,7 +83,7 @@ test('renders before the first search even without optional search configuration
 
 test('groups captures by default and resets pagination when showing every capture', () => {
   render(<App />);
-  const toggle = screen.getByRole('checkbox', { name: 'Group repeated captures' });
+  const toggle = screen.getByRole('checkbox', { name: 'Group captures and discussions' });
   expect(toggle).toBeChecked();
   fireEvent.click(toggle);
   expect(getSearchConfig.mock.calls[0][0].current.groupCaptures).toBe(false);

@@ -42,6 +42,7 @@ def render(previous, name, image, *, gemma=False, images=False, text_hosts=None)
                       GEMMA_EMBEDDING_BATCH_SIZE='8', REINDEX_PRIORITIZE_UNCONVERTED='true')
     if (gemma or text_hosts) and not images:
         values.update(EMBEDDING_CACHE_PATH='/indexing-state/embeddings.sqlite',
+                      DISCUSSION_CATALOG_PATH='/indexing-state/discussions.sqlite',
                       REINDEX_DIAGNOSTICS_PATH='/indexing-state/reindex-failures.sqlite',REINDEX_JOB_NAME=name)
         state={'name':'indexing-state','hostPath':{'path':'/mnt/samsung/eqarchives-curation/indexing-state','type':'Directory'}}
         mount={'name':'indexing-state','mountPath':'/indexing-state'}

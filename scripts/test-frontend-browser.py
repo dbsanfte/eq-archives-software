@@ -958,9 +958,9 @@ class FrontendBrowserTests(unittest.TestCase):
                     first.get_by_role('button', name='Hide captures (2)', exact=True).click()
                     first.get_by_role('button', name='View captures (2)', exact=True).click()
                     self.assertEqual(len(histories), 1)
-                    page.get_by_role('checkbox', name='Group repeated captures').uncheck()
+                    page.get_by_role('checkbox', name='Group captures and discussions').uncheck()
                     expect(page.get_by_role('link', name='Repeated page', exact=True)).to_have_count(20)
-                    page.get_by_role('checkbox', name='Group repeated captures').check()
+                    page.get_by_role('checkbox', name='Group captures and discussions').check()
                     expect(page.get_by_role('link', name='Repeated page', exact=True)).to_have_count(1)
                     expect(page.get_by_text('Showing sources 1–20 · 84 matching captures')).to_be_visible()
                     self.assertTrue(all(body.get('from', 0) + body['size'] <= 1000 for body in searches))
@@ -976,6 +976,92 @@ class FrontendBrowserTests(unittest.TestCase):
                     page.get_by_role('link', name='← Back to results', exact=True).click()
                     expect(page.get_by_text('Page 2', exact=True)).to_be_visible()
                     self.assertEqual(page.url, page_two)
+                finally:
+                    context.close()
+
+    def test_verified_discussions_expand_matches_and_switch_exact_capture_dates(self):
+        for width in (320,390,1280):
+            with self.subTest(width=width):
+                context=self.browser.new_context(viewport={'width':width,'height':950},is_mobile=width<800,has_touch=width<800)
+                try:
+                    page=context.new_page();errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
+                    proof={'version':'forum-discussions-v1','key':'a'*64,'platform':'lithium','origin':'http://forum.example.org',
+                           'forum':'/eq/Veterans','topic':'10','title':'Splitpaw field reports','source_sha256':'b'*64,'evidence_sha256':'c'*64}
+                    texts=['The old paths cause trouble.','This route is safer.','The revamp changed spells.','We grouped here.']
+                    records=[];documents={}
+                    for index in range(55):
+                        path='eq/board/print?board.id=Veterans&message.id='+str(10+index)
+                        identifier='websites/forum.example.org/20061213163803/'+path
+                        excerpt=texts[index%4]+' paw'
+                        source={'title':'Re: Splitpaw field reports','url':'https://web.archive.org/web/20061213163803/http://forum.example.org/'+path,
+                                'domain_name':'forum.example.org','capture_date':'2006-12-13T16:38:03Z','discussion':proof}
+                        records.append({'_id':identifier,'_score':1,'_source':source,'highlight':{'text_full':[excerpt]}})
+                        documents[identifier]={**source,'text_full':'# Captured discussion\n\n'+excerpt+'\n\nThe rest of this captured page.'}
+                    for index in range(25):
+                        identifier='websites/other.example.org/20060101000000/page'+str(index)
+                        source={'title':'Other source '+str(index),'url':'https://web.archive.org/web/20060101000000/http://other.example.org/page'+str(index)}
+                        records.append({'_id':identifier,'_score':1,'_source':source,'highlight':{'text_full':['Other matching paw evidence']}})
+                    selected=records[1]['_id'];older=selected.replace('/20061213163803/','/20050101120000/')
+                    documents[older]={**documents[selected],'capture_date':'2005-01-01T12:00:00Z',
+                                      'url':documents[selected]['url'].replace('/20061213163803/','/20050101120000/'),
+                                      'text_full':'# Earlier capture\n\n'+texts[1]+' paw'}
+                    facets={field:{'buckets':[]} for field in ('domain_name','llm_content_flavour','file_type','mime_type','mailing_list_name','llm_tags')}
+                    facets['last_indexed']={'buckets':{}}
+                    def archive(route):
+                        if route.request.url.endswith('/_count'):return route.fulfill(json={'count':len(records)})
+                        body=route.request.post_data_json
+                        if 'ids' in body.get('query',{}):
+                            identifier=body['query']['ids']['values'][0]
+                            self.assertNotIn('text',body['_source']);self.assertNotIn('llm_summary',body['_source'])
+                            return route.fulfill(json={'hits':{'hits':[{'_id':identifier,'_source':documents[identifier]}]}})
+                        if 'preference=archive-captures' in route.request.url:
+                            # A foreign page must not enter the date selector.
+                            choices=[{'_id':identifier,'_source':{k:v for k,v in documents[identifier].items() if k!='text_full'}} for identifier in (selected,older,records[2]['_id'])]
+                            return route.fulfill(json={'hits':{'total':{'value':3},'hits':choices}})
+                        start=body.get('from',0)
+                        route.fulfill(json={'hits':{'total':{'value':len(records),'relation':'eq'},'hits':records[start:start+body['size']]},
+                                            'aggregations':{'facet_bucket_all':{'doc_count':len(records),**facets}}})
+                    page.route('**/elasticsearch/**',archive)
+                    page.route('**/openai/**',lambda route:route.fulfill(status=503,json={'error':'fixture'}))
+                    page.goto(self.base_url+'/?q=paw&size=n_20_n',wait_until='networkidle')
+                    expect(page.locator('.sui-result')).to_have_count(20)
+                    card=page.locator('.archive-discussion-result')
+                    expect(card).to_have_count(1)
+                    expect(card.get_by_role('link',name='Splitpaw field reports',exact=True)).to_be_visible()
+                    expect(card.get_by_role('button',name='Show matches')).to_have_attribute('aria-expanded','false')
+                    card.get_by_role('button',name='Show matches').click()
+                    expect(card.get_by_role('link',name='Read from here',exact=False)).to_have_count(3)
+                    card.get_by_role('button',name='Show more matches').click()
+                    expect(card.get_by_role('link',name='Read from here',exact=False)).to_have_count(4)
+                    for action in card.locator('.archive-result-actions a,.archive-result-actions button,.archive-discussion-matches a').all():
+                        self.assertGreaterEqual(action.bounding_box()['height'],44)
+                    self.assertTrue(page.evaluate('document.documentElement.scrollWidth<=innerWidth'))
+                    search_url=page.url
+                    artifacts=os.environ.get('BROWSER_ARTIFACT_DIR')
+                    if artifacts:
+                        Path(artifacts).mkdir(parents=True,exist_ok=True)
+                        card.screenshot(path=str(Path(artifacts)/f'discussion-card-{width}.png'))
+                    card.get_by_role('link',name='Read from here',exact=False).nth(1).click()
+                    expect(page.get_by_role('heading',name='Splitpaw field reports',exact=True)).to_be_visible()
+                    expect(page.locator('.reader-body')).to_contain_text(texts[1])
+                    expect(page.get_by_role('combobox',name='Capture date')).to_be_enabled()
+                    expect(page.get_by_role('combobox',name='Capture date').locator('option')).to_have_count(2)
+                    self.assertFalse(page.locator('.reader-archive-details').evaluate('(element)=>element.open'))
+                    if artifacts:
+                        page.screenshot(path=str(Path(artifacts)/f'discussion-reader-{width}.png'))
+                    page.get_by_role('combobox',name='Capture date').select_option(older)
+                    expect(page.get_by_role('heading',name='Earlier capture',exact=True)).to_be_visible()
+                    self.assertEqual(parse_qs(urlparse(page.url).query)['id'],[older])
+                    expect(page.get_by_role('searchbox',name='Find in document')).to_have_value(texts[1]+' paw')
+                    page.get_by_text('Archive details',exact=True).click()
+                    expect(page.get_by_role('link',name='Open original archive',exact=False)).to_have_attribute('href',documents[older]['url'])
+                    self.assertTrue(page.evaluate('document.documentElement.scrollWidth<=innerWidth'))
+                    page.get_by_role('link',name='← Back to results',exact=True).click()
+                    expect(page.locator('.archive-discussion-result')).to_have_count(1)
+                    self.assertEqual(page.url,search_url)
+                    page.get_by_role('checkbox',name='Group captures and discussions').uncheck()
+                    expect(page.get_by_role('link',name='Re: Splitpaw field reports',exact=True)).to_have_count(20)
+                    self.assertEqual(errors,[])
                 finally:
                     context.close()
 
