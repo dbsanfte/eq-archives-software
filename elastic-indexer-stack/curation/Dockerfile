@@ -30,7 +30,7 @@ FROM dependencies AS test
 COPY elastic-indexer-stack/curation/requirements-dev.txt /app/requirements-dev.txt
 RUN pip install --no-cache-dir --require-hashes -r /app/requirements-dev.txt
 WORKDIR /app/curation
-COPY elastic-indexer-stack/indexer/src/indexer/test/test_passage_quality.py elastic-indexer-stack/indexer/src/indexer/test/test_passages.py elastic-indexer-stack/indexer/src/indexer/test/test_passage_pipeline.py elastic-indexer-stack/indexer/src/indexer/test/test_image_embeddings.py /app/curation/tests/
+COPY elastic-indexer-stack/indexer/src/indexer/test/test_lithium_feeds.py elastic-indexer-stack/indexer/src/indexer/test/test_passage_quality.py elastic-indexer-stack/indexer/src/indexer/test/test_passages.py elastic-indexer-stack/indexer/src/indexer/test/test_passage_pipeline.py elastic-indexer-stack/indexer/src/indexer/test/test_image_embeddings.py /app/curation/tests/
 COPY elastic-indexer-stack/indexer/src/indexer/test/test_source_decoding.py /app/curation/tests/
 COPY elastic-indexer-stack/indexer/src/indexer/test/test_platform_repairs.py elastic-indexer-stack/indexer/src/indexer/test/test_projection_repairs.py /app/curation/tests/
 COPY elastic-indexer-stack/indexer/src/indexer/test/test_corpus_formats.py /app/curation/tests/

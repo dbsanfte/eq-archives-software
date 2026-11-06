@@ -368,7 +368,7 @@ def test_operator_entrypoint_only_adds_mapping_and_runs_checkpointed_migration(t
         job.main()
 
 
-@pytest.mark.parametrize('previous_policy',['eq-passages-480-v4','eq-passages-480-v5','eq-passages-480-v6','eq-passages-480-v7','eq-passages-480-v8',passages.VERSION])
+@pytest.mark.parametrize('previous_policy',['eq-passages-480-v4','eq-passages-480-v5','eq-passages-480-v6','eq-passages-480-v7','eq-passages-480-v8','eq-passages-480-v9',passages.VERSION])
 def test_source_upgrade_reuses_only_identical_passage_requests_and_advances_checkpoint(tmp_path,previous_policy):
     hit,client,embedder=fixture();source=hit['_source'];source.update(mime_type='text/html',text_extraction_version='old')
     path=tmp_path/hit['_id'];path.parent.mkdir(parents=True);path.write_text('<title>Guild</title><p>Preserved complete guild instructions.</p>')
@@ -419,3 +419,20 @@ def test_import_newline_normalization_reuses_only_with_verified_same_raw_bytes(t
     else:
         embedder.get_chunks_and_embeddings.assert_called_once()
         assert 'text' in update
+
+
+def test_lithium_empty_report_clears_every_semantic_field_atomically(tmp_path):
+    hit,client,embedder=fixture();source=hit['_source']
+    key='websites/any-lithium.example/20061201000000/eq/notification?board.id=Clerics&message.id=1'
+    hit['_id']=source['id']=key
+    raw='''<html><title>Notify Moderator - Forums</title><form action="/eq/notification">
+    <input name="board.id"><input name="message.id"><input name="notification.type">
+    <textarea name="notification.body"></textarea></form></html>'''
+    path=tmp_path/key;path.parent.mkdir(parents=True);path.write_text(raw)
+    source.update(text_full='Original archival report form',mime_type='text/html',llm_summary='Historical enrichment retained')
+    job.migrate_record(client,'eq',hit,tmp_path,embedder)
+    patch=client.update.call_args.kwargs['doc']
+    assert patch['text']==[] and patch['llm_summary_vector'] is None and patch['llm_image_text_vector'] is None
+    assert not {'text_full','llm_summary','last_indexed'}&set(patch)
+    assert patch['text_chunking_version']==passages.VERSION
+    embedder.embed_text.assert_not_called()

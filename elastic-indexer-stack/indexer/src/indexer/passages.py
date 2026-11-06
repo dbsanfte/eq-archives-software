@@ -6,6 +6,9 @@ binds its selected view and source with hashes, and every passage has exact
 offsets into that view. No network, inference, filesystem walks or source writes.
 """
 from dataclasses import dataclass
+from copy import deepcopy
+from html import escape
+from xml.etree import ElementTree as ET
 from functools import lru_cache
 import hashlib
 import re
@@ -18,7 +21,7 @@ from .chunking import SourceChunk, chunk_source
 from .html_extraction import website_markdown, repair_script_markup
 from . import passage_forums
 
-VERSION = "eq-passages-480-v9"
+VERSION = "eq-passages-480-v10"
 MAX_TOKENS = 480
 ASSETS = {".js", ".css", ".map", ".ico", ".svg", ".woff", ".woff2"}
 CONTROLS = re.compile(r"^(?:reply(?: to (?:item|topic))?(?: with quote)?|quote|edit|delete|"
@@ -58,7 +61,10 @@ def identity(record_id):
 
 def _plain(text):
     text = re.sub(r"!?\[([^\]\n]*)\]\([^\n]*?\)", r"\1", text)
-    return re.sub(r"[*_`#|]+", " ", text).strip()
+    # Intraword underscores are literal usernames/identifiers, including
+    # Markdown-escaped names from HTML headings. Only outer emphasis is markup.
+    text=text.replace("\\_","_")
+    return re.sub(r"[*`#|]+|(?<!\w)_+|_+(?!\w)", " ", text).strip()
 
 
 def _short(text, budget=48):
@@ -364,7 +370,79 @@ def _news_articles(soup,excluded):
         node.replace_with(section);excluded.append('dated_article_structure')
 
 
+def _feed_view(raw):
+    """Project complete XML entries independently, retaining post metadata.
+
+    XML supplies entry boundaries; HTML supplies body/quote/code/table roles.
+    Never infer those boundaries from Markdown that a preceding post can alter.
+    Unknown/damaged XML retains the existing conservative HTML fallback.
+    """
+    if not re.match(r'\s*(?:\ufeff)?(?:<\?xml\b[^>]*>\s*)?<(?:rss|feed)\b',raw,re.I):return None
+    if re.search(r'<!\s*(?:DOCTYPE|ENTITY)\b',raw,re.I):return None
+    try:root=ET.fromstring(raw)
+    except (ET.ParseError,ValueError):return None
+    def local(node):return node.tag.rsplit('}',1)[-1].lower()
+    def field(node,*names):
+        return next((child for name in names for child in node if local(child)==name),None)
+    def content(node):return ''.join(node.itertext()).strip() if node is not None else ''
+    def markup(node,atom=False):
+        if node is None:return ''
+        kind=node.get('type','text' if atom else 'html').lower()
+        if atom and kind=='text':return escape(content(node))
+        if len(node):
+            # Strip XML namespace prefixes on XHTML body tags, preserving the
+            # complete authored subtree and attributes rather than flattening it.
+            clone=deepcopy(node)
+            for child in clone.iter():
+                child.tag=local(child)
+                child.attrib={key.rsplit('}',1)[-1]:value for key,value in child.attrib.items()}
+            return (escape(clone.text or '')+''.join(ET.tostring(c,encoding='unicode') for c in clone))
+        return node.text or ''
+    atom=local(root)=='feed'
+    if local(root)=='rss':
+        channels=[child for child in root if local(child)=='channel']
+        if len(channels)!=1:return None
+        channel=channels[0];entries=[child for child in channel if local(child)=='item']
+    elif atom:
+        channel=root;entries=[child for child in root if local(child)=='entry']
+    else:return None
+    if not entries:return None
+    rendered=[]
+    for entry in entries:
+        subject=content(field(entry,'title'))
+        author=field(entry,'author','creator')
+        name=content(field(author,'name')) if author is not None and len(author) else content(author)
+        stamp=content(field(entry,'pubdate','published','date','updated'))
+        fields=[field(entry,key) for key in ('encoded','content','description','summary')]
+        bodies=[];visible=[]
+        for value in fields:
+            body=markup(value,atom)
+            text=passage_forums.words(BeautifulSoup(body,'html.parser'))
+            if body and not any(text and text in previous for previous in visible):
+                bodies.append(body);visible.append(text)
+        fragment=BeautifulSoup(''.join(bodies),'html.parser')
+        for node in list(fragment.select('script,style,noscript,head,input,button,select')):
+            if node.parent:node.decompose()
+        for node in list(fragment.find_all('textarea')):
+            if node.get_text(strip=True):node.replace_with(node.get_text())
+            else:node.decompose()
+        for node in list(fragment.find_all('a')):
+            node.attrs.pop('href',None)
+        for node in list(fragment.find_all('img')):
+            alt=node.get('alt','').strip()
+            if alt and not DECORATION.fullmatch(alt):node.replace_with(alt)
+            else:node.decompose()
+        for node in fragment.find_all(string=lambda value:isinstance(value,Comment)):node.extract()
+        section=BeautifulSoup(passage_forums.section(name,stamp,str(fragment),subject),'html.parser')
+        if not name:
+            section.h2.string='Article: '+' | '.join(value for value in (stamp,subject or 'Feed entry') if value)
+        rendered.append(website_markdown(str(section)).strip())
+    return '\n\n'.join(rendered),content(field(channel,'title')),'feed_entries',['feed_entry_structure']
+
+
 def _html_view(raw, host, _preserve_layout=False, path=""):
+    feed=_feed_view(raw)
+    if feed:return feed
     projection,repaired=repair_script_markup(raw)
     soup = BeautifulSoup(projection, "html.parser")
     excluded = []
@@ -393,8 +471,10 @@ def _html_view(raw, host, _preserve_layout=False, path=""):
         if thread.engine=='ezboard':excluded.append('ezboard_author_comment_structure')
     # Unknown posting templates can retain both a visible message preview and
     # a populated quoted-message field. Preserve both before removing controls.
-    if not thread and re.search(r'(?:^|/)(?:post|posting|newreply|newpost)\.(?:asp|php|pl)$',path,re.I):
+    if not thread:
+        posting=re.search(r'(?:^|/)(?:post|posting|newreply|newpost)\.(?:asp|php|pl)$',path,re.I)
         for field in list(soup.find_all('textarea')):
+            if not posting and field.get('name')!='notification.body':continue
             if field.get_text(strip=True):
                 quote=soup.new_tag('blockquote');quote.string=field.get_text();field.replace_with(quote)
     for node in list(soup.find_all("title")):
@@ -755,7 +835,7 @@ def prepare(text, record_id="", title="", *, html_source=None, mime_type=""):
     if view:view += "\n"
     elif text.strip():excluded.append("no_visible_content")
     title=_short(title)
-    passages=_chunks(view,title,document_context,strict_sections=method=='feed_entries') if view.strip() else ()
+    passages=_chunks(view,title,document_context,strict_sections=method=='feed_entries' and 'feed_entry_structure' not in excluded) if view.strip() else ()
     plan=Plan(digest(text),raw_hash,view,title,method,tuple(sorted(set(excluded))),passages)
     verify(text,plan)
     return plan
