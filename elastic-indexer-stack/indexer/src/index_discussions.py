@@ -153,14 +153,14 @@ def backfill(inventory, catalog, client, hosts, *, max_files=10000, max_bytes=25
         raise ValueError('Invalid discussion backfill bounds')
     scope = inventory.scope(hosts)
     deadline = clock() + max_seconds
-    stats = {'read': 0, 'bytes': 0, 'learned': 0, 'updated': 0, 'unchanged': 0, 'unverified': 0, 'not_indexed': 0, 'conflicts': 0, 'failed': 0}
+    stats = {'attempted': 0, 'read': 0, 'bytes': 0, 'bytes_reserved': 0, 'learned': 0, 'updated': 0, 'unchanged': 0, 'unverified': 0, 'not_indexed': 0, 'conflicts': 0, 'failed': 0}
     for phase in (('learn',) if learn_only else ('learn', 'annotate')):
         for host, tree in scope:
             after, complete = inventory.cursor(host, phase)
             if complete:
                 continue
             for batch, ordinal, finished in inventory.batches(host, tree, after):
-                if stats['read'] >= max_files or clock() >= deadline:
+                if stats['attempted'] >= max_files or clock() >= deadline:
                     return {**stats, 'complete': False, 'pause_reason': 'operation_budget'}
                 candidates = [row for row in batch if phase != 'learn' or '/rss/message?' in row[1]]
                 records = client.records([row[1] for row in candidates]) if phase == 'annotate' and candidates else {}
@@ -169,12 +169,17 @@ def backfill(inventory, catalog, client, hosts, *, max_files=10000, max_bytes=25
                         stats['not_indexed'] += 1
                         inventory.checkpoint_phase(host, phase, position, False)
                         continue
-                    if stats['read'] >= max_files or stats['bytes'] + MAX_BYTES > max_bytes or clock() >= deadline:
+                    if stats['attempted'] >= max_files or stats['bytes_reserved'] + MAX_BYTES > max_bytes or clock() >= deadline:
                         return {**stats, 'complete': False, 'pause_reason': 'operation_budget'}
                     acknowledged = True
+                    # Failed reads still consume a file attempt and retain their
+                    # maximum byte reservation; only verified reads release it.
+                    stats['attempted'] += 1
+                    stats['bytes_reserved'] += MAX_BYTES
                     try:
                         raw = read_source(inventory, key, blob)
                         stats['read'] += 1; stats['bytes'] += len(raw)
+                        stats['bytes_reserved'] -= MAX_BYTES - len(raw)
                         if phase == 'learn':
                             evidence = lithium_feed(key, raw)
                             catalog.learn(evidence)

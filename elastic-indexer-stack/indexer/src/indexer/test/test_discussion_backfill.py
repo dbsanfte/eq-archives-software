@@ -140,3 +140,24 @@ def test_evidence_preparation_is_remote_free_and_cannot_read_or_write_elasticsea
     client=Client(sources)
     assert backfill(inventory,catalog,client,[HOST])['updated']==2
     inventory.close();catalog.close()
+
+
+@pytest.mark.parametrize('bounds',[{'max_files':1},{'max_bytes':2*1024*1024}])
+def test_failed_source_reads_consume_the_file_and_byte_limits_and_resume(prepared,tmp_path,bounds):
+    repo,sources=prepared
+    feed_path=repo/(PREFIX+'rss/message?board.id=Board&message.id=20')
+    original=feed_path.read_bytes();feed_path.write_bytes(b'corrupt source')
+    inventory=BackfillInventory(repo,tmp_path/'inventory.sqlite');catalog=Catalog(tmp_path/'catalog.sqlite')
+    result=backfill(inventory,catalog,Client(sources),[HOST],**bounds)
+    assert not result['complete'] and result['pause_reason']=='operation_budget'
+    assert result['read']==result['unverified']==0
+    assert result['attempted']==result['failed']==1 and result['read']==result['bytes']==0
+    assert result['bytes_reserved']==2*1024*1024
+    assert inventory.db.execute('SELECT COUNT(*) FROM discussion_gaps').fetchone()[0]==1
+    feed_path.write_bytes(original)
+    from index_discussions import retry_gaps
+    client=Client(sources)
+    assert retry_gaps(inventory,catalog,client,[HOST])['pending']==0
+    assert backfill(inventory,catalog,client,[HOST])['complete']
+    assert len(client.writes)==2
+    inventory.close();catalog.close()

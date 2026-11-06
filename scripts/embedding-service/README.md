@@ -597,8 +597,11 @@ python /app/index_discussions.py --repo /sources \
 
 Retain the exact same state, catalog, source revision and host scope on resume.
 Bounds apply per invocation; exit 2 means its bounded slice paused, not failure or
-completion. `--learn-only` prepares evidence without an ES client, credentials or
-network calls; subsequent normal runs retain the completed learn pass. Exit 0
+completion. Failed source reads consume file attempts and retain their maximum
+byte reservation; `bytes` reports verified reads and `bytes_reserved` also
+includes those conservative failure charges. `--learn-only` prepares evidence
+without an ES client, credentials or network calls; subsequent normal runs retain
+the completed learn pass. Exit 0
 means both passes finished with no pending gaps (or learn-only prepared its
 catalog). Unindexed documents are skipped and never created. Source/integrity
 gaps and concurrent update conflicts are retained privately; `--retry-gaps`
