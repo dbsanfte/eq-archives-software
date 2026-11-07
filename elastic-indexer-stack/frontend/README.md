@@ -314,48 +314,25 @@ docker build \
   ./frontend
 ```
 
-Create an ignored `.env.frontend.local` file in `elastic-indexer-stack` with your
-upstream addresses, for example:
-
-```dotenv
-ELASTICSEARCH_URL=http://elasticsearch.example.test:9200
-ELASTICSEARCH_INDEX=eq-archive
-OPENAI_URL=http://models.example.test:8000
-```
-
-Replace the example hosts with services reachable from the container.
-`ELASTICSEARCH_URL` includes the port; `OPENAI_URL` is the model server URL
-**without** `/v1`. The proxy appends `/v1/embeddings` itself. A container's
-`localhost` refers to that container, not its host machine.
-
-Using your editor or secret store, create these files in the same directory.
-Each file should contain only the corresponding value:
-
-| Local file | Container secret | Purpose |
-| --- | --- | --- |
-| `elastic.readonly.username.secret.txt` | `/run/secrets/es_readonly_username` | Elasticsearch user with read access to the search index |
-| `elastic.readonly.password.secret.txt` | `/run/secrets/es_readonly_password` | That user's password |
-| `openai_api_key.secret.txt` | `/run/secrets/openai_api_key` | Model endpoint API key |
-
-All three files must be nonempty. The repository ignores `*.secret.txt` and local
-`.env.*` files. Restrict their permissions and start the container:
+Run the bounded MCP/search API first (see [its guide](../mcp/README.md)).
+The static frontend receives no database or embedding credentials. It forwards
+only exact search/count/embedding routes to that API; configure its reachable
+base URL with `SEARCH_API_URL` (no trailing path):
 
 ```bash
-chmod 600 elastic.readonly.username.secret.txt \
-  elastic.readonly.password.secret.txt openai_api_key.secret.txt .env.frontend.local
-
 docker run --rm --name eqarchives-frontend \
-  --publish 127.0.0.1:3030:80 \
-  --env-file .env.frontend.local \
-  --mount "type=bind,src=$(pwd)/elastic.readonly.username.secret.txt,dst=/run/secrets/es_readonly_username,readonly" \
-  --mount "type=bind,src=$(pwd)/elastic.readonly.password.secret.txt,dst=/run/secrets/es_readonly_password,readonly" \
-  --mount "type=bind,src=$(pwd)/openai_api_key.secret.txt,dst=/run/secrets/openai_api_key,readonly" \
+  --publish 127.0.0.1:3030:8080 \
+  --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --tmpfs /tmp:rw,nosuid,nodev,size=64m \
+  --env SEARCH_API_URL=http://search-api.example.test:8080 \
   eqarchives-frontend:local
 ```
 
-Open `http://localhost:3030`. `GET /healthz` checks that NGINX is serving; a search
-also verifies the Elasticsearch connection. The container does not provision
-Elasticsearch, indexed data, or model servers.
+Open `http://localhost:3030`. `GET /healthz` checks NGINX; a search checks the
+bounded API and Elasticsearch. The image runs as UID 10001 on port 8080.
+Summaries render as plain text; snippets render only escaped text and `em`
+highlights. The CSP permits same-origin scripts/connections, inline styling for
+MUI, and HTTPS images, while disabling objects, base overrides and framing.
 
 ## Static builds and revision display
 

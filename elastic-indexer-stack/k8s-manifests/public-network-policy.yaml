@@ -1,0 +1,87 @@
+# Select only public workloads and Elasticsearch. Existing ingestion Jobs retain
+# their network behavior; their job-name labels permit database access.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: public-static-frontend
+  namespace: eqarchives-es
+  labels:
+    app.kubernetes.io/part-of: eqarchives-public-isolation
+spec:
+  podSelector:
+    matchLabels: {app: search-eqarchives}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {app.kubernetes.io/name: traefik}
+      ports: [{protocol: TCP, port: 8080}]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    - to:
+        - podSelector:
+            matchLabels: {app: eqarchives-mcp}
+      ports: [{protocol: TCP, port: 8080}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: public-search-api
+  namespace: eqarchives-es
+  labels:
+    app.kubernetes.io/part-of: eqarchives-public-isolation
+spec:
+  podSelector:
+    matchLabels: {app: eqarchives-mcp}
+  policyTypes: [Ingress, Egress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app: search-eqarchives}
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {app.kubernetes.io/name: traefik}
+      ports: [{protocol: TCP, port: 8080}]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: {kubernetes.io/metadata.name: kube-system}
+          podSelector:
+            matchLabels: {k8s-app: kube-dns}
+      ports: [{protocol: UDP, port: 53}, {protocol: TCP, port: 53}]
+    - to:
+        - podSelector:
+            matchLabels: {app: elasticsearch}
+      ports: [{protocol: TCP, port: 9200}]
+    - to:
+        - podSelector:
+            matchLabels: {app: nomic-embeddings}
+      ports: [{protocol: TCP, port: 8080}]
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: archive-database-ingress
+  namespace: eqarchives-es
+  labels:
+    app.kubernetes.io/part-of: eqarchives-public-isolation
+spec:
+  podSelector:
+    matchLabels: {app: elasticsearch}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: {app: eqarchives-mcp}
+        - podSelector:
+            matchExpressions:
+              - {key: job-name, operator: Exists}
+      ports: [{protocol: TCP, port: 9200}]

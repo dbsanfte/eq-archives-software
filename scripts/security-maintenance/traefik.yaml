@@ -1,0 +1,22 @@
+# Preserve the installed k3s HelmChart and all existing site/port settings.
+# HelmChartConfig wins over its old image pin without editing k3s-owned manifests.
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    image:
+      repository: traefik
+      name: traefik
+      tag: v2.11.61@sha256:262ccbae7ee89fbc17b2ec1c2c4718b48d4b4a7a38c8c26a8593b074fdbc7844
+    deployment:
+      replicas: 2
+    additionalArguments:
+      - --entrypoints.web.transport.respondingtimeouts.readtimeout=15s
+      - --entrypoints.web.transport.respondingtimeouts.writetimeout=30s
+      - --entrypoints.web.transport.respondingtimeouts.idletimeout=30s
+      - --entrypoints.websecure.transport.respondingtimeouts.readtimeout=15s
+      - --entrypoints.websecure.transport.respondingtimeouts.writetimeout=30s
+      - --entrypoints.websecure.transport.respondingtimeouts.idletimeout=30s

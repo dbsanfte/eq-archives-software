@@ -15,10 +15,11 @@ from starlette.routing import Route
 from .archive import Archive, Document, SearchResults, Settings
 from .research import MAX_RESEARCH_RESULTS, ResearchFilters, ResearchPage, SortOrder, SourcePage, SourceType
 from .explore import Explorer, Selection
+from .web_api import WebAPI, WebAdmission
 
 
 def create_app(archive: Archive | None = None):
-    explorer = None
+    explorer = web_api = None
     server = MCPServer(
         "EQ Archives", website_url="https://search.eqarchives.org", version="1.1.0",
         instructions=(
@@ -139,15 +140,30 @@ def create_app(archive: Archive | None = None):
         return rejected or PlainTextResponse("Method not allowed", status_code=405, headers={"Allow": "POST"})
 
     app.router.routes.insert(0, Route("/mcp", no_session_stream, methods=["GET", "DELETE"]))
+    async def browser_request(request):
+        rejected = await TransportSecurityMiddleware(security).validate_request(request)
+        if rejected:
+            return rejected
+        if request.path_params.get("index", archive.settings.index) != archive.settings.index:
+            return JSONResponse({"error": "Not found"}, status_code=404)
+        operation = "embedding" if request.url.path == "/openai/v1/embeddings" else (
+            "count" if request.url.path.endswith("/_count") else "search")
+        return await web_api.handle(request, operation)
+
+    for path, methods in (("/elasticsearch/{index}/_search", ["POST"]),
+                          ("/elasticsearch/{index}/_count", ["GET"]),
+                          ("/openai/v1/embeddings", ["POST"])):
+        app.router.routes.insert(0, Route(path, browser_request, methods=methods))
     transport_lifespan = app.router.lifespan_context
 
     @asynccontextmanager
     async def lifespan(app):
-        nonlocal archive, explorer
+        nonlocal archive, explorer, web_api
         owned = archive is None
         if owned:
             archive = Archive.connect(Settings.from_env())
         explorer = Explorer(archive)
+        web_api = WebAPI(archive)
         try:
             async with transport_lifespan(app):
                 yield
@@ -157,6 +173,7 @@ def create_app(archive: Archive | None = None):
                 archive = None
 
     app.router.lifespan_context = lifespan
+    app.add_middleware(WebAdmission)
     # Never log query bodies or SDK validation errors (which can echo arguments).
     logging.getLogger("mcp").setLevel(logging.ERROR)
     logging.getLogger("httpx").setLevel(logging.WARNING)

@@ -25,7 +25,7 @@ trap 'rm -rf "$work_dir"' EXIT
 umask 077
 
 # Render all public resources and validate them before changing the cluster.
-cp "$repo_dir"/elastic-indexer-stack/k8s-manifests/{01-frontend.yaml,mcp.yaml,kustomization.yaml} "$work_dir/"
+cp "$repo_dir"/elastic-indexer-stack/k8s-manifests/{01-frontend.yaml,mcp.yaml,kustomization.yaml,public-network-policy.yaml,elasticsearch-service.yaml} "$work_dir/"
 cp -R "$repo_dir/elastic-indexer-stack/k8s-manifests/embeddings" "$work_dir/"
 source "$work_dir/embeddings/runtime.env"
 secret_checksum=$(python3 - <<'PY'
@@ -111,8 +111,13 @@ print(max(pods, key=lambda p: p["metadata"]["creationTimestamp"])["metadata"]["n
 "${kubectl[@]}" -n eqarchives-es exec "$embedding_pod" -c llama-server -- \
   /bin/sh /bootstrap/check-gpu.sh
 
-"${kubectl[@]}" apply -f "$work_dir/frontend.yaml" -l 'app.kubernetes.io/part-of!=eqarchives-embeddings'
+# Deploy the adapter first: old cached browsers work with either static image.
+"${kubectl[@]}" apply -f "$work_dir/frontend.yaml" -l 'app.kubernetes.io/part-of=eqarchives-search-api'
+"${kubectl[@]}" -n eqarchives-es rollout status deployment/eqarchives-mcp --timeout=300s
+"${kubectl[@]}" apply -f "$work_dir/frontend.yaml" -l 'app.kubernetes.io/part-of notin (eqarchives-embeddings,eqarchives-public-isolation)'
 "${kubectl[@]}" -n eqarchives-es rollout status deployment/search-eqarchives --timeout=300s
+# Old pods used direct database/model access. Isolate only after their rollout.
+"${kubectl[@]}" apply -f "$work_dir/frontend.yaml" -l 'app.kubernetes.io/part-of=eqarchives-public-isolation'
 "${kubectl[@]}" -n eqarchives-es rollout status deployment/eqarchives-mcp --timeout=300s
 
 # Verify both NGINX and the authenticated Elasticsearch proxy through Traefik.
@@ -134,5 +139,6 @@ python3 "$repo_dir/scripts/check-embeddings.py" \
   https://search.eqarchives.org/openai/v1/embeddings --model "$MODEL_ALIAS" \
   --search-url https://search.eqarchives.org/elasticsearch/eq-archive/_search
 python3 "$repo_dir/scripts/check-mcp.py" https://search.eqarchives.org/mcp
+python3 "$repo_dir/scripts/check-public-security.py" https://search.eqarchives.org
 python3 "$repo_dir/scripts/check-explore.py" https://search.eqarchives.org
 echo "Deployed and verified frontend $image and MCP $mcp_image"

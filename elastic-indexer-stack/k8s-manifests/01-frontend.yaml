@@ -76,6 +76,15 @@ spec:
 apiVersion: traefik.containo.us/v1alpha1
 kind: Middleware
 metadata:
+  name: public-global-inflight
+  namespace: eqarchives-es
+spec:
+  inFlightReq:
+    amount: 64
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: Middleware
+metadata:
   name: redirectsearch
   namespace: eqarchives-es
 spec:
@@ -90,7 +99,7 @@ metadata:
   namespace: eqarchives-es
   annotations:
     traefik.ingress.kubernetes.io/router.entrypoints: websecure
-    traefik.ingress.kubernetes.io/router.middlewares: eqarchives-es-securityheaders@kubernetescrd,eqarchives-es-ratelimit@kubernetescrd,eqarchives-es-connectionlimit@kubernetescrd,eqarchives-es-redirectsearch@kubernetescrd
+    traefik.ingress.kubernetes.io/router.middlewares: eqarchives-es-securityheaders@kubernetescrd,eqarchives-es-ratelimit@kubernetescrd,eqarchives-es-connectionlimit@kubernetescrd,eqarchives-es-public-global-inflight@kubernetescrd,eqarchives-es-redirectsearch@kubernetescrd
     traefik.ingress.kubernetes.io/router.tls: 'true'
 spec:
   ingressClassName: traefik
@@ -145,21 +154,26 @@ spec:
       labels:
         app: search-eqarchives
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
       containers:
       - env:
         - name: LOG_LEVEL
           value: debug
-        - name: ELASTICSEARCH_URL
-          value: http://elasticsearch.eqarchives-es.svc.cluster.local:9200
-        - name: OPENAI_URL
-          value: http://nomic-embeddings.eqarchives-es.svc.cluster.local:8080
+        - name: SEARCH_API_URL
+          value: http://eqarchives-mcp.eqarchives-es.svc.cluster.local:8080
         - name: ELASTICSEARCH_INDEX
           value: eq-archive
         image: dbsanfte/frontend:deploy-via-ci
         imagePullPolicy: IfNotPresent
         name: search-eqarchives
         ports:
-        - containerPort: 80
+        - containerPort: 8080
           protocol: TCP
           name: http
         resources:
@@ -170,9 +184,13 @@ spec:
             cpu: 250m
             memory: 256Mi
         volumeMounts:
-        - mountPath: /run/secrets
-          name: secrets-volume
-          readOnly: true
+        - mountPath: /tmp
+          name: runtime
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: [ALL]
         readinessProbe:
           httpGet:
             path: /
@@ -201,10 +219,10 @@ spec:
       # Endpoint propagation + NGINX SIGQUIT draining (proxy timeout up to 60s).
       terminationGracePeriodSeconds: 75
       volumes:
-      - name: secrets-volume
-        secret:
-          defaultMode: 256
-          secretName: search-eqarchives-secrets
+      - name: runtime
+        emptyDir:
+          medium: Memory
+          sizeLimit: 64Mi
       automountServiceAccountToken: false
 ---
 apiVersion: v1
@@ -217,6 +235,6 @@ spec:
   ports:
   - port: 80
     protocol: TCP
-    targetPort: 80
+    targetPort: http
   selector:
     app: search-eqarchives

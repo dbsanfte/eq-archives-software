@@ -44,6 +44,35 @@ class FrontendBrowserTests(unittest.TestCase):
                 "aggregations": {"facet_bucket_all": {"doc_count": 0, **facets}},
             })
 
+    def test_untrusted_summary_snippet_and_source_url_cannot_execute_script(self):
+        context = self.browser.new_context()
+        try:
+            page = context.new_page()
+            payload = '<img src="/security-marker.png" onerror="window.securityMarker=1"><svg onload="window.securityMarker=2">'
+            def archive(route):
+                if route.request.url.endswith('/_count'):
+                    return route.fulfill(json={'count': 1})
+                facets = {f: {'buckets': []} for f in ('domain_name', 'llm_content_flavour', 'file_type', 'mime_type', 'mailing_list_name', 'llm_tags')}
+                facets['last_indexed'] = {'buckets': {}}
+                route.fulfill(json={'hits': {'total': {'value': 1, 'relation': 'eq'}, 'hits': [{
+                    '_id': 'isolated-security-fixture', '_score': 1,
+                    '_source': {'title': 'Untrusted source test', 'url': 'javascript:window.securityMarker=3', 'llm_summary': payload},
+                    'highlight': {'text_full': ['<em>&lt;safe text&gt;</em>' + payload]}
+                }]}, 'aggregations': {'facet_bucket_all': {'doc_count': 1, **facets}}})
+            page.route('**/elasticsearch/**', archive)
+            response = page.goto(self.base_url, wait_until='networkidle')
+            self.assertIn("script-src 'self'", response.headers['content-security-policy'])
+            self.assertEqual(response.headers['x-content-type-options'], 'nosniff')
+            page.locator('details.result-summary summary').click()
+            card = page.locator('.sui-result').first
+            expect(card.locator('img, svg, script')).to_have_count(0)
+            expect(card.locator('.result-text-snippet em')).to_have_text('<safe text>')
+            expect(card.locator('.result-summary div')).to_have_text(payload)
+            self.assertIsNone(card.locator('.sui-result__title-link').get_attribute('href'))
+            self.assertIsNone(page.evaluate('window.securityMarker'))
+        finally:
+            context.close()
+
     def test_header_links_the_repository_and_the_exact_deployed_commit(self):
         for width in (320,390,768,1280):
             with self.subTest(width=width):

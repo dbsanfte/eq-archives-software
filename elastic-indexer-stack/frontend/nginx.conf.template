@@ -1,7 +1,8 @@
 server {
-    listen 80;
+    listen 8080;
     server_name localhost;
     root /usr/share/nginx/html;
+    include /etc/nginx/security-headers.conf;
 
     gzip on;
     gzip_vary on;
@@ -18,6 +19,7 @@ server {
 
     location / {
         # HTML and unversioned assets must discover the next deployment.
+        include /etc/nginx/security-headers.conf;
         add_header Cache-Control "no-cache" always;
         try_files $uri /index.html;
     }
@@ -25,41 +27,29 @@ server {
     # The build embeds a content hash in these filenames. Only successful
     # responses get the long cache lifetime; a missing asset must remain a 404.
     location ~* "^/static/.+\.[0-9a-f]{8,}\.[a-z0-9.]+$" {
+        include /etc/nginx/security-headers.conf;
         add_header Cache-Control "public, max-age=31536000, immutable";
         try_files $uri =404;
     }
 
     location /static/ {
+        include /etc/nginx/security-headers.conf;
         add_header Cache-Control "no-cache";
         try_files $uri =404;
     }
 
-    location /elasticsearch/$ELASTICSEARCH_INDEX/_search {
-        proxy_set_header                Authorization "Basic $ELASTICSEARCH_AUTHORIZATION";
-        proxy_pass                      $ELASTICSEARCH_URL/$ELASTICSEARCH_INDEX/_search;
-
-        # Set a timeout for Elasticsearch queries
-        proxy_read_timeout 30s;
-        proxy_connect_timeout 30s;
-
-        # Limit request body size to prevent enormous queries
-        client_max_body_size 1M;
+    location = /elasticsearch/$ELASTICSEARCH_INDEX/_search {
+        if ($request_method != POST) { return 405; }
+        proxy_pass $SEARCH_API_URL;
     }
-
-    location /elasticsearch/$ELASTICSEARCH_INDEX/_count {
-        proxy_set_header                Authorization "Basic $ELASTICSEARCH_AUTHORIZATION";
-        proxy_pass                      $ELASTICSEARCH_URL/$ELASTICSEARCH_INDEX/_count;
-
-        # Set a timeout for Elasticsearch queries
-        proxy_read_timeout 30s;
-        proxy_connect_timeout 30s;
-
-        # Limit request body size to prevent enormous queries
-        client_max_body_size 1M;
+    location = /elasticsearch/$ELASTICSEARCH_INDEX/_count {
+        if ($request_method !~ ^(GET|HEAD)$) { return 405; }
+        proxy_pass $SEARCH_API_URL;
     }
-
-    location /openai/v1/embeddings {
-        proxy_set_header                Authorization "Bearer $OPENAI_API_KEY";
-        proxy_pass                      $OPENAI_URL/v1/embeddings;
+    location = /openai/v1/embeddings {
+        if ($request_method != POST) { return 405; }
+        proxy_pass $SEARCH_API_URL;
     }
+    location /elasticsearch/ { return 404; }
+    location /openai/ { return 404; }
 }

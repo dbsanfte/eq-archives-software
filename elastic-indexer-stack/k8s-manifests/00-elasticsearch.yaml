@@ -42,12 +42,11 @@ metadata:
   labels:
     app: elasticsearch
 spec:
-  type: NodePort
+  type: ClusterIP
   ports:
     - name: rest
       port: 9200
       targetPort: 9200
-      nodePort: 31200
     - name: inter-node
       port: 9300
       targetPort: 9300

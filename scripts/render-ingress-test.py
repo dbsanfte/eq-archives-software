@@ -16,6 +16,7 @@ import yaml
 def render(paths):
     resources = [resource for path in paths for resource in yaml.safe_load_all(Path(path).read_text()) if resource]
     services = {r["metadata"]["name"]: r for r in resources if r["kind"] == "Service"}
+    deployments = {r["metadata"]["name"]: r for r in resources if r["kind"] == "Deployment"}
     config = {"http": {"routers": {}, "services": {}}}
     for resource in resources:
         if resource["kind"] != "Ingress":
@@ -31,6 +32,13 @@ def render(paths):
                 port = backend["port"].get("number")
                 if port is None:
                     port = next(p["port"] for p in services[name]["spec"]["ports"] if p.get("name") == backend["port"]["name"])
+                # Docker reaches container ports directly; Kubernetes resolves
+                # the Service's public port to its numeric or named targetPort.
+                service_port = next(p for p in services[name]["spec"]["ports"] if p["port"] == port)
+                target = service_port.get("targetPort", port)
+                if isinstance(target, str):
+                    target = next(p["containerPort"] for c in deployments[name]["spec"]["template"]["spec"]["containers"]
+                                  for p in c.get("ports", []) if p.get("name") == target)
                 matcher = "Path" if path["pathType"] == "Exact" else "PathPrefix"
                 matcher = annotations.get("traefik.ingress.kubernetes.io/router.pathmatcher", matcher)
                 config["http"]["routers"][f'{metadata["name"]}-{index}'] = {
@@ -38,7 +46,7 @@ def render(paths):
                     "priority": int(annotations.get("traefik.ingress.kubernetes.io/router.priority", "0")),
                     "entryPoints": ["web"], "service": name,
                 }
-                config["http"]["services"][name] = {"loadBalancer": {"servers": [{"url": f"http://{name}:{port}"}]}}
+                config["http"]["services"][name] = {"loadBalancer": {"servers": [{"url": f"http://{name}:{target}"}]}}
     assert len(config["http"]["routers"]) >= 2, "Expected overlapping frontend and MCP routes"
     return config
 

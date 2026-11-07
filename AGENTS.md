@@ -70,6 +70,19 @@ gh api 'repos/dbsanfte/eq-archives-software/actions/runs?branch=master&per_page=
   --jq '.workflow_runs[] | {id,head_sha,status,conclusion,html_url}'
 ```
 
+Public search security uses the bounded browser adapter in
+`elastic-indexer-stack/mcp/eqarchives_mcp/web_api.py`, retaining cached-browser
+URLs without forwarding arbitrary DSL. Preserve closed grammar/cumulative query
+budgets, exact routes/methods, fixed source/highlight projections, finite vectors,
+shared admission limits, streamed body/response bounds, deadlines and sanitized
+errors. NGINX receives no backend credentials and runs non-root/read-only on 8080.
+Keep snippets as safe text/em elements and summaries as text, plus the CSP.
+Run the MCP tests, public-security manifest checks, real Chromium regressions and
+`check-public-security.py`; deploy the API before frontend and isolation policies
+after old frontend pods retire. Only the Elasticsearch Service is CI-managed;
+its StatefulSet/data and active reindex Jobs remain untouched. Database TLS/version
+or multi-minor k3s/runtime upgrades require an operator maintenance handoff.
+
 ## Testing requirements
 
 **Every bug fix needs a regression test.** Reproduce the failure before the fix
@@ -112,7 +125,8 @@ python3 -m venv .venv
 EXPECTED_GIT_SHA="$(git rev-parse HEAD)" \
   BROWSER_TEST_PYTHON="$PWD/.venv/bin/python" \
   bash scripts/smoke-frontend.sh eqarchives-frontend:local
-bash scripts/smoke-embeddings.sh eqarchives-frontend:local
+docker build --tag eqarchives-mcp:local elastic-indexer-stack/mcp
+bash scripts/smoke-embeddings.sh eqarchives-frontend:local eqarchives-mcp:local
 ```
 
 - [smoke-frontend.sh](scripts/smoke-frontend.sh) checks NGINX health, assets, build

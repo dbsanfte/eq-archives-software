@@ -2,7 +2,7 @@
 set -euo pipefail
 
 image=${1:?Usage: smoke-embeddings.sh FRONTEND_IMAGE}
-mcp_image=${2:-}
+mcp_image=${2:?Supply the tested MCP/search API image}
 repo_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 embedding_dir="$repo_dir/elastic-indexer-stack/k8s-manifests/embeddings"
 set -a
@@ -17,6 +17,12 @@ fixture_id=''
 traefik_id=''
 replacement_id=''
 cleanup() {
+  status=$?
+  if [[ "$status" != 0 ]]; then
+    for failed_container in "$frontend_id" "$mcp_id" "$embedding_id" "$fixture_id" "$traefik_id"; do
+      if [[ -n "$failed_container" ]]; then docker logs --tail 20 "$failed_container" >&2 || true; fi
+    done
+  fi
   if [[ -n "$replacement_id" ]]; then docker rm -f "$replacement_id" >/dev/null; fi
   if [[ -n "$traefik_id" ]]; then docker rm -f "$traefik_id" >/dev/null; fi
   if [[ -n "$mcp_id" ]]; then docker rm -f "$mcp_id" >/dev/null; fi
@@ -68,42 +74,7 @@ if [[ "$status" != 401 ]]; then
   exit 1
 fi
 
-frontend_id=$(docker run --detach --network "$network" --network-alias search-eqarchives --publish 127.0.0.1::80 \
-  --mount "type=bind,source=$work_dir/secrets,target=/run/secrets,readonly" \
-  --env ELASTICSEARCH_URL=http://127.0.0.1:9200 \
-  --env ELASTICSEARCH_INDEX=eq-archive --env OPENAI_URL=http://nomic:8080 "$image")
-frontend_address=$(docker port "$frontend_id" 80/tcp)
-bash "$repo_dir/scripts/wait-http.sh" "http://$frontend_address/healthz" >/dev/null
-# CPU quantized matrix kernels differ with batch shape (the repetitive fixture
-# measures ~0.999 cosine locally). The production Vulkan check retains 0.9999.
-python3 "$repo_dir/scripts/check-embeddings.py" \
-  "http://$frontend_address/openai/v1/embeddings" --model "$MODEL_ALIAS" \
-  --check-batches --batch-min-cosine 0.998
-if docker exec "$embedding_id" /bin/sh /bootstrap/check-gpu.sh; then
-  echo 'GPU verification incorrectly accepted the CPU-only CI server.' >&2
-  exit 1
-fi
-
-# An oversized query must fail cleanly and leave the service usable.
-python3 -c 'import json,os; print(json.dumps({"model":os.environ["MODEL_ALIAS"],"input":["word "*600]}))' > "$work_dir/oversized.json"
-status=$(curl --silent --show-error --output "$work_dir/oversized-response.json" --write-out '%{http_code}' \
-  -H 'Content-Type: application/json' --data-binary "@$work_dir/oversized.json" \
-  "http://$frontend_address/openai/v1/embeddings")
-if [[ "$status" != 400 ]]; then
-  echo "The pinned runtime should reject input above its per-slot context with HTTP 400; received $status." >&2
-  exit 1
-fi
-python3 - "$work_dir/oversized-response.json" <<'PY'
-import json, sys
-message = json.load(open(sys.argv[1])).get("error", {}).get("message", "")
-assert "larger than the max context size (512 tokens)" in message, "Unexpected oversized-input error"
-PY
-python3 "$repo_dir/scripts/check-embeddings.py" \
-  "http://$frontend_address/openai/v1/embeddings" --model "$MODEL_ALIAS"
-echo 'Model integrity, cache reuse, authentication, frontend proxy, dimensions, and oversized-input checks passed.'
-
-if [[ -n "$mcp_image" ]]; then
-  fixture_id=$(docker run --detach --network "$network" --network-alias archive-fixture \
+fixture_id=$(docker run --detach --network "$network" --network-alias archive-fixture \
     --cap-drop ALL --security-opt no-new-privileges --read-only --memory 256m \
     --mount "type=bind,source=$repo_dir/scripts/mcp-smoke-fixture.py,target=/fixture.py,readonly" \
     --entrypoint python "$mcp_image" /fixture.py)
@@ -115,6 +86,47 @@ if [[ -n "$mcp_image" ]]; then
   mcp_address=$(docker port "$mcp_id" 8080/tcp)
   curl --fail --silent --show-error --retry 15 --retry-all-errors --retry-delay 1 \
     --max-time 5 "http://$mcp_address/healthz" >/dev/null
+
+frontend_id=$(docker run --detach --network "$network" --network-alias search-eqarchives --publish 127.0.0.1::8080 \
+  --cap-drop ALL --security-opt no-new-privileges --read-only \
+  --tmpfs /tmp:rw,nosuid,nodev,size=64m \
+  --env SEARCH_API_URL=http://eqarchives-mcp:8080 "$image")
+frontend_address=$(docker port "$frontend_id" 8080/tcp)
+bash "$repo_dir/scripts/wait-http.sh" "http://$frontend_address/healthz" >/dev/null
+# CPU quantized matrix kernels differ with batch shape (the repetitive fixture
+# measures ~0.999 cosine locally). The production Vulkan check retains 0.9999.
+python3 "$repo_dir/scripts/check-embeddings.py" \
+  "http://$frontend_address/openai/v1/embeddings" --model "$MODEL_ALIAS"
+
+export CI_EMBEDDING_KEY=ci-embedding-api-key
+python3 "$repo_dir/scripts/check-embeddings.py" \
+  "http://$embedding_address/v1/embeddings" --model "$MODEL_ALIAS" \
+  --api-key-env CI_EMBEDDING_KEY --check-batches --batch-min-cosine 0.998
+if docker exec "$embedding_id" /bin/sh /bootstrap/check-gpu.sh; then
+  echo 'GPU verification incorrectly accepted the CPU-only CI server.' >&2
+  exit 1
+fi
+
+# An oversized query must fail cleanly and leave the service usable.
+python3 -c 'import json,os; print(json.dumps({"model":os.environ["MODEL_ALIAS"],"input":["word "*600]}))' > "$work_dir/oversized.json"
+status=$(curl --silent --show-error --output "$work_dir/oversized-response.json" --write-out '%{http_code}' \
+  -H 'Content-Type: application/json' -H 'Authorization: Bearer ci-embedding-api-key' --data-binary "@$work_dir/oversized.json" \
+  "http://$embedding_address/v1/embeddings")
+if [[ "$status" != 400 ]]; then
+  echo "The pinned runtime should reject input above its per-slot context with HTTP 400; received $status." >&2
+  exit 1
+fi
+python3 - "$work_dir/oversized-response.json" <<'PY'
+import json, sys
+message = json.load(open(sys.argv[1])).get("error", {}).get("message", "")
+assert "larger than the max context size (512 tokens)" in message, "Unexpected oversized-input error"
+PY
+python3 "$repo_dir/scripts/check-embeddings.py" \
+  "http://$frontend_address/openai/v1/embeddings" --model "$MODEL_ALIAS"
+python3 "$repo_dir/scripts/check-public-security.py" "http://$frontend_address"
+echo 'Model integrity, cache reuse, authentication, frontend proxy, dimensions, and oversized-input checks passed.'
+
+if [[ -n "$mcp_image" ]]; then
   python3 "$repo_dir/scripts/check-mcp.py" "http://$mcp_address/mcp"
 
   # Reproduce Traefik's rule ordering using the matches and priorities from the
@@ -139,14 +151,14 @@ if [[ -n "$mcp_image" ]]; then
   echo 'Production ingress rules route MCP, Explore and frontend requests to their respective containers.'
 
   replacement_id=$(docker run --detach --network "$network" --network-alias search-eqarchives-next \
-    --publish 127.0.0.1::80 --mount "type=bind,source=$work_dir/secrets,target=/run/secrets,readonly" \
-    --env ELASTICSEARCH_URL=http://127.0.0.1:9200 \
-    --env ELASTICSEARCH_INDEX=eq-archive --env OPENAI_URL=http://nomic:8080 "$image")
-  replacement_address=$(docker port "$replacement_id" 80/tcp)
+    --publish 127.0.0.1::8080 --read-only --cap-drop ALL --security-opt no-new-privileges \
+    --tmpfs /tmp:rw,nosuid,nodev,size=64m \
+    --env SEARCH_API_URL=http://eqarchives-mcp:8080 "$image")
+  replacement_address=$(docker port "$replacement_id" 8080/tcp)
   curl --fail --silent --show-error --retry 15 --retry-all-errors --retry-delay 1 \
     --max-time 5 "http://$replacement_address/healthz" >/dev/null
   "${DEPLOYMENT_TEST_PYTHON:-python3}" "$repo_dir/scripts/test-frontend-rollout.py" \
     "$repo_dir/elastic-indexer-stack/k8s-manifests/01-frontend.yaml" \
-    "$work_dir/routing/routes.yaml" "$frontend_id" "http://$traefik_address" http://search-eqarchives-next:80
+    "$work_dir/routing/routes.yaml" "$frontend_id" "http://$traefik_address" http://search-eqarchives-next:8080
   python3 "$repo_dir/scripts/check-mcp.py" "http://$traefik_address/mcp" --host search.eqarchives.org
 fi

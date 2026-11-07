@@ -4,3 +4,5 @@ resources:
   - 01-frontend.yaml
   - embeddings
   - mcp.yaml
+  - public-network-policy.yaml
+  - elasticsearch-service.yaml
