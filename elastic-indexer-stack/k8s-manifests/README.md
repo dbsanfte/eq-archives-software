@@ -275,3 +275,9 @@ Apply it separately after reviewing the rendered installed chart; do not overwri
 the k3s-managed HelmChart. Database version/TLS and a multi-minor k3s/runtime upgrade
 require a separate checkpoint-preserving maintenance window; ordinary frontend
 CI never restarts Elasticsearch or an indexing Job.
+
+Database transport is retained in the operator-owned `eqarchives-database-client`
+ConfigMap; ordinary CI bootstraps it only when absent and preserves HTTPS/private
+CA trust thereafter. See the [security maintenance runbook](../../scripts/security-maintenance/README.md)
+for the separately authorized database/runtime handoff. Never hardcode HTTP in a
+new database consumer or disable certificate verification.

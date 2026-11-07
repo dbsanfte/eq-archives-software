@@ -1,0 +1,66 @@
+# One-time operator setup. Private CA/server keys stay in Kubernetes Secrets.
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: eqarchives-bootstrap-ca
+  namespace: eqarchives-es
+spec:
+  selfSigned: {}
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: eqarchives-database-ca
+  namespace: eqarchives-es
+spec:
+  isCA: true
+  commonName: EQ Archives internal database CA
+  secretName: eqarchives-database-ca
+  duration: 87600h
+  renewBefore: 8760h
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Never
+  issuerRef:
+    name: eqarchives-bootstrap-ca
+    kind: Issuer
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: eqarchives-database-ca
+  namespace: eqarchives-es
+spec:
+  ca:
+    secretName: eqarchives-database-ca
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: elasticsearch-internal
+  namespace: eqarchives-es
+spec:
+  secretName: elasticsearch-internal-tls
+  duration: 2160h
+  renewBefore: 720h
+  privateKey:
+    algorithm: RSA
+    size: 2048
+    encoding: PKCS8
+    rotationPolicy: Always
+  issuerRef:
+    name: eqarchives-database-ca
+    kind: Issuer
+  dnsNames:
+    - localhost
+    - elasticsearch
+    - elasticsearch-0
+    - elasticsearch.eqarchives-es
+    - elasticsearch.eqarchives-es.svc
+    - elasticsearch.eqarchives-es.svc.cluster.local
+  ipAddresses:
+    - 127.0.0.1
+    - 10.43.61.29
+    - 192.168.68.53
+  usages: [digital signature, key encipherment, server auth, client auth]

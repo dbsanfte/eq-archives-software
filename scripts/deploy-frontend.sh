@@ -24,6 +24,11 @@ work_dir=$(mktemp -d)
 trap 'rm -rf "$work_dir"' EXIT
 umask 077
 
+# Retain an operator-selected HTTPS profile across every deployment.
+schema_ip=$("${kubectl[@]}" -n eqarchives-es get service elasticsearch -o jsonpath='{.spec.clusterIP}')
+python3 "$repo_dir/scripts/database-client-profile.py" --directory "$work_dir" --service-ip "$schema_ip"
+source "$work_dir/database-client.env"
+
 # Render all public resources and validate them before changing the cluster.
 cp "$repo_dir"/elastic-indexer-stack/k8s-manifests/{01-frontend.yaml,mcp.yaml,kustomization.yaml,public-network-policy.yaml,elasticsearch-service.yaml} "$work_dir/"
 cp -R "$repo_dir/elastic-indexer-stack/k8s-manifests/embeddings" "$work_dir/"
@@ -60,6 +65,7 @@ patches:
         path: /spec/template/metadata/annotations
         value:
           checksum/archive-secrets: "$secret_checksum"
+          checksum/database-client: "$DATABASE_CLIENT_CHECKSUM"
   - target:
       kind: Deployment
       name: search-eqarchives
@@ -89,8 +95,7 @@ python3 "$repo_dir/scripts/frontend-secrets.py" |
     --field-manager=frontend-cicd -f - >/dev/null
 
 # Bring up and verify the local model before changing frontend routing.
-schema_ip=$("${kubectl[@]}" -n eqarchives-es get service elasticsearch -o jsonpath='{.spec.clusterIP}')
-export EMBEDDING_SCHEMA_ES_URL="http://$schema_ip:9200"
+export EMBEDDING_SCHEMA_ES_URL="$DATABASE_OPERATOR_URL"
 "${kubectl[@]}" -n eqarchives-es get secret elastic-password-secret -o json |
   python3 "$repo_dir/scripts/embedding-service/provision-schema.py"
 "${kubectl[@]}" apply -f "$work_dir/frontend.yaml" -l app.kubernetes.io/part-of=eqarchives-embeddings

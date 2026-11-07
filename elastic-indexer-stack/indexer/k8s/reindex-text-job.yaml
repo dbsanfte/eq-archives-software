@@ -54,9 +54,17 @@ spec:
             - name: LOCAL_REPO_PATH
               value: /data/eq-archives
             - name: ELASTICSEARCH_HOST
-              value: http://elasticsearch.eqarchives-es.svc.cluster.local
+              valueFrom:
+                configMapKeyRef:
+                  name: eqarchives-database-client
+                  key: host
             - name: ELASTICSEARCH_PORT
-              value: "9200"
+              valueFrom:
+                configMapKeyRef:
+                  name: eqarchives-database-client
+                  key: port
+            - name: SSL_CERT_FILE
+              value: /usr/local/lib/python3.13/site-packages/certifi/cacert.pem
             - name: ELASTICSEARCH_INDEX
               value: eq-archive
             - name: ELASTICSEARCH_USERNAME
@@ -72,6 +80,10 @@ spec:
           volumeMounts:
             - name: archive
               mountPath: /data/eq-archives
+              readOnly: true
+            - name: database-trust
+              mountPath: /usr/local/lib/python3.13/site-packages/certifi/cacert.pem
+              subPath: ca-bundle.pem
               readOnly: true
             - name: credentials
               mountPath: /run/secrets
@@ -90,6 +102,9 @@ spec:
             runAsNonRoot: true
             runAsUser: 1000
       volumes:
+        - name: database-trust
+          configMap:
+            name: eqarchives-database-client
         - name: archive
           hostPath:
             path: /mnt/samsung/eq-archives-html-reindex
