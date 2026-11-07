@@ -318,3 +318,13 @@ def test_exclusive_worker_lease_and_explicit_restart_resume(candidate):
             assert store.db.execute('SELECT state FROM operations').fetchone()[0] == 'interrupted'
     finally:
         worker.lease.close()
+
+
+def test_import_uses_operator_database_profile_and_verified_combined_trust():
+    pod=import_job({'id':'a'*32,'manifest_sha256':'b'*64},IMAGE)['spec']['template']['spec']
+    env={e['name']:e for e in pod['containers'][0]['env']}
+    assert env['ELASTICSEARCH_URL']['valueFrom']['configMapKeyRef']=={'name':'eqarchives-database-client','key':'url'}
+    mount=next(m for m in pod['containers'][0]['volumeMounts'] if m['name']=='database-trust')
+    assert mount['readOnly'] and mount['subPath']=='ca-bundle.pem'
+    assert mount['mountPath']==env['SSL_CERT_FILE']['value']=='/usr/local/lib/python3.13/site-packages/certifi/cacert.pem'
+    assert next(v for v in pod['volumes'] if v['name']=='database-trust')['configMap']['name']=='eqarchives-database-client'

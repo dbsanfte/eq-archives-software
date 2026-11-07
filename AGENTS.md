@@ -82,6 +82,9 @@ Run the MCP tests, public-security manifest checks, real Chromium regressions an
 after old frontend pods retire. Only the Elasticsearch Service is CI-managed;
 its StatefulSet/data and active reindex Jobs remain untouched. Database TLS/version
 or multi-minor k3s/runtime upgrades require an operator maintenance handoff.
+Retain the operator-owned `eqarchives-database-client` endpoint/combined CA profile
+on every deployment; bootstrap only when absent and never disable TLS validation.
+Run `python3 scripts/test-database-client-profile.py` for transport/deploy changes.
 
 ## Testing requirements
 

@@ -29,6 +29,15 @@ class PublicSecurity(unittest.TestCase):
         self.assertNotIn('secret',str(pod['volumes']).lower())
         self.assertEqual({e['name'] for e in container['env']},{'LOG_LEVEL','SEARCH_API_URL','ELASTICSEARCH_INDEX'})
         self.assertNotIn('elasticsearch.eqarchives',str(container['env']))
+    def test_database_client_uses_persistent_endpoint_and_verified_trust(self):
+        pod=self.get('Deployment','eqarchives-mcp')['spec']['template']['spec']
+        env={e['name']:e for e in pod['containers'][0]['env']}
+        self.assertEqual(env['ELASTICSEARCH_URL']['valueFrom']['configMapKeyRef'],{'name':'eqarchives-database-client','key':'url'})
+        mount=next(m for m in pod['containers'][0]['volumeMounts'] if m['name']=='database-trust')
+        self.assertEqual(mount['mountPath'],'/usr/local/lib/python3.13/site-packages/certifi/cacert.pem')
+        self.assertTrue(mount['readOnly'])
+        self.assertEqual(mount['subPath'],'ca-bundle.pem')
+        self.assertEqual(next(v for v in pod['volumes'] if v['name']=='database-trust')['configMap']['name'],'eqarchives-database-client')
     def test_frontend_network_can_only_reach_dns_and_the_bounded_api(self):
         p=self.get('NetworkPolicy','public-static-frontend')['spec']
         self.assertEqual(p['podSelector'],{'matchLabels':{'app':'search-eqarchives'}})

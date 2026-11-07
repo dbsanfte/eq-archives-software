@@ -41,7 +41,10 @@ spec:
               containerPort: 8080
           env:
             - name: ELASTICSEARCH_URL
-              value: http://elasticsearch.eqarchives-es.svc.cluster.local:9200
+              valueFrom:
+                configMapKeyRef:
+                  name: eqarchives-database-client
+                  key: url
             - name: ELASTICSEARCH_INDEX
               value: eq-archive
             - name: EMBEDDING_URL
@@ -81,12 +84,19 @@ spec:
               exec:
                 command: ["sleep", "5"]
           volumeMounts:
+            - name: database-trust
+              mountPath: /usr/local/lib/python3.13/site-packages/certifi/cacert.pem
+              subPath: ca-bundle.pem
+              readOnly: true
             - name: credentials
               mountPath: /run/secrets
               readOnly: true
       imagePullSecrets:
         - name: dockerhub-pull-secret
       volumes:
+        - name: database-trust
+          configMap:
+            name: eqarchives-database-client
         - name: credentials
           secret:
             secretName: search-eqarchives-secrets

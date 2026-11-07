@@ -1,3 +1,8 @@
+Database connections use the operator-owned `eqarchives-database-client` profile
+and a combined public/private CA bundle mounted over certifi. Preserve these refs
+and `SSL_CERT_FILE` in new maintenance continuations, including pinned historical
+images. See [security maintenance](../../../scripts/security-maintenance/README.md).
+
 > Current model migration: use the [EmbeddingGemma runbook](../../../scripts/embedding-service/README.md#embeddinggemma-migration)
 > and `reindex_embeddings.py`, with new model-version checkpoints. The Nomic
 > extraction repair below is retained for historical recovery. Its tokenizer and

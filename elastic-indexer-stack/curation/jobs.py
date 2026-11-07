@@ -96,7 +96,8 @@ def import_job(batch, image):
                                                "command": ["python", "/app/index_captures.py", "--root", "/data",
                                                            "--batch", f"batches/{batch_id}/approved.json",
                                                            "--manifest-sha256", batch["manifest_sha256"]],
-                                               "env": [{"name": "ELASTICSEARCH_URL", "value": "http://elasticsearch.eqarchives-es.svc.cluster.local:9200"},
+                                               "env": [{"name": "ELASTICSEARCH_URL", "valueFrom": {"configMapKeyRef": {"name": "eqarchives-database-client", "key": "url"}}},
+                                                       {"name": "SSL_CERT_FILE", "value": "/usr/local/lib/python3.13/site-packages/certifi/cacert.pem"},
                                                        {"name": "IMPORT_JOB_NAME", "value": import_name(batch)},
                                                        {"name": "LUNA_DAILY_BUDGET_ROOT", "value": "/luna-budget"},
                                                        {"name": "EMBEDDING_CACHE_PATH", "value": "/indexing-state/embeddings.sqlite"},
@@ -111,7 +112,9 @@ def import_job(batch, image):
                                                                 {"name": "credentials", "mountPath": "/run/secrets", "readOnly": True},
                                                                 {"name": "staging", "mountPath": "/enrichment", "subPath": "enrichment"},
                                                                 {"name": "staging", "mountPath": "/luna-budget", "subPath": "luna-budget"},
-                                                                {"name": "staging", "mountPath": "/indexing-state", "subPath": "indexing-state"}]}],
+                                                                {"name": "staging", "mountPath": "/indexing-state", "subPath": "indexing-state"},
+                                                                {"name": "database-trust", "mountPath": "/usr/local/lib/python3.13/site-packages/certifi/cacert.pem",
+                                                                 "subPath": "ca-bundle.pem", "readOnly": True}]}],
                                            "volumes": [{"name": "staging", "persistentVolumeClaim": {"claimName": "eqarchives-curation"}},
                                                        {"name": "credentials", "projected": {"defaultMode": 288,
                                                         "sources": [{"secret": {"name": "eqarchives-capture-indexer-secrets",
@@ -120,4 +123,5 @@ def import_job(batch, image):
                                                                     {"secret": {"name": "search-eqarchives-secrets",
                                                                     "items": [{"key": "openai_api_key", "path": "openai_api_key"}]}},
                                                                     {"secret": {"name": "eqarchives-curation-secrets",
-                                                                    "items": [{"key": "luna_api_key", "path": "luna_api_key"}]}}]}}]}}}}
+                                                                    "items": [{"key": "luna_api_key", "path": "luna_api_key"}]}}]}},
+                                                       {"name": "database-trust", "configMap": {"name": "eqarchives-database-client"}}]}}}}

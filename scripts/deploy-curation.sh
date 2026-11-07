@@ -13,6 +13,10 @@ curation_work=$(mktemp -d)
 trap 'rm -rf "$curation_work"' EXIT
 umask 077
 
+elastic_ip=$("${kubectl[@]}" -n eqarchives-es get service elasticsearch -o jsonpath='{.spec.clusterIP}')
+python3 "$repo_dir/scripts/database-client-profile.py" --directory "$curation_work" --service-ip "$elastic_ip"
+source "$curation_work/database-client.env"
+
 # Snapshot existing unfinished ingestion Jobs. Neither this script nor the
 # controller has a reason to alter them or their source checkouts.
 "${kubectl[@]}" -n eqarchives-es get jobs -o json |
@@ -37,14 +41,14 @@ patches:
         path: /spec/template/metadata/annotations
         value:
           checksum/curation-secrets: "$checksum"
+          checksum/database-client: "$DATABASE_CLIENT_CHECKSUM"
       - op: replace
         path: /spec/template/spec/containers/0/env/1/value
         value: "$image"
 EOF
 "${kubectl[@]}" kustomize "$curation_work" > "$curation_work/resources.yaml"
 "${kubectl[@]}" apply --dry-run=server -f "$curation_work/resources.yaml" >/dev/null
-elastic_ip=$("${kubectl[@]}" -n eqarchives-es get service elasticsearch -o jsonpath='{.spec.clusterIP}')
-export CURATION_ES_URL="http://$elastic_ip:9200"
+export CURATION_ES_URL="$DATABASE_OPERATOR_URL"
 "${kubectl[@]}" -n eqarchives-es get secret elastic-password-secret eqarchives-capture-indexer-secrets --ignore-not-found -o json |
   python3 "$repo_dir/scripts/curation-secrets.py" |
   "${kubectl[@]}" apply --server-side --force-conflicts --field-manager=curation-cicd -f - >/dev/null
