@@ -16,6 +16,7 @@ class PublicSecurity(unittest.TestCase):
         pod=self.get('Deployment','search-eqarchives')['spec']['template']['spec']
         self.assertFalse(pod['automountServiceAccountToken'])
         self.assertTrue(pod['securityContext']['runAsNonRoot'])
+        self.assertEqual(pod['securityContext']['fsGroup'],10001)
         self.assertEqual(pod['securityContext']['seccompProfile']['type'],'RuntimeDefault')
         container=pod['containers'][0]
         self.assertEqual(container['ports'][0]['containerPort'],8080)
