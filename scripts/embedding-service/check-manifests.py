@@ -24,9 +24,12 @@ assert image_endpoints['subsets'] == [{'addresses': [{'ip': config['BIND_ADDRESS
     'ports': [{'name': 'http', 'port': int(vision['VISION_PORT']), 'protocol': 'TCP'}]}]
 local = resources['Service', 'nomic-embeddings']
 assert local['spec']['selector']['app'] == 'nomic-embeddings'
-# Online search and MCP must retain the low-latency Vulkan route.
-for name, variable in (('search-eqarchives', 'OPENAI_URL'), ('eqarchives-mcp', 'EMBEDDING_URL')):
+# The static frontend uses the bounded API, which retains live Vulkan inference.
+for name, variable, expected in (
+    ('search-eqarchives', 'SEARCH_API_URL', 'http://eqarchives-mcp.eqarchives-es.svc.cluster.local:8080'),
+    ('eqarchives-mcp', 'EMBEDDING_URL', 'http://nomic-embeddings.eqarchives-es.svc.cluster.local:8080'),
+):
     containers = resources['Deployment', name]['spec']['template']['spec']['containers']
     env = {row['name']: row.get('value') for container in containers for row in container.get('env', [])}
-    assert env[variable] == 'http://nomic-embeddings.eqarchives-es.svc.cluster.local:8080', 'Online queries must stay on Vulkan'
+    assert env[variable] == expected, 'Online queries must use the bounded API and stay on Vulkan'
 print('Verified CUDA indexing route and dedicated Vulkan routes for online queries.')

@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """Regression checks for the public workload's credential and network boundaries."""
 from pathlib import Path
+from contextlib import redirect_stdout
+import io
+import runpy
+import subprocess
 import unittest
+from unittest.mock import patch
 import yaml
 ROOT=Path(__file__).resolve().parents[1]
 DIR=ROOT/'elastic-indexer-stack/k8s-manifests'
@@ -61,6 +66,17 @@ class PublicSecurity(unittest.TestCase):
         self.assertEqual(self.get('Middleware','public-global-inflight')['spec'],{'inFlightReq':{'amount':64}})
         route=self.get('Ingress','search-eqarchives-root')
         self.assertIn('eqarchives-es-public-global-inflight@kubernetescrd',route['metadata']['annotations']['traefik.ingress.kubernetes.io/router.middlewares'])
+    def test_online_routing_validator_accepts_adapter_and_rejects_cuda_for_search(self):
+        rendered=subprocess.check_output(['kubectl','kustomize',str(DIR)],text=True)
+        checker=ROOT/'scripts/embedding-service/check-manifests.py'
+        with patch('sys.stdin',io.StringIO(rendered)),redirect_stdout(io.StringIO()):
+            runpy.run_path(str(checker))
+        resources=list(yaml.safe_load_all(rendered))
+        api=next(r for r in resources if r.get('kind')=='Deployment' and r['metadata']['name']=='eqarchives-mcp')
+        env=api['spec']['template']['spec']['containers'][0]['env']
+        next(e for e in env if e['name']=='EMBEDDING_URL')['value']='http://nomic-embeddings-rtx3080:8081'
+        with patch('sys.stdin',io.StringIO(yaml.safe_dump_all(resources))),self.assertRaises(AssertionError):
+            runpy.run_path(str(checker))
     def test_ingress_image_matches_the_ci_security_release(self):
         r=yaml.safe_load((ROOT/'scripts/security-maintenance/traefik.yaml').read_text())
         values=yaml.safe_load(r['spec']['valuesContent'])
