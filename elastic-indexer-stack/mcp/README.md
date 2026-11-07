@@ -21,6 +21,10 @@ and as the same JSON in a text item, following OpenAI's
 [research MCP contract](https://developers.openai.com/api/docs/mcp).
 The service uses the official Python MCP SDK, stateless JSON responses and no
 sticky sessions. GET/DELETE return 405: there are no unsolicited events or sessions.
+The HTTP adapter explicitly allows only initialization/discovery, ping, tool
+listing/calls and initialized/cancelled notifications. SDK defaults such as
+`subscriptions/listen`, prompts, resources and tasks are rejected before dispatch.
+Both protocol eras advertise only tools, without change subscriptions.
 
 Search combines source-text/title retrieval with existing 768-dimensional Nomic
 vectors (source chunks, summaries and images). Explicit phrases and simple
@@ -41,6 +45,10 @@ snippet truncation. Image transcriptions and estimated dates are clearly labelle
 generated summaries are not substituted for source text. Source URLs are preferred
 for citations, with encoded search permalinks as a fallback. Very large upstream
 responses over 8 MiB fail explicitly rather than returning a silently cut-off source.
+The complete serialized MCP response also has an 8 MiB limit, including both the
+structured result and its JSON text representation. A source that exceeds that
+wire limit returns an explicit HTTP 413 JSON-RPC error asking the client to open
+it on the archive website; source text is never silently truncated.
 
 ## Filtered research and source discovery
 
@@ -152,6 +160,11 @@ eqvm. Install `scripts/deployment-test-requirements.txt` and set
 `DEPLOYMENT_TEST_PYTHON` if needed for the routing test renderer. Master
 publishes `dbsanfte/frontend:mcp-<git-sha>` alongside the frontend artifact in the
 existing registry repository. Kustomize resolves their two digests independently.
+The same smoke suite runs `scripts/test-mcp-admission.py` against synthetic large
+sources in that isolated fixture. Real TCP clients stop reading response bodies;
+MCP and browser admission must refuse extra requests while health stays available,
+then recover after disconnect. Delivery uses 64 KiB writes and a final drain so
+Uvicorn cannot retain one large final write after releasing application capacity.
 
 The `eqarchives-mcp` Deployment/Service and exact `/mcp` HTTPS Ingress are managed
 by [`mcp.yaml`](../k8s-manifests/mcp.yaml). Explicit route priority prevents the
@@ -161,10 +174,19 @@ from the existing read-only account and shared model key. Credential checksums
 trigger a rollout only when values change. Normal connector changes do not restart
 Nomic or change ingestion/Elasticsearch data.
 
-Limits: four active retrieval calls per process, one embedding call at a time,
+Limits: two active MCP HTTP exchanges per process, retained until response delivery
+finishes, independently of ingress replica count. Busy requests receive HTTP 503
+with `Retry-After`. The adapter reads at most 16 KiB within two seconds, and bounds
+the complete request/response lifetime at 30 seconds. It buffers at most 8 MiB of
+serialized response before sending headers, so an oversized response fails as a
+complete error rather than a partial successful document. Cancellation and
+timeouts release capacity; a stalled transfer after headers closes explicitly.
+The health endpoint and browser adapter retain their independent admission.
+
+Retrieval has four active calls per process, one embedding call at a time,
 3-second embedding timeout, 15-second failure cooldown, lexical fallback, a
 128-entry/5-minute in-memory embedding cache, 8-second Elasticsearch search timeout,
-12-second HTTP timeout and 16 KiB request bodies. Queries over 600 characters skip
+12-second HTTP timeout. Queries over 600 characters skip
 embeddings but retain their entire lexical query. Traefik additionally limits MCP
 traffic to five requests/second with a burst of twenty and eight in-flight requests.
 The cache is process-local; a rolling update can briefly have two active instances.
@@ -183,6 +205,11 @@ budgets long ASCII runs at the standard analyzer's token-length limit, and count
 non-ASCII characters individually. It preserves query text; the estimate can
 reject dense or long multilingual requests before Elasticsearch does any work.
 These budgets also cover post-filters, facet filters and vector pre-filters.
+The same accounting applies to `search`, `search_archive` and `list_sources`:
+each nonempty query permits at most 100 conservative token units within the
+1,000-character contract. Invalid or excessive queries fail before model/database
+work. Empty filtered research queries still browse the archive, and accepted
+query text and operators are preserved.
 
 Exact-ID readers require a nonempty bounded subset of server-owned source fields;
 an empty array is rejected because Elasticsearch interprets it as unrestricted

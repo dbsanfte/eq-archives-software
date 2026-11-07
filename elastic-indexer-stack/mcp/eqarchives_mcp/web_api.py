@@ -14,6 +14,9 @@ import time
 from mcp.server.mcpserver.exceptions import ToolError
 from starlette.responses import JSONResponse
 
+from .limits import TextBudget
+from .http_limits import send_body
+
 FACETS = {"domain_name", "llm_content_flavour", "file_type", "mime_type", "mailing_list_name", "llm_tags"}
 DATES = {"capture_date", "llm_guessed_date", "last_indexed", "llm_extracted_dates.date"}
 TEXT = ["text_full", "llm_summary", "llm_image_text"]
@@ -49,7 +52,9 @@ class WebAdmission:
             nonlocal started
             if message["type"] == "http.response.start":
                 started = True
-            await send(message)
+                await send(message)
+            else:
+                await send_body(send, message.get("body", b""), message.get("more_body", False))
         async with self.slots:
             try:
                 async with asyncio.timeout(30):
@@ -89,20 +94,10 @@ def items(value, limit=20):
 class Builder:
     def __init__(self):
         self.nodes = 0
-        self.text_chars = self.text_terms = self.text_clauses = 0
+        self.text_budget = TextBudget()
 
     def analyzed_text(self, value, limit=1000):
-        value = text(value, limit)
-        # Upper-bound standard analysis without an ES round trip. Punctuation
-        # can split ASCII words; non-ASCII scripts can emit a token per character.
-        # Long ASCII runs may split at StandardTokenizer's 255-character limit.
-        terms = sum((len(part) + 254) // 255 if part.isascii() else 1
-                    for part in re.findall(r"[A-Za-z0-9]+|[^\x00-\x7f\s]", value))
-        self.text_chars += len(value)
-        self.text_terms += terms
-        self.text_clauses += 1
-        check(terms <= 100 and self.text_chars <= 4000 and self.text_terms <= 400 and self.text_clauses <= 8)
-        return value
+        return self.text_budget.accept(value, limit)
 
     def query(self, value, depth=0):
         self.nodes += 1

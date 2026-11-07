@@ -5,8 +5,10 @@ import re
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
+from mcp.server.mcpserver.exceptions import ToolError
 
 from .models import SearchResult
+from .limits import TextBudget
 
 
 MAX_RESEARCH_RESULTS = 1000
@@ -84,6 +86,10 @@ def keyword_query(query: str) -> dict:
     query = query.strip()
     if not query:
         return {"match_all": {}}
+    try:
+        TextBudget().accept(query)
+    except ValueError:
+        raise ToolError("Use a shorter research query (maximum 100 conservative token units).") from None
     return {"simple_query_string": {
         "query": query, "fields": ["title^3", "text_full", "llm_image_text_full"],
         # OR can turn cyclops -ring into cyclops OR anything without ring.
