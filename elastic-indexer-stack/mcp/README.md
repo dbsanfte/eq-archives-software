@@ -175,6 +175,24 @@ The service does not log request bodies or intentionally store conversations.
 Upstream/proxy operational logging is separate. Public descriptions must not promise
 retention periods for infrastructure that has not been audited.
 
+The browser Elasticsearch adapter reconstructs a closed grammar. All analyzed
+text clauses (`multi_match`, `query_string`, and capture-history URL phrases)
+share eight clauses, 4,000 characters and 400 conservative token units per
+request, with at most 100 units per clause. Accounting splits ASCII punctuation,
+budgets long ASCII runs at the standard analyzer's token-length limit, and counts
+non-ASCII characters individually. It preserves query text; the estimate can
+reject dense or long multilingual requests before Elasticsearch does any work.
+These budgets also cover post-filters, facet filters and vector pre-filters.
+
+Exact-ID readers require a nonempty bounded subset of server-owned source fields;
+an empty array is rejected because Elasticsearch interprets it as unrestricted
+source retrieval. Invalid numeric vectors and malformed Unicode return HTTP 400
+before upstream work. Invalid Unicode cannot change the embedding cache, lock or
+cooldown. A model rejecting an individual input (400/413/422) leaves subsequent
+queries available; authentication, rate limits, transient failures and malformed
+model responses retain the shared backoff. Regression checks run in unit tests,
+container smoke tests and production deployment (`check-public-security.py`).
+
 After deployment, run `python3 scripts/check-mcp.py https://search.eqarchives.org/mcp`
 from the repository root. This validates discovery, search, full-text fetch,
 missing documents, consecutive research pages, source discovery/filtering and

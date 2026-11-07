@@ -120,6 +120,11 @@ class Archive:
         await self.embeddings.aclose()
 
     async def embedding(self, query: str) -> list[float] | None:
+        # Invalid caller text must not be mistaken for a shared model outage.
+        try:
+            query.encode("utf-8")
+        except UnicodeError:
+            raise ToolError("Enter a valid Unicode research query.") from None
         now = time.monotonic()
         key = (self.settings.model, query)
         cached = self.cache.get(key)
@@ -140,12 +145,18 @@ class Archive:
                 vector = response.json()["data"][0]["embedding"]
                 if not isinstance(vector, list) or len(vector) != 768:
                     raise ValueError("Invalid embedding dimensions")
-                if not all(isinstance(x, (float, int)) and not isinstance(x, bool)
+                if not all(type(x) in (float, int) and abs(x) <= 1
                            and math.isfinite(x) for x in vector):
                     raise ValueError("Invalid embedding values")
                 norm = math.sqrt(sum(x * x for x in vector))
                 if not 0.9 < norm < 1.1:
                     raise ValueError("Embedding must be normalized")
+            except httpx.HTTPStatusError as error:
+                # A rejected input (e.g. token overflow) does not disable other
+                # users. Authentication, rate limits and outages still back off.
+                if error.response.status_code in (401, 403, 408, 429) or error.response.status_code >= 500:
+                    self.cooldown_until = now + 15
+                return None
             except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError):
                 self.cooldown_until = now + 15
                 return None

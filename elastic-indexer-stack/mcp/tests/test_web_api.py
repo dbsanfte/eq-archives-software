@@ -9,7 +9,7 @@ import pytest
 from starlette.testclient import TestClient
 
 from eqarchives_mcp.server import create_app
-from eqarchives_mcp.web_api import Builder, DATES, FACETS, HIGHLIGHT, LIST_FIELDS, MAX_BODY
+from eqarchives_mcp.web_api import Builder, DATES, FACETS, HIGHLIGHT, LIST_FIELDS, MAX_BODY, TEXT
 from test_archive import make_archive, VECTOR
 
 URL='/elasticsearch/eq-archive/_search'
@@ -255,3 +255,95 @@ def test_admission_deadline_closes_partial_transfers_and_releases_capacity(monke
             assert sent[0]['status']==503
         assert not guard.slots.locked()
     asyncio.run(exercise(False));asyncio.run(exercise(True))
+
+
+@pytest.mark.parametrize('source', [[], ['title'] * 1000])
+def test_reader_rejects_empty_and_oversized_source_selections_before_es(source):
+    calls=[]
+    with TestClient(create_app(make_archive(lambda request:calls.append(request)))) as client:
+        response=client.post(URL,json={'size':1,'query':{'ids':{'values':['synthetic-id']}},'_source':source})
+        assert response.status_code==400
+    assert not calls
+
+
+@pytest.mark.parametrize('kind,value', [
+    ('match_phrase', 'a '*101),
+    ('match_phrase', 'a/'*101),
+    ('multi_match', 'a/'*101),
+    ('query_string', 'a/'*101),
+    ('multi_match', '漢'*101),
+])
+def test_analyzed_text_limits_include_url_phrases_punctuation_and_unicode(kind,value):
+    clause={kind:{'url':value}} if kind=='match_phrase' else {kind:{'query':value,'fields':TEXT,**({'type':'best_fields'} if kind=='multi_match' else {})}}
+    calls=[]
+    with TestClient(create_app(make_archive(lambda request:calls.append(request)))) as client:
+        assert client.post(URL,json={'size':0,'query':clause}).status_code==400
+    assert not calls
+
+
+def test_url_phrases_share_cost_budget_across_query_filters_facets_and_knn():
+    url={'match_phrase':{'url':'http://example.org/quest.html'}}
+    body={'size':0,'query':{'bool':{'filter':[url]*2}},'post_filter':url,
+          'aggs':{'facet_bucket_all':{'filter':url,'aggs':{}}},
+          'knn':{'field':'text.vector','k':1,'num_candidates':1,'query_vector':VECTOR,'filter':[url]*5}}
+    calls=[]
+    def es(request):
+        calls.append(json.loads(request.content));return httpx.Response(200,json={'hits':{'hits':[]}})
+    with TestClient(create_app(make_archive(es))) as client:
+        assert client.post(URL,json=body).status_code==400
+        assert not calls
+        body['knn']['filter'].pop()
+        assert client.post(URL,json=body).status_code==200
+    assert len(calls)==1 and calls[0]['post_filter']==url
+
+
+def test_many_url_phrase_words_cannot_bypass_the_shared_budget():
+    url={'match_phrase':{'url':'a '*500}}
+    body={'size':0,'query':{'bool':{'should':[{'bool':{'should':[url]*20}}]*4}}}
+    assert len(json.dumps(body).encode())<MAX_BODY
+    calls=[]
+    with TestClient(create_app(make_archive(lambda request:calls.append(request)))) as client:
+        assert client.post(URL,json=body).status_code==400
+    assert not calls
+
+
+def test_analyzed_text_budget_preserves_regular_queries_and_long_ascii_words():
+    for query in ('"ancient cyclops" AND cleric', '戦士の叙事詩', 'x'*1000):
+        clause={'multi_match':{'query':query,'fields':TEXT,'type':'best_fields'}}
+        compiled=Builder().search({'query':clause},'gemma')
+        assert compiled['query']['multi_match']['query']==query
+
+
+@pytest.mark.parametrize('value', [10**1000,-10**1000,float('inf'),float('-inf'),float('nan'),True])
+def test_bad_vector_numbers_return_400_without_upstream_work(value):
+    vector=VECTOR.copy();vector[0]=value
+    calls=[]
+    with TestClient(create_app(make_archive(lambda request:calls.append(request))),raise_server_exceptions=False) as client:
+        body={'size':0,'knn':{'field':'text.vector','k':1,'num_candidates':1,'query_vector':vector}}
+        response=client.post(URL,content=json.dumps(body).encode(),headers={'Content-Type':'application/json'})
+        assert response.status_code==400
+    assert not calls
+
+
+@pytest.mark.parametrize('invalid', ['\ud800','\udfff','cleric\ud800quest'])
+def test_malformed_unicode_cannot_poison_shared_embedding_availability(invalid):
+    calls=[]
+    def embed(request):
+        calls.append(json.loads(request.content));return httpx.Response(200,json={'data':[{'embedding':VECTOR}]})
+    archive=make_archive(embedding_handler=embed)
+    with TestClient(create_app(archive),raise_server_exceptions=False) as client:
+        body={'model':archive.settings.model,'input':'task: search result | query: '+invalid}
+        response=client.post('/openai/v1/embeddings',content=json.dumps(body).encode(),headers={'Content-Type':'application/json'})
+        assert response.status_code==400
+        assert archive.cooldown_until==0 and not calls
+        body['input']='task: search result | query: cleric epic 😀'
+        assert client.post('/openai/v1/embeddings',json=body).status_code==200
+    assert len(calls)==1
+
+
+def test_invalid_unicode_in_search_is_rejected_without_es_work():
+    calls=[]
+    with TestClient(create_app(make_archive(lambda request:calls.append(request)))) as client:
+        body={'query':{'term':{'id':'bad\ud800id'}}}
+        assert client.post(URL,content=json.dumps(body).encode(),headers={'Content-Type':'application/json'}).status_code==400
+    assert not calls

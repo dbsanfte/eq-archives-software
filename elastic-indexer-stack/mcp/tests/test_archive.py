@@ -275,3 +275,56 @@ def test_configuration_and_credentials_are_runtime_only(tmp_path, monkeypatch):
     assert archive.embeddings.headers["Authorization"] == "Bearer dummy-key"
     assert "Authorization" not in request.url.query.decode()
     run(archive.close())
+
+
+def test_direct_embedding_rejects_invalid_unicode_before_cache_lock_or_cooldown():
+    calls=[]
+    def embed(request):
+        calls.append(request);return httpx.Response(200,json={'data':[{'embedding':VECTOR}]})
+    async def exercise():
+        archive=make_archive(embedding_handler=embed)
+        with pytest.raises(ToolError):await archive.embedding('\ud800')
+        assert archive.cooldown_until==0 and not archive.cache and not archive.embedding_lock.locked()
+        assert await archive.embedding('cleric epic')==VECTOR
+        assert len(calls)==1
+        await archive.close()
+    run(exercise())
+
+
+@pytest.mark.parametrize('status',[400,413,422])
+def test_model_rejecting_one_input_does_not_disable_other_queries(status):
+    calls=[]
+    def embed(request):
+        calls.append(request)
+        return httpx.Response(status,text='private rejected input') if len(calls)==1 else httpx.Response(200,json={'data':[{'embedding':VECTOR}]})
+    async def exercise():
+        archive=make_archive(embedding_handler=embed)
+        assert await archive.embedding('rejected input') is None
+        assert archive.cooldown_until==0
+        assert await archive.embedding('valid query')==VECTOR
+        assert len(calls)==2
+        await archive.close()
+    run(exercise())
+
+
+@pytest.mark.parametrize('status',[401,403,408,429,500,503])
+def test_model_auth_transient_and_rate_failures_still_back_off(status):
+    calls=[]
+    def embed(request):
+        calls.append(request);return httpx.Response(status,text='private failure')
+    async def exercise():
+        archive=make_archive(embedding_handler=embed)
+        assert await archive.embedding('first') is None
+        assert archive.cooldown_until>0
+        assert await archive.embedding('second') is None and len(calls)==1
+        await archive.close()
+    run(exercise())
+
+
+def test_unbounded_integer_in_model_response_falls_back_safely():
+    async def exercise():
+        archive=make_archive(embedding_handler=lambda _:httpx.Response(200,json={'data':[{'embedding':[10**1000]*768}]}))
+        assert await archive.embedding('query') is None
+        assert archive.cooldown_until>0
+        await archive.close()
+    run(exercise())

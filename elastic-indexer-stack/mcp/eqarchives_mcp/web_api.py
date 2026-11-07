@@ -72,6 +72,7 @@ def keys(value, allowed):
 
 def text(value, limit=255):
     check(isinstance(value, str) and 0 < len(value) <= limit and not any(ord(c) < 32 for c in value))
+    value.encode("utf-8")  # JSON escapes can decode to lone surrogates, not valid UTF-8.
     return value
 
 
@@ -89,6 +90,19 @@ class Builder:
     def __init__(self):
         self.nodes = 0
         self.text_chars = self.text_terms = self.text_clauses = 0
+
+    def analyzed_text(self, value, limit=1000):
+        value = text(value, limit)
+        # Upper-bound standard analysis without an ES round trip. Punctuation
+        # can split ASCII words; non-ASCII scripts can emit a token per character.
+        # Long ASCII runs may split at StandardTokenizer's 255-character limit.
+        terms = sum((len(part) + 254) // 255 if part.isascii() else 1
+                    for part in re.findall(r"[A-Za-z0-9]+|[^\x00-\x7f\s]", value))
+        self.text_chars += len(value)
+        self.text_terms += terms
+        self.text_clauses += 1
+        check(terms <= 100 and self.text_chars <= 4000 and self.text_terms <= 400 and self.text_clauses <= 8)
+        return value
 
     def query(self, value, depth=0):
         self.nodes += 1
@@ -140,7 +154,7 @@ class Builder:
             return {kind: {"id": "websites/"}}
         if kind == "match_phrase":
             check(isinstance(arg, dict) and set(arg) == {"url"})
-            return {kind: {"url": text(arg["url"], 2048)}}
+            return {kind: {"url": self.analyzed_text(arg["url"], 2048)}}
         if kind == "regexp":
             # Only a literal capture identity separated by a 14-digit timestamp.
             check(isinstance(arg, dict) and set(arg) == {"id"})
@@ -155,12 +169,7 @@ class Builder:
             return {kind: {"id": {"value": pattern, "max_determinized_states": 1000}}}
         if kind in ("multi_match", "query_string"):
             keys(arg, ["query", "fields", "type", "operator", "default_operator"])
-            query = text(arg.get("query"), 1000)
-            terms = len(query.split())
-            self.text_chars += len(query)
-            self.text_terms += terms
-            self.text_clauses += 1
-            check(terms <= 100 and self.text_chars <= 4000 and self.text_terms <= 400 and self.text_clauses <= 8)
+            query = self.analyzed_text(arg.get("query"))
             check(arg.get("fields") in (TEXT, [f + "^1" for f in TEXT]))
             if kind == "query_string":
                 # No field selectors, regexes, wildcard expansion, fuzziness or scripts.
@@ -226,8 +235,10 @@ class Builder:
         if "ids" in result["query"]:
             check(size == 1 and offset == 0 and not (value.keys() & {"aggs", "knn", "post_filter"}))
             source = value.get("_source", READER_FIELDS)
-            check(isinstance(source, list) and set(source) <= set(READER_FIELDS))
-            result["_source"] = source
+            # ES interprets an empty includes array as the complete stored source.
+            check(isinstance(source, list) and 0 < len(source) <= len(READER_FIELDS)
+                  and set(source) <= set(READER_FIELDS))
+            result["_source"] = list(dict.fromkeys(source))
         elif value.get("_source") is False:
             result["_source"] = False
         if "post_filter" in value:
@@ -259,7 +270,7 @@ class Builder:
                 check(field in {"image_vector", "llm_image_text_vector", "llm_summary_vector", "text.vector"} - used)
                 used.add(field)
                 vector = items(branch.get("query_vector"), 768)
-                check(len(vector) == 768 and all(type(x) in (float, int) and math.isfinite(x) and abs(x) <= 1 for x in vector))
+                check(len(vector) == 768 and all(type(x) in (float, int) and abs(x) <= 1 and math.isfinite(x) for x in vector))
                 check(0.9 < sum(x*x for x in vector) < 1.1)
                 k = integer(branch.get("k"), 1, 50)
                 candidates = integer(branch.get("num_candidates"), k, 250)
@@ -329,7 +340,7 @@ class WebAPI:
                 result = {"count": result["hits"]["total"]["value"]}
                 self.count_cache = (time.monotonic() + 30, result)
             return JSONResponse(result, headers=headers)
-        except (ValueError, KeyError, TypeError, RecursionError, UnicodeDecodeError):
+        except (ValueError, KeyError, TypeError, RecursionError, OverflowError):
             return JSONResponse({"error": {"message": "Unsupported search request. Use at most 1,000 results and refine your filters."}}, status_code=400, headers=headers)
         except (ToolError, TimeoutError):
             return JSONResponse({"error": {"message": "Search is busy or temporarily unavailable. Please retry shortly."}}, status_code=503, headers={**headers, "Retry-After": "5"})
