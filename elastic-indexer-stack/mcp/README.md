@@ -258,7 +258,7 @@ These are adapters for existing cached browsers, not raw Elasticsearch proxies.
 operations/options, scripts, runtime mappings, arbitrary aggregations, scroll
 parameters, duplicate JSON keys and invalid vectors are rejected before I/O.
 
-Search limits: 96 KiB streamed bodies with a two-second body deadline; 50 results,
+Search limits: 96 KiB streamed bodies with a two-second body deadline; 100 results (including the UI’s 60-result option),
 a 1,000-result window, 160 query nodes/eight nesting levels, eight text clauses,
 4,000 text characters/400 terms across the request, 900 facet buckets and four
 768-dimensional normalized finite vector branches (`k <= 50`, candidates <= 250).

@@ -39,7 +39,7 @@ def test_browser_search_rebuilds_bounds_projection_highlights_and_hybrid_filters
 @pytest.mark.parametrize('extra',[
  {'script_fields':{'pwn':{'script':'return 1;'}}}, {'runtime_mappings':{}}, {'profile':True},
  {'explain':True},{'stored_fields':['*']},{'search_after':[0]}, {'size':10000},{'from':1000},
- {'size':50,'from':999},{'size':True},{'query':{'script':{'script':'return true'}}},
+ {'size':101},{'size':True},{'query':{'script':{'script':'return true'}}},
  {'query':{'bool':{'must':[{'function_score':{}}]}}}, {'query':{'wildcard':{'text_full':'*'}}},
  {'query':{'ids':{'values':['a','b']}}}, {'size':20,'query':{'ids':{'values':['a']}}},
  {'aggs':{'evil':{'terms':{'field':'text_full'}}}}, {'query':{'term':{'unknown':'x'}}},
@@ -116,6 +116,15 @@ def test_filters_facets_recent_sites_reader_and_capture_history_remain_available
 def test_vector_work_is_bounded_and_finite(change):
     branch={'field':'text.vector','k':50,'num_candidates':250,'query_vector':VECTOR,**change}
     with pytest.raises(ValueError):Builder().search({'knn':[branch]},'model')
+
+
+def test_vector_only_search_never_adds_match_all_and_supported_page_sizes_fit_window():
+    body=Builder().search({'size':1,'_source':False,'knn':{
+        'field':'llm_summary_vector','k':1,'num_candidates':10,'query_vector':VECTOR}},'gemma')
+    assert 'query' not in body and body['knn'][0]['filter']==[{'term':{'embedding_model':'gemma'}}]
+    assert Builder().search({'size':60},'gemma')['size']==60
+    assert Builder().search({'size':60,'from':960},'gemma')['size']==40
+    assert Builder().search({'knn':[]},'gemma')['query']=={'match_all':{}}
 
 
 def test_embedding_endpoint_accepts_only_one_bounded_query_and_shares_cache():

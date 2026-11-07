@@ -218,9 +218,9 @@ class Builder:
 
     def search(self, value, model):
         keys(value, ["query", "post_filter", "size", "from", "sort", "_source", "highlight", "aggs", "knn", "timeout", "track_total_hits"])
-        size = integer(value.get("size", 20), 0, 50)
+        size = integer(value.get("size", 20), 0, 100)
         offset = integer(value.get("from", 0), 0, 999)
-        check(offset + size <= 1000)
+        size = min(size, 1000 - offset)
         result = {"size": size, "from": offset, "timeout": "8s", "track_total_hits": 1001,
                   "_source": LIST_FIELDS, "query": self.query(value.get("query", {"match_all": {}}))}
         if "ids" in result["query"]:
@@ -269,6 +269,10 @@ class Builder:
                 compiled.append({"term": {"embedding_model": model}})
                 result["knn"].append({"field": field, "query_vector": vector, "k": k,
                     "num_candidates": candidates, "boost": 10, "filter": compiled})
+            if result["knn"] and "query" not in value:
+                # A default match_all would OR unembedded records into a
+                # vector-only request and hide an empty model frontier.
+                result.pop("query")
         return result
 
 
