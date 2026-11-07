@@ -17,18 +17,27 @@ def check(base):
             raw=response.read(1024*1024)
             return response.status,raw
     path='/elasticsearch/eq-archive/_search'
+    vector=[0]*768
+    vector[0]=10**1000
+    url_phrase={'match_phrase':{'url':'a '*500}}
     for body in ({'size':1,'script_fields':{'audit':{'script':'return 1;'}}}, {'runtime_mappings':{}},
                  {'size':10000}, {'query':{'script':{'script':'return true;'}}},
-                 {'aggs':{'unsafe':{'terms':{'field':'domain_name','size':65536}}}}):
+                 {'aggs':{'unsafe':{'terms':{'field':'domain_name','size':65536}}}},
+                 {'size':1,'query':{'ids':{'values':['security-probe-missing-id']}},'_source':[]},
+                 {'size':0,'knn':{'field':'text.vector','k':1,'num_candidates':1,'query_vector':vector}},
+                 {'size':0,'query':{'bool':{'should':[{'bool':{'should':[url_phrase]*20}}]*4}}},
+                 {'size':0,'query':{'multi_match':{'query':'a/'*101,
+                     'fields':['text_full','llm_summary','llm_image_text'],'type':'best_fields'}}}):
         assert call(path,body)[0]==400,'Unsafe query was not rejected'
     assert call(path+'?scroll=10s',{'size':0})[0]==400,'Scroll contexts remain public'
     assert call(path+'/unexpected',{'size':0})[0]==404,'Search path is not exact'
     model='embeddinggemma-2-768-v1'
     assert call('/openai/v1/embeddings',{'model':model,'input':['task: search result | query: a']*2})[0]==400
     assert call('/openai/v1/embeddings',{'model':model,'input':['task: search result | query: '+'x'*601]})[0]==400
+    assert call('/openai/v1/embeddings',{'model':model,'input':'task: search result | query: \ud800'})[0]==400
     status,raw=call(path,{'size':0,'query':{'match_all':{}}})
     assert status==200 and 'hits' in json.loads(raw),'Valid search unavailable after rejected requests'
-    print('Public script, scroll, aggregation, response-size, path and embedding admission regressions passed.')
+    print('Public DSL, projection, query-cost, numeric, Unicode, path and embedding admission regressions passed.')
 
 
 if __name__=='__main__':check(sys.argv[1])

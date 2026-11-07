@@ -76,6 +76,11 @@ URLs without forwarding arbitrary DSL. Preserve closed grammar/cumulative query
 budgets, exact routes/methods, fixed source/highlight projections, finite vectors,
 shared admission limits, streamed body/response bounds, deadlines and sanitized
 errors. NGINX receives no backend credentials and runs non-root/read-only on 8080.
+Keep reader projections nonempty and bounded. Apply one conservative analyzed-text
+budget across main queries, URL phrases, filters, facets and kNN pre-filters;
+whitespace alone is not a token bound. Reject malformed Unicode and oversized
+numeric inputs before upstream work. Invalid caller input must not change shared
+embedding cooldown; preserve backoff for actual service/auth/rate failures.
 Keep snippets as safe text/em elements and summaries as text, plus the CSP.
 Run the MCP tests, public-security manifest checks, real Chromium regressions and
 `check-public-security.py`; deploy the API before frontend and isolation policies
