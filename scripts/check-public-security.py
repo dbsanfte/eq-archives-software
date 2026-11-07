@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Bounded public regressions: rejected work must not become database/model calls."""
 import json
-import sys
+import argparse
 import urllib.error
 import urllib.request
 
 
-def check(base):
-    def call(path, body=None):
-        req=urllib.request.Request(base.rstrip('/')+path, data=json.dumps(body).encode() if body is not None else None,
-                                   headers={'Content-Type':'application/json'})
+def check(base, mcp_base=None):
+    def call(path, body=None, headers=None, endpoint=None):
+        req=urllib.request.Request((endpoint or base).rstrip('/')+path, data=json.dumps(body).encode() if body is not None else None,
+                                   headers={'Content-Type':'application/json',**(headers or {})})
         try:
             response=urllib.request.urlopen(req,timeout=15)
         except urllib.error.HTTPError as error:response=error
@@ -37,7 +37,24 @@ def check(base):
     assert call('/openai/v1/embeddings',{'model':model,'input':'task: search result | query: \ud800'})[0]==400
     status,raw=call(path,{'size':0,'query':{'match_all':{}}})
     assert status==200 and 'hits' in json.loads(raw),'Valid search unavailable after rejected requests'
-    print('Public DSL, projection, query-cost, numeric, Unicode, path and embedding admission regressions passed.')
+    rpc_headers={'Accept':'application/json, text/event-stream','MCP-Protocol-Version':'2025-11-25'}
+    for tool in ('search','search_archive','list_sources'):
+        status,raw=call('/mcp',{'jsonrpc':'2.0','id':1,'method':'tools/call',
+            'params':{'name':tool,'arguments':{'query':'a/'*101}}},rpc_headers,mcp_base)
+        assert status==200 and json.loads(raw)['result']['isError'],'MCP query bypassed analyzed-text limits'
+    status,raw=call('/mcp',{'jsonrpc':'2.0','id':1,'method':'subscriptions/listen','params':{
+        '_meta':{'io.modelcontextprotocol/protocolVersion':'2026-07-28',
+                 'io.modelcontextprotocol/clientCapabilities':{}},'notifications':{'toolsListChanged':True}}},
+        {**rpc_headers,'MCP-Protocol-Version':'2026-07-28','Mcp-Method':'subscriptions/listen'},mcp_base)
+    assert status==400 and json.loads(raw)['error']['code']==-32601,'MCP subscription streams remain public'
+    status,raw=call('/mcp',{'jsonrpc':'2.0','id':1,'method':'ping'},rpc_headers,mcp_base)
+    assert status==200 and 'result' in json.loads(raw),'MCP unavailable after rejected requests'
+    print('Public DSL, projection, query-cost, numeric, Unicode, MCP method and admission regressions passed.')
 
 
-if __name__=='__main__':check(sys.argv[1])
+if __name__=='__main__':
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('base')
+    parser.add_argument('--mcp-base',help='Separate MCP base URL for isolated frontend/API containers')
+    args=parser.parse_args()
+    check(args.base,args.mcp_base)

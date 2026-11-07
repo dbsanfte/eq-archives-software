@@ -81,6 +81,14 @@ budget across main queries, URL phrases, filters, facets and kNN pre-filters;
 whitespace alone is not a token bound. Reject malformed Unicode and oversized
 numeric inputs before upstream work. Invalid caller input must not change shared
 embedding cooldown; preserve backoff for actual service/auth/rate failures.
+MCP uses the same analyzed-text policy as browser search. Retain its two process-wide
+HTTP slots through response delivery, 16 KiB/two-second uploads, 30-second lifecycle
+and 8 MiB serialized output limit; reject oversized output explicitly without
+truncating source text. Deliver MCP/browser bodies in 64 KiB writes with a final
+drain so Uvicorn backpressure retains admission through transport delivery.
+Keep an explicit protocol-method allowlist and tools-only
+discovery in both protocol eras so SDK defaults cannot enable subscription streams.
+Test slow sockets, cancellation, deadlines, chunked output and modern discovery.
 Keep snippets as safe text/em elements and summaries as text, plus the CSP.
 Run the MCP tests, public-security manifest checks, real Chromium regressions and
 `check-public-security.py`; deploy the API before frontend and isolation policies

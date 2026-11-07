@@ -123,10 +123,11 @@ assert "larger than the max context size (512 tokens)" in message, "Unexpected o
 PY
 python3 "$repo_dir/scripts/check-embeddings.py" \
   "http://$frontend_address/openai/v1/embeddings" --model "$MODEL_ALIAS"
-python3 "$repo_dir/scripts/check-public-security.py" "http://$frontend_address"
+python3 "$repo_dir/scripts/check-public-security.py" "http://$frontend_address" --mcp-base "http://$mcp_address"
 echo 'Model integrity, cache reuse, authentication, frontend proxy, dimensions, and oversized-input checks passed.'
 
 if [[ -n "$mcp_image" ]]; then
+  python3 "$repo_dir/scripts/test-mcp-admission.py" "http://$mcp_address/mcp"
   python3 "$repo_dir/scripts/check-mcp.py" "http://$mcp_address/mcp"
 
   # Reproduce Traefik's rule ordering using the matches and priorities from the

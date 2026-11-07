@@ -30,7 +30,7 @@ jobs:
           sh -n elastic-indexer-stack/k8s-manifests/embeddings/start-server.sh
           sh -n elastic-indexer-stack/k8s-manifests/embeddings/check-gpu.sh
           python3 -m py_compile scripts/frontend-secrets.py scripts/check-embeddings.py scripts/test-frontend-browser.py scripts/check-mcp.py scripts/check-explore.py scripts/mcp-smoke-fixture.py scripts/render-ingress-test.py scripts/test-frontend-rollout.py scripts/test-http-readiness.py scripts/check-static-assets.py scripts/check-public-security.py
-          python3 -m py_compile scripts/curation-secrets.py scripts/check-curation.py scripts/test-curation-browser.py scripts/indexer-job-guard.py
+          python3 -m py_compile scripts/curation-secrets.py scripts/check-curation.py scripts/test-curation-browser.py scripts/indexer-job-guard.py scripts/test-mcp-admission.py
           python3 scripts/test-database-client-profile.py
           python3 scripts/test-http-readiness.py
           python3 scripts/test-embedding-checks.py

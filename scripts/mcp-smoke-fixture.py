@@ -45,6 +45,14 @@ class Fixture(BaseHTTPRequestHandler):
             }]}}}}})
         hits = list(DOCUMENTS)
         if "ids" in body["query"]:
+            ids = body["query"]["ids"]["values"]
+            large = {"__mcp_admission_large__": 4 * 1024 * 1024 - 4096,
+                     "__mcp_admission_oversized__": 4 * 1024 * 1024,
+                     "__mcp_admission_browser__": 7 * 1024 * 1024}
+            if len(ids) == 1 and ids[0] in large:
+                source = {"id": ids[0], "title": "Synthetic admission source",
+                          "url": "https://example.org/admission", "text_full": "x" * large[ids[0]]}
+                return self.reply({"hits": {"hits": [{"_id": ids[0], "_source": source}]}})
             hits = [d for d in hits if d["_id"] in body["query"]["ids"]["values"]]
         elif "knn" in body:
             # A missing/invalid real embedding must fail the legacy hybrid check.

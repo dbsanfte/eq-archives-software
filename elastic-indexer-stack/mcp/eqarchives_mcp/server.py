@@ -16,6 +16,7 @@ from .archive import Archive, Document, SearchResults, Settings
 from .research import MAX_RESEARCH_RESULTS, ResearchFilters, ResearchPage, SortOrder, SourcePage, SourceType
 from .explore import Explorer, Selection
 from .web_api import WebAPI, WebAdmission
+from .mcp_boundary import MCPBoundary
 
 
 def create_app(archive: Archive | None = None):
@@ -174,6 +175,7 @@ def create_app(archive: Archive | None = None):
 
     app.router.lifespan_context = lifespan
     app.add_middleware(WebAdmission)
+    app.add_middleware(MCPBoundary, security=security)
     # Never log query bodies or SDK validation errors (which can echo arguments).
     logging.getLogger("mcp").setLevel(logging.ERROR)
     logging.getLogger("httpx").setLevel(logging.WARNING)
