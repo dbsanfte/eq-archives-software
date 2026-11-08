@@ -1110,6 +1110,9 @@ archive traversal, fixed lock allowlist and live-process checks before private
 quarantine of abandoned locks. Never remove a live/unsafe lock or a general glob
 of lock files. Bound and reap the entire Git/SSH/pack process group on timeout;
 retain fast-forward-only pushes, treeless/no-op fetches and marker recovery.
+Head fetches also require `--refetch` so locally authored remote heads are present
+in a bounded promisor pack; trace a repeated/uncertain successful publication and
+reject archive-wide `--exclude-promisor-objects` connectivity walks.
 `publication_recovery.py` retries only the latest still-approved manifest and
 shares transport backoff across the backlog. Permanent credentials/integrity
 failures and explicit retry pauses stay visible for correction while other work

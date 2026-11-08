@@ -202,6 +202,7 @@ def test_uncertain_successful_push_is_recovered_without_duplicate_archive_commit
     commit=subprocess.check_output(['git','--git-dir',str(remote),'commit-tree',tree],input=b'Initial archive\n',env=env).decode().strip()
     subprocess.run(['git','--git-dir',str(remote),'update-ref','refs/heads/master',commit],check=True)
     publisher=Publisher(root,remote='file://'+str(remote));real=publisher.git;pushes=[]
+    trace=tmp_path/'git-trace.jsonl';publisher.env['GIT_TRACE2_EVENT']=str(trace)
     def ambiguous(*args,**kwargs):
         result=real(*args,**kwargs)
         if args[0]=='push':pushes.append(args);return None
@@ -210,5 +211,7 @@ def test_uncertain_successful_push_is_recovered_without_duplicate_archive_commit
     try:
         manifest=manifest_for(row);result=publisher.publish(manifest,digest(manifest))
         assert result['recovered'] is True and len(pushes)==1
+        events=[json.loads(line) for line in trace.read_text().splitlines()]
+        assert not any('--exclude-promisor-objects' in row.get('argv',[]) for row in events), 'Fetch walked the partial archive instead of receiving a bounded promisor pack'
         assert subprocess.check_output(['git','--git-dir',str(remote),'rev-list','--count','master']).strip()==b'2'
     finally:publisher.close()

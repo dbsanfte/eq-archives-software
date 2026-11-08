@@ -954,7 +954,12 @@ an archive checkout, removes arbitrary lock files, clones a repository or force
 pushes. Git/SSH/pack descendants run in one process group; deadlines terminate and
 reap the whole group before ownership is released. Remote commands have a bounded
 ten-minute allowance; local commands remain bounded at three minutes. Head and
-individual-object fetches use treeless filters and no-op negotiation.
+individual-object fetches use treeless filters and no-op negotiation. Head fetches
+also use `--refetch`: a previously authored local commit must arrive in a small
+promisor pack, avoiding Git's slow connectivity walk over the archive. The
+regression traces real Git after an uncertain successful push and rejects an
+`--exclude-promisor-objects` traversal. See [Git's connectivity implementation](https://github.com/git/git/blob/v2.39.5/connected.c#L52)
+and [`--refetch`](https://git-scm.com/docs/git-fetch#Documentation/git-fetch.txt---refetch).
 
 Recognized transport, busy-lock, storage and worker-interruption failures keep the
 original operation, scope, manifest hash and approvals. A durable retry ledger

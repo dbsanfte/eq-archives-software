@@ -101,7 +101,7 @@ class Publisher:
         return result.stdout
 
     def fetch(self):
-        self.git("-c", "fetch.negotiationAlgorithm=noop", "fetch", "--no-tags", "--depth=1", "--filter=tree:0", "origin", "master")
+        self.git("-c", "fetch.negotiationAlgorithm=noop", "fetch", "--refetch", "--no-tags", "--depth=1", "--filter=tree:0", "origin", "master")
         return self.git("rev-parse", "FETCH_HEAD").decode().strip()
 
     def object(self, kind, oid):
