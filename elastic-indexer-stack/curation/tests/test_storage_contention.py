@@ -77,6 +77,35 @@ def test_non_contention_database_errors_remain_visible(candidate,monkeypatch):
     finally:worker.close()
 
 
+def test_import_reconciler_retries_contention_without_stopping_other_workers(candidate,monkeypatch):
+    root,_=candidate;worker=Worker(root);calls=[]
+    def indexing():
+        calls.append(True)
+        if len(calls)==1:raise sqlite3.OperationalError('database is locked')
+        worker.stop.set()
+    monkeypatch.setattr(worker,'indexing',indexing)
+    monkeypatch.setattr(worker.index_wake,'wait',lambda _:None)
+    try:
+        worker.run_index_jobs()
+        assert len(calls)==2
+    finally:worker.close()
+
+
+def test_import_reconciliation_failure_is_sanitized_and_keeps_pending_queue(candidate,monkeypatch):
+    root,_=candidate;worker=Worker(root)
+    with connect(root) as store:
+        store.db.execute("INSERT INTO batches VALUES (?,'published_waiting_index',NULL,NULL,NULL,NULL,NULL,'now','now')",('a'*32,))
+        store.db.commit()
+    monkeypatch.setattr(worker,'indexing',lambda:(_ for _ in ()).throw(RuntimeError('private upstream contents')))
+    try:
+        worker.indexing_turn()
+        with connect(root) as store:
+            row=store.db.execute('SELECT state,error FROM batches').fetchone()
+            assert row['state']=='published_waiting_index'
+            assert row['error']=='Index submission paused; Kubernetes state unavailable'
+    finally:worker.close()
+
+
 @pytest.mark.parametrize('kind',['capture','publish'])
 @pytest.mark.parametrize('fails',[False,True])
 def test_result_write_lock_does_not_replay_capture_or_publication(candidate,monkeypatch,kind,fails):

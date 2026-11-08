@@ -1,11 +1,55 @@
 import json
 import subprocess
+from unittest.mock import Mock
 
 import pytest
 
 from common import CrawlError, digest
 from publisher import Publisher, git_failure
 from conftest import manifest_for
+
+
+def test_many_small_sources_use_bounded_git_batches_and_keep_exact_bytes(candidate, tmp_path):
+    from captures import archive_path
+    root, row = candidate
+    publisher = Publisher(root, remote='file://' + str(tmp_path / 'unused-remote'))
+    real_git = publisher.git
+    real_git('config', 'core.autocrlf', 'true')
+    publisher.git = Mock(wraps=real_git)
+    captures = []
+    try:
+        for index in range(515):
+            path = root / ('source ' + str(index) + ' "quoted" \\ 日本語\n\t\x01.txt')
+            raw = b'Exact source bytes\r\n' + str(index).encode() + (b'\0' if index % 2 else b'\r\n')
+            path.write_bytes(raw)
+            capture = {**row['captures'][0], 'path': path.name, 'bytes': len(raw), 'sha256': digest(raw),
+                       'url': 'http://guild.example/eq/page-' + str(index)}
+            capture['archive_path'] = archive_path(capture)
+            captures.append(capture)
+        changes = publisher.hash_sources(captures)
+        calls = publisher.git.call_args_list
+        assert len(calls) == 2
+        assert all(call.args == ('hash-object', '-w', '--stdin-paths', '--no-filters') for call in calls)
+        assert max(len(call.kwargs['data'].splitlines()) for call in calls) == 512
+        assert len(changes) == len(captures)
+        for capture in (captures[0], captures[1], captures[-1]):
+            stored = real_git('cat-file', 'blob', changes[capture['archive_path']], local=True)
+            assert stored == (root / capture['path']).read_bytes()
+        assert not (publisher.repo / 'index').exists()
+    finally:
+        publisher.close()
+
+
+@pytest.mark.parametrize('output', [b'', b'not-an-oid\n', b'1'*40+b'\n'+b'2'*40+b'\n'])
+def test_partial_or_malformed_git_batch_cannot_become_a_publication(candidate, output):
+    from captures import archive_path
+    root, row = candidate
+    capture = {**row['captures'][0], 'archive_path': archive_path(row['captures'][0])}
+    publisher = object.__new__(Publisher)
+    publisher.root = root
+    publisher.git = Mock(return_value=output)
+    with pytest.raises(CrawlError, match='blob batch'):
+        publisher.hash_sources([capture])
 
 
 def git(path,*args):
