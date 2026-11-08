@@ -20,8 +20,8 @@ Discovery, Capture and Indexing each show their current phase or waiting reason;
 the current stage opens its details by default. In Queue, this includes the active
 capture's saved files, listing/download progress, ETA and waiting count. Automatic
 discovery shows its qualifying/checked totals, spending, last result and an actual
-countdown to the next frontier check or daily budget reset, outside the disabled
-manual Discover pane. Indexing exposes the existing Job it is waiting for.
+countdown to the next frontier check or daily/monthly budget reset, outside the disabled
+manual Discover pane. Indexing exposes the foreground import it is waiting for and bounded passage maintenance progress.
 Recent outcomes come from bounded SQLite metadata reads, independent of paginated
 sites and capped operation/batch lists. Polling every five seconds reports lost
 updates explicitly, preserves open details and drafts, and never starts paid work.
@@ -38,7 +38,7 @@ operator API retains its coverage refresh behavior.
 ## Continuous automatic mode
 
 **Candidates → Automatic mode → Configure automatic mode** is an explicit opt-in.
-It defaults **off**, with a proposed **$2/day**, **Grade 2+** policy and optional
+It defaults **off**, with proposed **$2/day**, **$200/calendar month**, **Grade 2+** limits and optional
 additional grading criteria. Edit the controls and press **Save automatic settings**;
 sliders, unsaved drafts, polling and deployment never enable it. Settings persist on
 the existing PVC, with revision checks against stale browser tabs. Drafts remain
@@ -68,35 +68,40 @@ scope edits prevent subsequent automatic approval of that entry.
 
 A private SQLite/WAL ledger at `luna-budget/budget.sqlite3` reserves conservative
 request costs **before** Luna calls across all three workers and new import Jobs.
-The daily ceiling covers portal grading and enrichment, including manual requests;
+Both ceilings cover portal grading and enrichment, including manual requests;
 standalone operator commands and the existing broad reindex are outside this mode.
 Estimated usage releases excess reservation only when usage is valid. Uncertain
 requests retain their reservation, rejected responses/corrections count, and paid
 caches never count twice. Accounting uses the UTC day on which a request was
-reserved; the daily window resets at **00:00 UTC**. Existing current-day portal
-ledgers are included when settings are first saved. Enabling waits for any older
-paid import Job without the shared ledger to finish; those Jobs are never changed.
+reserved; daily windows reset at **00:00 UTC**, and calendar months at **00:00 UTC
+on the first day**. Existing current-month portal ledgers are included when settings
+are saved. Enabling or changing limits waits for older paid imports without shared
+monthly accounting to finish; those Jobs are never changed. The operator-selected
+production pacing is **$20/day, capped at $200/month**; deployment preserves saved
+settings and never enables automatic mode.
 
 At the cap, paid work saves its position. Discovery resumes under its original
-operation limits and deadline when enough daily funds are available; an expired
+operation limits and deadline when enough funds within both limits are available; an expired
 run ends before a fresh bounded run starts, retaining pending source samples.
 Captured files and already indexed documents remain available. An import that
-needs more daily funds writes a manifest/Job-bound `waiting_budget` diagnostic
+needs more funds writes a manifest/Job-bound `waiting_budget` diagnostic
 and exits successfully. The controller keeps the site in **Indexing**, waits for
 funds, validates the original publication, then creates a **new numbered Job**.
 Previous Jobs, manifests, source hashes and paid caches are retained; existing ES
 IDs are skipped. Automatic sites that outlast the six-hour Kubernetes Job deadline
 also continue in a new numbered Job under the same policy. A missing or mismatched completion diagnostic cannot retire a
-site. The controller still waits for every other unfinished, unsuspended Job.
+site. Only another unfinished, unsuspended foreground capture import holds the
+import slot, including pending/retrying Jobs with active=0. Broad reindexes and
+policy maintenance never hold that slot.
 Raising the cap can resume work before midnight. If the next single reservation
 exceeds the entire daily limit, the displayed required amount must be funded.
 
 New automatic approvals use the shared daily enrichment policy across days,
 allowing large sites to finish without a $2 lifetime ceiling. Manual and existing
-approvals keep their original $2/site cap as well as any configured daily limit.
+approvals keep their original $2/site cap as well as both configured shared limits.
 Failed-file retries retain the original site's policy and enrichment budget/cache.
 Turning automatic mode off stops new automatic discovery and approvals; already
-approved captures and imports continue under the configured daily limit. Turning
+approved captures and imports continue under both configured limits. Turning
 it back on resumes retained automatic work. Approved captures retry temporary
 Wayback failures and worker interruptions independently of this discovery setting.
 Retries join the same FIFO after 5 minutes, then 15 minutes, then hourly for
@@ -215,10 +220,11 @@ external navigation links, with no workflow action or paid work on refresh.
    downloads. Each worker processes its own durable queue serially; capture,
    discovery and evidence checks still share one persistent Wayback client at a time.
    Publication makes one fast-forward archive commit per site, including
-   `crawl-manifests/<batch-id>.json`. Import waits for every other unfinished,
-   unsuspended Job in `eqarchives-es`, including pending/retrying Jobs with
-   `active=0`. The controller cannot patch, suspend or delete Jobs.
-   AI enrichment uses Luna by default, within the saved daily or manual $2/site policy.
+   `crawl-manifests/<batch-id>.json`. Import waits only for another unfinished,
+   unsuspended foreground capture import in `eqarchives-es`, including pending or
+   retrying Jobs with `active=0`. The controller cannot patch, suspend or delete Jobs.
+   AI enrichment uses Luna by default, within both shared limits and the original
+   automatic or manual $2/site policy.
    Indexed sites retire to **History** automatically.
 
 Completed ordinary sites and boards with gaps offer **Retry failed files** in Indexing or
@@ -655,7 +661,7 @@ Kubernetes retries twice. A terminal failure shows **Retry indexing** on the
 affected site's review. It verifies the saved publication approval and all source
 hashes, then queues a new numbered import Job under the original site budget.
 Duplicate/stale retry requests are rejected. The controller retains the failed
-Job, waits for other unfinished Jobs and never republishes or overwrites indexed
+Job, waits only for other foreground imports and never republishes or overwrites indexed
 entries. The selected source page stays open during retries and status updates.
 New import Jobs write small diagnostic files beside their enrichment cache. These
 bind to the exact Job name and approved manifest hash; the controller displays the
@@ -885,3 +891,54 @@ The public portal groups only verified discussions. Exact source records, dated
 history and comparisons retain their original identity. For existing records,
 use the separate [metadata-only operator](../../scripts/embedding-service/README.md#verified-discussion-metadata);
 ordinary curation rollout does not restart any active reindex Job.
+
+
+## Rolling passage maintenance
+
+Regular curation deployments apply the current passage policy to new imports and
+schedule bounded repairs of older, same-model records. A full corpus reindex is
+no longer needed for each chunking update. Model migrations, missing-source
+recovery and image backfills retain their separate operator workflows.
+
+Foreground imports run independently of legacy broad Jobs. Enrichment has first
+use of the shared Luna allowance: while approved imports are ready, running or
+waiting for funds, discovery grading pauses before reserving or sending a request.
+It resumes its original operation automatically when that demand clears. Capture,
+publication and free local maintenance can continue during a Luna budget wait.
+Per-Job claims expire after five minutes without a heartbeat; one failed site
+moves to attention without keeping other work or grading blocked.
+
+`PASSAGE_MAINTENANCE_ENABLED=1` admits one `eqarchives-policy-*` Job at a time,
+using the deployed immutable curation image and RTX 3080 CUDA service. Each slice
+handles at most 2,000 records or ten minutes, checks for imports between embedding
+batches, and yields cooperatively. A 15-minute Kubernetes deadline bounds hard
+failures. Maintenance waits for existing broad Jobs to finish naturally; rollout
+never modifies their specs, pods, prepared sources or checkpoints. The current
+v10 reindex can finish unchanged; its completion is not a claim of v11 coverage.
+Subsequent slices upgrade stale policies without downgrading newer checkpoints.
+
+Durable cursors, rejection history and an exclusive process lease live in
+`indexing-state/policy-maintenance.sqlite` and its lock file. Identity includes the
+physical Elasticsearch index, embedding model, passage and extraction versions.
+Readers, enrichment, dates, source identity and unrelated vectors are preserved;
+source-bound reader repairs and body-vector replacements use optimistic atomic
+updates. Exact source/view/request matches reuse vectors; otherwise all vectors
+are validated before saving. No Luna requests occur. The dedicated
+`eqarchives-policy-indexer-secrets` account has read/index privileges only on the
+resolved physical index, with no delete, cluster, mapping or security privilege.
+It never receives the publisher key, paid Luna key or Kubernetes token.
+
+Source reads are exact, bounded and remote-free, from the preserved source cache,
+archive checkout or local Git objects. No checkout walk, clone, fetch or source
+preparation runs. Missing/corrupt sources advance into durable diagnostics; retries
+run after a day, or five minutes for concurrent updates. Three consecutive hard
+worker deaths on one record quarantine it so later records can proceed. Verified
+external repairs resolve diagnostics only after source/view checks. Infrastructure
+pauses retry without consuming that interruption allowance.
+
+The controller writes small atomic control hints rather than exposing portal
+SQLite to background readers. Missing/stale hints yield safely. Bounded progress
+receipts show upgrades, vector reuse and recent issues in the existing collapsed
+Pipeline status panel. Only these new disposable maintenance Jobs have a one-day
+TTL; all prior full reindex and import Jobs are retained. Back up maintenance
+state and the Luna ledger with the existing PVC.

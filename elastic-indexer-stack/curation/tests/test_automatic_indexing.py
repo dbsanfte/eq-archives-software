@@ -71,9 +71,11 @@ def test_finished_site_queues_once_under_original_approval_and_keeps_full_reinde
         event = json.loads(store.db.execute("SELECT detail FROM events WHERE action='site_indexing_automatic'").fetchone()[0])
         assert event['authorization'] == 'original_site_capture_approval'
     reindex = {'metadata': {'name': 'existing-reindex', 'uid': 'same'}, 'status': {}, 'spec': {}}
+    created=[]
     class Kube:
-        def jobs(self): return [reindex]
-        def create(self, _): raise AssertionError('Do not interrupt pending/active full reindex')
+        def jobs(self): return [reindex]+created
+        def create(self, job):created.append(job)
+    monkeypatch.setenv('IMPORT_IMAGE','dbsanfte/frontend@sha256:'+'1'*64)
     monkeypatch.setattr('worker.publish', lambda *args: {'commit': 'c' * 40})
     worker = Worker(root, kube=Kube())
     try:
@@ -82,8 +84,9 @@ def test_finished_site_queues_once_under_original_approval_and_keeps_full_reinde
     finally:
         worker.close()
     current = detail(app, row)
-    assert current['review']['state'] == 'published_waiting_index'
-    assert current['review']['job']['waiting_for'] == ['existing-reindex']
+    assert current['review']['state'] == 'indexing'
+    assert len(created)==1 and current['review']['job']['name']==created[0]['metadata']['name']
+    assert reindex=={'metadata': {'name': 'existing-reindex', 'uid': 'same'}, 'status': {}, 'spec': {}}
     assert current['review']['manifest']['captures'] == manifest['captures']
     assert current['review']['manifest']['capture_retry']['files'] == 1
     # Restart/polling cannot create another publication or require a second approval.

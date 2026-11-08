@@ -82,11 +82,13 @@ class DeploymentTests(unittest.TestCase):
         incoming = {"items": [
             {"metadata": {"name": "elastic-password-secret"}, "data": {"ELASTIC_PASSWORD": encoded("dummy-admin")}},
             {"metadata": {"name": "eqarchives-capture-indexer-secrets"}, "data": {"es_password": encoded("dummy-writer")}},
+            {"metadata": {"name": "eqarchives-policy-indexer-secrets"}, "data": {"es_password": encoded("dummy-policy")}},
         ]}
         requests = []
         def response(request, timeout):
-            requests.append((request.full_url, request.method, json.loads(request.data)))
+            requests.append((request.full_url, request.method, json.loads(request.data) if request.data else None))
             self.assertEqual(timeout, 30)
+            if request.method=='GET':return io.StringIO('{"eq-archive-0.4":{"aliases":{"eq-archive":{}}}}')
             return io.StringIO('{"acknowledged":true}')
         output = io.StringIO()
         with patch.dict("os.environ", {"CURATION_ES_URL": "http://fixture:9200", "ARCHIVE_CRAWLER_OPENAI_API_KEY": "dummy-paid",
@@ -94,7 +96,7 @@ class DeploymentTests(unittest.TestCase):
                 patch("sys.stdin", io.StringIO(json.dumps(incoming))), patch.object(credentials.urllib.request, "urlopen", response), \
                 redirect_stdout(output):
             credentials.main()
-        self.assertEqual([method for _, method, _ in requests], ["PUT"] * 3)
+        self.assertEqual([method for _, method, _ in requests], ["PUT"] * 3+['GET','PUT','PUT'])
         role = requests[0][2]
         self.assertEqual(role, {"cluster": [], "indices": [{"names": ["eq-archive"], "privileges": ["read", "create_doc"]}]})
         self.assertEqual(requests[1][2], {"password": "dummy-writer", "roles": ["eqarchives-capture-import"]})
@@ -102,11 +104,29 @@ class DeploymentTests(unittest.TestCase):
         self.assertEqual(requests[2][2]["properties"]["embedding_model"], {"type": "keyword"})
         rendered = json.loads(output.getvalue())
         self.assertEqual([item["metadata"]["name"] for item in rendered["items"]],
-                         ["eqarchives-curation-secrets", "eqarchives-capture-indexer-secrets"])
+                         ["eqarchives-curation-secrets", "eqarchives-capture-indexer-secrets",'eqarchives-policy-indexer-secrets'])
         self.assertNotIn("dummy-admin", output.getvalue())
         self.assertNotIn(encoded("dummy-admin"), output.getvalue())
         self.assertEqual(rendered["items"][1]["data"]["es_password"], encoded("dummy-writer"))
         self.assertEqual(set(rendered["items"][0]["data"]), {"luna_api_key", "archive_publish_key"})
+        self.assertEqual(requests[4][2],{'cluster':[],'indices':[{'names':['eq-archive-0.4'],'privileges':['read','index']}]})
+        self.assertEqual(base64.b64decode(rendered['items'][2]['data']['es_index']).decode(),'eq-archive-0.4')
+        self.assertNotIn('delete',json.dumps(requests[4][2]))
+        self.assertEqual(requests[5][2],{'password':'dummy-policy','roles':['eqarchives-policy-maintenance']})
+        self.assertEqual(rendered['items'][2]['data']['es_password'],encoded('dummy-policy'))
+
+    def test_ambiguous_or_unsafe_physical_index_cannot_render_update_credentials(self):
+        for aliases in ({}, {'eq-archive-0':{},'eq-archive-1':{}}, {'eq-archive-*':{}}, {'unrelated':{}}):
+            incoming={'items':[{'metadata':{'name':'elastic-password-secret'},'data':{'ELASTIC_PASSWORD':encoded('dummy-admin')}}]}
+            def response(request,timeout):
+                return io.StringIO(json.dumps(aliases if request.method=='GET' else {'acknowledged':True}))
+            output=io.StringIO()
+            with patch.dict('os.environ',{'CURATION_ES_URL':'http://fixture','ARCHIVE_CRAWLER_OPENAI_API_KEY':'dummy-paid',
+                         'ARCHIVE_PUBLISH_SSH_KEY':'-----BEGIN OPENSSH PRIVATE KEY-----\ndummy\n'}), \
+                    patch('sys.stdin',io.StringIO(json.dumps(incoming))), \
+                    patch.object(credentials.urllib.request,'urlopen',response),redirect_stdout(output),self.assertRaises(SystemExit):
+                credentials.main()
+            self.assertEqual(output.getvalue(),'')
 
     def test_upstream_provisioning_failure_does_not_log_response_or_render_partial_secrets(self):
         incoming = {"items": [{"metadata": {"name": "elastic-password-secret"},

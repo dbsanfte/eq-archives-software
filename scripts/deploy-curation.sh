@@ -49,9 +49,22 @@ EOF
 "${kubectl[@]}" kustomize "$curation_work" > "$curation_work/resources.yaml"
 "${kubectl[@]}" apply --dry-run=server -f "$curation_work/resources.yaml" >/dev/null
 export CURATION_ES_URL="$DATABASE_OPERATOR_URL"
-"${kubectl[@]}" -n eqarchives-es get secret elastic-password-secret eqarchives-capture-indexer-secrets --ignore-not-found -o json |
+"${kubectl[@]}" -n eqarchives-es get secret elastic-password-secret eqarchives-capture-indexer-secrets eqarchives-policy-indexer-secrets --ignore-not-found -o json |
   python3 "$repo_dir/scripts/curation-secrets.py" |
   "${kubectl[@]}" apply --server-side --force-conflicts --field-manager=curation-cicd -f - >/dev/null
+policy_target=$("${kubectl[@]}" -n eqarchives-es get secret eqarchives-policy-indexer-secrets -o jsonpath='{.data.es_index}')
+if [[ -z "$policy_target" ]]; then echo 'Policy index identity is unavailable; rollout stopped.' >&2; exit 1; fi
+policy_checksum=$(printf '%s' "$policy_target" | sha256sum | cut -d' ' -f1)
+cat >> "$curation_work/kustomization.yaml" <<EOF
+  - target:
+      kind: Deployment
+      name: eqarchives-curation
+    patch: |-
+      - op: add
+        path: /spec/template/metadata/annotations/checksum~1policy-index
+        value: "$policy_checksum"
+EOF
+"${kubectl[@]}" kustomize "$curation_work" > "$curation_work/resources.yaml"
 "${kubectl[@]}" apply -f "$curation_work/resources.yaml"
 "${kubectl[@]}" -n eqarchives-es rollout status deployment/eqarchives-curation --timeout=300s
 "${kubectl[@]}" -n eqarchives-es get jobs -o json |

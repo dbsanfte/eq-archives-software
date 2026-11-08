@@ -21,7 +21,7 @@ from grading import grade
 from graph import staged_links
 from captures import capture_sites
 from capture_progress import CaptureProgress
-from jobs import Kubernetes, blockers, import_attempt, import_job, import_name
+from jobs import Kubernetes, blockers, finished, import_attempt, import_job, import_name
 from publisher import publish
 from state import Lane, OPERATION_KINDS, active_operation, connect, database_busy, unpack, worker_lease
 from coverage_check import refresh
@@ -344,8 +344,12 @@ class Worker:
 
     def indexing(self):
         with connect(self.root) as store:
-            batches = [unpack(row) for row in store.db.execute("SELECT * FROM batches WHERE state IN ('published_waiting_index','indexing','index_budget_waiting') ORDER BY created")]
-        if not batches:
+            batches = [unpack(row) for row in store.db.execute("SELECT id,state,manifest_sha256,job,publication FROM batches INDEXED BY batch_metadata WHERE state IN ('published_waiting_index','indexing','index_budget_waiting') ORDER BY created")]
+        self.daily_budget.prioritize('portal',bool(batches))
+        maintenance=os.environ.get('PASSAGE_MAINTENANCE_ENABLED')=='1'
+        from policy_scheduler import write_control
+        write_control(self.root,maintenance)
+        if not batches and not maintenance:
             return
         self.kube = self.kube or Kubernetes()
         jobs = self.kube.jobs()
@@ -366,6 +370,18 @@ class Worker:
                     store.db.execute("UPDATE batches SET state='index_failed',job=?,error=?,updated=? WHERE id=?",
                                      (json.dumps(job), detail, now(), batch['id']))
                     store.db.commit()
+        # Reconcile before declaring demand: one failed site cannot starve
+        # grading or background work after its import moves to attention.
+        from policy_scheduler import import_pending, schedule
+        self.daily_budget.prioritize('portal',import_pending(self.root,budget_wait=True))
+        if maintenance:
+            try:schedule(self.root,self.kube,jobs,os.environ.get('IMPORT_IMAGE',''))
+            except Exception as error:
+                if database_busy(error):raise
+                with connect(self.root) as store:
+                    saved=store.get('policy_maintenance',{})
+                    store.set('policy_maintenance',{**saved,'phase':'retry_wait',
+                              'error':'Background policy scheduling is unavailable; imports continue.'})
 
     def index_batch(self, batch, jobs):
         import_error = None
@@ -375,6 +391,9 @@ class Worker:
             attempt_detail['previous_name'] = batch['job']['previous_name']
         existing = next((job for job in jobs if job["metadata"]["name"] == name), None)
         if existing:
+            if finished(existing) and 'manifest' not in batch:
+                with connect(self.root) as store:
+                    batch={**batch,'manifest':json.loads(store.db.execute('SELECT manifest FROM batches WHERE id=?',(batch['id'],)).fetchone()[0])}
             annotations = existing["metadata"].get("annotations", {})
             if annotations.get("eqarchives.org/manifest-sha256") != batch["manifest_sha256"]:
                 raise CrawlError("Import Job does not match the approved manifest")
@@ -413,7 +432,7 @@ class Worker:
                     self.kube.create(job)
                 except Exception:
                     # A lost create response may still have started a Job. Re-list
-                    # before advancing; never bypass the unfinished-Job guard.
+                    # before advancing; never bypass foreground admission.
                     try:
                         jobs[:] = self.kube.jobs()
                     except Exception as error:
@@ -423,7 +442,7 @@ class Worker:
                 state, detail = "indexing", {**attempt_detail, "name": name, "state": "submitted"}
                 # No further submissions until the next list sees this Job.
                 if not any(item['metadata']['name'] == name for item in jobs):
-                    jobs.append({"metadata": {"name": name}, "spec": {}, "status": {}})
+                    jobs.append({"metadata": {"name": name,"labels":{"app":"eqarchives-capture-import"}}, "spec": {}, "status": {}})
         with connect(self.root) as store:
             store.db.execute("UPDATE batches SET state=?,job=?,error=?,updated=? WHERE id=?",
                              (state, json.dumps(detail), import_error, now(), batch["id"]))
@@ -452,6 +471,10 @@ class Worker:
             self.stop.wait(10)
 
     def run_turn(self, lane):
+        if lane==Lane.CANDIDATES:
+            from policy_scheduler import import_pending,write_control
+            self.daily_budget.prioritize('portal',import_pending(self.root,budget_wait=True))
+            write_control(self.root,os.environ.get('PASSAGE_MAINTENANCE_ENABLED')=='1')
         try:
             automation.resume_owned(self.root, lane, self.daily_budget)
             if lane == Lane.CANDIDATES:

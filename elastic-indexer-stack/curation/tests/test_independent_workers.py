@@ -156,14 +156,16 @@ def test_all_three_workers_make_independent_progress_and_keep_reindex_job(candid
     release = {lane: threading.Event() for lane in Lane}
     reindex = {'metadata': {'name': 'existing-full-reindex', 'uid': 'unchanged'}, 'spec': {}, 'status': {'active': 1}}
     checked_jobs = threading.Event()
+    created=[]
+    monkeypatch.setenv('IMPORT_IMAGE','dbsanfte/frontend@sha256:'+'1'*64)
 
     class FakeKube:
         def jobs(self):
             checked_jobs.set()
-            return [reindex]
+            return [reindex]+created
 
-        def create(self, _):
-            raise AssertionError('The existing full reindex must keep the import waiting')
+        def create(self, job):
+            created.append(job)
 
     def capture(_root, _batch, _sites, progress):
         assert current_transport.get() is worker.transport
@@ -222,11 +224,12 @@ def test_all_three_workers_make_independent_progress_and_keep_reindex_job(candid
                 assert checked_jobs.wait(5), 'Index reconciliation must run during a long capture'
                 assert batches[capture_manifest['batch_id']]['state'] == 'capturing'
         if finishes_first == Lane.INDEXING:
-            def waiting_for_reindex():
+            def submitted_independently():
                 with connect(root) as store:
                     job = store.db.execute('SELECT job FROM batches WHERE id=?', (published_manifest['batch_id'],)).fetchone()[0]
-                    return job and json.loads(job).get('waiting_for') == ['existing-full-reindex']
-            wait_until(waiting_for_reindex)
+                    return job and json.loads(job).get('state') == 'submitted'
+            wait_until(submitted_independently)
+            assert len(created)==1
         assert reindex == {'metadata': {'name': 'existing-full-reindex', 'uid': 'unchanged'}, 'spec': {}, 'status': {'active': 1}}
     finally:
         for event in release.values():

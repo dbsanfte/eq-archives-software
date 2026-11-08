@@ -12,9 +12,9 @@ images. See [security maintenance](../../../scripts/security-maintenance/README.
 
 Approved website batches use the separate
 [curation/import flow](../../curation/README.md), deployed by standard CI/CD.
-Its create-only import Jobs verify staged manifests and wait for all existing
-unfinished ingestion Jobs. They do not replace or modify the one-off or broad
-reindex Jobs described here.
+Its create-only import Jobs verify staged manifests and wait for other unfinished
+foreground capture-import Jobs; broad reindexes no longer hold that slot. They
+do not replace or modify the one-off or broad reindex Jobs described here.
 
 `blueworld-index-job.yaml` is a one-off Job for the 11,914 recovered
 `alt.games.everquest` articles. It is deliberately outside the frontend
@@ -160,7 +160,7 @@ Job with the same read-only source checkout and version checkpoints, without the
 source-preparation init container. Create the replacement with `parallelism: 0`
 and without `suspend` before suspending the old Job, wait for the old pod to stop,
 then set the replacement's parallelism to one.
-This keeps an unfinished Job present for the import guard throughout the handoff.
+This keeps the broad-writer exclusion visible to rolling maintenance throughout the handoff.
 Completed version checkpoints are skipped; any interrupted record is retried.
 Keep the old Job suspended and retain its logs, verify new progress and public
 search/embedding health, and do not change other indexing Jobs or source checkouts.
@@ -233,8 +233,9 @@ that a Running pod has made progress.
 The current source policy is `eq-passages-480-v11`, with both model and passage
 policy required for completion in a newly prepared Job. Deployment leaves an
 already running v10 Job and its checkpoints unchanged; completion of that Job
-does not imply v11 coverage. A separately authorized, prepared handoff prioritizes
-the unfinished model frontier, then upgrades older Gemma passages. Retain the old
+does not imply v11 coverage. The regular curation loop upgrades stale same-model passages in bounded slices
+after the old broad writer finishes, yielding to foreground imports. A separately
+authorized, prepared model migration still prioritizes the unfinished model frontier. Retain the old
 Job and prepared checkout. A separate `render-reindex.py --images` Job can index
 rasters through the CUDA vision companion, using create-only writes and a
 persistent `/mnt/samsung/eqarchives-images` inventory. Neither backfill calls
@@ -260,3 +261,18 @@ Retain the prepared archive mount, existing missing-text SQLite inventory,
 immutable recovery runner, previous Jobs and independent image Job. See the
 [cache and diagnostic runbook](../../../scripts/embedding-service/README.md#bounded-shared-text-embedding-cache-and-rejection-ledger)
 for heat/idle expiry, bounds, safe failure categories and bounded pending-ID retry.
+
+
+## Routine policy updates
+
+The curation controller now schedules bounded same-model passage repairs, using
+its deployed image, dedicated physical-index update account and persistent
+`indexing-state/policy-maintenance.sqlite` diagnostics/cursors. See the
+[curation workflow](../../curation/README.md#rolling-passage-maintenance).
+Foreground capture imports wait only for other foreground imports, so a broad
+reindex no longer blocks fresh sites. Maintenance waits for legacy broad Jobs and
+yields between CUDA batches when imports arrive. No paid enrichment runs in
+maintenance. Do not restart a broad Job to deliver an ordinary policy update;
+leave its prepared sources, immutable recovery configuration and checkpoints
+intact. Explicit model/image/extraction recovery operations retain the runbooks
+above. A historical Job's completion validates its own pinned version only.

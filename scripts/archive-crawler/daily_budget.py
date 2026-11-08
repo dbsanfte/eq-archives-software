@@ -1,4 +1,4 @@
-"""One durable UTC daily Luna ceiling shared by portal workers and import Jobs.
+"""Durable UTC daily/monthly Luna ceilings and enrichment-first admission.
 
 Reserve before sending, retain uncertain requests, and release only verified
 usage. A lost local commit can leak a conservative reservation, never a payment
@@ -17,10 +17,12 @@ import uuid
 from common import CrawlError, now
 
 SCALE = 1_000_000_000
-DEFAULT = {'enabled': False, 'configured': False, 'daily_usd': 2.0,
+DEFAULT = {'enabled': False, 'configured': False, 'daily_usd': 2.0, 'monthly_usd': 200.0,
            'min_grade': 2, 'grading_criteria': '', 'revision': 0}
 current_budget = ContextVar('luna_daily_budget', default=None)
 automatic_request = ContextVar('automatic_luna_request', default=False)
+request_purpose = ContextVar('luna_request_purpose', default='discovery')
+priority_owner = ContextVar('luna_priority_owner', default=None)
 
 
 def instant():
@@ -34,9 +36,14 @@ def units(amount):
 
 
 class DailyBudgetPause(CrawlError):
-    def __init__(self, amount, retry_at):
-        self.amount, self.retry_at = amount, retry_at
-        super().__init__('Daily Luna budget reached; paid work resumes after the UTC daily reset')
+    def __init__(self, amount, retry_at, period='daily'):
+        self.amount, self.retry_at, self.period = amount, retry_at, period
+        super().__init__(f'{period.title()} Luna budget reached; paid work resumes after the UTC {period} reset')
+
+
+class EnrichmentPriorityPause(CrawlError):
+    def __init__(self):
+        super().__init__('Approved-site enrichment has priority; grading resumes automatically afterward')
 
 
 class AutomaticStopped(CrawlError):
@@ -56,6 +63,7 @@ class DailyBudget:
                 CREATE TABLE IF NOT EXISTS reservations(id TEXT PRIMARY KEY, day TEXT NOT NULL,
                     reserved INTEGER NOT NULL, actual INTEGER, created TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS reservation_day ON reservations(day);
+                CREATE TABLE IF NOT EXISTS enrichment_priority(owner TEXT PRIMARY KEY, expires TEXT NOT NULL);
             ''')
             db.execute('INSERT OR IGNORE INTO settings VALUES (1,?)', (json.dumps(DEFAULT),))
         (self.root / 'budget.sqlite3').chmod(0o600)
@@ -71,26 +79,47 @@ class DailyBudget:
             db.close()
 
     @contextmanager
-    def bind(self, *, automatic=False):
+    def bind(self, *, automatic=False, purpose='discovery', owner=None):
+        if purpose not in ('discovery','enrichment'):
+            raise ValueError('Invalid Luna request purpose')
         token = current_budget.set(self)
         auto = automatic_request.set(automatic)
+        scope = request_purpose.set(purpose)
+        owner = owner or 'import-' + uuid.uuid4().hex
+        claim=priority_owner.set(owner if purpose=='enrichment' else None)
         try:
+            if purpose == 'enrichment':self.prioritize(owner, True)
             yield self
         finally:
-            automatic_request.reset(auto)
-            current_budget.reset(token)
+            try:
+                if purpose == 'enrichment':self.prioritize(owner, False)
+            finally:
+                priority_owner.reset(claim);request_purpose.reset(scope)
+                automatic_request.reset(auto);current_budget.reset(token)
+
+    def prioritize(self, owner, pending):
+        if not isinstance(owner,str) or not 1<=len(owner)<=253 or type(pending) is not bool:
+            raise ValueError('Invalid enrichment priority claim')
+        with self.database() as db:
+            if pending:
+                when=instant();expires=(when+timedelta(minutes=5)).isoformat()
+                db.execute('''INSERT INTO enrichment_priority VALUES (?,?) ON CONFLICT(owner) DO UPDATE
+                    SET expires=excluded.expires WHERE enrichment_priority.expires<?''',
+                    (owner,expires,(when+timedelta(minutes=4)).isoformat()))
+            else:db.execute('DELETE FROM enrichment_priority WHERE owner=?',(owner,))
 
     def settings(self):
         with self.database() as db:
-            return json.loads(db.execute('SELECT value FROM settings WHERE id=1').fetchone()[0])
+            return {**DEFAULT, **json.loads(db.execute('SELECT value FROM settings WHERE id=1').fetchone()[0])}
 
     @staticmethod
     def validate(payload):
         from grading import criteria
-        if (not isinstance(payload, dict) or set(payload) != {'enabled', 'daily_usd', 'min_grade', 'grading_criteria', 'revision'}
+        if (not isinstance(payload, dict) or set(payload)-{'monthly_usd'} != {'enabled', 'daily_usd', 'min_grade', 'grading_criteria', 'revision'}
                 or type(payload['enabled']) is not bool or type(payload['min_grade']) is not int
                 or payload['min_grade'] not in range(4) or type(payload['revision']) is not int
-                or not 0 < units(payload['daily_usd']) <= 1_000_000 * SCALE):
+                or not 0 < units(payload['daily_usd']) <= 1_000_000 * SCALE
+                or not 0 < units(payload.get('monthly_usd',DEFAULT['monthly_usd'])) <= 1_000_000 * SCALE):
             raise CrawlError('Automatic mode needs a daily USD limit, a minimum grade from 0 to 3, and current settings')
         return {**payload, 'grading_criteria': criteria(payload['grading_criteria'])}
 
@@ -101,7 +130,7 @@ class DailyBudget:
             previous = json.loads(db.execute('SELECT value FROM settings WHERE id=1').fetchone()[0])
             if payload['revision'] != previous['revision']:
                 raise CrawlError('Automatic settings changed in another session. Reload the settings before saving.')
-            saved = {**payload, 'configured': True, 'revision': previous['revision'] + 1, 'updated_at': now()}
+            saved = {**DEFAULT, **previous, **payload, 'configured': True, 'revision': previous['revision'] + 1, 'updated_at': now()}
             db.execute('UPDATE settings SET value=? WHERE id=1', (json.dumps(saved),))
         return saved
 
@@ -112,15 +141,35 @@ class DailyBudget:
             FROM reservations WHERE day=?''', (day,)).fetchone()
         return tuple(row)
 
+    @staticmethod
+    def limits(db, when, config):
+        day=when.date().isoformat();first=when.replace(day=1,hour=0,minute=0,second=0,microsecond=0)
+        month_reset=(first+timedelta(days=32)).replace(day=1)
+        month=db.execute('''SELECT COALESCE(SUM(actual),0),
+            COALESCE(SUM(CASE WHEN actual IS NULL THEN reserved ELSE 0 END),0)
+            FROM reservations WHERE day>=? AND day<?''',
+            (first.date().isoformat(),month_reset.date().isoformat())).fetchone()
+        spent,pending=DailyBudget.totals(db,day)
+        daily=units(config['daily_usd'])-spent-pending
+        monthly=units(config.get('monthly_usd',DEFAULT['monthly_usd']))-sum(month)
+        day_reset=(when+timedelta(days=1)).replace(hour=0,minute=0,second=0,microsecond=0)
+        period='monthly' if monthly<daily else 'daily'
+        return {'estimated_usd':spent/SCALE,'unresolved_usd':pending/SCALE,
+                '_remaining_units':max(0,min(daily,monthly)),
+                'remaining_usd':max(0,min(daily,monthly))/SCALE,'budget_period':period,
+                'resets_at':(month_reset if period=='monthly' else day_reset).isoformat(),
+                'daily_remaining_usd':max(0,daily)/SCALE,'daily_resets_at':day_reset.isoformat(),
+                'monthly':{'estimated_usd':month[0]/SCALE,'unresolved_usd':month[1]/SCALE,
+                           'remaining_usd':max(0,monthly)/SCALE,'resets_at':month_reset.isoformat()}}
+
     def snapshot(self):
         when = instant()
-        reset = (when + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
         with self.database() as db:
-            config = json.loads(db.execute('SELECT value FROM settings WHERE id=1').fetchone()[0])
-            spent, pending = self.totals(db, when.date().isoformat())
-        return {'settings': config, 'complete': config['configured'], 'estimated_usd': spent / SCALE, 'unresolved_usd': pending / SCALE,
-                'remaining_usd': max(0, units(config['daily_usd']) - spent - pending) / SCALE,
-                'resets_at': reset.isoformat(), 'day': when.date().isoformat(), 'timezone': 'UTC'}
+            config = {**DEFAULT,**json.loads(db.execute('SELECT value FROM settings WHERE id=1').fetchone()[0])}
+            limits=self.limits(db,when,config)
+            priority=db.execute('SELECT 1 FROM enrichment_priority WHERE expires>? LIMIT 1',(when.isoformat(),)).fetchone() is not None
+        return {'settings': config, 'complete': config['configured'], **{k:v for k,v in limits.items() if not k.startswith('_')},
+                'enrichment_pending':priority,'day': when.date().isoformat(), 'timezone': 'UTC'}
 
     def reserve(self, amount):
         reserved = units(amount)
@@ -128,13 +177,18 @@ class DailyBudget:
             db.execute('BEGIN IMMEDIATE')
             when = instant()
             day = when.date().isoformat()
-            reset = (when + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
             config = json.loads(db.execute('SELECT value FROM settings WHERE id=1').fetchone()[0])
             if automatic_request.get() and not config['enabled']:
                 raise AutomaticStopped()
-            spent, pending = self.totals(db, day)
-            if config['configured'] and spent + pending + reserved > units(config['daily_usd']):
-                raise DailyBudgetPause(amount, reset)
+            limits=self.limits(db,when,config)
+            if config['configured'] and reserved>limits['_remaining_units']:
+                raise DailyBudgetPause(amount, limits['resets_at'], limits['budget_period'])
+            if request_purpose.get()=='discovery' and db.execute(
+                    'SELECT 1 FROM enrichment_priority WHERE expires>? LIMIT 1',(when.isoformat(),)).fetchone():
+                raise EnrichmentPriorityPause()
+            if owner:=priority_owner.get():
+                db.execute('INSERT OR REPLACE INTO enrichment_priority VALUES (?,?)',
+                           (owner,(when+timedelta(minutes=5)).isoformat()))
             receipt = uuid.uuid4().hex
             db.execute('INSERT INTO reservations VALUES (?,?,?,NULL,?)', (receipt, day, reserved, when.isoformat()))
         return receipt

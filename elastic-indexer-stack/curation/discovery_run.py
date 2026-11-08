@@ -13,7 +13,7 @@ from grading import Luna, grade
 from graph import staged_links
 from state import connect
 from review import checked_sources, record
-from daily_budget import DailyBudgetPause, AutomaticStopped, require_automatic
+from daily_budget import DailyBudgetPause, AutomaticStopped, EnrichmentPriorityPause, require_automatic
 
 SECONDS = 3600
 
@@ -265,7 +265,7 @@ def fill(root, operation, store):
                 return finish('spend_limit')
             if any(part in error for part in ('budget', '422 after', '429 after', 'HTTP 401', 'HTTP 403')):
                 raise CrawlError(error)
-    except (DailyBudgetPause, AutomaticStopped):
+    except (DailyBudgetPause, AutomaticStopped, EnrichmentPriorityPause):
         # Carry the sampled site into durable Suggestions before sleeping. A
         # campaign whose hour expires overnight cannot strand its saved source.
         if row is not None:

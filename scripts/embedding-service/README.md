@@ -152,7 +152,7 @@ metadata/vectors. Create the replacement at parallelism zero before suspending t
 old Job. Wait for the old pod to stop, then raise replacement parallelism to one.
 Keep the original recovery runner, immutable ConfigMap, credentials, previous Jobs,
 logs and prepared source checkout; never repeat source preparation. Curation's
-unfinished-Job guard remains in effect throughout. Watch both backend counters,
+broad-writer exclusion for background maintenance remains in effect throughout. Watch both backend counters,
 GPU utilization/power and ES resource usage. No LLM enrichment or API spend is added.
 
 ## EmbeddingGemma migration
@@ -175,7 +175,7 @@ Gemma and Nomic vectors in the same semantic query.
    `render-reindex.py --gemma --name reindex-gemma-<date> --image <tested-image>`.
    It starts with `parallelism=0`, retaining the source checkout, credentials,
    recovery wrapper and no-paid-enrichment policy. Create it **before** suspending
-   the old Job, so the curation unfinished-Job guard remains effective.
+   the old Job, so the curation background-maintenance exclusion remains effective.
 4. After normal CI/deployment completes, suspend the old broad Job as an explicit
    operator handoff. Wait for its pod to stop; do not delete the Job, repeat source
    preparation or allow Nomic/Gemma writers to overlap. Install the new CUDA
@@ -701,6 +701,8 @@ Validate source-bound plans against varied private captures and unrelated layout
 Keep the full reader, hashes, offsets, enrichment and 480-token request bounds.
 An exact v10 source/view/request match may reuse vectors under the existing
 validation; changed plans require embedding. Ordinary CI/CD activates v11 for new
-imports and leaves the active v10 reindex untouched. Upgrading existing records
-requires a separately prepared operator handoff, preserving all previous Jobs,
-prepared sources, cache/rejection ledgers and the independent image workflow.
+imports and leaves the active v10 reindex untouched. The regular curation loop upgrades existing same-model records in bounded slices
+after legacy broad writers finish. It yields to foreground imports, preserves all
+previous Jobs, sources, cache/rejection ledgers and the independent image workflow,
+and makes no paid enrichment calls. Explicit model migrations retain prepared
+operator handoffs. See the curation guide for rolling maintenance and diagnostics.

@@ -78,7 +78,7 @@ def test_kubernetes_paging_checks_later_jobs_and_rereads_rotated_tokens(tmp_path
             return io.StringIO(json.dumps({'items':[],'metadata':{'continue':'next /+'}}))
         assert request.get_header('Authorization')=='Bearer rotated-dummy-token'
         assert parse_qs(urlsplit(request.full_url).query)['continue']==['next /+']
-        return io.StringIO(json.dumps({'items':[{'metadata':{'name':'legacy-pending'},'spec':{},'status':{}}]}))
+        return io.StringIO(json.dumps({'items':[{'metadata':{'name':'legacy-pending','labels':{'app':'eqarchives-capture-import'}},'spec':{},'status':{}}]}))
     monkeypatch.setattr('jobs.urllib.request.urlopen',response)
     assert blockers(client.jobs(),'new-import')==['legacy-pending']
     assert len(seen)==2
@@ -110,11 +110,11 @@ def test_simultaneous_paid_actions_create_only_one_operation(candidate):
         assert store.db.execute('SELECT COUNT(*) FROM operations').fetchone()[0]==1
 
 
-def test_new_imports_wait_for_existing_active_pending_and_retrying_jobs(candidate,monkeypatch):
+def test_new_imports_wait_for_other_active_pending_and_retrying_foreground_imports(candidate,monkeypatch):
     root,row=candidate
     manifest=manifest_for(row)
     expected=digest(manifest)
-    existing={'metadata':{'name':'reindex-text-html-resume-20261006','uid':'existing'},'spec':{},'status':{'active':1}}
+    existing={'metadata':{'name':'other-capture-import','uid':'existing','labels':{'app':'eqarchives-capture-import'}},'spec':{},'status':{'active':1}}
     class FakeKube:
         def __init__(self): self.items=[existing]; self.created=[]
         def jobs(self): return self.items.copy()
@@ -233,7 +233,7 @@ def test_explicit_index_retry_preserves_failed_jobs_publication_and_approved_sit
     original['metadata']['uid']='preserved-failed-job'
     original['status']={'conditions':[{'type':'Failed','status':'True'}]}
     snapshot=copy.deepcopy(original)
-    ingestion={'metadata':{'name':'legacy-ingestion','uid':'preserved-ingestion'},'spec':{},'status':{'active':0}}
+    ingestion={'metadata':{'name':'legacy-ingestion','uid':'preserved-ingestion','labels':{'app':'eqarchives-capture-import'}},'spec':{},'status':{'active':0}}
     class FakeKube:
         def __init__(self):self.items=[original,ingestion];self.created=[]
         def jobs(self):return self.items.copy()

@@ -11,7 +11,7 @@ const descriptions = {
   history:'Completed and declined sites stay here, away from your active work.'
 };
 const aliases = {recommended:'candidates',approved:'queued',captured:'indexing',review:'indexing',pending:'candidates',all:'history'};
-const labels = {approval_pending:'Needs a capture decision',coverage_unverified:'Coverage needs checking',deferred:'Saved for later',rejected:'Dismissed',already_archived:'Already archived',duplicate_candidate:'Duplicate candidate',approved_waiting_batch:'Queued for capture',capture_resume_queued:'Resume queued',capturing:'Capture in progress',captured_awaiting_review:'Preparing indexing',approved_waiting_publication:'Publication approved',awaiting_review:'Preparing indexing',index_preflight_failed:'Indexing preparation paused',publication_requested:'Publishing',published_waiting_index:'Waiting to index',indexing:'Enriching & indexing',index_failed:'Indexing needs attention',index_budget_waiting:'Waiting for daily Luna budget',indexed:'Indexed',indexing_declined:'Indexing declined'};
+const labels = {approval_pending:'Needs a capture decision',coverage_unverified:'Coverage needs checking',deferred:'Saved for later',rejected:'Dismissed',already_archived:'Already archived',duplicate_candidate:'Duplicate candidate',approved_waiting_batch:'Queued for capture',capture_resume_queued:'Resume queued',capturing:'Capture in progress',captured_awaiting_review:'Preparing indexing',approved_waiting_publication:'Publication approved',awaiting_review:'Preparing indexing',index_preflight_failed:'Indexing preparation paused',publication_requested:'Publishing',published_waiting_index:'Waiting to index',indexing:'Enriching & indexing',index_failed:'Indexing needs attention',index_budget_waiting:'Waiting for Luna budget',indexed:'Indexed',indexing_declined:'Indexing declined'};
 let route = readRoute(), data = null, detail = null, busy = false, generation = 0, controller = null;
 let listSignature = '', workspaceSignature = '', dockSignature = '', liveSignature = '', sourceGeneration = 0;
 let searchTimer,gradeTimer,dismissSnapshot=null;
@@ -778,8 +778,8 @@ function renderLive() {
     host.append(box);
   } else if (row.stage==='indexing' && review) {
     const state=review.state,preparing=['awaiting_review','index_preflight_failed'].includes(state),preflightFailed=state==='index_preflight_failed',publishing=state==='publication_requested',paused=publishing && review.operation?.state==='interrupted',failed=state==='index_failed',budgetWaiting=state==='index_budget_waiting';
-    const title=budgetWaiting ? 'Waiting for daily Luna budget' : preflightFailed ? 'Indexing preparation paused' : preparing ? 'Preparing automatic indexing' : paused ? 'Publication paused' : failed ? 'Indexing needs attention' : publishing ? 'Publishing approved files' : state==='published_waiting_index' ? 'Waiting to index' : 'AI enrichment & indexing';
-    const box=panel(title,budgetWaiting ? `Paid results and indexed pages are retained. The next request needs a reservation of $${Number(review.job.required_usd).toFixed(4)}. This site resumes automatically when the daily budget allows, resetting at ${new Date(data.automation?.resets_at || review.job.retry_at).toUTCString()}. You can raise the daily limit in Candidates.` : preflightFailed ? 'Saved files are retained. Resolve the issue below and retry preparation.' : preparing ? 'Checking saved files, archive coverage and your original capture approval. Publication and indexing follow automatically.' : paused ? 'Your approval is saved. Retry publication to continue with the retained sources.' : failed ? 'Published sources are retained. Retry with saved AI results and the same site budget; existing entries are skipped.' : publishing ? 'The approved site is being added to the archive. Git publication can take several minutes.' : state==='published_waiting_index' ? 'Indexing starts when the worker is available and other indexing Jobs finish.' : 'Luna enrichment and indexing are running. The site will retire from the active portal when the import completes.',paused || failed || preflightFailed ? 'attention' : '');
+    const title=budgetWaiting ? (review.job?.budget_period==='monthly' ? 'Waiting for monthly Luna budget' : 'Waiting for daily Luna budget') : preflightFailed ? 'Indexing preparation paused' : preparing ? 'Preparing automatic indexing' : paused ? 'Publication paused' : failed ? 'Indexing needs attention' : publishing ? 'Publishing approved files' : state==='published_waiting_index' ? 'Waiting to index' : 'AI enrichment & indexing';
+    const box=panel(title,budgetWaiting ? `Paid results and indexed pages are retained. The next request needs a reservation of $${Number(review.job.required_usd).toFixed(4)}. This site resumes automatically when the daily budget allows, resetting at ${new Date(data.automation?.resets_at || review.job.retry_at).toUTCString()}. You can change the Luna limits in Candidates.` : preflightFailed ? 'Saved files are retained. Resolve the issue below and retry preparation.' : preparing ? 'Checking saved files, archive coverage and your original capture approval. Publication and indexing follow automatically.' : paused ? 'Your approval is saved. Retry publication to continue with the retained sources.' : failed ? 'Published sources are retained. Retry with saved AI results and the same site budget; existing entries are skipped.' : publishing ? 'The approved site is being added to the archive. Git publication can take several minutes.' : state==='published_waiting_index' ? 'Approved sites share one foreground import slot. Background policy work yields to them.' : 'Luna enrichment and indexing are running. The site will retire from the active portal when the import completes.',paused || failed || preflightFailed ? 'attention' : '');
     box.append(node('p','Capture and discovery continue independently of publication and indexing.','meta'));
     box.append(node('p',review.manifest.indexing?.daily_budget ? 'AI enrichment continues across days under your shared daily Luna limit, including retries.' : `AI enrichment: up to $${review.manifest.indexing?.max_enrichment_usd ?? 2} for this site, including retries.`,'meta'));
     if (review.error || review.operation?.error) box.append(node('p',review.error || review.operation.error));
@@ -1064,7 +1064,7 @@ function renderPipelineActivity() {
   const discovery=activeOperation('candidates'),capture=activeOperation('capture'),publication=activeOperation('indexing');
   const unavailable=Object.values(info.runtime || {}).some(healthy=>healthy===false);
   $('pipeline-overview').dataset.attention=String(unavailable);
-  $('pipeline-overview').textContent=`${unavailable ? 'Worker needs attention' : `${[discovery,capture,publication].filter(Boolean).length} workers active`} · ${data.stage_counts.queued || 0} sites queued${data.capture_attention?.retrying ? ` · ${data.capture_attention.retrying} retries scheduled` : ''}`;
+  $('pipeline-overview').textContent=`${unavailable ? 'Worker needs attention' : `${[discovery,capture,publication || info.indexing?.state==='indexing',info.maintenance?.phase==='running'].filter(Boolean).length} workers active`} · ${data.stage_counts.queued || 0} sites queued${data.capture_attention?.retrying ? ` · ${data.capture_attention.retrying} retries scheduled` : ''}`;
   for (const [lane,title] of [['candidates','Discovery'],['capture','Capture'],['indexing','Indexing']]) {
     let card=$(`activity-${lane}`);
     if (!card) {
@@ -1072,7 +1072,7 @@ function renderPipelineActivity() {
       card.append(node('summary'),node('div',undefined,'activity-body'));$('pipeline-workers').append(card);
     }
     if (laneChanged) card.open=selected===lane;
-    const signature=JSON.stringify([lane==='candidates' ? [discovery,info.discovery,auto] : lane==='capture' ? [capture,info.next_capture,info.next_retry,data.capture_attention,data.capture_queue_error] : [publication,info.indexing,auto?.resets_at],info.runtime,data.stage_counts]);
+    const signature=JSON.stringify([lane==='candidates' ? [discovery,info.discovery,auto] : lane==='capture' ? [capture,info.next_capture,info.next_retry,data.capture_attention,data.capture_queue_error] : [publication,info.indexing,info.maintenance,auto?.resets_at],info.runtime,data.stage_counts]);
     if (card.dataset.signature===signature) continue;card.dataset.signature=signature;
     const body=node('div',undefined,'activity-body');let status='',tone='idle';
     if (lane==='candidates') {
@@ -1085,10 +1085,14 @@ function renderPipelineActivity() {
         activityAge(body,discovery.updated);
       } else if (enabled) {
         if (phase==='daily_budget') {
-          status='Waiting for daily Luna funds';tone='waiting';
-          body.append(node('p',`$${Number(auto.remaining_usd).toFixed(4)} remaining today. Saved work resumes automatically when funded.`));
-          activityDeadline(body,auto.resets_at,'Daily budget reset');
+          const period=auto.budget_period==='monthly' ? 'Monthly' : 'Daily';
+          status=`Waiting for ${period.toLowerCase()} Luna funds`;tone='waiting';
+          body.append(node('p',`$${Number(auto.remaining_usd).toFixed(4)} available within both limits. Saved work resumes automatically when funded.`));
+          activityDeadline(body,auto.resets_at,`${period} budget reset`);
           if (auto.activity.required_usd>auto.settings.daily_usd) body.append(node('p','The next request exceeds the daily limit. Raise the limit in automatic settings to continue.','activity-warning'));
+        } else if (phase==='enrichment_priority') {
+          status='Enrichment has priority';tone='waiting';
+          body.append(node('p','Approved-site enrichment has first use of Luna funds. Discovery grading resumes automatically afterward.'));
         } else if (phase==='links_exhausted' || phase==='archive_unavailable' || phase==='retry_wait') {
           status=phase==='links_exhausted' ? 'Waiting for new links' : phase==='archive_unavailable' ? 'Archive sources unavailable' : 'Waiting to retry';tone='waiting';
           body.append(node('p',phase==='links_exhausted' ? 'The available archive pages and new links have been checked. New captures can supply more links; remembered sites are kept.' : phase==='archive_unavailable' ? 'Readable archive pages have been checked. Some files or metadata are missing locally or exceed the scan limits. Completed source passes with gaps are retried after a day; new staged links are checked below.' : auto.activity.error || 'Saved progress is retained.'));
@@ -1131,13 +1135,26 @@ function renderPipelineActivity() {
       else if (index) {
         status=labels[index.state] || 'Preparing indexing';tone=index.state==='indexing' ? 'running' : 'waiting';
         activitySite(body,index.site);
-        if (index.job?.waiting_for?.length) {status='Waiting for existing indexing Jobs';body.append(node('p',`Waiting for: ${index.job.waiting_for.join(', ')}`,'address'));}
-        else if (index.state==='index_budget_waiting') activityDeadline(body,auto?.resets_at || index.job?.retry_at,'Daily budget reset');
+        if (index.job?.waiting_for?.length) {status='Waiting for another approved site';body.append(node('p',`Waiting for: ${index.job.waiting_for.join(', ')}`,'address'));}
+        else if (index.state==='index_budget_waiting') activityDeadline(body,auto?.resets_at || index.job?.retry_at,index.job?.budget_period==='monthly' ? 'Monthly budget reset' : 'Daily budget reset');
         else body.append(node('p',index.state==='indexing' ? 'AI enrichment and import are running. Completed sites retire to History.' : 'The indexing worker checks approved work every 10 seconds.'));
         if (index.job?.name) body.append(node('p',`Job: ${index.job.name}`,'address'));
         if (index.error) {tone='attention';body.append(node('p',index.error,'activity-warning'));}
       } else if (data.stage_counts.indexing) {status='Sites need attention';tone='attention';body.append(node('p',`${data.stage_counts.indexing} sites remain in Indexing. Open their entries for the saved error and retry options.`));}
       else {status='No sites waiting';body.append(node('p','Completed captures publish and index automatically.'));}
+      const maintenance=info.maintenance;
+      if (maintenance?.policy) {
+        const phases={running:'Updating older archive chunks',waiting_imports:'Chunk maintenance yields to approved imports',waiting_jobs:'Chunk maintenance waits for the existing reindex',sweep_waiting:'Chunk maintenance will check again later',retry_wait:'Chunk maintenance is waiting to retry',attention:'Chunk maintenance needs attention',checking_submission:'Checking maintenance worker submission'};
+        if (!publication && !index && maintenance.phase==='running') {status='Updating older archive chunks';tone='running';}
+        body.append(node('p',`${phases[maintenance.phase] || 'Chunk maintenance'} · ${maintenance.policy}`,'meta'));
+        if (maintenance.progress) {const p=maintenance.progress;body.append(node('p',`${Number(p.updated || 0).toLocaleString()} upgraded · ${Number(p.reused || 0).toLocaleString()} reused vectors · ${Number(p.unresolved || 0).toLocaleString()} records awaiting retry`,'activity-counts'));}
+        if (maintenance.progress?.issues?.length) {
+          const issues=node('details');issues.append(node('summary','Recent repair issues'));
+          for (const issue of maintenance.progress.issues) {const item=node('p',undefined,'address');item.append(node('strong',issue.reason.replaceAll('_',' ')),node('br'),node('span',issue.id));issues.append(item);}
+          body.append(issues);
+        }
+        if (maintenance.error) body.append(node('p',maintenance.error,'activity-warning'));
+      }
     }
     if (info.runtime?.[lane]===false || lane!=='indexing' && info.runtime?.wayback===false) {
       status=info.runtime?.[lane]===false ? 'Worker unavailable' : 'Wayback connection unavailable';tone='attention';
@@ -1161,7 +1178,7 @@ function renderPipelineActivity() {
 let automationDraft=null,automationDirty=false;
 try {const saved=JSON.parse(localStorage.getItem('curation-automatic-draft'));if (saved && typeof saved.enabled==='boolean' && Number.isInteger(saved.revision)) {automationDraft=saved;automationDirty=true;}} catch (_) {}
 function automaticFields(value) {
-  $('automation-enabled').checked=value.enabled;$('automation-daily').value=value.daily_usd;
+  $('automation-enabled').checked=value.enabled;$('automation-daily').value=value.daily_usd;$('automation-monthly').value=value.monthly_usd ?? 200;
   $('automation-grade').value=value.min_grade;$('automation-grade-value').value=value.min_grade;
   $('automation-criteria').value=value.grading_criteria || '';
 }
@@ -1173,27 +1190,29 @@ function renderAutomation() {
     automationDraft={...settings};automaticFields(automationDraft);
   }
   const waiting=auto.activity?.phase==='daily_budget',attention=auto.activity?.phase==='attention';
-  $('automation-state').textContent=settings.enabled ? waiting ? 'Daily limit' : attention ? 'Needs attention' : 'On' : 'Off';
+  const period=auto.budget_period==='monthly' ? 'Monthly' : 'Daily';
+  $('automation-state').textContent=settings.enabled ? waiting ? `${period} limit` : attention ? 'Needs attention' : auto.activity?.phase==='enrichment_priority' ? 'Enrichment first' : 'On' : 'Off';
   $('automation-state').dataset.tone=attention ? 'attention' : settings.enabled ? 'active' : '';
   const reset=new Date(auto.resets_at).toUTCString();
   let status=settings.enabled ? `Continuously discovering and grading. Sites at Grade ${settings.min_grade}+ are automatically captured and indexed; lower grades are saved for later.` : 'Off. Turn on automatic mode to keep discovering, grading, capturing and indexing sites.';
-  if (settings.enabled && waiting) status=`Waiting for daily Luna funds. Discovery resumes automatically after the reset at ${reset}. Captures and approved work retain their progress.`;
+  if (settings.enabled && waiting) status=`Waiting for ${period.toLowerCase()} Luna funds. Discovery resumes automatically after the reset at ${reset}. Captures and approved work retain their progress.`;
+  if (settings.enabled && auto.activity?.phase==='enrichment_priority') status='Approved-site enrichment has first use of Luna funds. Discovery grading resumes automatically when that work clears; capture and publication continue.';
   if (settings.enabled && waiting && auto.activity.required_usd>settings.daily_usd) status=`The next grading request needs a $${auto.activity.required_usd.toFixed(4)} reservation, exceeding the daily limit. Raise the limit below to continue. Progress is retained.`;
   if (settings.enabled && auto.activity?.phase==='links_exhausted') status='All currently known new links have been checked. Discovery checks again in five minutes; remembered sites are kept.';
   if (settings.enabled && auto.activity?.phase==='archive_unavailable') status='Available source pages have been checked; some archive sources are unavailable locally. See Pipeline activity for scan progress and the next check.';
   if (settings.enabled && ['attention','retry_wait'].includes(auto.activity?.phase)) status=(auto.activity.phase==='retry_wait' ? `Retrying at ${new Date(auto.activity.retry_at).toUTCString()}. ` : 'Automatic discovery needs attention. ')+(auto.activity.error || 'See Recent activity.');
   $('automation-status').textContent=status;
-  $('automation-budget').textContent=!settings.configured ? `Daily limit not configured. Default proposal: $${settings.daily_usd.toFixed(2)}/day. Saving settings includes today's earlier portal spending.` : `Today: $${auto.estimated_usd.toFixed(4)} estimated + $${auto.unresolved_usd.toFixed(4)} reserved · $${auto.remaining_usd.toFixed(4)} remaining of $${settings.daily_usd.toFixed(2)}. Resets at 00:00 UTC.`;
+  $('automation-budget').textContent=!settings.configured ? `Limits not configured. Proposal: $${settings.daily_usd.toFixed(2)}/day and $${Number(settings.monthly_usd ?? 200).toFixed(2)}/month. Saving includes this month's earlier portal spending.` : `Today: $${auto.estimated_usd.toFixed(4)} + $${auto.unresolved_usd.toFixed(4)} reserved / $${settings.daily_usd.toFixed(2)}. Month: $${Number(auto.monthly?.estimated_usd ?? 0).toFixed(4)} + $${Number(auto.monthly?.unresolved_usd ?? 0).toFixed(4)} reserved / $${Number(settings.monthly_usd ?? 200).toFixed(2)}. $${auto.remaining_usd.toFixed(4)} available. Resets use UTC.`;
   $('automation-meter').hidden=!settings.configured;$('automation-meter').max=settings.daily_usd;$('automation-meter').value=auto.estimated_usd+auto.unresolved_usd;
   $('automation-draft').textContent=automationDirty ? automationDraft.revision!==settings.revision ? 'Saved settings changed in another session. Reload saved settings before applying your changes.' : 'Unsaved settings. The current mode continues until you save.' : 'Changes take effect only when saved.';
-  for (const id of ['automation-enabled','automation-daily','automation-grade','automation-criteria']) $(id).disabled=busy;
+  for (const id of ['automation-enabled','automation-daily','automation-monthly','automation-grade','automation-criteria']) $(id).disabled=busy;
   $('automation-save').disabled=busy || automationDraft.revision!==settings.revision;
   $('automation-reload').disabled=busy;
-  $('automation-footer').textContent=`Private intranet · automatic mode ${settings.enabled ? 'on' : 'off'}${settings.configured ? ` · $${settings.daily_usd.toFixed(2)}/day Luna limit (UTC)` : ''}`;
+  $('automation-footer').textContent=`Private intranet · automatic mode ${settings.enabled ? 'on' : 'off'}${settings.configured ? ` · $${settings.daily_usd.toFixed(2)}/day · $${Number(settings.monthly_usd ?? 200).toFixed(2)}/month (UTC)` : ''}`;
 }
 if (automationDraft) automaticFields(automationDraft);
-for (const id of ['automation-enabled','automation-daily','automation-grade','automation-criteria']) $(id).addEventListener('input',()=>{
-  automationDraft={enabled:$('automation-enabled').checked,daily_usd:$('automation-daily').value,min_grade:Number($('automation-grade').value),grading_criteria:$('automation-criteria').value,revision:automationDraft?.revision ?? data?.automation?.settings.revision};
+for (const id of ['automation-enabled','automation-daily','automation-monthly','automation-grade','automation-criteria']) $(id).addEventListener('input',()=>{
+  automationDraft={enabled:$('automation-enabled').checked,daily_usd:$('automation-daily').value,monthly_usd:$('automation-monthly').value,min_grade:Number($('automation-grade').value),grading_criteria:$('automation-criteria').value,revision:automationDraft?.revision ?? data?.automation?.settings.revision};
   automationDirty=true;$('automation-grade-value').value=automationDraft.min_grade;
   try {localStorage.setItem('curation-automatic-draft',JSON.stringify(automationDraft));} catch (_) {}
   renderAutomation();
@@ -1205,7 +1224,7 @@ $('automation-reload').addEventListener('click',()=>{
 });
 $('automation-form').addEventListener('submit',event=>{
   event.preventDefault();if (!data?.automation || busy) return;
-  const payload={enabled:$('automation-enabled').checked,daily_usd:Number($('automation-daily').value),min_grade:Number($('automation-grade').value),grading_criteria:$('automation-criteria').value,revision:automationDraft.revision};
+  const payload={enabled:$('automation-enabled').checked,daily_usd:Number($('automation-daily').value),monthly_usd:Number($('automation-monthly').value),min_grade:Number($('automation-grade').value),grading_criteria:$('automation-criteria').value,revision:automationDraft.revision};
   act('Saving automatic mode',async()=>{
     const result=await request('/api/automation',payload);data.automation=result;automationDraft={...result.settings};automationDirty=false;
     automaticFields(automationDraft);try {localStorage.removeItem('curation-automatic-draft');} catch (_) {}
