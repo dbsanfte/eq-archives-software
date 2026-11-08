@@ -239,6 +239,48 @@ def test_all_three_workers_make_independent_progress_and_keep_reindex_job(candid
     assert not any(thread.is_alive() for thread in worker.threads.values())
 
 
+def test_import_submits_while_publication_is_blocked_and_keeps_legacy_job(candidate, monkeypatch):
+    root, row = candidate
+    manifest = manifest_for(row)
+    blocked, release, submitted = threading.Event(), threading.Event(), threading.Event()
+    created = []
+    legacy = {'metadata': {'name': 'existing-full-reindex', 'uid': 'unchanged'},
+              'spec': {}, 'status': {'active': 1}}
+    class Kube:
+        def jobs(self): return [legacy] + created
+        def create(self, job): created.append(job); submitted.set()
+    worker = Worker(root, kube=Kube())
+    monkeypatch.setenv('IMPORT_IMAGE', 'dbsanfte/frontend@sha256:' + '1'*64)
+    def operation(lane):
+        if lane == Lane.INDEXING:
+            blocked.set()
+            assert release.wait(10)
+    monkeypatch.setattr(worker, 'operation', operation)
+    with connect(root) as store:
+        store.db.execute("INSERT INTO batches VALUES (?,'published_waiting_index',?,?,?,NULL,NULL,'now','now')",
+                         (manifest['batch_id'], json.dumps(manifest), digest(manifest), json.dumps({'commit': 'b'*40})))
+        store.db.execute("UPDATE candidates SET state='published'")
+        store.db.commit()
+    try:
+        worker.start()
+        assert blocked.wait(3)
+        assert submitted.wait(3), 'Pending imports must start before slow publication finishes'
+        assert not release.is_set()
+        wait_until(lambda: current_index_state(root) == 'indexing')
+        assert len(created) == 1 and created[0]['metadata']['name'] == 'eqarchives-captures-' + manifest['batch_id']
+        assert legacy == {'metadata': {'name': 'existing-full-reindex', 'uid': 'unchanged'},
+                          'spec': {}, 'status': {'active': 1}}
+    finally:
+        release.set()
+        worker.close()
+    assert not worker.index_thread.is_alive()
+
+
+def current_index_state(root):
+    with connect(root) as store:
+        return store.db.execute('SELECT state FROM batches').fetchone()[0]
+
+
 def test_restart_retains_all_queues_and_health_requires_all_workers(candidate, monkeypatch):
     root, _ = candidate
     with connect(root) as store:
@@ -257,6 +299,7 @@ def test_restart_retains_all_queues_and_health_requires_all_workers(candidate, m
             assert all(json.loads(rows[identifier]['result']) == {'retained': True} for identifier in (capture, publication, gathering))
         app = create_app(root, start_worker=True)
         app.state.worker = worker
+        worker.index_thread = SimpleNamespace(is_alive=lambda: True, ident=1, join=lambda timeout: None)
         for lane in Lane:
             worker.threads[lane] = SimpleNamespace(is_alive=lambda: True, ident=1, join=lambda timeout: None)
         assert call(app, 'GET', '/healthz').status_code == 200
@@ -264,6 +307,9 @@ def test_restart_retains_all_queues_and_health_requires_all_workers(candidate, m
             worker.threads[lane].is_alive = lambda: False
             assert call(app, 'GET', '/healthz').status_code == 503
             worker.threads[lane].is_alive = lambda: True
+        worker.index_thread.is_alive = lambda: False
+        assert call(app, 'GET', '/healthz').status_code == 503
+        worker.index_thread.is_alive = lambda: True
         worker.transport.failed = True
         assert call(app, 'GET', '/healthz').status_code == 503
         worker.transport.failed = False
@@ -274,6 +320,7 @@ def test_restart_retains_all_queues_and_health_requires_all_workers(candidate, m
             worker_lease(root)
         for lane in Lane:
             worker.threads[lane].is_alive = lambda: False
+        worker.index_thread.is_alive = lambda: False
         worker.close()
         with worker_lease(root):
             pass

@@ -518,7 +518,7 @@ until the operator changes the approval. Show failures independently of capped
 operation lists, and isolate import submission failures per site. Reconcile an
 uncertain Kubernetes create before advancing; retain the foreground-import serialization guard.
 Candidate gathering,
-capture, and publication/indexing have independent serial workers under one process lease;
+capture, and publication have independent serial workers under one process lease;
 slow downloads, Git publication and waiting imports must not block the other
 workers. Scope busy checks, claims and explicit resume to the relevant worker.
 Share one persistent Wayback client across capture, discovery and evidence checks,
@@ -528,6 +528,10 @@ to resumed portal work without rewriting saved source manifests or cumulative
 limits. Waiting counts toward the original deadline; closing a session
 must not close another worker’s connection. Keep serial publication with the
 foreground-import serialization guard.
+Run the sole import Job reconciler independently of publication under that same
+lease, with a ten-second idle interval and publication-completion wake. Long
+Git work must not delay completed Job reconciliation or approved imports. Include
+this thread in health/shutdown/lease retention; never add a second submission loop.
 Expose worker availability independently of capped operation lists, require all
 workers and the shared transport for health and retain the lease until all stop.
 SQLite BUSY/LOCKED failures retry worker turns without killing a lane. After

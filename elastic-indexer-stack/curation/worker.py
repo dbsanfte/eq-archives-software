@@ -147,24 +147,28 @@ class Worker:
         # their queue, without migrating payloads, checkpoints or approvals.
         self.threads = {lane: threading.Thread(target=self.run, args=(lane,),
                         name=f"curation-{lane.value}", daemon=True) for lane in Lane}
+        self.index_wake = threading.Event()
+        self.index_thread = threading.Thread(target=self.run_index_jobs, name='curation-index-jobs', daemon=True)
 
     def start(self):
-        for thread in self.threads.values():
+        for thread in (*self.threads.values(), self.index_thread):
             thread.start()
 
     def healthy(self):
-        return not self.stop.is_set() and self.transport.healthy() and all(thread.is_alive() for thread in self.threads.values())
+        return not self.stop.is_set() and self.transport.healthy() and all(
+            thread.is_alive() for thread in (*self.threads.values(), self.index_thread))
 
     def close(self):
         self.stop.set()
         self.transport.wake()
+        self.index_wake.set()
         deadline = time.monotonic() + 100
-        for thread in self.threads.values():
+        for thread in (*self.threads.values(), self.index_thread):
             if thread.ident is not None:
                 thread.join(timeout=max(0, deadline - time.monotonic()))
         # Never hand ownership to another process while a download or Git
         # request is still in flight. Process exit releases a retained lease.
-        if not any(thread.is_alive() for thread in self.threads.values()):
+        if not any(thread.is_alive() for thread in (*self.threads.values(), self.index_thread)):
             self.transport.close()
             self.lease.close()
 
@@ -192,6 +196,7 @@ class Worker:
                 row=store.db.execute('SELECT state FROM candidates WHERE id=?',(site['id'],)).fetchone()
                 store.db.execute('UPDATE candidates SET state=? WHERE id=?',(transition(row['state'],Action.PUBLISH),site['id']))
             store.db.commit()
+        self.index_wake.set()
 
     def capture_progress(self, operation, batch_id, snapshot):
         with connect(self.root) as store:
@@ -485,6 +490,29 @@ class Worker:
                 LOG.warning('Curation %s worker waiting for SQLite; queued work retained for next turn',lane.value)
             self.stop.wait(10)
 
+    def run_index_jobs(self):
+        # The same process lease owns this sole Job reconciler. Publication can
+        # spend minutes on Git without holding completion checks/submissions.
+        with self.daily_budget.bind():
+            while not self.stop.is_set():
+                try:
+                    self.indexing_turn()
+                except sqlite3.OperationalError as error:
+                    if not database_busy(error):raise
+                    LOG.warning('Curation import reconciliation waiting for SQLite; queued work retained')
+                self.index_wake.wait(10)
+                self.index_wake.clear()
+
+    def indexing_turn(self):
+        try:
+            self.indexing()
+        except Exception as error:
+            if database_busy(error):raise
+            detail = str(error) if isinstance(error, CrawlError) else "Index submission paused; Kubernetes state unavailable"
+            with connect(self.root) as store:
+                store.db.execute("UPDATE batches SET error=? WHERE state IN ('published_waiting_index','indexing','index_budget_waiting')", (detail,))
+                store.db.commit()
+
     def run_turn(self, lane):
         if lane==Lane.CANDIDATES:
             from policy_scheduler import import_pending,write_control
@@ -517,12 +545,3 @@ class Worker:
         self.operation(lane)
         if self.stop.is_set():
             return
-        if lane == Lane.INDEXING:
-            try:
-                self.indexing()
-            except Exception as error:
-                if database_busy(error):raise
-                detail = str(error) if isinstance(error, CrawlError) else "Index submission paused; Kubernetes state unavailable"
-                with connect(self.root) as store:
-                    store.db.execute("UPDATE batches SET error=? WHERE state IN ('published_waiting_index','indexing','index_budget_waiting')", (detail,))
-                    store.db.commit()

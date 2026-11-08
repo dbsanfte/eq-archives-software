@@ -725,9 +725,13 @@ Jobs. Disk-pressure image garbage collection may remove locally built reindex
 images: restore the **same** image from Docker into k3s/containerd after dependent
 services are healthy, letting the existing pending Job resume itself.
 
-One replica uses `Recreate` and an exclusive process lease covering three worker
+One replica uses `Recreate` and an exclusive process lease covering three operation
 threads: candidate gathering (discovery, manual sites and evidence grading), capture,
-and publication/indexing. Atomic SQLite claims prevent two operations from using the same worker; API actions and retries check only
+and publication. A separate import reconciler under the same lease observes
+completion and submits approved imports every ten seconds, with an immediate
+wake after publication. Long Git work cannot hold that loop. It retains one
+foreground import slot and never restarts legacy reindex Jobs. Health and graceful
+shutdown include all four threads. Atomic SQLite claims prevent two operations from using the same worker; API actions and retries check only
 their own worker. `/api/queue` includes uncapped `workers.candidates`,
 `workers.capture` and `workers.indexing` activity independently of its recent-operations
 list. Capture and candidate gathering take fair turns on one persistent Wayback
