@@ -321,7 +321,10 @@ authored directories, code and populated source textareas. Attach post/feed
 attribution to its own first body block without merging entries. Bold first-row
 data alone is not evidence of table headers. Preserve v10 checkpoints; only exact
 source/view/request matches may reuse vectors. Ordinary delivery does not change
-the active broad reindex Job; a new-policy handoff remains an operator operation.
+the active broad reindex Job. Routine same-model policy updates run in bounded
+curation maintenance slices after legacy broad writers finish, yielding to imports.
+Model/image migrations retain operator handoffs; do not restart broad Jobs for
+ordinary chunking delivery.
 Unclosed empty table rows must unwrap rather than delete their populated
 descendants. Every archive-status projection clears summary/OCR vectors along
 with body vectors, regardless of its diagnostic reason.
@@ -432,7 +435,7 @@ Persist revision-checked settings and browser-local unsaved drafts. Saved automa
 mode disables and greys the entire manual Discover pane, including its slider and
 advanced controls; drafts and budget waits cannot re-enable it. Disabling the saved
 mode restores manual controls and drafts, subject to worker availability. Keep one
-shared private SQLite daily reservation ledger across portal grading and new
+shared private SQLite daily/monthly reservation ledger across portal grading and new
 import Jobs; reserve atomically before calls, retain uncertain costs and count
 corrections. Include prior current-day portal spend on configuration. Use UTC
 midnight resets, retain original operation limits/deadlines, and resume funded
@@ -445,7 +448,14 @@ modify previous Jobs or infer indexing completion from a budget exit. New import
 Jobs require a verified completion diagnostic. Automatic imports that exceed the
 Job time limit can continue in a new numbered Job with the original budget/cache. Disabling automatic mode stops new
 automatic discovery/approvals; approved work continues under the daily cap.
-Do not enable while a legacy paid import without the shared ledger is unfinished.
+The operator-selected limits are $20/day and $200/calendar month; deployment
+preserves saved settings and automatic-mode opt-in. Both limits include actual and
+uncertain reservations across workers, UTC resets and prior current-month costs.
+Approved enrichment has priority over discovery; deny grading before reservation
+while heartbeat-backed import demand remains, and automatically resume original
+operations without renewing their limits/deadlines. Per-site failures cannot keep
+priority indefinitely. Do not change caps or enable while an older paid Job lacks
+shared monthly accounting. Never alter existing paid Jobs to add it.
 Automatic promotion requires verified grading and coverage, preserves board/shared
 account boundaries, and uses whole-site scopes only for pristine suggestions.
 Keep lower grades in Saved for later and exclude their identities from discovery.
@@ -504,7 +514,7 @@ that cancellation. Existing multi-site batches resume together. Retain failed
 preflight approvals as undoable entries with a decision-bound error; skip them
 until the operator changes the approval. Show failures independently of capped
 operation lists, and isolate import submission failures per site. Reconcile an
-uncertain Kubernetes create before advancing; retain the unfinished-Job guard.
+uncertain Kubernetes create before advancing; retain the foreground-import serialization guard.
 Candidate gathering,
 capture, and publication/indexing have independent serial workers under one process lease;
 slow downloads, Git publication and waiting imports must not block the other
@@ -515,7 +525,7 @@ shared backoff and separate durable operation budgets. Apply this connection pol
 to resumed portal work without rewriting saved source manifests or cumulative
 limits. Waiting counts toward the original deadline; closing a session
 must not close another worker’s connection. Keep serial publication with the
-existing unfinished-Job guard for imports.
+foreground-import serialization guard.
 Expose worker availability independently of capped operation lists, require all
 workers and the shared transport for health and retain the lease until all stop.
 SQLite BUSY/LOCKED failures retry worker turns without killing a lane. After
@@ -621,8 +631,9 @@ the real SSH configuration offline in the built-image smoke check.
 
 Do not alter, suspend, delete or restart existing indexing Jobs or their source
 checkouts during curation delivery. Its controller has only Jobs get/list/create
-permissions and waits for other unfinished, unsuspended Jobs, including pending/
-retrying Jobs with active=0. The publisher uses its own bare treeless repository
+permissions. Foreground imports wait only for other unfinished, unsuspended
+foreground capture imports, including pending/retrying Jobs with active=0. Broad
+reindexes and maintenance never block that slot. The publisher uses its own bare treeless repository
 and dedicated archive deploy key, without an archive worktree or force push. Keep
 private state on its PVC. Import Jobs mount approved sources read-only and a
 separate enrichment subdirectory writable. They receive their dedicated
@@ -1074,3 +1085,20 @@ build SHA, and the changed behavior in a real browser. Include mobile verificati
 for responsive UI work. Report what changed, tests actually run, the PR/commit,
 deployment status and any remaining limitation. Documentation-only work with an
 explicit skip-CI request should finish without launching a deployment.
+
+
+Routine same-model chunk updates use `curation/policy_maintenance.py` and
+`policy_scheduler.py`: one 2,000-record/ten-minute slice, CUDA only, no Luna or
+source preparation, cooperative yield between batches, 15-minute hard deadline.
+Wait for legacy broad writers to finish naturally; leave their specs/pods/sources
+untouched. Scope durable cursors/diagnostics and the least-privileged read/index
+account to the physical ES index plus model/policy/extraction checkpoints. Use
+exact bounded remote-free source reads and optimistic atomic updates; never
+create/delete documents or downgrade newer policies. Preserve readers, enrichment,
+dates and image workflows; reuse vectors only with exact source/view/request
+proof. Quarantine per-record errors and repeated hard worker interruptions while
+later IDs proceed; known transport pauses do not consume that allowance. Resolve
+diagnostics only after acknowledged or fully verified external repairs. Use small
+atomic control hints, never readonly portal SQLite WAL reads. Keep per-slice
+progress/issue receipts bounded and visible in the collapsed pipeline pane; only
+new disposable maintenance Jobs have a TTL. Preserve prior full/index Jobs.

@@ -124,6 +124,13 @@ spec:
               value: /archive-source-objects
             - name: KUBERNETES_CREDENTIALS_DIR
               value: /run/kubernetes
+            - name: PASSAGE_MAINTENANCE_ENABLED
+              value: '1'
+            - name: POLICY_INDEX
+              valueFrom:
+                secretKeyRef:
+                  name: eqarchives-policy-indexer-secrets
+                  key: es_index
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

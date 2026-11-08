@@ -8,7 +8,7 @@ import time
 from candidate_checks import require_finished, start as start_check
 from common import CrawlError, capture_scope, digest, now
 from coverage_check import refresh, require_new
-from daily_budget import DailyBudget, DailyBudgetPause, AutomaticStopped
+from daily_budget import DailyBudget, DailyBudgetPause, AutomaticStopped, EnrichmentPriorityPause
 from portal import Stage, candidate_filter, decorate
 from review import _apply_decisions, record
 from spending import Spending
@@ -39,7 +39,7 @@ def eligible(store, row):
 
 def seed_spend(root, account):
     """Bounded shallow ledger reads; no archive/source enumeration or paid work."""
-    day = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    day = datetime.now(timezone.utc).replace(day=1,hour=0, minute=0, second=0, microsecond=0)
     deadline = time.monotonic() + 5
     try:
         for path in Spending(root).ledgers():
@@ -67,7 +67,9 @@ def configure(root, payload, kube=None):
     account = budget(root)
     # New Jobs always share this ledger. Existing Jobs must finish untouched;
     # older images cannot be claimed to honor a newly configured daily ceiling.
-    if kube and (payload['enabled'] or not account.settings()['configured']):
+    prior=account.settings()
+    limits_changed=(payload['daily_usd']!=prior['daily_usd'] or payload.get('monthly_usd',prior['monthly_usd'])!=prior['monthly_usd'])
+    if kube and (payload['enabled'] or not prior['configured'] or limits_changed):
         from jobs import finished
         for job in kube.jobs():
             if (job['metadata'].get('labels', {}).get('app') == 'eqarchives-capture-import'
@@ -75,6 +77,8 @@ def configure(root, payload, kube=None):
                 env = job['spec']['template']['spec']['containers'][0].get('env', [])
                 if not any(item.get('name') == 'LUNA_DAILY_BUDGET_ROOT' for item in env):
                     raise CrawlError('An earlier enrichment Job is still running without daily budget control. Let it finish before enabling automatic mode.')
+                if not any(item.get('name')=='LUNA_MONTHLY_BUDGET_VERSION' and item.get('value')=='calendar-v1' for item in env):
+                    raise CrawlError('An earlier enrichment Job is still running without monthly budget control. Let it finish before changing spending limits.')
     seed_spend(Path(root), account)
     saved = account.configure(payload)
     with connect(root) as store:
@@ -131,7 +135,7 @@ def promote(root, account):
             _apply_decisions(store, [choice], UNDO_SECONDS, require_finished)
             grant = json.loads(store.db.execute('SELECT decision FROM candidates WHERE id=?', (row['id'],)).fetchone()[0])
             grant['automatic'] = {'revision': config['revision'], 'min_grade': config['min_grade'],
-                                  'daily_usd': config['daily_usd'], 'grading_criteria': config['grading_criteria'],
+                                  'daily_usd': config['daily_usd'], 'monthly_usd':config.get('monthly_usd',200), 'grading_criteria': config['grading_criteria'],
                                   'enrichment_budget': 'daily-v1', 'grade': row['rating']['grade']}
             grant['origin'] = 'automatic_policy'
             store.db.execute('UPDATE candidates SET decision=? WHERE id=?', (json.dumps(grant), row['id']))
@@ -156,11 +160,14 @@ def schedule(root, account):
     with connect(root) as store:
         if active := active_operation(store, Lane.CANDIDATES):
             if json.loads(active['payload']).get('automatic'):
-                store.set('automatic_activity', {'phase': 'discovering', 'operation': active['id'], 'revision': config['revision']})
+                store.set('automatic_activity', {'phase': 'enrichment_priority' if snapshot.get('enrichment_pending') else 'discovering', 'operation': active['id'], 'revision': config['revision']})
             return
         activity = store.get('automatic_activity', {})
         if snapshot['remaining_usd'] <= 0:
             store.set('automatic_activity', {'phase': 'daily_budget', 'retry_at': snapshot['resets_at']})
+            return
+        if snapshot.get('enrichment_pending'):
+            store.set('automatic_activity',{'phase':'enrichment_priority'})
             return
         # Only automation-owned pauses are resumed. Manual paused runs retain
         # their explicit-resume semantics and their original limits.
@@ -214,8 +221,10 @@ def finished(root, operation, result):
 
 
 def pause_detail(error, operation=None):
+    if isinstance(error, EnrichmentPriorityPause):
+        return {'reason':'enrichment_priority'}
     if isinstance(error, DailyBudgetPause):
-        return {'reason': 'daily_budget', 'required_usd': error.amount, 'retry_at': error.retry_at}
+        return {'reason': 'daily_budget', 'required_usd': error.amount, 'retry_at': error.retry_at,'budget_period':error.period}
     if isinstance(error, AutomaticStopped):
         return {'reason': 'disabled'}
     return None
@@ -225,23 +234,24 @@ def resume_owned(root, lane, account):
     if lane == Lane.CAPTURE:
         return  # Capture recovery uses the shared FIFO, regardless of discovery mode.
     snapshot = account.snapshot()
-    if not snapshot['settings']['enabled']:
-        return
     kinds = OPERATION_KINDS[Lane(lane)]
     with connect(root) as store:
         store.db.execute('BEGIN IMMEDIATE')
         if active_operation(store, lane):
             return
         rows = store.db.execute(f"""SELECT * FROM operations WHERE state='interrupted'
-            AND json_extract(payload,'$.automatic')=1 AND kind IN ({','.join('?' for _ in kinds)})
+            AND (json_extract(payload,'$.automatic')=1 OR json_extract(result,'$.automatic_pause.reason')='enrichment_priority')
+            AND kind IN ({','.join('?' for _ in kinds)})
             ORDER BY updated,created,rowid""", kinds).fetchall()
         for row in rows:
             operation = unpack(row)
             pause = (operation['result'] or {}).get('automatic_pause') or {}
             reason = pause.get('reason')
-            allowed = (reason == 'disabled' or
+            priority=reason=='enrichment_priority' and not snapshot.get('enrichment_pending')
+            allowed = (priority and (not operation['payload'].get('automatic') or snapshot['settings']['enabled']) or
+                       snapshot['settings']['enabled'] and (reason == 'disabled' or
                        reason == 'daily_budget' and snapshot['remaining_usd'] >= pause.get('required_usd', float('inf')) or
-                       operation['error'] == 'Worker stopped; resume explicitly')
+                       operation['error'] == 'Worker stopped; resume explicitly'))
             if allowed:
                 # Nonresumable failures need no event scan. Retaining hundreds
                 # of them must not monopolize the database write lock each tick.

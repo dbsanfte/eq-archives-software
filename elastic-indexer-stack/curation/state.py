@@ -77,6 +77,7 @@ def connect(directory):
                 attempts INTEGER NOT NULL, retry_at TEXT, paused INTEGER NOT NULL DEFAULT 0);
             CREATE INDEX IF NOT EXISTS operation_activity ON operations(updated DESC);
             CREATE INDEX IF NOT EXISTS batch_activity ON batches(updated DESC);
+            CREATE INDEX IF NOT EXISTS batch_work_state ON batches(state,created,id);
             CREATE INDEX IF NOT EXISTS batch_metadata ON batches(
                 id,state,manifest_sha256,publication,job,error,created,updated);
         """)

@@ -1632,7 +1632,7 @@ async def continuous_mode_flow(browser,base,width):
     save_release=asyncio.Event();save_release.set()
     page.on('pageerror',lambda error:errors.append(str(error)))
     snapshot=await (await context.request.get(base+'/api/queue?filter=candidates')).json()
-    config={'enabled':False,'configured':False,'daily_usd':2.0,'min_grade':2,'grading_criteria':'','revision':0}
+    config={'enabled':False,'configured':False,'daily_usd':2.0,'monthly_usd':200.0,'min_grade':2,'grading_criteria':'','revision':0}
     auto={'settings':config,'estimated_usd':0.0,'unresolved_usd':0.0,'remaining_usd':2.0,
           'resets_at':'2026-10-10T00:00:00+00:00','activity':{},'held':0}
     row=snapshot['candidates'][0]
@@ -1671,6 +1671,7 @@ async def continuous_mode_flow(browser,base,width):
     await expect(page.locator('#automation-grade')).to_have_value('2')
     await page.locator('#automation-enabled').check()
     await page.locator('#automation-daily').fill('5.50')
+    await page.locator('#automation-monthly').fill('150.00')
     await page.locator('#automation-grade').fill('3')
     await page.locator('#automation-form .grading-options > summary').click()
     await page.locator('#automation-criteria').fill('Cleric guilds')
@@ -1684,6 +1685,7 @@ async def continuous_mode_flow(browser,base,width):
     await page.locator('#automation-settings > summary').click()
     await expect(page.locator('#automation-enabled')).to_be_checked()
     await expect(page.locator('#automation-daily')).to_have_value('5.50')
+    await expect(page.locator('#automation-monthly')).to_have_value('150.00')
     await expect(page.locator('#automation-grade')).to_have_value('3')
     await page.locator('#automation-form .grading-options > summary').click()
     await expect(page.locator('#automation-criteria')).to_have_value('Cleric guilds')
@@ -1693,12 +1695,12 @@ async def continuous_mode_flow(browser,base,width):
         assert box['height']>=44 and box['width']>=44,(target,box)
     save_release.clear()
     await page.locator('#automation-save').click()
-    for identifier in ('#automation-enabled','#automation-daily','#automation-grade','#automation-criteria'):
+    for identifier in ('#automation-enabled','#automation-daily','#automation-monthly','#automation-grade','#automation-criteria'):
         await expect(page.locator(identifier)).to_be_disabled()
     await expect(page.locator('#automation-state')).to_have_text('Off')
     save_release.set();await settled(page)
     await expect(page.locator('#automation-state')).to_have_text('On')
-    assert posts==[('/api/automation',{'enabled':True,'daily_usd':5.5,'min_grade':3,'grading_criteria':'Cleric guilds','revision':0})]
+    assert posts==[('/api/automation',{'enabled':True,'daily_usd':5.5,'monthly_usd':150,'min_grade':3,'grading_criteria':'Cleric guilds','revision':0})]
     # Saved automatic mode disables the entire manual pane, even while idle.
     for control in await manual_controls.all():
         await expect(control).to_be_disabled()
@@ -1717,7 +1719,7 @@ async def continuous_mode_flow(browser,base,width):
     await page.evaluate('refresh()');await settled(page)
     await expect(page.locator('#automation-state')).to_have_text('Daily limit')
     await expect(page.locator('#automation-status')).to_contain_text('resumes automatically')
-    await expect(page.locator('#automation-budget')).to_contain_text('$0.0000 remaining')
+    await expect(page.locator('#automation-budget')).to_contain_text('$0.0000 available')
     await expect(page.locator('#automation-grade')).to_have_value('1')
     for control in await manual_controls.all():
         await expect(control).to_be_disabled()
@@ -1726,6 +1728,18 @@ async def continuous_mode_flow(browser,base,width):
     await safe_layout(page,width)
     await page.screenshot(path=f'/tmp/curation-continuous-light-{width}.png',full_page=True)
     assert len(posts)==1
+    # Month-wide limits and enrichment priority remain visible while drafts survive.
+    auto.update(budget_period='monthly',monthly={'estimated_usd':149.9,'unresolved_usd':.1,'remaining_usd':0})
+    await page.evaluate('refresh()');await settled(page)
+    await expect(page.locator('#automation-state')).to_have_text('Monthly limit')
+    await expect(page.locator('#automation-budget')).to_contain_text('Month: $149.9000 + $0.1000 reserved / $150.00')
+    await expect(page.locator('#automation-grade')).to_have_value('1')
+    auto.update(remaining_usd=2,activity={'phase':'enrichment_priority'},enrichment_pending=True)
+    await page.evaluate('refresh()');await settled(page)
+    await expect(page.locator('#automation-state')).to_have_text('Enrichment first')
+    await expect(page.locator('#automation-status')).to_contain_text('Approved-site enrichment has first use')
+    await expect(page.locator('#discover')).to_be_disabled()
+    await safe_layout(page,width)
     # Another operator's revision cannot be overwritten by polling or a stale tab.
     config['revision']+=1
     await page.evaluate('refresh()');await settled(page)
@@ -2195,7 +2209,7 @@ async def pipeline_activity_flow(browser,base,width):
           'estimated_usd':.12,'unresolved_usd':.02,'remaining_usd':1.86,'resets_at':datetime.fromtimestamp(deadline,timezone.utc).isoformat(),
           'activity':{'phase':'discovering'},'held':0}
     info={'discovery':discovery,'next_capture':None,'runtime':{'candidates':True,'capture':True,'indexing':True,'wayback':True},
-          'indexing':{'state':'published_waiting_index','job':{'waiting_for':['existing-full-reindex']},'error':None,'site':None},
+          'indexing':{'state':'published_waiting_index','job':{'waiting_for':['eqarchives-captures-'+32*'a']},'error':None,'site':None},
           'recent':[{'id':'a'*32,'label':'Automatically queued for capture','state':'automatic_promoted','at':stamp,'site':{'id':site['id'],'url':site['url']}}]}
     workers={'candidates':discovery,'capture':capture,'indexing':None}
     async def fixture(route):
@@ -2225,6 +2239,7 @@ async def pipeline_activity_flow(browser,base,width):
     await expect(page.locator('#activity-candidates')).to_contain_text('660 sources unavailable or too large')
     await page.locator('#automation-settings > summary').click()
     await page.locator('#automation-daily').fill('5.50')
+    await page.locator('#automation-monthly').fill('150.00')
     # The last automatic result remains available even when omitted from operations.
     workers['candidates']=None;discovery['state']='completed';discovery['result']['progress'].update(phase='complete',stop_reason='links_exhausted')
     auto['activity']={'phase':'links_exhausted','retry_at':auto['resets_at']}
@@ -2233,6 +2248,7 @@ async def pipeline_activity_flow(browser,base,width):
     await expect(page.locator('#activity-candidates')).to_contain_text('Next discovery check in')
     await expect(page.locator('#activity-candidates')).to_contain_text('Last run: 7/50')
     await expect(page.locator('#automation-daily')).to_have_value('5.50')
+    await expect(page.locator('#automation-monthly')).to_have_value('150.00')
     discovery['result']['progress']['stop_reason']='archive_unavailable'
     auto['activity']['phase']='archive_unavailable'
     await page.evaluate('refresh()');await settled(page)
@@ -2240,6 +2256,7 @@ async def pipeline_activity_flow(browser,base,width):
     await expect(page.locator('#activity-candidates')).to_contain_text('Some files or metadata are missing locally')
     await expect(page.locator('#activity-candidates')).not_to_contain_text('No new links remain')
     await expect(page.locator('#automation-daily')).to_have_value('5.50')
+    await expect(page.locator('#automation-monthly')).to_have_value('150.00')
     await page.locator('#pipeline-recent > summary').click()
     await expect(page.locator('#pipeline-events')).to_contain_text('Automatically queued for capture')
     await page.evaluate('refresh()');assert await page.locator('#pipeline-recent').get_attribute('open') is not None
@@ -2248,7 +2265,17 @@ async def pipeline_activity_flow(browser,base,width):
     await expect(page.locator('#activity-capture > summary')).to_contain_text('Checking archive listings')
     await expect(page.locator('#activity-capture')).to_contain_text('451 of 660 archive listings checked · 209 left')
     await expect(page.locator('#activity-capture')).to_contain_text('16 sites waiting')
-    await expect(page.locator('#activity-indexing > summary')).to_contain_text('Waiting for existing indexing Jobs')
+    await expect(page.locator('#activity-indexing > summary')).to_contain_text('Waiting for another approved site')
+    info['maintenance']={'policy':'eq-passages-480-v11','phase':'waiting_imports','progress':{
+        'updated':2000,'reused':100,'unresolved':1,'issues':[{'id':'websites/large.example/'+200*'x'+'/<script>alert(1)</script>', 'reason':'source_unavailable'}]}}
+    await page.evaluate('refresh()');await settled(page)
+    await expect(page.locator('#activity-indexing')).to_contain_text('Chunk maintenance yields to approved imports')
+    await expect(page.locator('#activity-indexing')).to_contain_text('2,000 upgraded · 100 reused vectors · 1 records awaiting retry')
+    await page.locator('#activity-indexing > summary').click()
+    await page.locator('#activity-indexing details > summary').click()
+    await expect(page.locator('#activity-indexing')).to_contain_text('<script>alert(1)</script>')
+    assert await page.locator('#activity-indexing script').count()==0
+    await safe_layout(page,width)
     await page.locator('#activity-capture .activity-site').focus()
     capture['result']['progress']['files']=3
     await page.evaluate('refresh()')

@@ -296,7 +296,7 @@ def main():
                 print('Import status could not be saved; consult this Job log.', flush=True)
     try:
         if budget_root := os.environ.get('LUNA_DAILY_BUDGET_ROOT'):
-            contexts.enter_context(DailyBudget(budget_root).bind())
+            contexts.enter_context(DailyBudget(budget_root).bind(purpose='enrichment',owner=job_name or None))
         batch = read_batch(args.root, args.batch, args.manifest_sha256)
         settings = policy(batch["manifest"])
         if not re.fullmatch(r'[a-f0-9]{32}', batch['manifest']['batch_id']):

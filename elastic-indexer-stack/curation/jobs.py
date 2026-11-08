@@ -1,4 +1,4 @@
-"""Read existing Jobs; create deterministic import Jobs only when ingestion is idle."""
+"""Read existing Jobs; serialize foreground imports independently of maintenance."""
 
 import json
 import os
@@ -56,10 +56,12 @@ def finished(job):
 
 
 def blockers(jobs, own_name):
-    # Conservatively wait for every other unfinished, unsuspended Job in this
-    # namespace, including Jobs awaiting scheduling or retrying with active=0.
+    # Only other foreground imports share this slot. Pending/retrying imports
+    # count too; legacy reindex and bounded maintenance Jobs never hold it.
     return sorted(job["metadata"]["name"] for job in jobs
                   if job["metadata"]["name"] != own_name
+                  and (job['metadata'].get('labels',{}).get('app')=='eqarchives-capture-import'
+                       or re.fullmatch(r'eqarchives-captures-[a-f0-9]{32}(?:-r[1-9][0-9]{0,5})?',job['metadata']['name']))
                   and not finished(job) and not job["spec"].get("suspend", False))
 
 
@@ -100,6 +102,7 @@ def import_job(batch, image):
                                                        {"name": "SSL_CERT_FILE", "value": "/usr/local/lib/python3.13/site-packages/certifi/cacert.pem"},
                                                        {"name": "IMPORT_JOB_NAME", "value": import_name(batch)},
                                                        {"name": "LUNA_DAILY_BUDGET_ROOT", "value": "/luna-budget"},
+                                                       {"name": "LUNA_MONTHLY_BUDGET_VERSION", "value": "calendar-v1"},
                                                        {"name": "EMBEDDING_CACHE_PATH", "value": "/indexing-state/embeddings.sqlite"},
                                                        {"name": "DISCUSSION_CATALOG_PATH", "value": "/indexing-state/discussions.sqlite"},
                                                        {"name": "EMBEDDING_URL", "value": "http://nomic-embeddings-rtx3080.eqarchives-es.svc.cluster.local:8080"},

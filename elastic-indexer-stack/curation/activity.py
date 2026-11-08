@@ -71,6 +71,7 @@ def snapshot(store, worker=None):
         runtime = {lane.value: thread.is_alive() and not worker.stop.is_set() for lane, thread in worker.threads.items()}
         runtime['wayback'] = worker.transport.healthy() and not worker.stop.is_set()
     return {'discovery': discovery, 'next_capture': dict(next_capture) if next_capture else None,
+            'maintenance':store.get('policy_maintenance',{}),
             'next_retry': dict(retry) if retry else None,
             'indexing': index, 'runtime': runtime,
             'recent': sorted(recent, key=lambda event: event['at'], reverse=True)[:8]}

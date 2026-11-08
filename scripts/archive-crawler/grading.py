@@ -8,7 +8,7 @@ from pathlib import Path
 
 from common import CATEGORIES, CrawlError, Page, decode, digest, now
 from wayback_transport import TransportUnavailable, current_transport
-from daily_budget import AutomaticStopped, DailyBudgetPause, reserve_attempt, settle_attempt
+from daily_budget import AutomaticStopped, DailyBudgetPause, EnrichmentPriorityPause, reserve_attempt, settle_attempt
 
 MODEL = "gpt-6-luna"
 PRICING = {"input_per_million": 0.10, "output_per_million": 0.50,
@@ -270,7 +270,7 @@ def grade(args, store, *, candidates=None, client=None):
                 store.set('luna_grade:' + signature, rating)
                 count += 1
                 print(f"Luna graded {count}: grade {rating['grade']}, {rating['category']}, {rating['confidence']} confidence", flush=True)
-            except (TransportUnavailable, DailyBudgetPause, AutomaticStopped):
+            except (TransportUnavailable, DailyBudgetPause, EnrichmentPriorityPause, AutomaticStopped):
                 raise
             except CrawlError as error:
                 store.db.execute("UPDATE candidates SET state='grade_error',error=?,rating=NULL,decision=NULL WHERE id=?", (str(error), candidate["id"]))

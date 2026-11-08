@@ -56,9 +56,8 @@ def test_budget_wait_is_not_completion_and_resumes_new_job_without_changing_rein
             resumed = unpack(store.db.execute('SELECT * FROM batches').fetchone())
         assert resumed['state'] == 'published_waiting_index' and resumed['job']['attempt'] == 2
         worker.indexing()
-        assert not kube.created  # Existing long-running reindex always wins.
+        assert len(kube.created)==1  # Foreground enrichment no longer waits for the full reindex.
         assert old == original and reindex['status']['active'] == 1
-        reindex['status'] = {'conditions': [{'type': 'Complete', 'status': 'True'}]}
         worker.indexing(); worker.indexing()
         assert len(kube.created) == 1
         new = kube.created[0]
