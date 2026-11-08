@@ -80,6 +80,7 @@ fixture_id=$(docker run --detach --network "$network" --network-alias archive-fi
     --entrypoint python "$mcp_image" /fixture.py)
   mcp_id=$(docker run --detach --network "$network" --network-alias eqarchives-mcp --publish 127.0.0.1::8080 \
     --cap-drop ALL --security-opt no-new-privileges --read-only --memory 256m \
+    --sysctl 'net.ipv4.tcp_wmem=4096 16384 262144' \
     --mount "type=bind,source=$work_dir/secrets,target=/run/secrets,readonly" \
     --env ELASTICSEARCH_URL=http://archive-fixture:9200 --env EMBEDDING_URL=http://nomic:8080 \
     "$mcp_image")
@@ -127,7 +128,12 @@ python3 "$repo_dir/scripts/check-public-security.py" "http://$frontend_address" 
 echo 'Model integrity, cache reuse, authentication, frontend proxy, dimensions, and oversized-input checks passed.'
 
 if [[ -n "$mcp_image" ]]; then
-  python3 "$repo_dir/scripts/test-mcp-admission.py" "http://$mcp_address/mcp"
+  # Docker's forwarded port can buffer a complete response before a slow host
+  # client applies pressure. Test directly inside the isolated API namespace,
+  # with its TCP send buffers bounded below the multi-megabyte fixture size.
+  # Routing/authentication tests continue through the actual proxies below.
+  docker exec -i "$mcp_id" python - http://127.0.0.1:8080/mcp \
+    < "$repo_dir/scripts/test-mcp-admission.py"
   python3 "$repo_dir/scripts/check-mcp.py" "http://$mcp_address/mcp"
 
   # Reproduce Traefik's rule ordering using the matches and priorities from the
