@@ -19,9 +19,9 @@ from bs4 import BeautifulSoup, Comment
 from . import gemma
 from .chunking import SourceChunk, chunk_source
 from .html_extraction import website_markdown, repair_script_markup
-from . import passage_forums
+from . import passage_forums, passage_sites, passage_scaffolding
 
-VERSION = "eq-passages-480-v10"
+VERSION = "eq-passages-480-v11"
 MAX_TOKENS = 480
 ASSETS = {".js", ".css", ".map", ".ico", ".svg", ".woff", ".woff2"}
 CONTROLS = re.compile(r"^(?:reply(?: to (?:item|topic))?(?: with quote)?|quote|edit|delete|"
@@ -35,7 +35,7 @@ NAV = re.compile(r"(?:^|[-_ ])(?:nav(?:igation)?|sidebar|site-menu|site-header|s
 FOOTER = re.compile(r"ONElist is THE place|e-mails exchanged daily|ONElist has nearly|"
                     r"Looking to expand your world\?|Yahoo! Groups Links|"
                     r"Your use of Yahoo! Groups is subject", re.I)
-COLUMN_NAMES=re.compile(r'^(?:faction|positive quests|negative quests|member name|rank|name|spell|mana|item|effect|recipe|ingredients|username|from|joined|posts|email|url|icq|aim|yim|msn|replies|author|views|last post|topics|type|value|description|level|class|race|guild|location|zone):?$',re.I)
+COLUMN_NAMES=re.compile(r'^(?:faction|positive quests|negative quests|member name|rank|name|spell|mana|item|effect|recipe|ingredients|trivial|quantity|yield|container|cost|username|from|joined|posts|email|url|icq|aim|yim|msn|replies|author|views|last post|topics|type|value|description|level|class|race|guild|location|zone):?$',re.I)
 
 
 def digest(text):
@@ -457,10 +457,15 @@ def _html_view(raw, host, _preserve_layout=False, path=""):
         for body in reversed(roots):head.insert_after(body.extract())
         if roots:excluded.append('recovered_body_from_head')
     thread=passage_forums.extract(soup,host,path,projection)
-    if not thread:_encoded_advertising(soup,excluded)
-    reason=None if thread else (passage_forums.excluded_page(soup,title,path) or _layout_utility(soup,path))
+    initial_reason=None if thread else (passage_forums.excluded_page(soup,title,path) or _layout_utility(soup,path))
+    if initial_reason:return "",title,"archive_status",[initial_reason]
+    if not thread:
+        passage_scaffolding.expand_fallbacks(soup,excluded)
+        _encoded_advertising(soup,excluded)
+        passage_scaffolding.clean(soup,excluded)
+    reason=None if thread else (passage_forums.excluded_page(soup,title,path) or passage_scaffolding.status(soup,title,excluded) or _layout_utility(soup,path))
     if reason:
-        return "",title,"archive_status",[reason]
+        return "",title,"archive_status",excluded+[reason]
     if not thread and soup.select_one('.postbody'):
         for diagnostic in passage_forums.database_error_tables(soup):
             diagnostic.decompose();excluded.append('generated_forum_diagnostic')
@@ -472,9 +477,7 @@ def _html_view(raw, host, _preserve_layout=False, path=""):
     # Unknown posting templates can retain both a visible message preview and
     # a populated quoted-message field. Preserve both before removing controls.
     if not thread:
-        posting=re.search(r'(?:^|/)(?:post|posting|newreply|newpost)\.(?:asp|php|pl)$',path,re.I)
         for field in list(soup.find_all('textarea')):
-            if not posting and field.get('name')!='notification.body':continue
             if field.get_text(strip=True):
                 quote=soup.new_tag('blockquote');quote.string=field.get_text();field.replace_with(quote)
     for node in list(soup.find_all("title")):
@@ -549,6 +552,8 @@ def _html_view(raw, host, _preserve_layout=False, path=""):
         if heading:
             title = heading.get_text(" ", strip=True)
         title = _everlore(soup,excluded,path) or title
+    site = None if thread else passage_sites.project(soup,host,path,title,excluded)
+    if site:title,site_method=site
     # Modern forum engines and many Ezboard mirrors expose the message body.
     # Replace a single-post presentation table, retaining its source author/date.
     for node in ([] if thread else list(soup.select("[id^=post_message_],.postbody,.post-content,.postText"))):
@@ -607,19 +612,25 @@ def _html_view(raw, host, _preserve_layout=False, path=""):
         rows=[r for r in table.find_all('tr') if r.find_parent('table') is table]
         kept=[]
         for row in rows:
+            if not row.parent:continue
             cells=row.find_all(['td','th'],recursive=False)
-            if not any(c.get_text(strip=True) for c in cells):row.decompose()
+            if not any(c.get_text(strip=True) for c in cells):
+                # An unclosed empty <tr> may own later, populated rows. Drop
+                # only its wrapper; decomposing it would delete real data.
+                if row.get_text(strip=True):
+                    row.unwrap();excluded.append('unwrapped_empty_table_row')
+                else:row.decompose()
             else:kept.append(row)
         if kept:
             cells=kept[0].find_all(['td','th'],recursive=False)
-            if len(cells)>1 and all(COLUMN_NAMES.fullmatch(c.get_text(' ',strip=True)) or c.find(['b','strong']) for c in cells):
+            if len(cells)>1 and all(COLUMN_NAMES.fullmatch(c.get_text(' ',strip=True)) for c in cells):
                 for cell in cells:cell.name='th'
     view=website_markdown(str(soup))
     if not _preserve_layout and len(_plain(view))<50 and len(raw)>300:
         fallback, fallback_title, method, reasons=_html_view(raw,host,_preserve_layout=True,path=path)
         if len(_plain(fallback))>len(_plain(view))+100:
             return fallback,fallback_title,method,reasons+["conservative_layout_fallback"]
-    return view, title, "forum_posts" if thread else "html_structure", excluded
+    return view, title, "forum_posts" if thread else site_method if site else "html_structure", excluded
 
 
 def _text_view(text, record_id):
@@ -770,8 +781,23 @@ def _chunks(view, title, document_context="", strict_sections=False):
             prefix=document_prefix(title)+context
             for chunk in chunk_source(body,tokenizer,prefix=prefix):
                 result.append(Passage(start+chunk.start,start+chunk.end,chunk.text,title,context,kind))
+    attributed=[]
+    index=0
+    while index<len(result):
+        current=result[index]
+        if (index+1<len(result) and current.kind=='post'
+                and re.fullmatch(r'(?:Post(?: by [^\n]*| \|[^\n]*)?|Article: [^\n]*)(?:\n[-=]+)?',current.text.strip())):
+            following=result[index+1]
+            if (following.kind in ('quote','table','post','code') and current.end==following.start
+                    and following.context.startswith(current.context.rstrip())
+                    and not re.match(r'(?:Post(?: by | \||\n|$)|Article: )',following.text.lstrip())):
+                body=view[current.start:following.end]
+                for part in chunk_source(body,tokenizer,prefix=document_prefix(title)+following.context):
+                    attributed.append(Passage(current.start+part.start,current.start+part.end,part.text,title,following.context,following.kind))
+                index+=2;continue
+        attributed.append(current);index+=1
     packed=[]
-    for passage in result:
+    for passage in attributed:
         if packed and not strict_sections:
             previous=packed[-1]
             punctuation=(not any(c.isalnum() for c in passage.text) or not any(c.isalnum() for c in previous.text)) and not {previous.kind,passage.kind}&{'post','quote'}

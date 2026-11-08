@@ -792,7 +792,7 @@ dismissal is fabricated and no Luna request is made to classify this known adver
 
 ## Imported search content
 
-Imported text uses the shared `eq-passages-480-v10` search policy: real titles,
+Imported text uses the shared `eq-passages-480-v11` search policy: real titles,
 section/table context and attributed forum/mail quotations, with full reader
 content retained separately. Verified raster assets also receive local Gemma
 visual vectors through `gemma-image-embeddings`. This does not call Luna or change
@@ -807,6 +807,15 @@ message boundaries. Exact duplicate title/context/text requests reuse local
 inference within the capture while retaining all source offsets and vectors;
 this does not change Luna enrichment or approval policies. Recognized generated
 error pages are preserved without calling enrichment or embedding services.
+
+EQ Traders recipes and vendor lists carry tradeskill, city and column context;
+Magelo profiles bind separate table headers to captured values and keep character
+identity with their stats, skills, spells and biography. Only recognized site
+layouts receive those projections. Empty UI panels, inert calendars/login
+widgets and proven hosting/parking templates do not create semantic noise;
+authored events, directories, code and populated source textareas remain content.
+The complete archival reader remains unchanged. This policy applies to new
+imports; deployment does not restart or upgrade an existing broad reindex Job.
 
 Discovery, source browsing and imports share the dependency-free source decoder.
 Validated Japanese byte/script evidence selects Shift-JIS/CP932, EUC-JP or
