@@ -66,6 +66,11 @@ Criteria are recorded in each rating and its source signature. Regrading within
 the same work directory retains its original spend ledger and reuses cached
 assessments/responses for matching sources and criteria. The production portal
 exposes this through Advanced, with a fixed original budget for each site check.
+Admission counts settled usage plus full unresolved reservations, including
+rejected responses and corrections. Verified actual costs replace reservations;
+missing usage or uncertain outcomes never release money. Progress reports show
+settled estimates and unresolved reservations separately. Retries preserve the
+original cap and ledger.
 
 | Resource | Default limit |
 | --- | --- |

@@ -12,7 +12,7 @@ import yaml
 from common import CrawlError, Store, digest, now
 from grading import Luna, MODEL, PRICING
 from import_status import EnrichmentError
-from daily_budget import current_budget, reserve_attempt, settle_attempt
+from daily_budget import attempt_remaining_units, current_budget, reserve_attempt, settle_attempt, units
 
 RESOURCES = Path(__file__).with_name("resources")
 TASKS = ("classification", "summary", "tagging", "date")
@@ -33,6 +33,7 @@ SCHEMA["required"] = list(SCHEMA["properties"])
 DEFAULT_POLICY = {"enrichment": True, "model": MODEL, "max_enrichment_usd": 2}
 AUTO_POLICY = {"enrichment": True, "model": MODEL, "max_enrichment_usd": None, "daily_budget": "portal-utc-v1"}
 MAX_CORRECTIONS = 2
+MAX_DATE_ITEMS = 1024
 MISSING_RESPONSE = object()
 EVIDENCE_INSTRUCTIONS = (
     "\n\nEvery date_evidence excerpt must be one contiguous span copied from the source. "
@@ -84,9 +85,9 @@ class ValidationError(EnrichmentError):
 
 
 def validate(response, source):
-    def require(condition):
+    def require(condition, code='schema'):
         if not condition:
-            raise ValueError("Invalid enrichment field")
+            raise ValidationError(code)
     if not isinstance(response, dict):
         raise ValidationError('schema')
     if response.get("status") != "completed":
@@ -104,29 +105,40 @@ def validate(response, source):
         tags = result["llm_tags"]
         require(isinstance(tags, list) and all(tag in TAGS for tag in tags) and len(set(tags)) == len(tags))
         extracted = result["llm_extracted_dates"]
-        require(isinstance(extracted, list) and len(extracted) <= 100)
-        dates = []
+        require(isinstance(extracted, list) and len(extracted) <= MAX_DATE_ITEMS, 'date_metadata')
+        dates = {}  # Stable unique days; several posts can legitimately share one.
         for item in extracted:
-            require(isinstance(item, dict) and set(item) == {"date"})
+            require(isinstance(item, dict) and set(item) == {"date"}, 'date_metadata')
             value = item["date"]
-            require(isinstance(value, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", value))
-            date.fromisoformat(value)
-            dates.append(value)
-        require(len(set(dates)) == len(dates))
-        require(result["llm_guessed_date"] is None or result["llm_guessed_date"] in dates)
+            require(isinstance(value, str) and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value), 'date_metadata')
+            try:
+                date.fromisoformat(value)
+            except ValueError:
+                raise ValidationError('date_metadata') from None
+            dates[value] = None
+        require(result["llm_guessed_date"] is None or isinstance(result["llm_guessed_date"], str)
+                and result["llm_guessed_date"] in dates, 'date_metadata')
         evidence = result["date_evidence"]
-        require(isinstance(evidence, list) and len(evidence) == len(dates))
-        require({item["date"] for item in evidence} == set(dates))
+        require(isinstance(evidence, list) and len(evidence) <= MAX_DATE_ITEMS, 'date_metadata')
+        supported, excerpts = set(), {}
         for item in evidence:
-            require(set(item) == {"date", "excerpt"} and isinstance(item["excerpt"], str))
-            require(1 <= len(item["excerpt"]) <= 500 and item["excerpt"].strip())
+            require(isinstance(item, dict) and set(item) == {"date", "excerpt"}
+                    and isinstance(item['date'], str) and item['date'] in dates
+                    and isinstance(item["excerpt"], str), 'date_metadata')
+            require(1 <= len(item["excerpt"]) <= 500 and item["excerpt"].strip(), 'source_evidence')
             # HTML headings often contain NBSPs or wrap across Markdown lines.
             # Only whitespace may differ; retain the actual verbatim source.
             pattern = r"\s+".join(re.escape(part) for part in re.split(r"\s+", item["excerpt"].strip()))
             match = re.search(pattern, source)
             if match is None:
                 raise ValidationError('source_evidence')
-            item["excerpt"] = match.group(0)
+            supported.add(item['date'])
+            excerpts[(item['date'], match.group(0))] = None
+        require(supported == set(dates), 'date_metadata')
+        # Normalize derived metadata only, retaining every distinct source quote.
+        # json.loads above leaves the original paid response/cache immutable.
+        result['llm_extracted_dates'] = [{'date': value} for value in dates]
+        result['date_evidence'] = [{'date': value, 'excerpt': quote} for value, quote in excerpts]
     except (ValueError, KeyError, TypeError, AttributeError):
         raise ValidationError('schema') from None
     return result
@@ -174,8 +186,7 @@ class Enricher:
             if correction:
                 return MISSING_RESPONSE  # A lost response consumes its correction slot.
             raise EnrichmentError('request')
-        reserved = self.store.db.execute('SELECT COALESCE(SUM(reserved),0) FROM attempts').fetchone()[0]
-        if self.maximum is not None and reserved + amount > self.maximum:
+        if self.maximum is not None and units(amount) > attempt_remaining_units(self.store, self.maximum):
             self.store.db.rollback()
             raise EnrichmentError('budget')
         attempt = self.store.db.execute('INSERT INTO attempts(candidate,signature,reserved,status,created) VALUES (?,?,?,?,?)',

@@ -8,7 +8,8 @@ from pathlib import Path
 
 from common import CATEGORIES, CrawlError, Page, decode, digest, now
 from wayback_transport import TransportUnavailable, current_transport
-from daily_budget import AutomaticStopped, DailyBudgetPause, EnrichmentPriorityPause, reserve_attempt, settle_attempt
+from daily_budget import (AutomaticStopped, DailyBudgetPause, EnrichmentPriorityPause,
+                          attempt_remaining_units, attempt_spending, reserve_attempt, settle_attempt, units)
 
 MODEL = "gpt-6-luna"
 PRICING = {"input_per_million": 0.10, "output_per_million": 0.50,
@@ -186,8 +187,7 @@ def reserve(store, candidate, signature, payload, maximum):
     amount = ((len(json.dumps(payload, ensure_ascii=False).encode()) + 8192) * PRICING["input_per_million"]
               + payload["max_output_tokens"] * PRICING["output_per_million"]) / 1_000_000
     store.db.execute("BEGIN IMMEDIATE")
-    total = store.db.execute("SELECT COALESCE(SUM(reserved),0) FROM attempts").fetchone()[0]
-    if total + amount > maximum:
+    if units(amount) > attempt_remaining_units(store, maximum):
         store.db.rollback()
         raise CrawlError("Luna dollar budget reached; judgments retained")
     cursor = store.db.execute("INSERT INTO attempts(candidate,signature,reserved,status,created) VALUES (?,?,?,?,?)",
@@ -284,6 +284,4 @@ def grade(args, store, *, candidates=None, client=None):
     finally:
         if owned:
             client.close()
-    store.set("grading_result", {"new_judgments": count,
-              "estimated_usd": store.db.execute("SELECT COALESCE(SUM(actual),0) FROM attempts").fetchone()[0],
-              "reserved_usd": store.db.execute("SELECT COALESCE(SUM(reserved),0) FROM attempts").fetchone()[0]})
+    store.set("grading_result", {"new_judgments": count, **attempt_spending(store)})

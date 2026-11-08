@@ -222,13 +222,20 @@ def test_fill_stops_at_original_hour_deadline_and_resume_never_resets_it(run_fix
 
 
 def test_fill_stops_when_next_request_would_exceed_total_dollar_cap(run_fixture):
+    from contextlib import closing
+    from daily_budget import attempt_remaining_units, units
     root, clock, client, downloader, settings, operation, observed, discovered = run_fixture
     op = operation(budget=.004)
     result = campaign(root, op)['progress']
-    assert result['stop_reason'] == 'spend_limit' and result['accepted'] == 1
-    assert result['reserved_usd'] <= .004 and client.request.call_count == 1
+    assert result['stop_reason'] == 'spend_limit' and 1 < result['accepted'] < 50
+    assert result['reserved_usd'] == 0 and client.request.call_count == result['accepted']
+    with closing(Store(root / 'runs' / op['id'])) as store:
+        actual, next_reservation = store.db.execute('SELECT SUM(actual),MAX(reserved) FROM attempts').fetchone()
+        assert result['estimated_usd'] == pytest.approx(actual) and actual < .004
+        assert attempt_remaining_units(store, .004) < units(next_reservation)
+    calls = client.request.call_count
     campaign(root, op)
-    assert client.request.call_count == 1
+    assert client.request.call_count == calls
 
 
 def test_fill_reports_exhausted_links_and_respects_minimum_zero(run_fixture):

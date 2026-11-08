@@ -11,6 +11,7 @@ from daily_budget import DailyBudgetPause, units
 MESSAGES = {
     'schema': 'Luna enrichment failed schema/source validation: invalid metadata fields.',
     'source_evidence': 'Luna enrichment failed source validation: date evidence is not a verbatim source excerpt.',
+    'date_metadata': 'Luna enrichment has invalid date metadata: use valid ISO dates, support every distinct date with a source excerpt, and keep each date list within 1,024 entries.',
     'incomplete': 'Luna enrichment is incomplete; indexing remains pending.',
     'refused': 'Luna declined enrichment; indexing remains pending.',
     'budget': 'Enrichment dollar budget reached; paid results are retained.',

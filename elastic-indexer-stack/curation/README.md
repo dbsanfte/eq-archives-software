@@ -639,12 +639,22 @@ An explicit model refusal remains pending without correction requests.
 
 Each manually approved site has a separate cumulative $2 enrichment cap. Newly
 automatically approved sites instead use the configured shared UTC daily ceiling.
-Reservations use conservative long-context rates and precede calls; ambiguous
-failures retain reservations. Paid responses, including rejected evidence, are
+Reservations use conservative long-context rates and precede calls. Once usage
+is verified, its actual cost replaces that request's reservation for admission;
+received responses without usage and ambiguous failures retain their full
+reservations. Rejected responses and corrections count too. Discovery uses the
+same settled-cost-plus-unresolved-reservations rule for its original run cap,
+and displays those two amounts separately rather than double-counting them.
+Paid responses, including rejected evidence, are
 cached by source/prompt/model signature in a writable `enrichment/` subdirectory
 on the PVC. Existing results from the previous prompt remain reusable. Corrections
 have separate numbered cache entries linked to their original response, retaining
-all rejected evidence and the final matched verbatim excerpts. The original paid
+all rejected evidence and the final matched verbatim excerpts. Extracted dates
+are stable unique ISO calendar days; multiple posts or news items on one day may
+retain different supporting excerpts. Duplicate days/identical quotes normalize
+without discarding distinct proof, and every day still requires a matched source
+excerpt. Date and evidence arrays each have a 1,024-entry validation bound, so
+long news indexes with more than 100 supported dates can be accepted. The original paid
 response is never overwritten. Each correction slot can spend only once, including
 an ambiguous/lost response, and the two-slot limit survives pod and Job retries.
 An initial request with no received response has at most two reserved attempts.
@@ -657,6 +667,10 @@ on retry without paying again for a received response, while existing document
 IDs incur no model calls. Failed enrichment or an exhausted budget leaves that
 document pending instead of silently creating an unenriched entry. There is no
 index/mapping creation, RabbitMQ or broad scan.
+Mislabeled binary downloads (for example DWF maps served as `text/plain`) remain
+preserved source files, without paid text enrichment or blocking later pages.
+Classification uses known binary signatures or dense control-byte evidence,
+preserving Unicode BOMs, Japanese encodings and uncertain text layouts.
 Kubernetes retries twice. A terminal failure shows **Retry indexing** on the
 affected site's review. It verifies the saved publication approval and all source
 hashes, then queues a new numbered import Job under the original site budget.

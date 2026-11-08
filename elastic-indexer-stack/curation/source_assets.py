@@ -1,4 +1,5 @@
 """Source-bound supporting-file references; never a crawl of another site."""
+import codecs
 from html.parser import HTMLParser
 import re
 
@@ -6,6 +7,24 @@ from common import decode, original_url
 
 DOWNLOAD = re.compile(r'\.(?:png|jpe?g|gif|svg|webp|ico|bmp|css|js|pdf|zip|gz|tar|rar|7z|exe|docx?|xlsx?|pptx?|rtf|txt|xml|mp3|wav|ogg|mid|midi|mp4|avi|mov|swf|fla|woff2?|ttf)(?:[?;]|$)', re.I)
 CSS_URL = re.compile(r'''url\(\s*['"]?([^'"\s)]+)|@import\s+['"]([^'"]+)''', re.I)
+
+
+def binary_source(raw):
+    """Conservative byte evidence when old servers label downloads as text.
+
+    Unicode BOMs and legacy Japanese/terminal escapes remain text. Unknown
+    layouts are retained unless a binary signature or dense control bytes prove
+    this is a file, rather than source suitable for text extraction/enrichment.
+    """
+    if raw.startswith((codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE,
+                       codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE, codecs.BOM_UTF8)):
+        return False
+    if raw.startswith((b'(DWF V', b'PK\x03\x04', b'PK\x05\x06', b'\x1f\x8b', b'%PDF-',
+                       b'\x7fELF', b'\x89PNG\r\n\x1a\n', b'\xff\xd8\xff', b'GIF87a', b'GIF89a')):
+        return True
+    sample = raw[:8192]
+    controls = sum(value < 32 and value not in (7, 8, 9, 10, 12, 13, 26, 27) for value in sample)
+    return controls >= 8 and controls * 20 > len(sample)
 
 
 class Resources(HTMLParser):
