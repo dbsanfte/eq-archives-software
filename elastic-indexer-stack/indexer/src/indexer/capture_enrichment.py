@@ -34,6 +34,8 @@ DEFAULT_POLICY = {"enrichment": True, "model": MODEL, "max_enrichment_usd": 2}
 AUTO_POLICY = {"enrichment": True, "model": MODEL, "max_enrichment_usd": None, "daily_budget": "portal-utc-v1"}
 MAX_CORRECTIONS = 2
 MAX_DATE_ITEMS = 1024
+MAX_OUTPUT_TOKENS = 32768
+PREVIOUS_OUTPUT_TOKENS = 4096
 MISSING_RESPONSE = object()
 EVIDENCE_INSTRUCTIONS = (
     "\n\nEvery date_evidence excerpt must be one contiguous span copied from the source. "
@@ -161,11 +163,11 @@ class Enricher:
         prompt = instructions(urlsplit(capture["url"]).hostname, legacy=legacy)
         payload = {"model": MODEL, "store": False, "service_tier": "default", "instructions": prompt,
                    "input": json.dumps({"original_url": capture["url"], "complete_source_markdown": source}, ensure_ascii=False),
-                   "reasoning": {"effort": "low"}, "max_output_tokens": 4096,
+                   "reasoning": {"effort": "low"}, "max_output_tokens": MAX_OUTPUT_TOKENS,
                    "text": {"format": {"type": "json_schema", "name": "eq_enrichment", "strict": True, "schema": SCHEMA}}}
         return payload
 
-    def exchange(self, capture, payload, signature, correction=False, parent=None):
+    def exchange(self, capture, payload, signature, correction=False, parent=None, initial_signatures=()):
         encoded = json.dumps(payload, ensure_ascii=False).encode()
         if len(encoded) > 900000:
             raise EnrichmentError('context')
@@ -180,7 +182,12 @@ class Enricher:
         if cached:
             self.store.db.rollback()
             return cached['response']
-        attempts = self.store.db.execute('SELECT COUNT(*) FROM attempts WHERE signature=?', (signature,)).fetchone()[0]
+        # A larger allowance cannot reset ambiguous initial attempts made with
+        # either earlier prompt/output limit. Correction/recovery slots remain
+        # individually single-use, including a lost response.
+        signatures = tuple(dict.fromkeys((signature, *initial_signatures))) if not correction else (signature,)
+        attempts = self.store.db.execute('SELECT COUNT(*) FROM attempts WHERE signature IN (' +
+                                        ','.join('?' for _ in signatures) + ')', signatures).fetchone()[0]
         if attempts >= (1 if correction else 2):
             self.store.db.rollback()
             if correction:
@@ -201,7 +208,8 @@ class Enricher:
         # Cache the entire paid response before validation, without modifying any
         # earlier response. Parent links retain the correction's provenance.
         self.store.set('enrichment:' + signature, {'response': response, 'signature': signature,
-                       'source_sha256': capture['sha256'], 'received_at': now(), 'parent': parent})
+                       'source_sha256': capture['sha256'], 'received_at': now(), 'parent': parent,
+                       'max_output_tokens': payload['max_output_tokens']})
         usage = response.get('usage', {}) if isinstance(response, dict) else {}
         if isinstance(usage, dict) and not all(key in usage for key in ('input_tokens', 'output_tokens')):
             self.store.db.execute("UPDATE attempts SET status='received' WHERE id=?", (attempt,))
@@ -238,16 +246,20 @@ class Enricher:
 
     def enrich(self, capture, source):
         payload = self.payload(capture, source)
-        signature = digest({"payload": payload, "raw_source_sha256": capture["sha256"]})
-        # Reuse source-bound responses from the original prompt, including the
-        # rejected evidence that caused old imports to fail. Never pay to replace
-        # a valid cached response solely because the prompt was strengthened.
-        if not self.store.get('enrichment:' + signature):
-            legacy = self.payload(capture, source, legacy=True)
-            legacy_signature = digest({'payload': legacy, 'raw_source_sha256': capture['sha256']})
-            if self.store.get('enrichment:' + legacy_signature):
-                payload, signature = legacy, legacy_signature
-        response = self.exchange(capture, payload, signature)
+        legacy = self.payload(capture, source, legacy=True)
+        variants = [payload, legacy, {**payload, 'max_output_tokens': PREVIOUS_OUTPUT_TOKENS},
+                    {**legacy, 'max_output_tokens': PREVIOUS_OUTPUT_TOKENS}]
+        signatures = [digest({'payload': value, 'raw_source_sha256': capture['sha256']}) for value in variants]
+        signature = signatures[0]
+        # Keep exact source/request identities and the original numbered
+        # correction chain. Valid paid 4K results need no replacement request.
+        for previous, key in zip(variants, signatures, strict=True):
+            cached = self.store.get('enrichment:' + key)
+            if cached:
+                payload, signature, response = previous, key, cached['response']
+                break
+        else:
+            response = self.exchange(capture, payload, signature, initial_signatures=signatures)
         original_signature = signature
         last_issue = None
         for correction in range(MAX_CORRECTIONS + 1):
@@ -260,6 +272,15 @@ class Enricher:
             else:
                 last_issue = 'request'
             if correction == MAX_CORRECTIONS:
+                saved = self.store.get('enrichment:' + signature) or {}
+                limit = saved.get('max_output_tokens', response.get('max_output_tokens', payload['max_output_tokens'])
+                                  if isinstance(response, dict) else None)
+                if (payload['max_output_tokens'] == PREVIOUS_OUTPUT_TOKENS and type(limit) is int
+                        and limit < MAX_OUTPUT_TOKENS and isinstance(response, dict)
+                        and response.get('status') == 'incomplete'
+                        and isinstance(response.get('incomplete_details'), dict)
+                        and response['incomplete_details'].get('reason') == 'max_output_tokens'):
+                    return self.capacity_retry(capture, source, original_signature, signature)
                 raise EnrichmentError('correction_limit', last_issue)
             repair = self.payload(capture, source)
             repair['instructions'] += ('\n\nCorrect the rejected enrichment response using the complete source. '
@@ -273,3 +294,17 @@ class Enricher:
             # Stable numbered slots also bound ambiguous failures across restarts.
             signature = digest({'enrichment': original_signature, 'correction_version': 1, 'correction': correction + 1})
             response = self.exchange(capture, repair, signature, correction=True, parent=parent)
+
+    def capacity_retry(self, capture, source, original_signature, parent):
+        # Operator-authorized allowance increase: one additional durable slot
+        # only for a proven, exhausted old output limit. Never erase/replenish
+        # prior corrections, reservations or paid responses on Job restarts.
+        signature = digest({'enrichment': original_signature, 'output_limit_recovery': 1,
+                            'max_output_tokens': MAX_OUTPUT_TOKENS})
+        response = self.exchange(capture, self.payload(capture, source), signature, correction=True, parent=parent)
+        if response is MISSING_RESPONSE:
+            raise EnrichmentError('correction_limit', 'request')
+        try:
+            return self.accepted(response, source, signature)
+        except ValidationError as error:
+            raise EnrichmentError('correction_limit', error.code) from None
