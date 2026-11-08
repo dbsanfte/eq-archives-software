@@ -253,7 +253,7 @@ extraction checkpoints, enrichment, source identity, dates and last_indexed. No
 paid enrichment during this backfill. Do not reuse Nomic checkpoints as Gemma
 completion. The Nomic repair entry point remains for historical recovery only.
 Follow the embedding-service migration runbook for operator-authorized handoffs.
-Gemma text uses `eq-passages-480-v10`: budget title/context with every 480-token
+Gemma text uses `eq-passages-480-v11`: budget title/context with every 480-token
 request, retain full reader text, verify source-bound selected-view coverage and
 store view offsets/provenance separately. Unknown layouts retain content;
 format-specific navigation/post/table handling needs regression evidence. Resume
@@ -307,6 +307,20 @@ unique summaries/full content, quotes, real code and tables, and escapes literal
 fence decorations before Markdown chunking. Damaged XML keeps content through a
 conservative fallback; never fetch XML entities or remote entry content. Preserve
 raw readers, discussion identity and v9 checkpoints during operator handoffs.
+The v11 policy adds evidence-gated EQ Traders recipes/vendor sections and Magelo
+profile panels, carrying source identity and column labels into every relevant
+chunk. Bind detached profile headers to real data; remove only proven controls
+and empty panels. Keep unfamiliar layouts and populated biographies/zero values.
+Generic scaffolding rules exclude inert calendars, login widgets, decoded hosting
+ad fallbacks and complete parking/default/error templates, retaining events,
+authored directories, code and populated source textareas. Attach post/feed
+attribution to its own first body block without merging entries. Bold first-row
+data alone is not evidence of table headers. Preserve v10 checkpoints; only exact
+source/view/request matches may reuse vectors. Ordinary delivery does not change
+the active broad reindex Job; a new-policy handoff remains an operator operation.
+Unclosed empty table rows must unwrap rather than delete their populated
+descendants. Every archive-status projection clears summary/OCR vectors along
+with body vectors, regardless of its diagnostic reason.
 The v9 projection repair adds source entity context, dated article boundaries,
 conservative generic navigation/utility filtering and canonical HTML newlines.
 Retain raw-reader hashes and decoder behavior. Older v8 requests may reuse vectors

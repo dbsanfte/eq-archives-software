@@ -92,6 +92,8 @@ def test_binary_document_keeps_its_existing_extracted_text_and_extraction_checkp
     '<title>System Message: Error</title><h1>Error</h1><p>The post you selected no longer exists.</p>',
     '<html><frameset><frame src="main.html"></frameset><noframes>This page requires frames.</noframes></html>',
     '<html><title>Games</title><script>window.open("/exitpage/popup.php");</script>'+''.join(f'<a href="?term=Game{i}">Game {i}</a> | ' for i in range(40))+'</html>',
+    '<html><h3>Error. Page cannot be displayed. Please contact your service provider for more details. (7)</h3></html>',
+    '<html><title>Welcome To IIS 4.0!</title><img src="/iissamples/default/IISTitle.gif"><a href="/iissamples/default/LEARN.asp">Learn About</a><a href="/iissamples/default/samples.asp">Samples</a><p>Internet Information Server. Send comments to iiswish@microsoft.com.</p></html>',
 ])
 def test_archived_error_clears_all_semantic_vectors_and_preserves_the_reader_and_enrichment(tmp_path,raw):
     hit,client,embedder=fixture()
@@ -368,7 +370,7 @@ def test_operator_entrypoint_only_adds_mapping_and_runs_checkpointed_migration(t
         job.main()
 
 
-@pytest.mark.parametrize('previous_policy',['eq-passages-480-v4','eq-passages-480-v5','eq-passages-480-v6','eq-passages-480-v7','eq-passages-480-v8','eq-passages-480-v9',passages.VERSION])
+@pytest.mark.parametrize('previous_policy',['eq-passages-480-v4','eq-passages-480-v5','eq-passages-480-v6','eq-passages-480-v7','eq-passages-480-v8','eq-passages-480-v9','eq-passages-480-v10',passages.VERSION])
 def test_source_upgrade_reuses_only_identical_passage_requests_and_advances_checkpoint(tmp_path,previous_policy):
     hit,client,embedder=fixture();source=hit['_source'];source.update(mime_type='text/html',text_extraction_version='old')
     path=tmp_path/hit['_id'];path.parent.mkdir(parents=True);path.write_text('<title>Guild</title><p>Preserved complete guild instructions.</p>')

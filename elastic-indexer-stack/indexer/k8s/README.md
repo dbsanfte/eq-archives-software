@@ -230,9 +230,11 @@ Infrastructure recovery is automatic; application/integrity failures remain
 visible for a correction. Inspect Job conditions and logs rather than assuming
 that a Running pod has made progress.
 
-The current Gemma passage upgrade uses `eq-passages-480-v10`, with both model and
-passage policy required for completion. Its pending handoff prioritizes the
-unfinished model frontier, then upgrades older Gemma passages. Retain the old
+The current source policy is `eq-passages-480-v11`, with both model and passage
+policy required for completion in a newly prepared Job. Deployment leaves an
+already running v10 Job and its checkpoints unchanged; completion of that Job
+does not imply v11 coverage. A separately authorized, prepared handoff prioritizes
+the unfinished model frontier, then upgrades older Gemma passages. Retain the old
 Job and prepared checkout. A separate `render-reindex.py --images` Job can index
 rasters through the CUDA vision companion, using create-only writes and a
 persistent `/mnt/samsung/eqarchives-images` inventory. Neither backfill calls

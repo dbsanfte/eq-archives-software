@@ -202,7 +202,7 @@ not hold other workers. Missing sources are counted, retain original text/chunks
 and never claim repaired extraction. Unusable old vectors with no corresponding
 text are cleared during replacement. Empty sources are not invented.
 
-`embedding_model` and `text_chunking_version=eq-passages-480-v10` together are the
+`embedding_model` and `text_chunking_version=eq-passages-480-v11` together are the
 text resume checkpoint. Older Gemma records remain eligible for the passage
 upgrade; `REINDEX_PRIORITIZE_UNCONVERTED=true` finishes the old model frontier
 first, then upgrades previously converted Gemma records. Count model conversion
@@ -669,3 +669,38 @@ applying `Dockerfile.reindex`. Retain the original image and verify the resultin
 compiled worker, pinned tokenizer, complete vectors and unchanged-record reuse
 before tagging it with the merged revision. Flattening is local image preparation;
 it does not alter running Jobs, archive sources or persistent state.
+
+### EQ Traders, Magelo and generated scaffolding
+
+Policy `eq-passages-480-v11` recognizes EQ Traders article/recipe navigation and
+legacy tradeskill/vendor sections, retaining ingredient counts, trivials,
+uncertainty, merchant locations and described link directories. Recipe columns
+and city/skill headings remain in the budgeted context of continuation chunks.
+The site's forums continue through the shared forum handlers.
+
+Recognized Magelo profile layouts bind detached skills/spells/flags table headers
+to their captured data. Character identity travels with every chunk; named panels
+separate statistics, skills, spells, flags, biography and calculations. Proven
+empty panels and UI buttons are excluded; populated biographies, zero/unknown
+values, equipment links and unfamiliar layouts remain. No JavaScript is executed
+to invent values absent from the capture.
+
+Host-independent rules remove inert calendar/login widgets and proven hosting
+advertisement fallbacks, while retaining events and authored text/quotes/code.
+Only complete default-server, provider-error and parking templates become status
+projections with no semantic fields. Nonempty captured textareas remain quoted
+source. Attribution-only post/feed fragments attach to their own next body block,
+including large quotations and subheaded articles; separate entries remain
+separate. Bold first-row values alone no longer become table-column metadata.
+Empty malformed table-row wrappers retain their populated descendant rows;
+this restores older EQ Traders clay-conversion tables and unrelated damaged HTML.
+Archive-status projections clear summary/OCR vectors with body vectors atomically,
+using the typed projection status rather than an incomplete diagnostic allowlist.
+
+Validate source-bound plans against varied private captures and unrelated layouts.
+Keep the full reader, hashes, offsets, enrichment and 480-token request bounds.
+An exact v10 source/view/request match may reuse vectors under the existing
+validation; changed plans require embedding. Ordinary CI/CD activates v11 for new
+imports and leaves the active v10 reindex untouched. Upgrading existing records
+requires a separately prepared operator handoff, preserving all previous Jobs,
+prepared sources, cache/rejection ledgers and the independent image workflow.
