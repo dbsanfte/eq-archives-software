@@ -57,7 +57,7 @@ def test_unsafe_lock_and_recovery_paths_are_never_removed(tmp_path):
     assert lock.exists()
 
 
-def test_timeout_reaps_child_group_including_term_ignoring_descendants(tmp_path):
+def test_timeout_reaps_child_group_including_term_ignoring_descendants(tmp_path,monkeypatch):
     marker=tmp_path/'child'
     script="""import os,signal,time,sys
 signal.signal(signal.SIGTERM,signal.SIG_IGN)
@@ -66,6 +66,18 @@ if pid==0:
  open(sys.argv[1],'w').write(str(os.getpid()))
 while True:time.sleep(.1)
 """
+    # Start the deadline only after the descendant is ready, independently of
+    # coverage startup and CPU contention in the full built-image suite.
+    original=subprocess.Popen
+    def ready(*args,**kwargs):
+        process=original(*args,**kwargs);deadline=time.monotonic()+15
+        while not marker.exists() and time.monotonic()<deadline:time.sleep(.01)
+        if not marker.exists():
+            import signal
+            os.killpg(process.pid,signal.SIGKILL);process.communicate()
+            pytest.fail('Process group fixture never became ready')
+        return process
+    monkeypatch.setattr('publication_git.subprocess.Popen',ready)
     with pytest.raises(subprocess.TimeoutExpired):run([sys.executable,'-c',script,str(marker)],env=os.environ.copy(),timeout=.5)
     pid=int(marker.read_text());stat=Path('/proc')/str(pid)/'stat'
     assert not stat.exists() or stat.read_text().split()[2]=='Z'

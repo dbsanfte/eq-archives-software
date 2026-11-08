@@ -177,14 +177,15 @@ def test_all_worker_threads_and_http_health_survive_contention(candidate,monkeyp
         with connect(root) as store:
             store.db.execute('PRAGMA busy_timeout=0');yield store
     monkeypatch.setattr('worker.connect',immediate)
+    monkeypatch.setattr('publication_recovery.connect',immediate)
     failed={lane:threading.Event() for lane in Lane};recovered={lane:threading.Event() for lane in Lane}
-    original=worker.operation
+    original=worker.run_turn
     def attempt(lane):
         try:original(lane)
         except sqlite3.OperationalError:
             failed[lane].set();raise
         recovered[lane].set()
-    monkeypatch.setattr(worker,'operation',attempt)
+    monkeypatch.setattr(worker,'run_turn',attempt)
     original_wait=worker.stop.wait
     monkeypatch.setattr(worker.stop,'wait',lambda _:original_wait(.01))
     try:
