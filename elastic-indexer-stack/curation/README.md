@@ -977,3 +977,12 @@ Pipeline status summary exposes the publication backlog; expanded Indexing shows
 retry/attention counts, the latest error and the last completed import, so process
 health cannot hide a stopped ingestion pipeline. Existing imports, capture,
 discovery, source caches and full reindex Jobs retain their independent lifecycles.
+
+
+Import Jobs request 512 MiB and have a 2 GiB memory limit. Pinned Gemma tokenizer
+startup alone exceeds the old 512 MiB limit; CI runs real tokenizer/planner startup
+inside the exact 2 GiB container budget. The controller reads only owned import
+pod termination statuses (list permission, no logs/exec/mutations). OOM failures
+are explicit in the workspace. A failed old 512 MiB Job can continue once as a new
+numbered Job under the current profile, original manifest, paid cache and budget;
+OOM under the current profile requires attention while other sites proceed.

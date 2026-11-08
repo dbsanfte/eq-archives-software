@@ -108,3 +108,28 @@ def test_budget_diagnostics_reject_invalid_or_stale_content(tmp_path, change):
     path = status_path(directory, job)
     value = json.loads(path.read_text()); path.write_text(json.dumps({**value, **change}))
     assert read_budget_pause(tmp_path, batch, job) is None
+
+
+@pytest.mark.parametrize('memory',['512Mi','2Gi'])
+def test_oom_only_migrates_the_undersized_import_profile_and_preserves_old_job(tmp_path,monkeypatch,memory):
+    root=tmp_path/'state';row,manifest=completed(root);immutable=published(root,manifest,'indexing')
+    with connect(root) as store:batch=unpack(store.db.execute('SELECT * FROM batches').fetchone())
+    old=import_job(batch,IMAGE);old['spec']['template']['spec']['containers'][0]['resources']['limits']['memory']=memory
+    old['status']={'conditions':[{'type':'Failed','status':'True'}]};original=copy.deepcopy(old)
+    class Kube:
+        def __init__(self):self.items=[old];self.created=[]
+        def jobs(self):return copy.deepcopy(self.items)
+        def create(self,value):self.created.append(value);self.items.append(value)
+        def job_failure(self,_):return 'Indexer exceeded its memory limit (OOMKilled); saved sources and paid results are retained.'
+    kube=Kube();monkeypatch.setenv('IMPORT_IMAGE',IMAGE);worker=Worker(root,kube=kube)
+    try:
+        worker.indexing()
+        with connect(root) as store:current=unpack(store.db.execute('SELECT * FROM batches').fetchone())
+        if memory=='512Mi':
+            assert current['state']=='published_waiting_index' and current['job']['attempt']==2
+            worker.indexing();assert len(kube.created)==1
+            assert kube.created[0]['spec']['template']['spec']['containers'][0]['resources']['limits']['memory']=='2Gi'
+        else:
+            assert current['state']=='index_failed' and 'OOMKilled' in current['error'] and not kube.created
+        assert old==original and (root/'batches'/batch['id']/'approved.json').read_bytes()==immutable
+    finally:worker.close()

@@ -632,8 +632,8 @@ The non-root curation UID must have a Unix account so OpenSSH can start; exercis
 the real SSH configuration offline in the built-image smoke check.
 
 Do not alter, suspend, delete or restart existing indexing Jobs or their source
-checkouts during curation delivery. Its controller has only Jobs get/list/create
-permissions. Foreground imports wait only for other unfinished, unsuspended
+checkouts during curation delivery. Its controller has Jobs get/list/create and read-only pod status list
+permissions for owned import diagnostics, without pod mutation/log/exec access. Foreground imports wait only for other unfinished, unsuspended
 foreground capture imports, including pending/retrying Jobs with active=0. Broad
 reindexes and maintenance never block that slot. The publisher uses its own bare treeless repository
 and dedicated archive deploy key, without an archive worktree or force push. Keep
@@ -1118,3 +1118,11 @@ shares transport backoff across the backlog. Permanent credentials/integrity
 failures and explicit retry pauses stay visible for correction while other work
 advances. Pipeline status must expose publication backlog/errors and the last
 completed import; deployment health alone does not verify successful ingestion.
+
+Curation imports use a 2 GiB limit (512 MiB request); exercise the actual pinned
+Gemma tokenizer/planner in a fresh container at that budget in smoke-curation.
+The old 512 MiB limit cannot load it. Permit read-only pod status listing for owned
+import OOM diagnostics, without logs/exec/mutations. Only a failed old 512 MiB
+profile auto-migrates to a new numbered current-profile import; preserve the old
+Job, approvals, manifests, paid cache and budget. Current-profile OOMs stay visible
+for correction and cannot hold other sites. Keep full reindex Jobs untouched.

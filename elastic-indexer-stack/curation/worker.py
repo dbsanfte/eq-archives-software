@@ -426,6 +426,14 @@ class Worker:
                 state, detail = 'published_waiting_index', self.continue_import(batch, name)
             if state == 'index_failed':
                 import_error = import_error or read_error(self.root, batch, name)
+                if not import_error and hasattr(self.kube,'job_failure'):
+                    try:import_error=self.kube.job_failure(existing)
+                    except CrawlError:import_error='Import Job failed; pod diagnostics are temporarily unavailable. Saved sources and paid results are retained.'
+                if (import_error and 'OOMKilled' in import_error
+                        and existing['spec']['template']['spec']['containers'][0].get('resources',{}).get('limits',{}).get('memory')=='512Mi'):
+                    state,detail='published_waiting_index',self.continue_import(batch,name)
+                    detail['recovery_reason']='Previous 512 MiB importer was too small for the pinned tokenizer; retry uses the current memory profile.'
+                    import_error=None
         else:
             if batch['state'] == 'index_budget_waiting':
                 raise CrawlError('Budget-paused import Job is unavailable; automatic continuation is paused')
