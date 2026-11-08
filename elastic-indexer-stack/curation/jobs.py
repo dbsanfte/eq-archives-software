@@ -46,6 +46,22 @@ class Kubernetes:
             if not continuation:
                 return result
 
+    def job_failure(self,job):
+        """Read only this import's owned pod statuses, never logs or other Jobs."""
+        from urllib.parse import urlencode
+        name=job['metadata']['name'];uid=job['metadata'].get('uid')
+        if not re.fullmatch(r'eqarchives-captures-[a-f0-9]{32}(?:-r[1-9][0-9]{0,5})?',name):
+            raise CrawlError('Invalid import diagnostic identity')
+        result=self.request('GET',f'/api/v1/namespaces/{self.namespace}/pods?'+
+                            urlencode({'labelSelector':'job-name='+name,'limit':100}))
+        for pod in result['items']:
+            if not any(owner.get('kind')=='Job' and owner.get('uid')==uid and owner.get('controller') is True
+                       for owner in pod['metadata'].get('ownerReferences',[])):continue
+            for container in pod.get('status',{}).get('containerStatuses',[]):
+                if container.get('name')=='index' and container.get('state',{}).get('terminated',{}).get('reason')=='OOMKilled':
+                    return 'Indexer exceeded its memory limit (OOMKilled); saved sources and paid results are retained.'
+        return None
+
     def create(self, job):
         return self.request("POST", f"/apis/batch/v1/namespaces/{self.namespace}/jobs", job)
 
@@ -107,8 +123,8 @@ def import_job(batch, image):
                                                        {"name": "DISCUSSION_CATALOG_PATH", "value": "/indexing-state/discussions.sqlite"},
                                                        {"name": "EMBEDDING_URL", "value": "http://nomic-embeddings-rtx3080.eqarchives-es.svc.cluster.local:8080"},
                                                        {"name": "EMBEDDING_MODEL", "value": "embeddinggemma-2-768-v1"}],
-                                               "resources": {"requests": {"cpu": "100m", "memory": "128Mi"},
-                                                             "limits": {"cpu": "1", "memory": "512Mi"}},
+                                               "resources": {"requests": {"cpu": "100m", "memory": "512Mi"},
+                                                             "limits": {"cpu": "1", "memory": "2Gi"}},
                                                "securityContext": {"allowPrivilegeEscalation": False, "readOnlyRootFilesystem": True,
                                                                    "capabilities": {"drop": ["ALL"]}},
                                                "volumeMounts": [{"name": "staging", "mountPath": "/data", "readOnly": True},

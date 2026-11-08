@@ -88,4 +88,6 @@ def get(store, review_id, candidate=None, known_hash=None):
 
 def publication_operation(store, review_id):
     operation = store.db.execute("SELECT * FROM operations WHERE kind='publish' AND json_extract(payload,'$.batch_id')=? ORDER BY created DESC LIMIT 1", (review_id,)).fetchone()
-    return unpack(operation) if operation else None
+    if not operation:return None
+    from publication_recovery import detail
+    return {**unpack(operation),'retry':detail(store,operation['id'])}

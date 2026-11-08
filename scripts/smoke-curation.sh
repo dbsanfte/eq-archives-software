@@ -41,6 +41,20 @@ for name,mode in [('fresh',None),('interrupted',0o700),('restart',0o2770)]:
         assert root.stat().st_uid==10001 and root.stat().st_mode&0o777==0o700
 print('Production seed capabilities, first start, interrupted ownership and repeated restart verified')
 PY
+# Exercise real pinned-tokenizer startup within the import Job's actual budget.
+docker run --rm --network none --read-only --memory=2g --cpus=1 -i --entrypoint python "$image" - <<'PYTHON'
+import json,resource
+from jobs import import_job
+import index_captures
+from indexer import passages
+container=import_job({'id':'a'*32,'manifest_sha256':'b'*64},'dbsanfte/frontend@sha256:'+'1'*64)['spec']['template']['spec']['containers'][0]
+assert container['resources']['limits']['memory']=='2Gi'
+plan=passages.prepare('A guild expedition defeated Nagafen and explored Lower Guk. '*20,
+    'websites/guild.example/20000101000000/index.html','Guild history',
+    html_source='<p>A guild expedition defeated Nagafen and explored Lower Guk.</p>',mime_type='text/html')
+assert plan.passages
+print(json.dumps({'import_tokenizer_startup':'passed','peak_mib':round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,1)}))
+PYTHON
 mkdir "$curation_runtime/credentials" "$curation_runtime/kubernetes"
 printf '%s\n' dummy-paid-key > "$curation_runtime/credentials/luna_api_key"
 printf '%s\n' dummy-service-token > "$curation_runtime/kubernetes/token"

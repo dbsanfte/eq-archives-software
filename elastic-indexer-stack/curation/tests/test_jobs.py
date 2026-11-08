@@ -328,3 +328,26 @@ def test_import_uses_operator_database_profile_and_verified_combined_trust():
     assert mount['readOnly'] and mount['subPath']=='ca-bundle.pem'
     assert mount['mountPath']==env['SSL_CERT_FILE']['value']=='/usr/local/lib/python3.13/site-packages/certifi/cacert.pem'
     assert next(v for v in pod['volumes'] if v['name']=='database-trust')['configMap']['name']=='eqarchives-database-client'
+
+
+def test_import_profile_can_start_the_pinned_gemma_tokenizer():
+    container=import_job({'id':'a'*32,'manifest_sha256':'b'*64},IMAGE)['spec']['template']['spec']['containers'][0]
+    assert container['resources']=={'requests':{'cpu':'100m','memory':'512Mi'},'limits':{'cpu':'1','memory':'2Gi'}}
+
+
+def test_oom_diagnostics_are_bound_to_the_exact_job_owner_and_do_not_read_logs():
+    from jobs import Kubernetes
+    from urllib.parse import parse_qs,urlsplit
+    client=Kubernetes.__new__(Kubernetes);client.namespace='eqarchives-es';seen=[]
+    name='eqarchives-captures-'+'a'*32;job={'metadata':{'name':name,'uid':'owned-job'}}
+    def pod(owner):return {'metadata':{'ownerReferences':[{'kind':'Job','uid':owner,'controller':True}]},
+        'status':{'containerStatuses':[{'name':'index','state':{'terminated':{'reason':'OOMKilled'}}}]}}
+    def response(method,path):
+        seen.append(path);assert method=='GET' and '/pods?' in path and '/log' not in path
+        assert parse_qs(urlsplit(path).query)['labelSelector']==['job-name='+name]
+        return {'items':[pod('other-job')]}
+    client.request=response
+    assert client.job_failure(job) is None
+    client.request=lambda *args:{'items':[pod('owned-job')]}
+    assert 'OOMKilled' in client.job_failure(job)
+    with pytest.raises(CrawlError):client.job_failure({'metadata':{'name':'reindex-legacy','uid':'original'}})

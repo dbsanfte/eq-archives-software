@@ -1823,6 +1823,16 @@ async def automatic_indexing_flow(browser,base,width):
     await page.evaluate('refresh()');await settled(page)
     await expect(page.get_by_role('heading',name='Publishing approved files',exact=True)).to_be_visible()
     await expect(page.get_by_role('button',name='Approve site & index',exact=True)).to_have_count(0)
+    review['operation']={'id':'a'*32,'state':'interrupted','error':'Publisher Git lock is busy; queued retry.',
+                         'retry':{'attempts':1,'paused':0,'retry_at':'2026-12-01T00:00:00+00:00'}}
+    await page.evaluate('refresh()');await settled(page)
+    await expect(page.get_by_role('heading',name='Publication retry scheduled',exact=True)).to_be_visible()
+    await expect(page.locator('#stage-live')).to_contain_text('retry automatically')
+    pause_button=page.get_by_role('button',name='Pause automatic publication retries',exact=True)
+    await expect(pause_button).to_be_visible()
+    box=await pause_button.bounding_box();assert box['height']>=44 and box['width']>=44
+    review.pop('operation')
+    await page.evaluate('refresh()');await settled(page)
     await safe_layout(page,width)
     await page.screenshot(path=f'/tmp/curation-automatic-indexing-{width}.png',full_page=True)
     review.update(state='index_budget_waiting',job={'name':'eqarchives-captures-'+review['id'],'required_usd':.01,'retry_at':'2026-10-10T00:00:00+00:00'});row['review_state']='index_budget_waiting'
@@ -2275,6 +2285,14 @@ async def pipeline_activity_flow(browser,base,width):
     await page.locator('#activity-indexing details > summary').click()
     await expect(page.locator('#activity-indexing')).to_contain_text('<script>alert(1)</script>')
     assert await page.locator('#activity-indexing script').count()==0
+    await safe_layout(page,width)
+    info['publications']={'waiting':479,'retrying':478,'attention':1,'error':'Publisher Git lock is busy; staged sources are retained.',
+                          'next_retry':datetime.fromtimestamp(deadline,timezone.utc).isoformat(),'last_indexed':'2026-10-08T13:49:08+00:00'}
+    await page.evaluate('refresh()');await settled(page)
+    await expect(page.locator('#pipeline-overview')).to_contain_text('479 publications waiting')
+    await expect(page.locator('#activity-indexing')).to_contain_text('479 publications waiting · 478 retries scheduled · 1 need attention')
+    await expect(page.locator('#activity-indexing')).to_contain_text('Publisher Git lock is busy')
+    await expect(page.locator('#activity-indexing')).to_contain_text('Last completed import:')
     await safe_layout(page,width)
     await page.locator('#activity-capture .activity-site').focus()
     capture['result']['progress']['files']=3

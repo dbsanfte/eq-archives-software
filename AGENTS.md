@@ -460,7 +460,9 @@ Automatic promotion requires verified grading and coverage, preserves board/shar
 account boundaries, and uses whole-site scopes only for pristine suggestions.
 Keep lower grades in Saved for later and exclude their identities from discovery.
 Restore, Undo and manual scope edits must prevent automatic reapproval. Preserve
-explicit human decisions. Exhausted link frontiers wait five minutes. Candidate and publication recovery retain their existing explicit/owned rules.
+explicit human decisions. Exhausted link frontiers wait five minutes. Candidate recovery retains its explicit/owned rules. Approved publication transport
+failures retry under the current manifest with durable five/fifteen-minute/hourly
+backoff; preserve declines, scope edits and explicit retry pauses.
 Approved captures independently retry recognized Wayback failures and worker
 interruptions after 5 minutes, 15 minutes, then hourly, preserving checkpoints and
 cumulative usage. Unknown errors and approval/scope/integrity failures require a
@@ -630,8 +632,8 @@ The non-root curation UID must have a Unix account so OpenSSH can start; exercis
 the real SSH configuration offline in the built-image smoke check.
 
 Do not alter, suspend, delete or restart existing indexing Jobs or their source
-checkouts during curation delivery. Its controller has only Jobs get/list/create
-permissions. Foreground imports wait only for other unfinished, unsuspended
+checkouts during curation delivery. Its controller has Jobs get/list/create and read-only pod status list
+permissions for owned import diagnostics, without pod mutation/log/exec access. Foreground imports wait only for other unfinished, unsuspended
 foreground capture imports, including pending/retrying Jobs with active=0. Broad
 reindexes and maintenance never block that slot. The publisher uses its own bare treeless repository
 and dedicated archive deploy key, without an archive worktree or force push. Keep
@@ -1102,3 +1104,25 @@ diagnostics only after acknowledged or fully verified external repairs. Use smal
 atomic control hints, never readonly portal SQLite WAL reads. Keep per-slice
 progress/issue receipts bounded and visible in the collapsed pipeline pane; only
 new disposable maintenance Jobs have a TTL. Preserve prior full/index Jobs.
+
+Publisher Git ownership uses `publication_git.py`: an exclusive OS lease, no
+archive traversal, fixed lock allowlist and live-process checks before private
+quarantine of abandoned locks. Never remove a live/unsafe lock or a general glob
+of lock files. Bound and reap the entire Git/SSH/pack process group on timeout;
+retain fast-forward-only pushes, treeless/no-op fetches and marker recovery.
+Head fetches also require `--refetch` so locally authored remote heads are present
+in a bounded promisor pack; trace a repeated/uncertain successful publication and
+reject archive-wide `--exclude-promisor-objects` connectivity walks.
+`publication_recovery.py` retries only the latest still-approved manifest and
+shares transport backoff across the backlog. Permanent credentials/integrity
+failures and explicit retry pauses stay visible for correction while other work
+advances. Pipeline status must expose publication backlog/errors and the last
+completed import; deployment health alone does not verify successful ingestion.
+
+Curation imports use a 2 GiB limit (512 MiB request); exercise the actual pinned
+Gemma tokenizer/planner in a fresh container at that budget in smoke-curation.
+The old 512 MiB limit cannot load it. Permit read-only pod status listing for owned
+import OOM diagnostics, without logs/exec/mutations. Only a failed old 512 MiB
+profile auto-migrates to a new numbered current-profile import; preserve the old
+Job, approvals, manifests, paid cache and budget. Current-profile OOMs stay visible
+for correction and cannot hold other sites. Keep full reindex Jobs untouched.

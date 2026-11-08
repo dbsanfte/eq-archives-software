@@ -32,7 +32,7 @@ def test_git_command_uses_safe_stage_error_on_failure(tmp_path,monkeypatch):
     publisher.repo=tmp_path/'publisher.git'
     publisher.reader=tmp_path/'reader.git'
     publisher.env={}
-    monkeypatch.setattr(subprocess,'run',lambda *args,**kwargs:subprocess.CompletedProcess(args[0],128,b'',b'No user exists for uid 10001\nprivate-fixture-secret'))
+    monkeypatch.setattr('publisher.run_git',lambda *args,**kwargs:subprocess.CompletedProcess(args[0],128,b'',b'No user exists for uid 10001\nprivate-fixture-secret'))
     with pytest.raises(CrawlError,match='Archive Git fetch failed.*Unix account') as caught:
         publisher.git('fetch','origin','master')
     assert 'private-fixture-secret' not in str(caught.value)
