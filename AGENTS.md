@@ -1113,6 +1113,10 @@ retain fast-forward-only pushes, treeless/no-op fetches and marker recovery.
 Head fetches also require `--refetch` so locally authored remote heads are present
 in a bounded promisor pack; trace a repeated/uncertain successful publication and
 reject archive-wide `--exclude-promisor-objects` connectivity walks.
+Hash verified source files with `hash-object --stdin-paths --no-filters` in
+512-path batches, using Git C quoting and checking every returned object ID/count.
+Avoid per-file Git startups, archive traversal or buffering source bytes in Python;
+retain the single site commit/push, ownership lease and immutable approval marker.
 `publication_recovery.py` retries only the latest still-approved manifest and
 shares transport backoff across the backlog. Permanent credentials/integrity
 failures and explicit retry pauses stay visible for correction while other work

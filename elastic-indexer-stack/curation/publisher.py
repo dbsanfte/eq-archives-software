@@ -7,6 +7,7 @@ archive checkout mutation, or force push. A marker recovers ambiguous pushes.
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import tempfile
 
@@ -171,6 +172,27 @@ class Publisher:
                         for name, (mode, kind, oid) in ordered)
         return self.git("hash-object", "-w", "-t", "tree", "--stdin", data=data).decode().strip()
 
+    def hash_sources(self, captures):
+        changes = {}
+        for offset in range(0, len(captures), 512):
+            batch = captures[offset:offset + 512]
+            lines = []
+            for capture in batch:
+                path = os.fsencode(verified_path(self.root, capture))
+                # Git's stdin-paths accepts C-quoted lines. Quote bytes rather
+                # than JSON: Git does not understand JSON's Unicode escapes.
+                quoted = b''.join(b'\\' + bytes([value]) if value in (34, 92)
+                                  else f'\\{value:03o}'.encode() if value < 32 or value == 127
+                                  else bytes([value]) for value in path)
+                lines.append(b'"' + quoted + b'"\n')
+            output = self.git('hash-object', '-w', '--stdin-paths', '--no-filters', data=b''.join(lines))
+            objects = output.splitlines()
+            if len(objects) != len(batch) or any(not re.fullmatch(rb'[0-9a-f]{40}', oid) for oid in objects):
+                raise CrawlError('Archive blob batch was incomplete or invalid; publication paused')
+            changes.update((capture['archive_path'], oid.decode('ascii'))
+                           for capture, oid in zip(batch, objects, strict=True))
+        return changes
+
     def publish(self, manifest, expected):
         if digest(manifest) != expected:
             raise CrawlError("Batch changed since publication approval")
@@ -181,10 +203,10 @@ class Publisher:
                   "sites": [{key: site[key] for key in ("id", "url", "scope", "manifest_sha256")} for site in manifest["sites"]],
                   "captures": [{key: capture[key] for key in ("url", "timestamp", "sha256", "bytes", "archive_path", "source")}
                                for capture in manifest["captures"]]}
-        # Git streams one source at a time. Never materialize a whole site's
-        # images/downloads in RAM, and keep the single site-level commit/push.
-        changes = {capture['archive_path']: self.git('hash-object', '-w', '--',
-                   str(verified_path(self.root, capture))).decode().strip() for capture in manifest['captures']}
+        # Git streams verified files in bounded path batches, avoiding one Git
+        # startup/object-store scan per tiny file. Source bytes stay off Python's
+        # heap; retain the single site-level commit/push and recovery marker.
+        changes = self.hash_sources(manifest['captures'])
         changes[marker_path] = self.git('hash-object', '-w', '--stdin',
             data=(json.dumps(marker, ensure_ascii=False, sort_keys=True, indent=2) + '\n').encode()).decode().strip()
         for attempt in range(3):

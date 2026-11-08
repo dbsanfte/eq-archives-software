@@ -961,6 +961,12 @@ state and the Luna ledger with the existing PVC.
 ## Publication resilience
 
 The private bare publisher has an exclusive OS lease for every Git operation.
+Verified files are hashed in 512-path batches through Git's `--stdin-paths`, with
+Git C quoting, disabled content filters and exact output count/object-ID checks.
+Git streams source bytes directly; Python retains only paths/object IDs. This
+avoids tens of thousands of Git startups for large sites without adding commits
+or walking the archive. Source verification, the single site commit/push and
+recovery marker remain mandatory.
 Before work starts, fixed Git lock paths are checked against live Git processes.
 Abandoned locks move atomically into private `publisher-recovery/` evidence;
 active, symlinked or unexpectedly owned locks are retained. Recovery never walks
