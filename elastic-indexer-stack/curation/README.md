@@ -106,8 +106,8 @@ it back on resumes retained automatic work. Approved captures retry temporary
 Wayback failures and worker interruptions independently of this discovery setting.
 Retries join the same FIFO after 5 minutes, then 15 minutes, then hourly for
 continued site-wide failures. Saved files, approvals and cumulative usage remain.
-Other sites run during each wait; no failed site holds a worker queue. Publication
-and unknown/integrity failures still require an explicit correction or retry.
+Other sites run during each wait; no failed site holds a worker queue. Unknown/integrity failures require an explicit correction. Publication transport
+failures recover automatically under the rules below.
 Exhausted discovery links are rechecked after five minutes, without
 regrading remembered sites or opening additional Wayback connections.
 
@@ -942,3 +942,33 @@ receipts show upgrades, vector reuse and recent issues in the existing collapsed
 Pipeline status panel. Only these new disposable maintenance Jobs have a one-day
 TTL; all prior full reindex and import Jobs are retained. Back up maintenance
 state and the Luna ledger with the existing PVC.
+
+
+## Publication resilience
+
+The private bare publisher has an exclusive OS lease for every Git operation.
+Before work starts, fixed Git lock paths are checked against live Git processes.
+Abandoned locks move atomically into private `publisher-recovery/` evidence;
+active, symlinked or unexpectedly owned locks are retained. Recovery never walks
+an archive checkout, removes arbitrary lock files, clones a repository or force
+pushes. Git/SSH/pack descendants run in one process group; deadlines terminate and
+reap the whole group before ownership is released. Remote commands have a bounded
+ten-minute allowance; local commands remain bounded at three minutes. Head and
+individual-object fetches use treeless filters and no-op negotiation.
+
+Recognized transport, busy-lock, storage and worker-interruption failures keep the
+original operation, scope, manifest hash and approvals. A durable retry ledger
+uses five-minute, fifteen-minute and hourly delays, with shared transport backoff
+so a backlog cannot hammer GitHub. Only the latest still-current approved
+publication can retry; declined, changed or explicitly paused entries are excluded.
+Legacy approved fetch/timeout failures are recovered once into the same ledger.
+Credentials, host identity and unknown integrity failures need attention and stay
+visible while other sites advance. Remote marker/source verification recovers an
+uncertain push before attempting another commit.
+
+Indexing workspaces show the next publication retry and a Pause automatic
+publication retries control. An explicit retry clears the saved pause. The collapsed
+Pipeline status summary exposes the publication backlog; expanded Indexing shows
+retry/attention counts, the latest error and the last completed import, so process
+health cannot hide a stopped ingestion pipeline. Existing imports, capture,
+discovery, source caches and full reindex Jobs retain their independent lifecycles.

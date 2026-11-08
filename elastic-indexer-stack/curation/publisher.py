@@ -12,6 +12,7 @@ import tempfile
 
 from common import CrawlError, digest
 from captures import check_manifest, verified_path
+from publication_git import PublicationError, lease, recover, run as run_git, category
 
 REMOTE = "git@github.com:dbsanfte/eq-archives.git"
 
@@ -27,7 +28,7 @@ def git_failure(arguments, stderr):
              (b'could not resolve hostname', 'The publication service could not resolve GitHub.'),
              (b'no space left on device', 'Publication staging has no free disk space.'),
              (b'connection timed out', 'The connection to GitHub timed out.')]
-    hint = next((message for pattern,message in hints if pattern in diagnostic), 'Upstream details were omitted to protect credentials.')
+    hint = ('Publisher Git lock is busy; abandoned locks recover before the next retry.' if category(stderr)[0]=='git_lock' else next((message for pattern,message in hints if pattern in diagnostic), 'Upstream details were omitted to protect credentials.'))
     return f'Archive Git {operation} failed. {hint} The approved sources remain in staging.'
 
 
@@ -42,55 +43,65 @@ class Publisher:
                     "GIT_AUTHOR_EMAIL": "curation@eqarchives.org", "GIT_COMMITTER_NAME": "EQ archives curation",
                     "GIT_COMMITTER_EMAIL": "curation@eqarchives.org"}
         self.private = None
-        if remote == REMOTE:
-            self.private = tempfile.TemporaryDirectory(prefix="curation-ssh-")
-            key = Path(self.private.name) / "key"
-            key.write_bytes(Path(key_file).read_bytes())
-            key.chmod(0o600)
-            known_hosts = Path(__file__).with_name("github-known-hosts")
-            self.env["GIT_SSH_COMMAND"] = (f"ssh -i {key} -o IdentitiesOnly=yes -o BatchMode=yes "
-                                           f"-o StrictHostKeyChecking=yes -o UserKnownHostsFile={known_hosts} "
-                                           "-o ConnectTimeout=15")
-        if not self.repo.exists():
-            self.repo.mkdir(mode=0o700)
-            self.git("init", "--bare", "--template=", "-q")
-            self.git("remote", "add", "origin", remote)
-            self.git("config", "remote.origin.promisor", "true")
-            self.git("config", "remote.origin.partialclonefilter", "tree:0")
-            self.git("config", "extensions.partialClone", "origin")
-            self.git("config", "gc.auto", "0")
-            self.git("config", "maintenance.auto", "false")
-            self.git("config", "pack.window", "0")
-            self.git("config", "pack.threads", "1")
-        if self.git("remote", "get-url", "origin").decode().strip() != remote:
-            raise CrawlError("Publisher remote differs from the configured archive repository")
-        if not self.reader.exists():
-            self.reader.mkdir(mode=0o700)
-            self.git("init", "--bare", "--template=", "-q", local=True)
-        if self.git("remote", local=True).strip():
-            raise CrawlError("Publisher object reader must have no remotes")
+        self.lease=lease(self.root)
+        try:
+            self.recovered_locks=recover(self.root,self.repo)
+            if remote == REMOTE:
+                self.private = tempfile.TemporaryDirectory(prefix="curation-ssh-")
+                key = Path(self.private.name) / "key"
+                key.write_bytes(Path(key_file).read_bytes())
+                key.chmod(0o600)
+                known_hosts = Path(__file__).with_name("github-known-hosts")
+                self.env["GIT_SSH_COMMAND"] = (f"ssh -i {key} -o IdentitiesOnly=yes -o BatchMode=yes "
+                                               f"-o StrictHostKeyChecking=yes -o UserKnownHostsFile={known_hosts} "
+                                               "-o ConnectTimeout=15")
+            if not self.repo.exists():
+                self.repo.mkdir(mode=0o700)
+                self.git("init", "--bare", "--template=", "-q")
+                self.git("remote", "add", "origin", remote)
+                self.git("config", "remote.origin.promisor", "true")
+                self.git("config", "remote.origin.partialclonefilter", "tree:0")
+                self.git("config", "extensions.partialClone", "origin")
+                self.git("config", "gc.auto", "0")
+                self.git("config", "maintenance.auto", "false")
+                self.git("config", "pack.window", "0")
+                self.git("config", "pack.threads", "1")
+            if self.git("remote", "get-url", "origin").decode().strip() != remote:
+                raise CrawlError("Publisher remote differs from the configured archive repository")
+            if not self.reader.exists():
+                self.reader.mkdir(mode=0o700)
+                self.git("init", "--bare", "--template=", "-q", local=True)
+            if self.git("remote", local=True).strip():
+                raise CrawlError("Publisher object reader must have no remotes")
+        except BaseException:
+            self.close()
+            raise
 
     def close(self):
-        if self.private:
-            self.private.cleanup()
+        try:
+            if self.private:self.private.cleanup()
+        finally:
+            if getattr(self,'lease',None):self.lease.close()
 
     def git(self, *arguments, data=None, optional=False, local=False):
         env = {**self.env, "GIT_OBJECT_DIRECTORY": str(self.repo / "objects")} if local else self.env
         try:
-            result = subprocess.run(["git", "--git-dir", str(self.reader if local else self.repo), *arguments], input=data,
-                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, timeout=180)
+            result = run_git(["git", "--git-dir", str(self.reader if local else self.repo), *arguments], data=data,
+                             env=env, timeout=600 if any(a in ('fetch','push','ls-remote') for a in arguments) else 180,
+                             descriptor=self.lease.fileno() if getattr(self,'lease',None) else None)
         except subprocess.TimeoutExpired:
-            raise CrawlError("Archive Git operation timed out; resume to check the remote publication marker") from None
+            raise PublicationError("Archive Git operation timed out; its child processes were stopped. Publication will retry and verify the remote marker.",'timeout') from None
         if result.returncode:
-            if optional:
+            code,retryable=category(result.stderr)
+            if optional and (local or code!='credentials'):
                 return None
-            raise CrawlError(git_failure(arguments,result.stderr))
+            raise PublicationError(git_failure(arguments,result.stderr),code,retryable)
         if b"filtering not recognized" in result.stderr or b"does not support filter" in result.stderr:
             raise CrawlError("Remote does not support bounded partial fetches")
         return result.stdout
 
     def fetch(self):
-        self.git("fetch", "--no-tags", "--depth=1", "--filter=tree:0", "origin", "master")
+        self.git("-c", "fetch.negotiationAlgorithm=noop", "fetch", "--no-tags", "--depth=1", "--filter=tree:0", "origin", "master")
         return self.git("rev-parse", "FETCH_HEAD").decode().strip()
 
     def object(self, kind, oid):
@@ -201,12 +212,13 @@ class Publisher:
             result = self.git("push", "origin", commit + ":refs/heads/master", optional=True)
             if result is not None:
                 return {"commit": commit, "marker": marker_path, "recovered": False}
-        raise CrawlError("Archive publication could not be confirmed; resume to check the remote marker")
+        raise PublicationError("Archive publication could not be confirmed; a retry will check the remote marker first.",'uncertain')
 
 
 def publish(root, manifest, expected):
     publisher = Publisher(root)
     try:
-        return publisher.publish(manifest, expected)
+        return {**publisher.publish(manifest, expected),
+                'recovered_git_locks':publisher.recovered_locks}
     finally:
         publisher.close()

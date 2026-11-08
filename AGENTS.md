@@ -460,7 +460,9 @@ Automatic promotion requires verified grading and coverage, preserves board/shar
 account boundaries, and uses whole-site scopes only for pristine suggestions.
 Keep lower grades in Saved for later and exclude their identities from discovery.
 Restore, Undo and manual scope edits must prevent automatic reapproval. Preserve
-explicit human decisions. Exhausted link frontiers wait five minutes. Candidate and publication recovery retain their existing explicit/owned rules.
+explicit human decisions. Exhausted link frontiers wait five minutes. Candidate recovery retains its explicit/owned rules. Approved publication transport
+failures retry under the current manifest with durable five/fifteen-minute/hourly
+backoff; preserve declines, scope edits and explicit retry pauses.
 Approved captures independently retry recognized Wayback failures and worker
 interruptions after 5 minutes, 15 minutes, then hourly, preserving checkpoints and
 cumulative usage. Unknown errors and approval/scope/integrity failures require a
@@ -1102,3 +1104,14 @@ diagnostics only after acknowledged or fully verified external repairs. Use smal
 atomic control hints, never readonly portal SQLite WAL reads. Keep per-slice
 progress/issue receipts bounded and visible in the collapsed pipeline pane; only
 new disposable maintenance Jobs have a TTL. Preserve prior full/index Jobs.
+
+Publisher Git ownership uses `publication_git.py`: an exclusive OS lease, no
+archive traversal, fixed lock allowlist and live-process checks before private
+quarantine of abandoned locks. Never remove a live/unsafe lock or a general glob
+of lock files. Bound and reap the entire Git/SSH/pack process group on timeout;
+retain fast-forward-only pushes, treeless/no-op fetches and marker recovery.
+`publication_recovery.py` retries only the latest still-approved manifest and
+shares transport backoff across the backlog. Permanent credentials/integrity
+failures and explicit retry pauses stay visible for correction while other work
+advances. Pipeline status must expose publication backlog/errors and the last
+completed import; deployment health alone does not verify successful ingestion.

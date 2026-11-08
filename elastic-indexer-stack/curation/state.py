@@ -75,6 +75,9 @@ def connect(directory):
                 decision TEXT NOT NULL, error TEXT NOT NULL, created TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS capture_retries(operation TEXT PRIMARY KEY,
                 attempts INTEGER NOT NULL, retry_at TEXT, paused INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS publication_retries(operation TEXT PRIMARY KEY,
+                attempts INTEGER NOT NULL, retry_at TEXT, paused INTEGER NOT NULL DEFAULT 0);
+            CREATE INDEX IF NOT EXISTS operation_publication_batch ON operations(kind,json_extract(payload,'$.batch_id'));
             CREATE INDEX IF NOT EXISTS operation_activity ON operations(updated DESC);
             CREATE INDEX IF NOT EXISTS batch_activity ON batches(updated DESC);
             CREATE INDEX IF NOT EXISTS batch_work_state ON batches(state,created,id);

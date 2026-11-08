@@ -576,11 +576,23 @@ def create_app(root=None, origin=None, start_worker=True):
                 return JSONResponse({'resumed': payload['id'], 'state': 'resume_queued'}, status_code=202)
             if active_operation(store, operation_lane(operation['kind'])):
                 raise CrawlError("Another operation for this worker is queued or running")
+            if operation['kind']=='publish':
+                store.db.execute('UPDATE publication_retries SET paused=0,retry_at=NULL WHERE operation=?',(operation['id'],))
+                store.db.execute("DELETE FROM meta WHERE key='publication_backoff'")
             result = store.db.execute("UPDATE operations SET state='queued',error=NULL,updated=? WHERE id=? AND state='interrupted'", (now(), valid_id(payload["id"])))
             if result.rowcount != 1:
                 raise CrawlError("Operation is not awaiting an explicit resume")
             store.db.commit()
         return JSONResponse({"resumed": payload["id"]}, status_code=202)
+
+    async def pause_publication_retry(request):
+        from publication_recovery import pause
+        payload=await body(request)
+        if not isinstance(payload,dict) or set(payload)!={'id'}:
+            raise CrawlError('Pause publication retries requires an operation ID')
+        with connect(root) as store:
+            store.db.execute('BEGIN IMMEDIATE');pause(store,valid_id(payload['id']));store.db.commit()
+        return JSONResponse({'state':'interrupted','paused':True})
 
     async def cancel_capture_resume(request):
         payload = await body(request)
@@ -619,6 +631,7 @@ def create_app(root=None, origin=None, start_worker=True):
 
     app = Starlette(routes=[Route("/", screen), Route("/assets/{name}", asset), Route("/healthz", health),
                             Route('/api/cancel-resume', cancel_capture_resume, methods=['POST']),
+                            Route('/api/pause-publication-retry',pause_publication_retry,methods=['POST']),
                             Route('/api/pause-capture-retries', pause_capture_retries, methods=['POST']),
                             Route("/api/queue", listing), Route("/api/source", source),
                             Route('/api/automation', automatic_settings, methods=['POST']),

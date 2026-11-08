@@ -779,9 +779,11 @@ function renderLive() {
   } else if (row.stage==='indexing' && review) {
     const state=review.state,preparing=['awaiting_review','index_preflight_failed'].includes(state),preflightFailed=state==='index_preflight_failed',publishing=state==='publication_requested',paused=publishing && review.operation?.state==='interrupted',failed=state==='index_failed',budgetWaiting=state==='index_budget_waiting';
     const title=budgetWaiting ? (review.job?.budget_period==='monthly' ? 'Waiting for monthly Luna budget' : 'Waiting for daily Luna budget') : preflightFailed ? 'Indexing preparation paused' : preparing ? 'Preparing automatic indexing' : paused ? 'Publication paused' : failed ? 'Indexing needs attention' : publishing ? 'Publishing approved files' : state==='published_waiting_index' ? 'Waiting to index' : 'AI enrichment & indexing';
-    const box=panel(title,budgetWaiting ? `Paid results and indexed pages are retained. The next request needs a reservation of $${Number(review.job.required_usd).toFixed(4)}. This site resumes automatically when the daily budget allows, resetting at ${new Date(data.automation?.resets_at || review.job.retry_at).toUTCString()}. You can change the Luna limits in Candidates.` : preflightFailed ? 'Saved files are retained. Resolve the issue below and retry preparation.' : preparing ? 'Checking saved files, archive coverage and your original capture approval. Publication and indexing follow automatically.' : paused ? 'Your approval is saved. Retry publication to continue with the retained sources.' : failed ? 'Published sources are retained. Retry with saved AI results and the same site budget; existing entries are skipped.' : publishing ? 'The approved site is being added to the archive. Git publication can take several minutes.' : state==='published_waiting_index' ? 'Approved sites share one foreground import slot. Background policy work yields to them.' : 'Luna enrichment and indexing are running. The site will retire from the active portal when the import completes.',paused || failed || preflightFailed ? 'attention' : '');
+    const publicationRetry=paused && retryPending(review.operation?.retry);
+    const box=panel(publicationRetry ? 'Publication retry scheduled' : title,budgetWaiting ? `Paid results and indexed pages are retained. The next request needs a reservation of $${Number(review.job.required_usd).toFixed(4)}. This site resumes automatically when the daily budget allows, resetting at ${new Date(data.automation?.resets_at || review.job.retry_at).toUTCString()}. You can change the Luna limits in Candidates.` : preflightFailed ? 'Saved files are retained. Resolve the issue below and retry preparation.' : preparing ? 'Checking saved files, archive coverage and your original capture approval. Publication and indexing follow automatically.' : publicationRetry ? 'Your approval and saved files are retained. Publication will retry automatically and check the remote marker before publishing again.' : paused ? 'Your approval is saved. Retry publication to continue with the retained sources.' : failed ? 'Published sources are retained. Retry with saved AI results and the same site budget; existing entries are skipped.' : publishing ? 'The approved site is being added to the archive. Git publication can take several minutes.' : state==='published_waiting_index' ? 'Approved sites share one foreground import slot. Background policy work yields to them.' : 'Luna enrichment and indexing are running. The site will retire from the active portal when the import completes.',paused || failed || preflightFailed ? 'attention' : '');
     box.append(node('p','Capture and discovery continue independently of publication and indexing.','meta'));
     box.append(node('p',review.manifest.indexing?.daily_budget ? 'AI enrichment continues across days under your shared daily Luna limit, including retries.' : `AI enrichment: up to $${review.manifest.indexing?.max_enrichment_usd ?? 2} for this site, including retries.`,'meta'));
+    if (publicationRetry) activityDeadline(box,review.operation.retry.retry_at,'Publication retry');
     if (review.error || review.operation?.error) box.append(node('p',review.error || review.operation.error));
     const step=preparing ? 0 : publishing ? 1 : state==='published_waiting_index' ? 2 : 3,pipeline=node('ol',undefined,'pipeline');
     ['Verify captured files','Publish approved site','Wait for an available worker','AI enrichment & indexing','Complete and retire'].forEach((text,index)=>{const li=node('li',text);li.dataset.progress=index<step ? 'done' : index===step ? 'current' : 'upcoming';pipeline.append(li);});box.append(pipeline);
@@ -917,6 +919,7 @@ function renderDock(force=false) {
     hint='Recheck saved files and the original approval';
     buttons.append(mutation('Retry indexing preparation',()=>request('/api/prepare-indexing',{id:review.id,manifest_sha256:review.manifest_sha256}),'Indexing preparation queued again.',true));
   } else if (row.stage==='indexing' && review?.state==='publication_requested' && review.operation?.state==='interrupted') {
+    if (retryPending(review.operation.retry)) buttons.append(mutation('Pause automatic publication retries',()=>request('/api/pause-publication-retry',{id:review.operation.id}),'Automatic publication retries paused.',true));
     hint='Approval retained · no recapture needed';buttons.append(mutation('Retry publication',()=>request('/api/resume',{id:review.operation.id}),'Publication queued again.',true,hasOperation('indexing')));
   } else if (row.stage==='indexing' && review?.state==='index_failed' && review.job?.name) {
     hint='Reuse saved AI results and the original site budget';buttons.append(mutation('Retry indexing',()=>request('/api/index-retry',{id:review.id,manifest_sha256:review.manifest_sha256,job_name:review.job.name}),'Indexing queued again.',true));
@@ -1064,7 +1067,7 @@ function renderPipelineActivity() {
   const discovery=activeOperation('candidates'),capture=activeOperation('capture'),publication=activeOperation('indexing');
   const unavailable=Object.values(info.runtime || {}).some(healthy=>healthy===false);
   $('pipeline-overview').dataset.attention=String(unavailable);
-  $('pipeline-overview').textContent=`${unavailable ? 'Worker needs attention' : `${[discovery,capture,publication || info.indexing?.state==='indexing',info.maintenance?.phase==='running'].filter(Boolean).length} workers active`} · ${data.stage_counts.queued || 0} sites queued${data.capture_attention?.retrying ? ` · ${data.capture_attention.retrying} retries scheduled` : ''}`;
+  $('pipeline-overview').textContent=`${unavailable ? 'Worker needs attention' : `${[discovery,capture,publication || info.indexing?.state==='indexing',info.maintenance?.phase==='running'].filter(Boolean).length} workers active`} · ${data.stage_counts.queued || 0} sites queued${data.capture_attention?.retrying ? ` · ${data.capture_attention.retrying} retries scheduled` : ''}${info.publications?.waiting ? ` · ${info.publications.waiting} publications waiting` : ''}`;
   for (const [lane,title] of [['candidates','Discovery'],['capture','Capture'],['indexing','Indexing']]) {
     let card=$(`activity-${lane}`);
     if (!card) {
@@ -1072,7 +1075,7 @@ function renderPipelineActivity() {
       card.append(node('summary'),node('div',undefined,'activity-body'));$('pipeline-workers').append(card);
     }
     if (laneChanged) card.open=selected===lane;
-    const signature=JSON.stringify([lane==='candidates' ? [discovery,info.discovery,auto] : lane==='capture' ? [capture,info.next_capture,info.next_retry,data.capture_attention,data.capture_queue_error] : [publication,info.indexing,info.maintenance,auto?.resets_at],info.runtime,data.stage_counts]);
+    const signature=JSON.stringify([lane==='candidates' ? [discovery,info.discovery,auto] : lane==='capture' ? [capture,info.next_capture,info.next_retry,data.capture_attention,data.capture_queue_error] : [publication,info.indexing,info.publications,info.maintenance,auto?.resets_at],info.runtime,data.stage_counts]);
     if (card.dataset.signature===signature) continue;card.dataset.signature=signature;
     const body=node('div',undefined,'activity-body');let status='',tone='idle';
     if (lane==='candidates') {
@@ -1131,7 +1134,7 @@ function renderPipelineActivity() {
       if (attention.interrupted || attention.preflight) body.append(node('p',`${attention.interrupted || 0} paused captures · ${attention.preflight || 0} approval errors. These sites wait for your decision while eligible sites continue.`,'activity-warning'));
     } else {
       const index=info.indexing;
-      if (publication) {status='Publishing archive files';tone='running';body.append(node('p','Git publication can take several minutes. Capture and discovery continue.'));activityAge(body,publication.updated);}
+      if (publication) {const wait=publication.state==='queued' && info.publications?.backoff?.retry_at && new Date(info.publications.backoff.retry_at).getTime()>Date.now();status=wait ? 'Waiting to retry publication' : 'Publishing archive files';tone=wait ? 'waiting' : 'running';body.append(node('p',wait ? 'Saved publications share a Git transport cooldown. Capture and active imports continue.' : 'Git publication can take several minutes. Capture and discovery continue.'));activityAge(body,publication.updated);}
       else if (index) {
         status=labels[index.state] || 'Preparing indexing';tone=index.state==='indexing' ? 'running' : 'waiting';
         activitySite(body,index.site);
@@ -1142,6 +1145,15 @@ function renderPipelineActivity() {
         if (index.error) {tone='attention';body.append(node('p',index.error,'activity-warning'));}
       } else if (data.stage_counts.indexing) {status='Sites need attention';tone='attention';body.append(node('p',`${data.stage_counts.indexing} sites remain in Indexing. Open their entries for the saved error and retry options.`));}
       else {status='No sites waiting';body.append(node('p','Completed captures publish and index automatically.'));}
+      const publishing=info.publications;
+      if (publishing?.waiting) {
+        body.append(node('p',`${publishing.waiting} publications waiting · ${publishing.retrying} retries scheduled · ${publishing.attention} need attention`,'activity-counts'));
+        if (!publication && !index) {status=publishing.attention ? 'Publication needs attention' : 'Publication retry scheduled';tone=publishing.attention ? 'attention' : 'waiting';}
+        if (publishing.error) body.append(node('p',publishing.error,'activity-warning'));
+        const retry=publishing.backoff?.retry_at || publishing.next_retry;
+        if (retry) activityDeadline(body,retry,'Publication retry');
+        if (publishing.last_indexed) body.append(node('p',`Last completed import: ${new Date(publishing.last_indexed).toUTCString()}`,'meta'));
+      }
       const maintenance=info.maintenance;
       if (maintenance?.policy) {
         const phases={running:'Updating older archive chunks',waiting_imports:'Chunk maintenance yields to approved imports',waiting_jobs:'Chunk maintenance waits for the existing reindex',sweep_waiting:'Chunk maintenance will check again later',retry_wait:'Chunk maintenance is waiting to retry',attention:'Chunk maintenance needs attention',checking_submission:'Checking maintenance worker submission'};

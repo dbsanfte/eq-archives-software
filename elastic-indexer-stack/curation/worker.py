@@ -130,7 +130,7 @@ class Worker:
         migrate(self.root)
         with connect(self.root) as store:
             # Approved downloads recover on a timer. Interrupted paid discovery
-            # and publication retain their existing resume rules/reservations.
+            # keeps its original limits; owned publication failures recover below.
             from capture_failures import WORKER_INTERRUPTED
             store.db.execute("""UPDATE operations SET state='interrupted',
                 error=CASE WHEN kind='capture' THEN ? ELSE 'Worker stopped; resume explicitly' END,
@@ -185,6 +185,7 @@ class Worker:
 
     def publication_complete(self, batch_id, manifest, result):
         with connect(self.root) as store:
+            store.db.execute("DELETE FROM meta WHERE key='publication_backoff'")
             store.db.execute("UPDATE batches SET state='published_waiting_index',publication=?,updated=? WHERE id=?",
                              (json.dumps(result), now(), batch_id))
             for site in manifest['sites']:
@@ -229,6 +230,9 @@ class Worker:
             if pause:=automation.pause_detail(error,operation):result['automatic_pause']=pause
             store.db.execute("UPDATE operations SET state='interrupted',error=?,result=?,updated=? WHERE id=?",
                              (detail,json.dumps(result),now(),operation['id']))
+            if operation['kind']=='publish':
+                from publication_recovery import register
+                register(store,operation,error)
             if operation['kind']=='capture':
                 from capture_recovery import register
                 register(store,operation,detail)
@@ -275,6 +279,9 @@ class Worker:
                 store.set('capture_queue_error', None)
 
     def operation(self, lane=Lane.CAPTURE):
+        if lane==Lane.INDEXING:
+            from publication_recovery import paused
+            if paused(self.root):return
         kinds = OPERATION_KINDS[Lane(lane)]
         with connect(self.root) as store:
             store.db.execute("BEGIN IMMEDIATE")
@@ -486,6 +493,8 @@ class Worker:
                 detail = str(error) if isinstance(error, CrawlError) else 'Automatic scheduling paused; saved state is retained'
                 store.set('automatic_activity', {'phase': 'attention', 'error': detail})
         if lane == Lane.INDEXING:
+            from publication_recovery import schedule
+            schedule(self.root)
             prepare_next(self.root)
         if lane == Lane.CAPTURE:
             try:
