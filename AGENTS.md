@@ -660,6 +660,13 @@ immutable, retain correction provenance, reuse legacy paid caches, and count los
 correction responses against that durable limit. Refusals remain pending. Surface
 safe predefined failure reasons through Job/manifest-bound diagnostic files; never
 expose model output or let a previous attempt's status override the current Job.
+Enrichment uses 32,768 output tokens for initial/correction requests; reserve the
+full allowance before sending. Reuse exact source-bound 4K paid caches and retain
+their correction identities. The operator-authorized 32K migration has one durable
+single-use recovery slot only for a received old 4K `max_output_tokens` failure
+after its correction chain is exhausted. Keep old costs/history and unknown
+reservations; never replenish correction slots or unknown initial attempts across
+limit/prompt versions. Refusals, other failures and 32K exhaustion stay bounded.
 
 New approved captures cover all available dated versions from inclusive UTC
 1999-01-01 through 2006-12-31. The 1999–2001 preference ranks discovery evidence

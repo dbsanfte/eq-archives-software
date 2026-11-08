@@ -636,6 +636,11 @@ or source validation gets at most two correction requests with the complete
 source and specific validation failure. Corrections pass the same strict
 validator; an unsupported quote is never accepted by relaxing the check.
 An explicit model refusal remains pending without correction requests.
+Enrichment requests and corrections allow 32,768 output tokens, including
+reasoning; discovery grading retains its separate limit. Reservations include
+the full configured allowance before sending, with verified actual usage settling
+the charge afterward. Valid cached 4,096-token results and their corrections are
+reused with their original source/request identities.
 
 Each manually approved site has a separate cumulative $2 enrichment cap. Newly
 automatically approved sites instead use the configured shared UTC daily ceiling.
@@ -658,6 +663,12 @@ long news indexes with more than 100 supported dates can be accepted. The origin
 response is never overwritten. Each correction slot can spend only once, including
 an ambiguous/lost response, and the two-slot limit survives pod and Job retries.
 An initial request with no received response has at most two reserved attempts.
+The 32K allowance upgrade permits one additional durable recovery request only
+when an exhausted old 4K chain ends with the API's `max_output_tokens` reason.
+It retains the old response chain and costs, has a stable single-use slot even
+after a lost response, and cannot replenish correction slots. Other failures or
+responses already using 32K receive no extra recovery allowance. Ambiguous initial
+attempts remain jointly bounded across old/new prompt and output-limit signatures.
 Every reservation counts against the original daily or $2/site policy; retries neither reset
 that policy nor silently create an unenriched document. Exhausted corrections require
 operator attention rather than another paid loop.
