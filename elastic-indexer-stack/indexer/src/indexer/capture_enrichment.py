@@ -2,6 +2,7 @@
 
 from datetime import date
 import json
+import logging
 import math
 from pathlib import Path
 import re
@@ -36,6 +37,8 @@ MAX_CORRECTIONS = 2
 MAX_DATE_ITEMS = 1024
 MAX_OUTPUT_TOKENS = 32768
 PREVIOUS_OUTPUT_TOKENS = 4096
+DATE_VALIDATION_VERSION = 'date-evidence-v2'
+LOG = logging.getLogger(__name__)
 MISSING_RESPONSE = object()
 EVIDENCE_INSTRUCTIONS = (
     "\n\nEvery date_evidence excerpt must be one contiguous span copied from the source. "
@@ -86,7 +89,17 @@ class ValidationError(EnrichmentError):
     """A received model response can be corrected, but never accepted unchecked."""
 
 
-def validate(response, source):
+def valid_date(value):
+    if not isinstance(value, str) or not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}', value):
+        return False
+    try:
+        date.fromisoformat(value)
+    except ValueError:
+        return False
+    return True
+
+
+def validate(response, source, *, audit=None):
     def require(condition, code='schema'):
         if not condition:
             raise ValidationError(code)
@@ -109,38 +122,55 @@ def validate(response, source):
         extracted = result["llm_extracted_dates"]
         require(isinstance(extracted, list) and len(extracted) <= MAX_DATE_ITEMS, 'date_metadata')
         dates = {}  # Stable unique days; several posts can legitimately share one.
+        invalid_dates = 0
         for item in extracted:
-            require(isinstance(item, dict) and set(item) == {"date"}, 'date_metadata')
+            require(isinstance(item, dict) and set(item) == {"date"} and isinstance(item['date'], str), 'date_metadata')
             value = item["date"]
-            require(isinstance(value, str) and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value), 'date_metadata')
-            try:
-                date.fromisoformat(value)
-            except ValueError:
-                raise ValidationError('date_metadata') from None
+            if not valid_date(value):
+                invalid_dates += 1
+                continue
             dates[value] = None
-        require(result["llm_guessed_date"] is None or isinstance(result["llm_guessed_date"], str)
-                and result["llm_guessed_date"] in dates, 'date_metadata')
+        guessed = result['llm_guessed_date']
+        require(guessed is None or isinstance(guessed, str), 'date_metadata')
         evidence = result["date_evidence"]
         require(isinstance(evidence, list) and len(evidence) <= MAX_DATE_ITEMS, 'date_metadata')
         supported, excerpts = set(), {}
+        discarded = {}
+        def discard(reason):
+            discarded[reason] = discarded.get(reason, 0) + 1
         for item in evidence:
             require(isinstance(item, dict) and set(item) == {"date", "excerpt"}
-                    and isinstance(item['date'], str) and item['date'] in dates
+                    and isinstance(item['date'], str)
                     and isinstance(item["excerpt"], str), 'date_metadata')
-            require(1 <= len(item["excerpt"]) <= 500 and item["excerpt"].strip(), 'source_evidence')
+            if not valid_date(item['date']):
+                discard('invalid_date')
+                continue
+            if item['date'] not in dates:
+                discard('undeclared_date')
+                continue
+            if not 1 <= len(item['excerpt']) <= 500 or not item['excerpt'].strip():
+                discard('invalid_excerpt')
+                continue
             # HTML headings often contain NBSPs or wrap across Markdown lines.
             # Only whitespace may differ; retain the actual verbatim source.
             pattern = r"\s+".join(re.escape(part) for part in re.split(r"\s+", item["excerpt"].strip()))
             match = re.search(pattern, source)
             if match is None:
-                raise ValidationError('source_evidence')
+                discard('unmatched_excerpt')
+                continue
             supported.add(item['date'])
             excerpts[(item['date'], match.group(0))] = None
-        require(supported == set(dates), 'date_metadata')
         # Normalize derived metadata only, retaining every distinct source quote.
         # json.loads above leaves the original paid response/cache immutable.
-        result['llm_extracted_dates'] = [{'date': value} for value in dates]
+        result['llm_extracted_dates'] = [{'date': value} for value in dates if value in supported]
         result['date_evidence'] = [{'date': value, 'excerpt': quote} for value, quote in excerpts]
+        result['llm_guessed_date'] = guessed if guessed in supported else None
+        if audit is not None:
+            audit.update(version=DATE_VALIDATION_VERSION, declared_date_items=len(extracted),
+                         unique_declared_dates=len(dates), supported_dates=len(supported),
+                         omitted_dates=[value for value in dates if value not in supported],
+                         invalid_date_items=invalid_dates, discarded_evidence=discarded,
+                         guessed_date_cleared=guessed is not None and result['llm_guessed_date'] is None)
     except (ValueError, KeyError, TypeError, AttributeError):
         raise ValidationError('schema') from None
     return result
@@ -232,17 +262,47 @@ class Enricher:
         return response
 
     def accepted(self, response, source, signature):
+        audit = {}
         try:
-            result = validate(response, source)
+            result = validate(response, source, audit=audit)
         except ValidationError as error:
             self.store.set('enrichment_validation:' + signature, {'code': error.code, 'checked_at': now()})
             raise
         self.store.db.execute("UPDATE attempts SET status='enriched' WHERE signature=? AND status='received'", (signature,))
         self.store.db.commit()
         self.store.set('enrichment_validation:' + signature, {'code': 'validated', 'checked_at': now(),
-                                                              'date_evidence': result['date_evidence']})
+                         'date_evidence': result['date_evidence'], 'date_validation': audit})
+        if audit['omitted_dates'] or audit['invalid_date_items'] or audit['discarded_evidence'] or audit['guessed_date_cleared']:
+            LOG.info('Enrichment date normalization: supported=%d omitted=%d invalid=%d discarded_evidence=%d guess_cleared=%s',
+                     audit['supported_dates'], len(audit['omitted_dates']), audit['invalid_date_items'],
+                     sum(audit['discarded_evidence'].values()), audit['guessed_date_cleared'])
         return {**{key: result[key] for key in SCHEMA['required'] if key != 'date_evidence'},
                 'llm_model_name': response.get('model', MODEL), 'llm_enrichment_signature': signature}
+
+    def cached_enrichment(self, source, original_signature):
+        """Prefer already-paid evidence coverage over an incomplete date subset."""
+        keys = [original_signature]
+        keys.extend(digest({'enrichment': original_signature, 'correction_version': 1, 'correction': n})
+                    for n in range(1, MAX_CORRECTIONS + 1))
+        keys.append(digest({'enrichment': original_signature, 'output_limit_recovery': 1,
+                            'max_output_tokens': MAX_OUTPUT_TOKENS}))
+        best = None
+        for key in keys:
+            cached = self.store.get('enrichment:' + key)
+            if not cached:
+                continue
+            audit = {}
+            try:
+                result = validate(cached['response'], source, audit=audit)
+            except ValidationError:
+                continue
+            # Dates are optional. Prefer greater proven coverage, then fewer
+            # omissions. Ties retain the earlier response identity and metadata.
+            score = (len(result['llm_extracted_dates']), -(len(audit['omitted_dates']) + audit['invalid_date_items']
+                     + sum(audit['discarded_evidence'].values()) + int(audit['guessed_date_cleared'])))
+            if best is None or score > best[0]:
+                best = score, key, cached['response']
+        return self.accepted(best[2], source, best[1]) if best else None
 
     def enrich(self, capture, source):
         payload = self.payload(capture, source)
@@ -261,6 +321,9 @@ class Enricher:
         else:
             response = self.exchange(capture, payload, signature, initial_signatures=signatures)
         original_signature = signature
+        cached = self.cached_enrichment(source, original_signature)
+        if cached is not None:
+            return cached
         last_issue = None
         for correction in range(MAX_CORRECTIONS + 1):
             if response is not MISSING_RESPONSE:

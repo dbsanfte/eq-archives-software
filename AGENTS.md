@@ -653,7 +653,13 @@ estimates. Enrichment failures leave the new document pending. Skip existing
 IDs without paying for enrichment or overwriting their metadata.
 Cache paid responses before validation, including rejected evidence, to prevent
 repeated charges on retries. Date evidence may vary only in whitespace; retain
-the matched verbatim source excerpt and reject all other content differences.
+the matched verbatim source excerpt. Omit unsupported/invalid optional date claims
+and their evidence, clearing an unsupported guessed date to null; never substitute
+a capture timestamp. Keep source text, summary and tags intact, and persist a
+versioned private validation receipt with omission counts/reasons. Strict wire
+shapes, non-date metadata, refusals and resource bounds still require validation.
+Prefer an already-paid response with more supported dates within the same bounded
+correction chain, retaining its signature without another API call.
 Invalid or incomplete received enrichment responses can use at most two separately
 cached correction requests under the original site's budget. Keep rejected responses
 immutable, retain correction provenance, reuse legacy paid caches, and count lost
