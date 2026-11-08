@@ -658,7 +658,15 @@ all rejected evidence and the final matched verbatim excerpts. Extracted dates
 are stable unique ISO calendar days; multiple posts or news items on one day may
 retain different supporting excerpts. Duplicate days/identical quotes normalize
 without discarding distinct proof, and every day still requires a matched source
-excerpt. Date and evidence arrays each have a 1,024-entry validation bound, so
+excerpt. Unsupported or invalid optional date claims and unmatched evidence are
+omitted; an unsupported guessed date becomes null, never a capture timestamp.
+The summary, classification, tags and complete source remain intact. A versioned
+private validation receipt records omissions and evidence rejection counts, while
+the original paid response remains immutable. Already-paid corrections with more
+supported dates are preferred over a poorer original response without another
+API call. Malformed schema, invalid non-date metadata, refusals and incomplete
+responses still follow the bounded failure/correction rules.
+Date and evidence arrays each have a 1,024-entry validation bound, so
 long news indexes with more than 100 supported dates can be accepted. The original paid
 response is never overwritten. Each correction slot can spend only once, including
 an ambiguous/lost response, and the two-slot limit survives pod and Job retries.

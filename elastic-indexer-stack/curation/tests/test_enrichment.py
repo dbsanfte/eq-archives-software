@@ -52,15 +52,16 @@ def test_missing_date_remains_null_and_capture_timestamp_cannot_replace_it():
     result=copy.deepcopy(RESULT)
     result.update(llm_guessed_date=None,llm_extracted_dates=[],date_evidence=[])
     assert validate(response(result),'An undated EverQuest guild page.')['llm_guessed_date'] is None
-    for change in ({'llm_guessed_date':'2000-01-01'}, {'llm_summary':'x'*501}, {'llm_tags':['raid','raid']},
+    assert validate(response({**result,'llm_guessed_date':'2000-01-01'}),SOURCE)['llm_guessed_date'] is None
+    for change in ({'llm_summary':'x'*501}, {'llm_tags':['raid','raid']},
                    {'llm_tags':['invented-tag']}, {'llm_content_flavour':'invented-category'}):
         with pytest.raises(CrawlError):validate(response({**result,**change}),SOURCE)
     wrong=copy.deepcopy(RESULT)
     wrong['date_evidence'][0]['excerpt']='Invented evidence.'
-    with pytest.raises(CrawlError,match='source validation'):validate(response(wrong),SOURCE)
+    assert validate(response(wrong),SOURCE)['llm_extracted_dates']==[]
     wrong=copy.deepcopy(RESULT)
     wrong['llm_extracted_dates'][0]['date']='2000-02-31'
-    with pytest.raises(CrawlError):validate(response(wrong),SOURCE)
+    assert validate(response(wrong),SOURCE)['llm_guessed_date'] is None
     with pytest.raises(CrawlError,match='incomplete'):validate({'status':'incomplete'},SOURCE)
 
 
@@ -73,14 +74,14 @@ def test_date_evidence_accepts_wrapped_nbsp_headings_and_retains_verbatim_source
     assert validated['date_evidence']==[{'date':'2000-08-03','excerpt':'AUGUST\n3 \u00a02000'}]
     for excerpt in ('AUGUST 4 2000','August 3 2000','AUGUST 3 2001','   '):
         result['date_evidence'][0]['excerpt']=excerpt
-        with pytest.raises(CrawlError,match='source validation'):validate(response(result),source)
+        assert validate(response(result),source)['date_evidence']==[]
 
 
 def test_invalid_paid_responses_stop_after_two_corrections_across_restarts(candidate,tmp_path):
     _,row=candidate
     capture={**row['captures'][0],'archive_path':'websites/guild.example/20000101000000/eq/news.html'}
     invalid=copy.deepcopy(RESULT)
-    invalid['date_evidence'][0]['excerpt']='Invented evidence.'
+    invalid['llm_summary']='x'*501
     calls=[]
     class FakeLuna:
         def __init__(self,*args):pass
@@ -142,7 +143,7 @@ def test_table_evidence_recovers_with_verbatim_cells_and_reuses_corrected_respon
     _,row=candidate
     capture={**row['captures'][0],'archive_path':'websites/guild.example/20000101000000/index.html'}
     calls=[]
-    bad=response(table_result());good=response(table_result('10/13/99 2:54:01 am'))
+    bad=response({**table_result(),'llm_summary':'x'*501});good=response(table_result('10/13/99 2:54:01 am'))
     class FakeLuna:
         def __init__(self,*args):pass
         def request(self,payload):
@@ -165,7 +166,7 @@ def test_table_evidence_recovers_with_verbatim_cells_and_reuses_corrected_respon
             assert evidence['date_evidence']==[{'date':'1999-10-13','excerpt':'10/13/99 2:54:01 am'}]
             repair=json.loads(calls[1]['input'])
             assert repair['complete_source_markdown']==TABLE_SOURCE and repair['rejected_response']==bad
-            assert 'date evidence is not a verbatim' in calls[1]['instructions']
+            assert 'invalid metadata' in calls[1]['instructions']
             assert 'never combine' in calls[0]['instructions']
         finally:client.close()
 
@@ -183,7 +184,7 @@ def test_legacy_paid_cache_is_reused_without_repeating_original_request(candidat
     try:
         old=client.payload(capture,TABLE_SOURCE,legacy=True)
         signature=digest({'payload':old,'raw_source_sha256':capture['sha256']})
-        cached={'response':response(table_result('10/13/99 2:54:01 am') if valid else table_result()),
+        cached={'response':response(table_result('10/13/99 2:54:01 am') if valid else {**table_result(),'llm_summary':'x'*501}),
                 'signature':signature,'source_sha256':capture['sha256'],'received_at':'original'}
         client.store.set('enrichment:'+signature,cached)
         result=client.enrich(capture,TABLE_SOURCE)
@@ -223,7 +224,7 @@ def test_corrections_cannot_bypass_site_budget_or_spend_again_after_ambiguous_fa
     client=Enricher(directory,'dummy',client_factory=Uncertain)
     try:
         signature=digest({'payload':client.payload(capture,TABLE_SOURCE),'raw_source_sha256':capture['sha256']})
-        client.store.set('enrichment:'+signature,{'response':response(table_result())})
+        client.store.set('enrichment:'+signature,{'response':response({**table_result(),'llm_summary':'x'*501})})
         client.store.db.execute("INSERT INTO attempts(candidate,signature,reserved,status) VALUES ('previous','other',2,'reserved')")
         client.store.db.commit()
         with pytest.raises(CrawlError,match='dollar budget'):client.enrich(capture,TABLE_SOURCE)

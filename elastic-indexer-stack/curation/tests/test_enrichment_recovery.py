@@ -52,12 +52,17 @@ def test_long_news_index_keeps_every_supported_date_and_bounds_metadata():
     {'date_evidence': [{'date': '2000-01-03', 'excerpt': 'January 2, 2000'}]},
     {'llm_extracted_dates': [{'date': '2000-02-31'}]},
     {'date_evidence': [{'date': '2000-01-02', 'excerpt': 'Invented date'}]},
-    {'date_evidence': [None]},
-    {'date_evidence': [{'date': [], 'excerpt': 'January 2, 2000'}]},
 ])
 def test_normalization_never_accepts_missing_or_invalid_date_proof(change):
+    result = validate(response({**RESULT, **change}), SOURCE)
+    assert result['llm_extracted_dates'] == result['date_evidence'] == []
+    assert result['llm_guessed_date'] is None
+
+
+@pytest.mark.parametrize('evidence', [[None], [{'date': [], 'excerpt': 'January 2, 2000'}]])
+def test_malformed_evidence_shape_still_requires_correction(evidence):
     with pytest.raises(CrawlError):
-        validate(response({**RESULT, **change}), SOURCE)
+        validate(response({**RESULT, 'date_evidence': evidence}), SOURCE)
 
 
 def test_previously_rejected_cached_correction_recovers_without_network(candidate, tmp_path):
