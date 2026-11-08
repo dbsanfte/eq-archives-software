@@ -1076,6 +1076,7 @@ async def discovery_flow(browser,base,width):
                             'estimated_usd':.01,'reserved_usd':.02,'max_usd':2}})
     arrivals.append(copy.deepcopy(template))
     await expect(page.locator('#discovery-progress-text')).to_contain_text('1/50 new Grade 2+ sites',timeout=8000)
+    await expect(page.locator('#discovery-progress-text')).to_contain_text('$0.0100 estimated + $0.0200 awaiting usage, of $2')
     await expect(page.locator('#candidates .site-tile')).to_have_count(1)
     assert await page.locator('#discovery-meter').get_attribute('value')=='1'
     assert len(posts)==1 and await button.is_disabled()

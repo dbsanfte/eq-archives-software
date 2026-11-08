@@ -35,6 +35,29 @@ def units(amount):
     return int((Decimal(str(amount)) * SCALE).to_integral_value(rounding=ROUND_CEILING))
 
 
+def attempt_spending(store):
+    """Settled usage plus only unresolved reservations in an operation ledger.
+
+    Status describes validation, not payment. A rejected or corrected response
+    still costs money, and a received response without usage remains uncertain.
+    Keep original reservations/history intact; settlement replaces their charge.
+    """
+    actual = pending = 0
+    # Round each request exactly as the shared integer ledger does. Rounding a
+    # floating-point SUM instead can gain/lose nanodollars at the admission edge.
+    for settled, reserved in store.db.execute('SELECT actual,reserved FROM attempts'):
+        if settled is None:
+            pending += units(reserved)
+        else:
+            actual += units(settled)
+    return {'estimated_usd': actual / SCALE, 'reserved_usd': pending / SCALE}
+
+
+def attempt_remaining_units(store, maximum):
+    """Call under BEGIN IMMEDIATE for admission, sharing daily-ledger rounding."""
+    return units(maximum) - sum(units(value) for value in attempt_spending(store).values())
+
+
 class DailyBudgetPause(CrawlError):
     def __init__(self, amount, retry_at, period='daily'):
         self.amount, self.retry_at, self.period = amount, retry_at, period

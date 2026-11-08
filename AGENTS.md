@@ -1126,3 +1126,12 @@ import OOM diagnostics, without logs/exec/mutations. Only a failed old 512 MiB
 profile auto-migrates to a new numbered current-profile import; preserve the old
 Job, approvals, manifests, paid cache and budget. Current-profile OOMs stay visible
 for correction and cannot hold other sites. Keep full reindex Jobs untouched.
+
+Luna operation/site caps count verified actual costs plus only unresolved
+reservations, under the same atomic admission lock and nanodollar rounding as
+the shared UTC limits. Keep rejected requests, corrections and uncertain costs
+in their original ledgers; never reset budgets on retry. Source-bound enrichment
+dates are unique calendar days with one or more verbatim excerpts per day; accept
+long news indexes up to the explicit 1,024-item metadata bounds. Normalize only
+derived metadata, retaining distinct proof and immutable paid responses/signatures
+so previously rejected but valid cached corrections can recover without new calls.

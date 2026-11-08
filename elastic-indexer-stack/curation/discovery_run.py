@@ -13,7 +13,8 @@ from grading import Luna, grade
 from graph import staged_links
 from state import connect
 from review import checked_sources, record
-from daily_budget import DailyBudgetPause, AutomaticStopped, EnrichmentPriorityPause, require_automatic
+from daily_budget import (DailyBudgetPause, AutomaticStopped, EnrichmentPriorityPause,
+                          attempt_remaining_units, attempt_spending, require_automatic)
 
 SECONDS = 3600
 
@@ -120,14 +121,14 @@ def fill(root, operation, store):
 
     def progress(phase, reason=None):
         nonlocal snapshot
-        spending = store.db.execute('SELECT COALESCE(SUM(actual),0),COALESCE(SUM(reserved),0) FROM attempts').fetchone()
+        spending = attempt_spending(store)
         snapshot = {'phase': phase, 'stop_reason': reason, 'target': payload['max_candidates'],
                     'current_url': row['url'] if row is not None and row['id'] not in checkpoint['done']
                         and phase in ('checking_coverage', 'sampling', 'grading', 'paused') else None,
                     'min_grade': minimum, 'accepted': len(checkpoint['accepted']), 'checked': len(checkpoint['done']),
                     'skipped': len(checkpoint['skipped']), 'started_at': checkpoint['started_at'],
                     'deadline': checkpoint['deadline'], 'remaining_seconds': max(0, checkpoint['deadline'] - time.time()),
-                    'estimated_usd': spending[0], 'reserved_usd': spending[1], 'max_usd': payload['max_usd']}
+                    **spending, 'max_usd': payload['max_usd']}
         if checkpoint.get('archive_scan'):
             snapshot['archive_scan'] = checkpoint['archive_scan']
         store.set('fill_checkpoint', checkpoint)
@@ -156,8 +157,7 @@ def fill(root, operation, store):
                 return finish('target_reached')
             if time.time() >= checkpoint['deadline']:
                 return finish('time_limit')
-            reserved = store.db.execute('SELECT COALESCE(SUM(reserved),0) FROM attempts').fetchone()[0]
-            if reserved >= payload['max_usd']:
+            if attempt_remaining_units(store, payload['max_usd']) <= 0:
                 return finish('spend_limit')
             pending = [row for row in store.candidates() if row['id'] not in checkpoint['done']]
             if not pending:

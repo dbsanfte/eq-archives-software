@@ -131,6 +131,34 @@ def test_enrichment_failure_leaves_new_document_pending_and_never_writes_fallbac
         index_batch(root,published(row),Pending())
 
 
+def test_mislabeled_binary_download_does_not_enrich_or_block_later_pages(candidate):
+    from copy import deepcopy
+    from captures import archive_path
+    root,row=candidate
+    batch=published(row)
+    batch['manifest']['sites'][0].update(scope='http://guild.example/',scope_mode='site')
+    binary=deepcopy(batch['manifest']['captures'][0])
+    raw=b'(DWF V00.30)' + b'\x00\x01\x02\xfe' * 1000
+    binary.update(url='http://guild.example/eq/map.dwf',path='map.dwf',content_type='text/plain',
+                  bytes=len(raw),sha256=digest(raw))
+    binary['archive_path']=archive_path(binary)
+    (root/binary['path']).write_bytes(raw)
+    batch['manifest']['captures'].insert(0,binary)
+    batch['manifest_sha256']=digest(batch['manifest'])
+    class Import:
+        def __init__(self):self.docs={};self.paid=[]
+        def exists(self,key):return key in self.docs
+        def enrich(self,capture,source):
+            self.paid.append(capture['url']);return {'llm_summary':'An EverQuest guild page.'}
+        def embedding(self,*args,**kwargs):return [1.]+[0.]*767
+        def create(self,key,doc):self.docs[key]=doc;return True
+    services=Import()
+    result=index_batch(root,batch,services)
+    assert result=={'created':1,'existing':0,'captures':2,'preserved_files':1}
+    assert services.paid==[row['captures'][0]['url']]
+    assert (root/binary['path']).read_bytes()==raw
+
+
 def test_read_batch_rejects_missing_publication_stale_hash_and_path_escape(candidate):
     root,row=candidate
     path=root/'approved.json'

@@ -977,7 +977,7 @@ function renderDiscoveryProgress() {
   const reasons={target_reached:'Target reached',time_limit:'One-hour limit reached',spend_limit:'Luna budget reached',links_exhausted:'Available archive pages and links checked',archive_unavailable:'Some archive sources are unavailable locally'};
   const remaining=Math.max(0,Math.ceil((progress.deadline-Date.now()/1000)/60));
   const state=operation.state==='interrupted' ? 'Paused — resume within the original limits' : reasons[progress.stop_reason] || phases[progress.phase] || 'Waiting for the worker';
-  $('discovery-progress-text').textContent=`${progress.accepted}/${progress.target} new Grade ${progress.min_grade}+ sites · ${progress.checked} checked. ${state}. ${operation.state==='running' ? `${remaining} min left. ` : ''}Luna: ${usd(progress.estimated_usd)} estimated; ${usd(progress.reserved_usd)} reserved of $${progress.max_usd}. Results refresh every 5 seconds while this page is open.`;
+  $('discovery-progress-text').textContent=`${progress.accepted}/${progress.target} new Grade ${progress.min_grade}+ sites · ${progress.checked} checked. ${state}. ${operation.state==='running' ? `${remaining} min left. ` : ''}Luna: ${usd(progress.estimated_usd)} estimated + ${usd(progress.reserved_usd)} awaiting usage, of $${progress.max_usd}. Results refresh every 5 seconds while this page is open.`;
 }
 function renderManualResult() {
   const operation=manualResult?.operation ? data?.operations.find(op=>op.id===manualResult.operation) : data?.operations.find(op=>op.kind==='discover' && op.payload.target);
@@ -1112,7 +1112,7 @@ function renderPipelineActivity() {
           if (scan.sources_unavailable || scan.metadata_unavailable) body.append(node('p',`${Number(scan.sources_unavailable || 0).toLocaleString()} sources unavailable or too large · ${Number(scan.metadata_unavailable || 0).toLocaleString()} hosts with unavailable metadata. Other hosts continue.`,'activity-warning'));
         }
         if (discovery) {const bar=node('progress');bar.max=progress.target || 50;bar.value=progress.accepted || 0;bar.setAttribute('aria-label','Discovery qualifying sites');body.append(bar);}
-        body.append(node('p',`${discoveryStops[progress.stop_reason] || ''}${progress.stop_reason ? '. ' : ''}Luna: ${usd(progress.estimated_usd || 0)} estimated + ${usd(progress.reserved_usd || 0)} reserved${progress.max_usd ? ` of $${progress.max_usd}` : ''}.`,'meta'));
+        body.append(node('p',`${discoveryStops[progress.stop_reason] || ''}${progress.stop_reason ? '. ' : ''}Luna: ${usd(progress.estimated_usd || 0)} estimated + ${usd(progress.reserved_usd || 0)} awaiting usage${progress.max_usd ? ` of $${progress.max_usd}` : ''}.`,'meta'));
         if (discovery && progress.deadline) activityDeadline(body,new Date(progress.deadline*1000).toISOString(),'Run deadline');
         if (!discovery && latest.updated) body.append(node('p',`Last run updated ${new Date(latest.updated).toLocaleString()}.`,'meta'));
       }

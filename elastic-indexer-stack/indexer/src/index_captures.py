@@ -22,6 +22,7 @@ from indexer.vector_json import dumps as vector_json
 
 from common import CrawlError, decode, digest, now
 from captures import check_manifest, indexable, verified_source, verified_path
+from source_assets import binary_source
 from capture_budget import budget_identity
 from indexer.gemma import CHUNKING_VERSION, DOCUMENT_PREFIX, MODEL, chunk_source
 from indexer import passages
@@ -228,10 +229,13 @@ def index_batch(root, batch, services, chunker=chunk_source):
         if services.exists(record_id):
             skipped += 1
             continue
+        raw=verified_source(root,capture)
+        if binary_source(raw):
+            preserved += 1
+            continue
         replay, content = text_document(root, capture)
         # Model date extraction sees the original body, not our synthetic
         # provenance header or the capture timestamp embedded in its URL.
-        raw=verified_source(root,capture)
         decoded=decode_source(raw,capture.get('content_type') or '')
         source=decoded.text
         title_node=BeautifulSoup(source,'html.parser').title
