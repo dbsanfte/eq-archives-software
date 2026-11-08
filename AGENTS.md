@@ -89,6 +89,10 @@ drain so Uvicorn backpressure retains admission through transport delivery.
 Keep an explicit protocol-method allowlist and tools-only
 discovery in both protocol eras so SDK defaults cannot enable subscription streams.
 Test slow sockets, cancellation, deadlines, chunked output and modern discovery.
+The real slow-reader smoke test runs inside the isolated API container with
+bounded TCP send buffers, so Docker's forwarded-port buffers cannot absorb its
+entire fixture body and conceal transport backpressure. Keep proxy/routing tests
+separate and retain the same busy/recovery assertions.
 Keep snippets as safe text/em elements and summaries as text, plus the CSP.
 Run the MCP tests, public-security manifest checks, real Chromium regressions and
 `check-public-security.py`; deploy the API before frontend and isolation policies
