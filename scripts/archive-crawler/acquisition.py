@@ -219,6 +219,9 @@ def sample(args, store, *, candidates=None, downloader=None):
                                          (json.dumps(captures), candidate["id"]))
                         store.db.commit()
                     break  # Prefer tier 1; use tier 2 when tier 1 has no captures.
+                if captures and getattr(args, 'selection_context', False):
+                    from selection_samples import context
+                    context(store, candidate, captures, downloader)
                 variants = any(item["identity_variants"] for item in listings)
                 state = "sampled" if captures else "identity_unresolved" if variants else "unavailable"
                 error = (None if captures else "CDX lists different original URLs; exact source identity remains unresolved"

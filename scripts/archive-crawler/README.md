@@ -239,3 +239,16 @@ transfer limits, date/URL rejection, pinned vendor hashes, cached discovery,
 missing promisor objects without fetching, paid-call caching/budgets, complete
 source checks, stale approvals, atomic decisions, and mobile review/export.
 Tests never call Wayback, OpenAI, ingestion or production services.
+
+
+Candidate selection uses `eq-site-selection-v2`: separate relevance/substance
+scores, a conservative combined grade and source-evidenced EQ boundaries. To add
+bounded homepage and same-scope frame/entry context during sampling, pass
+`sample --selection-context`; the production portal enables this for newly
+acquired samples. This shares the original Wayback limits/client and stages no
+more than two entry targets plus four homepage captures. Missing context does not
+widen the candidate scope. The complete grading-source limit still applies.
+Legacy paid judgments remain verifiable for existing approvals, while new
+automatic approvals require the current policy. Capture stays broad inside a
+verified EQ site or subsite; social pages, concise records and supporting assets
+are retained without a per-page topic filter.

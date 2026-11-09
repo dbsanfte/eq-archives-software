@@ -106,7 +106,7 @@ def search_matches(row, query):
 
 
 def grade_value(row):
-    return (row.get('rating') or {}).get('grade', -1) if row.get('captures') else -1
+    return (row.get('rating') or {}).get('grade', -1) if row.get('captures') and row.get('selection_current') is not False else -1
 
 
 def candidate_filter(rows, minimum=None, needs_grade=False):

@@ -76,7 +76,7 @@ def run_fixture(tmp_path, monkeypatch):
     monkeypatch.setattr('discovery_run.sample', sample)
     def response(payload):
         index = int(json.loads(payload['input'])['captures'][0]['url'].split('guild-')[1].split('.')[0])
-        rating = {'grade': 0 if index < configuration['bad_grades'] else 3, 'category': 'guild', 'confidence': 'high',
+        rating = {'relevance_grade':3,'quality_grade':3,'content_kind':'substantive','site_type':'unknown','scope_evidence':[],'grade': 0 if index < configuration['bad_grades'] else 3, 'category': 'guild', 'confidence': 'high',
                   'reason': 'EQ guild.', 'evidence': [{'slot': 0, 'excerpt': 'EverQuest guild history.'}]}
         return {'status': 'completed', 'output': [{'type': 'message', 'content': [{'type': 'output_text', 'text': json.dumps(rating)}]}],
                 'usage': {'input_tokens': 100, 'output_tokens': 100}}
@@ -367,7 +367,7 @@ def test_fill_resolves_ezboard_threads_before_creating_one_board_candidate(run_f
     monkeypatch.setattr('ezboard_discovery.resolve',resolver)
     client.request.side_effect=None
     client.request.return_value={'status':'completed','output':[{'type':'message','content':[{'type':'output_text','text':json.dumps({
-        'grade':3,'category':'forum','confidence':'high','reason':'EverQuest forum evidence.',
+        'relevance_grade':3,'quality_grade':3,'content_kind':'substantive','site_type':'unknown','scope_evidence':[],'grade':3,'category':'forum','confidence':'high','reason':'EverQuest forum evidence.',
         'evidence':[{'slot':0,'excerpt':'EverQuest guild history.'}]})}]}],'usage':{'input_tokens':100,'output_tokens':100}}
     result=campaign(root,operation(target=1))
     assert result['progress']['accepted']==1 and result['progress']['stop_reason']=='target_reached'

@@ -2459,12 +2459,58 @@ async def slow_polling_flow(browser,base,width):
         await context.close()
 
 
+async def selection_quality_flow(browser,base,width):
+    context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
+    page=await context.new_page();errors=[];posts=[]
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    snapshot=await (await context.request.get(base+'/api/queue?filter=candidates')).json()
+    row=copy.deepcopy(snapshot['candidates'][0])
+    row.update(stage='candidates',state='approval_pending',selection_current=True,candidate_check=None)
+    row['rating'].update(grade=2,relevance_grade=3,quality_grade=2,grading_criteria='')
+    async def fixture(route):
+        path=urlsplit(route.request.url).path
+        if route.request.method=='POST':
+            assert path=='/api/check-candidate'
+            posts.append(route.request.post_data_json)
+            row['candidate_check']={'id':'b'*32,'state':'queued','phase':'grading','max_usd':2,'grading_criteria':''}
+            await route.fulfill(status=202,json={'operation':'b'*32});return
+        if path=='/api/queue':
+            view=parse_qs(urlsplit(route.request.url).query).get('filter',['candidates'])[0]
+            rows=[row] if view==row['stage'] else []
+            await route.fulfill(status=200,json={**snapshot,'candidates':rows,'total':len(rows),'operations':[]})
+        elif path=='/api/candidate':await route.fulfill(status=200,json={'candidate':row,'review':None})
+        else:raise AssertionError(path)
+    await page.route('**/api/**',fixture)
+    try:
+        await page.goto(base+'/?view=candidates&candidate='+row['id']);await settled(page)
+        await expect(page.get_by_text('EQ relevance 3/3 · Archival substance 2/3',exact=True)).to_be_visible()
+        assert not posts
+        row['selection_current']=False
+        row['rating'].pop('quality_grade');row['rating'].pop('relevance_grade')
+        await page.locator('#refresh').click();await settled(page)
+        await expect(page.get_by_text('This older grade needs the updated quality and site-boundary assessment before automatic approval.',exact=True)).to_be_visible()
+        scope_url=urlsplit(row['scope'])
+        button=page.get_by_role('button',name='Update quality assessment: '+scope_url.netloc+(scope_url.path if scope_url.path!='/' else ''),exact=True)
+        await expect(button).to_be_enabled();await safe_layout(page,width)
+        await button.click();await settled(page)
+        assert len(posts)==1 and posts[0]['id']==row['id'] and posts[0]['max_usd']==2
+        row.update(stage='saved',state='deferred',decision={'automatic':{'grade':3,'min_grade':3,
+            'selection_reason':'The EQ assessment needs higher confidence before automatic approval.'}})
+        await page.goto(base+'/?view=saved&candidate='+row['id']);await settled(page)
+        await expect(page.locator('#site-workspace')).to_contain_text('needs higher confidence')
+        assert 'below its Grade' not in await page.locator('#site-workspace').inner_text()
+        await safe_layout(page,width)
+        assert not errors,errors
+    finally:await context.close()
+
+
 async def check(base):
     async with async_playwright() as playwright:
         browser=await playwright.chromium.launch()
         try:
             for width in (320,390,430,768,1280):
                 await collapsed_pipeline_flow(browser,base,width)
+                if width in (390,1280):await selection_quality_flow(browser,base,width)
                 if width in (390,1280):await capture_retry_flow(browser,base,width)
                 if width in (390,1280):await slow_polling_flow(browser,base,width)
                 await pipeline_activity_flow(browser,base,width)

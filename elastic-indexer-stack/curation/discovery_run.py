@@ -110,7 +110,7 @@ def fill(root, operation, store):
     minimum = payload['min_grade']
     options = parser()
     base = ['--work-dir', str(store.root)]
-    sample_args = options.parse_args(base + ['sample', '--max-candidates', '1', '--max-requests', '1200',
+    sample_args = options.parse_args(base + ['sample', '--selection-context', '--max-candidates', '1', '--max-requests', '1200',
                                              '--max-bytes', '134217728', '--max-seconds', '3600'])
     grade_args = options.parse_args(base + ['grade', '--api-key-file', '/run/secrets/luna_api_key',
                                             '--max-candidates', '1', '--max-usd', str(payload['max_usd'])])

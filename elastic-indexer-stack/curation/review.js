@@ -45,6 +45,7 @@ function statusLabel(row) {
   const check=row.candidate_check;
   if (row.stage==='candidates' && check && ['queued','running'].includes(check.state)) return {coverage:'Checking coverage',sampling:'Finding Wayback samples',grading:'Grading with Luna'}[check.phase] || 'Evidence check queued';
   const issue=candidateIssue(row);if (issue) return issue.title;
+  if (row.stage==='candidates' && row.rating && row.selection_current===false) return 'Needs quality assessment';
   if (row.stage==='candidates' && row.state==='approval_pending' && (!row.rating || !row.captures?.length)) return row.captures?.length ? 'Needs a grade' : 'Needs source evidence';
   return labels[row.review_state] || labels[row.state] || {unavailable:'No samples found',sample_error:'Sampling failed',identity_unresolved:'Exact source needed',grade_error:'Grading failed',sampled:'Needs a grade',discovered:'Needs source evidence'}[row.state] || row.state.replaceAll('_',' ');
 }
@@ -227,14 +228,14 @@ function renderList() {
       const item=control('',()=>openSite(row.id),'site-tile');item.dataset.candidate=row.id;
       item.setAttribute('aria-label',`Open ${siteName(row)}`);
       const top=node('div',undefined,'tile-top');top.append(badge(statusLabel(row),tone(row)));
-      if (row.stage==='candidates' && row.rating) top.append(node('span',`Grade ${row.rating.grade}/3`,'meta'));
+      if (row.stage==='candidates' && row.rating) top.append(node('span',`${row.selection_current===false ? 'Previous grade' : 'Grade'} ${row.rating.grade}/3`,'meta'));
       item.append(top,node('h2',siteName(row)),node('span',row.url,'address'));
       const capture=row.coverage?.capture;
       const issue=candidateIssue(row);
       const description=row.state==='capture_resume_queued' ? 'Waiting to resume with saved files and progress. Cancel until capture starts.' : row.capture_queue_error || row.capture_error || (row.stage==='candidates' ? row.rating?.reason || (issue ? '' : 'Source review is needed.') :
         row.stage==='queued' ? 'Approved scope saved. Undo before capture starts.' : row.stage==='capturing' ? '' :
         row.stage==='indexing' ? (['index_failed','index_preflight_failed'].includes(row.review_state) ? 'Sources are retained. Open this site to retry.' : 'Publication and AI-enriched indexing are automatic.') :
-        row.stage==='saved' ? row.decision?.automatic ? `Saved by automatic mode: Grade ${row.decision.automatic.grade} is below ${row.decision.automatic.min_grade}. Restore to review and approve it yourself.` : 'Set aside for a later decision.' : capture ? `${capture.pages} pages · ${capture.files} dated captures${row.stage==='indexing' && capture.needs_regeneration ? ' · Full capture needed' : ''}` : 'Saved decision and source evidence.');
+        row.stage==='saved' ? row.decision?.automatic?.selection_reason || (row.decision?.automatic ? `Saved by automatic mode: Grade ${row.decision.automatic.grade} is below ${row.decision.automatic.min_grade}. Restore to review and approve it yourself.` : 'Set aside for a later decision.') : capture ? `${capture.pages} pages · ${capture.files} dated captures${row.stage==='indexing' && capture.needs_regeneration ? ' · Full capture needed' : ''}` : 'Saved decision and source evidence.');
       if (description) item.append(node('p',description));
       if (row.capture_state==='interrupted' && retryPending(row.capture_retry)) activityDeadline(item,row.capture_retry.retry_at,'Automatic retry');
       if (row.stage==='capturing') {
@@ -319,7 +320,7 @@ function candidateCard(row,item) {
     button.setAttribute('aria-label',`${label}: ${siteName(row)}`);button.dataset.mutation='';button.dataset.blocked=String(disabled);button.disabled=disabled || busy;actions.append(button);
   }
   front.append(item,actions);
-  if (!row.rating || !row.captures?.length) front.append(recoveryControls(row));
+  if (!row.rating || !row.captures?.length || row.selection_current===false) front.append(recoveryControls(row));
   card.append(backdrop,front);
   let gesture=null,suppressUntil=0;
   const reset=()=>{
@@ -421,7 +422,7 @@ function candidateIssuePanel(row) {
 function recoveryControls(row) {
   const box=node('div',undefined,'candidate-recovery'),check=row.candidate_check;
   const active=check && ['queued','running'].includes(check.state),paused=check?.state==='interrupted';
-  const label=active ? statusLabel(row) : paused ? 'Retry evidence & grading' : row.captures?.length ? 'Grade source evidence' : 'Find samples & grade';
+  const label=active ? statusLabel(row) : paused ? 'Retry evidence & grading' : row.selection_current===false && row.rating ? 'Update quality assessment' : row.captures?.length ? 'Grade source evidence' : 'Find samples & grade';
   const focus=check?.grading_criteria ?? $('grading-criteria').value.trim();
   const button=mutation(label,()=>request('/api/check-candidate',{id:row.id,manifest_sha256:row.manifest_sha256,max_usd:2,...(!check && focus ? {grading_criteria:focus} : {})}),
     'Evidence check queued for this site. Progress appears on its card.',true,Boolean(active || hasOperation()));
@@ -448,11 +449,11 @@ function gradingOptions(row) {
     {id:row.id,manifest_sha256:row.manifest_sha256,max_usd:2,grading_criteria:draft.value}),
     'Grading queued with your saved criteria and the original site budget.');
   function changed() {
-    const blocked=active || hasOperation() || !canDismiss(row) || Boolean(row.rating && draft.value.trim()===(row.rating.grading_criteria || ''));
+    const blocked=active || hasOperation() || !canDismiss(row) || Boolean(row.rating && row.selection_current!==false && draft.value.trim()===(row.rating.grading_criteria || ''));
     button.dataset.blocked=String(blocked);button.disabled=busy || blocked;
   }
   input.addEventListener('input',()=>{draft.value=input.value;draft.dirty=true;changed();});changed();
-  options.append(label,input,node('p',`Blank uses general EQ relevance. A high grade requires both EQ relevance and a match to your focus. Explicit grading only · ${check ? 'original' : 'one-site'} $${check?.max_usd ?? 2} total cap, including earlier attempts and regrades.`,'meta'));
+  options.append(label,input,node('p',`Blank evaluates EQ relevance and archival substance. Your focus can lower the combined grade. Small guilds and concise records can score highly. Explicit grading only · ${check ? 'original' : 'one-site'} $${check?.max_usd ?? 2} total cap, including earlier attempts and regrades.`,'meta'));
   if (check) options.append(node('p',`${active ? 'Current check' : 'Last check'}: ${check.grading_criteria || 'General EverQuest relevance'}. ${active ? 'Criteria are fixed until this check finishes.' : 'Retries keep the saved criteria and budget.'}`,'meta'));
   options.append(button);
   return options;
@@ -496,7 +497,7 @@ function renderWorkspace() {
       if (row.stage==='candidates') renderCandidate(root,row);
       else if (row.stage==='indexing') renderCapturedSite(root,row,review);
       else if (row.stage==='saved') {
-        root.append(panel('Saved for later',row.decision?.automatic ? `Automatic mode saved this Grade ${row.decision.automatic.grade} site below its Grade ${row.decision.automatic.min_grade} threshold. Evidence and scope are retained. Restore it to Candidates to make your own decision; it will stay under manual control.` : 'Your source evidence and capture scope are retained. Restore this site to Candidates when you’re ready.'));
+        root.append(panel('Saved for later',row.decision?.automatic ? `${row.decision.automatic.selection_reason || `Automatic mode saved this Grade ${row.decision.automatic.grade} site below its Grade ${row.decision.automatic.min_grade} threshold.`} Evidence and scope are retained. Restore it to Candidates to make your own decision; it will stay under manual control.` : 'Your source evidence and capture scope are retained. Restore this site to Candidates when you’re ready.'));
         if (row.coverage?.ezboard_parent_required) root.append(panel('Parent board needed',row.error));
         appendEvidenceLink(root,row);
       } else if (row.stage==='history') renderHistory(root,row,review);
@@ -535,14 +536,16 @@ function coveragePanel(row) {
 }
 function renderCandidate(root,row) {
   const issue=candidateIssuePanel(row);if (issue) root.append(issue);
-  if (!row.rating || !row.captures?.length) root.append(recoveryControls(row));
+  if (!row.rating || !row.captures?.length || row.selection_current===false) root.append(recoveryControls(row));
   const columns=node('div',undefined,'site-columns'),left=node('div'),right=node('div');
   const evidence=panel(row.rating ? 'Why capture this site?' : 'Source evidence',row.rating?.reason || 'This site needs verified source evidence before approval.');
-  if (row.rating) evidence.prepend(badge(`Luna grade ${row.rating.grade}/3 · ${row.rating.category.replaceAll('_',' ')}`));
+  if (row.rating) evidence.prepend(badge(`${row.selection_current===false ? 'Previous Luna grade' : 'Luna grade'} ${row.rating.grade}/3 · ${row.rating.category.replaceAll('_',' ')}`));
   for (const excerpt of row.rating?.evidence || []) evidence.append(node('blockquote',excerpt.excerpt,'evidence'));
+  if (row.rating && row.selection_current!==false && Number.isInteger(row.rating.relevance_grade) && Number.isInteger(row.rating.quality_grade)) evidence.append(node('p',`EQ relevance ${row.rating.relevance_grade}/3 · Archival substance ${row.rating.quality_grade}/3`,'grading-focus'));
+  if (row.rating && row.selection_current===false) evidence.append(node('p','This older grade needs the updated quality and site-boundary assessment before automatic approval.','status-help'));
   if (row.rating) evidence.append(node('p',`${row.rating.confidence} confidence · AI assessment, awaiting your decision`,'meta'));
   if (row.rating) evidence.append(node('p',`Graded for: ${row.rating.grading_criteria || 'General EverQuest relevance'}`,'grading-focus'));
-  if (['queued','running','interrupted'].includes(row.candidate_check?.state) && row.rating) evidence.append(recoveryControls(row));
+  if (['queued','running','interrupted'].includes(row.candidate_check?.state) && row.rating && row.selection_current!==false) evidence.append(recoveryControls(row));
   appendEvidenceLink(evidence,row);left.append(evidence);
   const coverage=coveragePanel(row);if (coverage) left.append(coverage);
   if (row.evidence?.length) {

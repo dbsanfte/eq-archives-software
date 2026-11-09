@@ -45,6 +45,7 @@ def parser():
     command.set_defaults(handler=discover)
     command = commands.add_parser("sample", help="Use serial persistent Wayback Machine Downloader to stage exact samples")
     command.add_argument("--max-candidates", type=positive, default=50)
+    command.add_argument("--selection-context", action="store_true", help="Also sample bounded site/account landing-page evidence before considering a wider scope")
     command.add_argument("--samples-per-candidate", type=int, choices=[1, 2], default=2)
     command.add_argument("--delay", type=float, default=0, help='Optional operator request spacing in seconds; 0 means no fixed delay (default)')
     command.add_argument("--bytes-per-second", type=nonnegative, default=0, help='Optional operator transfer cap; 0 means unlimited (default)')

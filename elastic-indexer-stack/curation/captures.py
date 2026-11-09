@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 from acquisition import Downloader
 from capture_failures import FileRetries
 from archive_layout import archive_path
-from common import CAPTURE_WINDOW, CrawlError, Page, Store, decode, digest, in_capture_window, now, original_url, save, tier, within_scope
+from common import CAPTURE_WINDOW, CrawlError, Page, Store, decode, digest, in_capture_window, now, original_url, save, tier, within_scope, within_capture_scope
 from discovery import SKIP
 from indexer.capture_enrichment import DEFAULT_POLICY, policy_for_sites
 
@@ -224,6 +224,8 @@ def capture_sites(root, batch_id, sites, downloader_factory=Downloader, progress
                  "sites": sites, "captures": [], "visited": [], "notes": [], "indexing": policy_for_sites(sites)}
         for site in sites:
             for capture in site["captures"]:
+                if capture.get('selection_role') == 'site_home' and not within_capture_scope(capture['url'], site['scope']):
+                    continue
                 if not in_capture_window(capture['timestamp']):
                     continue
                 verified_source(root, capture)
