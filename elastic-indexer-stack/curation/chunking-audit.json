@@ -1,0 +1,2359 @@
+{
+  "scope": "HTML capture counts from the search index on 9 November 2026; subdomains grouped. Samples span dates, large records and random URLs. This is a sample audit, not a corpus-wide quality guarantee.",
+  "baseline": "eq-passages-480-v11",
+  "sites": [
+    {
+      "rank": 1,
+      "site": "ezboard.com",
+      "pages": 900112,
+      "status": "fixed",
+      "policies": [
+        "Ezboard Author/Comment and threaded messages"
+      ],
+      "finding": "Inline ad rows could prevent whole-thread recognition. Keep source-proven messages separate and omit empty new-topic forms.",
+      "samples": 47,
+      "verified": 47,
+      "changed": 2,
+      "max_tokens": 480,
+      "before_chunks": 2529,
+      "after_chunks": 2540,
+      "checks": [
+        "47 before/after captures have identical source hashes.",
+        "47 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "8e6b581a63dc46e82a639a8fd67c662b95dd697d531278466cdf5e6e07bdfd78",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20061225030232/http://pub6.ezboard.com/ftherathetravelagencyfrm15.showMessageRange?topicID=1363.topic&start=61&stop=80",
+          "label": "2006-12-25 · pub6.ezboard.com / ftherathetravelagencyfrm15.showMessageRange?topicID=1363.topic&start=61&stop=80",
+          "id": "websites/pub6.ezboard.com/20061225030232/ftherathetravelagencyfrm15.showMessageRange?topicID=1363.topic&start=61&stop=80",
+          "source_sha256": "e0fcb8d4a034dc004a7b792e1a681fee21d63503746a1223c30dbb8ec3108554"
+        },
+        {
+          "url": "https://web.archive.org/web/20030512185101/http://pub96.ezboard.com/fdragonknightsdaocfrm1.showAddTopicScreenFromWeb",
+          "label": "2003-05-12 · pub96.ezboard.com / fdragonknightsdaocfrm1.showAddTopicScreenFromWeb",
+          "id": "websites/pub96.ezboard.com/20030512185101/fdragonknightsdaocfrm1.showAddTopicScreenFromWeb",
+          "source_sha256": "09e191ad38d05031c6b8a7a2a7b489f3bf3eeb7208b572759181177d20da8912"
+        },
+        {
+          "url": "https://web.archive.org/web/20020820040527/http://pub28.ezboard.com/fdrinal28133frm32.showNextMessage?topicID=575.topic",
+          "label": "2002-08-20 · pub28.ezboard.com / fdrinal28133frm32.showNextMessage?topicID=575.topic",
+          "id": "websites/pub28.ezboard.com/20020820040527/fdrinal28133frm32.showNextMessage?topicID=575.topic",
+          "source_sha256": "aaa46ce12fe0c24549cc2b1889476539a1c9e32a06c354f23ca32270404f6a2f"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "comparison": {
+        "before": "html_structure · 87 chunks\n\nHOW DO YOU PEOPLE REMEMBER TO BREATHE?!?\n**NEW RTA FORUM LINK!  \nThese forums are now CLOSED you may view but not post**\n\n**\"But the whole chaos needed order, shaping and fine touch. And so the Nameless created The Gods of Power. To do so, The Nameless reached into the chaos, drew\n\nHOW DO YOU PEOPLE REMEMBER TO BREATHE?!?\n|  |  |\n| --- | --- |\n| The Rathe Travel Agency Board       > Flame Central           > HOW DO YOU PEOPLE REMEMBER TO BREATHE?!? |  \n\n",
+        "after": "forum_posts · 100 chunks\n\nHOW DO YOU PEOPLE REMEMBER TO BREATHE?!?\nPost by joekreeper1 9/4/03 5:00 pm\n\nPost by joekreeper1 | 9/4/03 5:00 pm\n------------------------------------\n\n Re: HOW DO YOU PEOPLE REMEMBER TO BREATHE?!?\n\n---\n\nZZZZZZZWEEEEEOOOWNNNNN  \n  \nthats the sound of something going over your head\n\n\n\nHOW DO YOU PEOPLE REMEMBER TO BREATHE?!?\nPost by Yark Hutprancer 9/4/03 5:12 pm\n\nPost by Yark Hutprancer | 9/4/03 5:12 pm\n----------------------------------------\n\n Re: HOW DO YOU PEOPLE REMEMBER TO BREATHE?!?\n\n---\n\nOH CRAP!?!?! HOW DO YOU BREATHE AGAIN!?!?!  \n  \nWait...  \n  \nNever mind, I got it.\n\n\n"
+      },
+      "issues": []
+    },
+    {
+      "rank": 2,
+      "site": "allakhazam.com",
+      "pages": 681204,
+      "status": "covered",
+      "policies": [
+        "Allakhazam entities, comments and directories"
+      ],
+      "finding": "Retain the existing entity/comment policy. Samples include long bestiary discussions, item pages, class discussions, directory pages and pricing data; entity titles and source comment boundaries are already present.",
+      "samples": 29,
+      "verified": 29,
+      "changed": 0,
+      "max_tokens": 480,
+      "before_chunks": 3240,
+      "after_chunks": 3240,
+      "checks": [
+        "29 before/after captures have identical source hashes.",
+        "29 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "e638f95111e56a321abfbac74c49111e33578e7ee8b532ba211cdfe2500ac43d",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20041125030713/http://everquest.allakhazam.com/db/item.html?item=56&mid=9895993781490",
+          "label": "2004-11-25 · everquest.allakhazam.com / db/item.html?item=56&mid=9895993781490",
+          "id": "websites/everquest.allakhazam.com/20041125030713/db/item.html?item=56&mid=9895993781490",
+          "source_sha256": "6bc39b3528ce8680bfd8ae432a7589e0dc4eab9ed5668f188334cd9a58cbfe85"
+        },
+        {
+          "url": "https://web.archive.org/web/20031008211636/http://everquest.allakhazam.com/db/item.html?item=23188&start=0",
+          "label": "2003-10-08 · everquest.allakhazam.com / db/item.html?item=23188&start=0",
+          "id": "websites/everquest.allakhazam.com/20031008211636/db/item.html?item=23188&start=0",
+          "source_sha256": "797430642cde6e2adaa40c14faa757802c1a42d4013a3e64c8cc5ab047f292bd"
+        },
+        {
+          "url": "https://web.archive.org/web/20011224192217/http://everquest.allakhazam.com/db/item.html?item=3045",
+          "label": "2001-12-24 · everquest.allakhazam.com / db/item.html?item=3045",
+          "id": "websites/everquest.allakhazam.com/20011224192217/db/item.html?item=3045",
+          "source_sha256": "984f957c1d413687f2831b92e75cfeeaaa560bfd5ea355062a29f8a973dc4c9f"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "issues": []
+    },
+    {
+      "rank": 3,
+      "site": "castersrealm.com",
+      "pages": 203448,
+      "status": "fixed",
+      "policies": [
+        "CastersRealm content markers",
+        "UBB.classic",
+        "Catalog navigation"
+      ],
+      "finding": "Legacy static UBB pages need the shared nested-font message policy. Existing explicit content markers preserve player profiles, poison ingredients, weapons, guides and database detail pages.",
+      "samples": 29,
+      "verified": 29,
+      "changed": 1,
+      "max_tokens": 480,
+      "before_chunks": 604,
+      "after_chunks": 650,
+      "checks": [
+        "29 before/after captures have identical source hashes.",
+        "29 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "a35dcc78381bfbf7cc31ebc2d15e9f6e407925376105cb6a113cb2a8148e1a67",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20010306001312/http://forums.castersrealm.com/eq/Forum1/HTML/005412.html",
+          "label": "2001-03-06 · forums.castersrealm.com / eq/Forum1/HTML/005412.html",
+          "id": "websites/forums.castersrealm.com/20010306001312/eq/Forum1/HTML/005412.html",
+          "source_sha256": "f5faf96c1c33ce5440b53283b1787ad93188ac64bb8256fd04b8e66bb4f727bb"
+        },
+        {
+          "url": "https://web.archive.org/web/20010713052522/http://eq.castersrealm.com/players/view_profile.asp?Action=Journal&Id=60309",
+          "label": "2001-07-13 · eq.castersrealm.com / players/view_profile.asp?Action=Journal&Id=60309",
+          "id": "websites/eq.castersrealm.com/20010713052522/players/view_profile.asp?Action=Journal&Id=60309",
+          "source_sha256": "579f026ccfc5622db1c2a7545d93f94a403be74d1ce50d94694a9a5b65971a95"
+        },
+        {
+          "url": "https://web.archive.org/web/20020716072230/http://eq.castersrealm.com/players/view_profile.asp?Id=74745&Profile=12039",
+          "label": "2002-07-16 · eq.castersrealm.com / players/view_profile.asp?Id=74745&Profile=12039",
+          "id": "websites/eq.castersrealm.com/20020716072230/players/view_profile.asp?Id=74745&Profile=12039",
+          "source_sha256": "a7b1cd4a9de2e6db628305f833d8266419d0ebad527c8dfef436bc51990d653a"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "comparison": {
+        "before": "html_structure · 151 chunks\n\nThe Shadow Falls(The Final Complete Release and Win Sweepstakes!) - EQ Casters Realm Forums\nGeneral Forums     [all categories]\n  \n  General Discussion\n  \n  The Shadow Falls(The Final Complete Release and Win Sweepstakes!) (Page 1)\n\nPost New Topic  Post A Reply\n  \nprofile | | preferences | faq | search\n\n\n\nThe Shadow Falls(The Final Complete Release and Win Sweepstakes!) - EQ Casters Realm Forums\n|  |  |\n| --- | --- |\n| UBBFriend: Email This Page to Someone!  This topic is 2 pages long:   1  2 | next newest topic | next oldest topic |\n\n\n",
+        "after": "forum_posts · 197 chunks\n\nThe Shadow Falls(The Final Complete Release and Win Sweepstakes!)\nPost by Raziel February 21, 2001 10:19 AM\n\nPost by Raziel | February 21, 2001 10:19 AM\n-------------------------------------------\n\nWelcome all! Yes, it is that time once again. It's time for a complete release of The Shadow Falls. And sadly today is an extra special release, I say \n\nThe Shadow Falls(The Final Complete Release and Win Sweepstakes!)\nPost by Raziel February 21, 2001 10:19 AM Chapter 1 The Hell Lord Rises\n\n Chapter 1 The Hell Lord Rises   \n ----------------------\n\nArorua woke with a start, a light flash had cut through Raziel's quarters overlooking the  \n training ground. She settled her"
+      },
+      "issues": []
+    },
+    {
+      "rank": 4,
+      "site": "everlore.com",
+      "pages": 185574,
+      "status": "fixed",
+      "policies": [
+        "Everlore entity/comment policy",
+        "UBB.classic",
+        "Game-network navigation"
+      ],
+      "finding": "Extend shared UBB support to the old static forum and remove the source-proven game-network masthead. Keep entity data, guild listings and reader text.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 7,
+      "max_tokens": 479,
+      "before_chunks": 1086,
+      "after_chunks": 1080,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "21617f1f5e64b42454745bee638ed72d36ba431b8b42ee072ca70296703fdc99",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/19991128033837/http://www.everlore.com/boards/EL/Forum15/HTML/000035.html",
+          "label": "1999-11-28 · www.everlore.com / boards/EL/Forum15/HTML/000035.html",
+          "id": "websites/www.everlore.com/19991128033837/boards/EL/Forum15/HTML/000035.html",
+          "source_sha256": "507bd2de3c8933a37bf090fbca86786b92ad124af52caa3c64fa2c50b98f16ee"
+        },
+        {
+          "url": "https://web.archive.org/web/20020827143903/http://www.everlore.com/guilds/default.asp?l=T&mode=9&order=1&page=3",
+          "label": "2002-08-27 · www.everlore.com / guilds/default.asp?l=T&mode=9&order=1&page=3",
+          "id": "websites/www.everlore.com/20020827143903/guilds/default.asp?l=T&mode=9&order=1&page=3",
+          "source_sha256": "f7f003100732beac197424f8c8181fe3adbfbf6bc32400c09ee328d1919efedf"
+        },
+        {
+          "url": "https://web.archive.org/web/20030428033715/http://www.everlore.com/bestiary/beastdetails.asp?mode=show&BID=286716&pg=2&sortby=2",
+          "label": "2003-04-28 · www.everlore.com / bestiary/beastdetails.asp?mode=show&BID=286716&pg=2&sortby=2",
+          "id": "websites/www.everlore.com/20030428033715/bestiary/beastdetails.asp?mode=show&BID=286716&pg=2&sortby=2",
+          "source_sha256": "151cf24ebff2f63333fe28d345ec8a373fd2ff355b894e04d20318838341889b"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "comparison": {
+        "before": "html_structure · 6 chunks\n\nAAaaah!! - EverLore Boards\nUBBFriend: Email This Page to Someone!\n\n Class Specific     [all categories]    Bard's Forum     AAaaah!!  Post New Topic  Post A Reply   profile | | preferences | faq |\n\nnext newest topic | next oldest topic\n\n\n\nAAaaah!! - EverLore Boards\n|  |  |\n| --- | --- |\n| **Author** | **Topic:   AAaaah!!** |\n| **Lisa** unregistered | posted 10-11-1999 06:02 AM           Edit/Delete Message  ---  Bard or Druid? I wanna be a bard, cause they get songs and just the whole idea of a bard. \n",
+        "after": "forum_posts · 6 chunks\n\nAAaaah!!\nPost by Lisa 10-11-1999 06:02 AM\n\nPost by Lisa | 10-11-1999 06:02 AM\n----------------------------------\n\nBard or Druid?  \nI wanna be a bard, cause they get songs and just the whole idea of a bard. but i also wanna be a druid cause they get wolf form, i cannot decide who to \n\nAAaaah!!\nPost by Kaana 10-11-1999 01:08 PM\n\nPost by Kaana | 10-11-1999 01:08 PM\n-----------------------------------\n\nI prefer bards over druids by far. You will not be asked for SoW and teleports all day as a bard. You have a new song to look forward to every lvl. Bards get many skil\n"
+      },
+      "issues": []
+    },
+    {
+      "rank": 5,
+      "site": "magelo.com",
+      "pages": 146028,
+      "status": "fixed",
+      "policies": [
+        "Magelo profile panels",
+        "Magelo forum messages"
+      ],
+      "finding": "Retain the dedicated profile policy; add source-identified forum message rows so replies retain their own author and timestamp without account profile panels.",
+      "samples": 23,
+      "verified": 23,
+      "changed": 1,
+      "max_tokens": 480,
+      "before_chunks": 1086,
+      "after_chunks": 1095,
+      "checks": [
+        "23 before/after captures have identical source hashes.",
+        "23 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "c695afe966be8113711ff8ed4bd7975c08f2c7f19374efda57f1f616bacda17e",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20081217124906/http://eq.magelo.com/forum/messages.jspa?topic=5096",
+          "label": "2008-12-17 · eq.magelo.com / forum/messages.jspa?topic=5096",
+          "id": "websites/eq.magelo.com/20081217124906/forum/messages.jspa?topic=5096",
+          "source_sha256": "9b80d1c6e00a605b2625845b94275805415b285dec949c47ecec431497d60f11"
+        },
+        {
+          "url": "https://web.archive.org/web/20021122100527/http://www.magelo.com/eq_view_profile.html?num=110655",
+          "label": "2002-11-22 · www.magelo.com / eq_view_profile.html?num=110655",
+          "id": "websites/www.magelo.com/20021122100527/eq_view_profile.html?num=110655",
+          "source_sha256": "b7fd570b6479418c22d774c9feedc8098a797d98a6655452f583d6e4db17b50e"
+        },
+        {
+          "url": "https://web.archive.org/web/20091230224018/http://eq.magelo.com/profile/477927/index.html",
+          "label": "2009-12-30 · eq.magelo.com / profile/477927/index.html",
+          "id": "websites/eq.magelo.com/20091230224018/profile/477927/index.html",
+          "source_sha256": "fcd4a1d9936514b9aada88fe5f2d55ef0a5edd0133a1a11910f53584231d3fd8"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "comparison": {
+        "before": "html_structure · 321 chunks\n\nMagelo - EQ - Topic : not detecting characters\nWorld of Warcraft\nEverQuest\n\nClick to login\n\nMy characters\n\nMy guild\n\nMy account\n\nForums\n\nHelp\n\nRanking\n\nGuilds\n\nItems\n\nSpells\n\nZones\n\nNPCs\n\nTopic : not detecting characters\n\n\n\nMagelo - EQ - Topic : not detecting characters\n|  |  |  |  |\n| --- | --- | --- | --- |\n|  | Search forum |  | Back to topic list |\n| warning | This topic is locked. | | |\n\n\n",
+        "after": "forum_posts · 330 chunks\n\nnot detecting characters\nPost by motleycrue 10/12/08 11:00 AM\n\nPost by motleycrue | 10/12/08 11:00 AM\n--------------------------------------\n\nive tried over and over and its not detecting any characters\n\n\n\nnot detecting characters\nPost by Erycil 10/13/08 3:34 AM\n\nPost by Erycil | 10/13/08 3:34 AM\n---------------------------------\n\nHello, motleycrue!  \n  \nThis seems to be an issue that occured due to changes applied with the recent patch to Magelo Sync we did in response to the EQ patch. We're lookin\n"
+      },
+      "issues": []
+    },
+    {
+      "rank": 6,
+      "site": "sony.com",
+      "pages": 131375,
+      "status": "covered",
+      "policies": [
+        "Lithium",
+        "Generic articles and technical documents"
+      ],
+      "finding": "Retain the existing Lithium policy for official discussions and printer views. Independent live-site articles, announcements, requirements and technical tables remain on the generic path.",
+      "samples": 29,
+      "verified": 29,
+      "changed": 0,
+      "max_tokens": 480,
+      "before_chunks": 2539,
+      "after_chunks": 2539,
+      "checks": [
+        "29 before/after captures have identical source hashes.",
+        "29 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "82a8095fbc334c0897c4bc7ec804b1fd7b8ee717f3dd5c930c3afdc22ee6f56f",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20061213171119/http://eqforums.station.sony.com/eq/board/print?board.id=Veterans&message.id=337405&page=1&format=all",
+          "label": "2006-12-13 · eqforums.station.sony.com / eq/board/print?board.id=Veterans&message.id=337405&page=1&format=all",
+          "id": "websites/eqforums.station.sony.com/20061213171119/eq/board/print?board.id=Veterans&message.id=337405&page=1&format=all",
+          "source_sha256": "e6dbcf4a05a3459708b3f6a7a90f2eee65873f4179cdd69d0d82bfd5357494e0"
+        },
+        {
+          "url": "https://web.archive.org/web/20060720003339/http://eqforums.station.sony.com/eq/board/message?board.id=studio&message.id=497",
+          "label": "2006-07-20 · eqforums.station.sony.com / eq/board/message?board.id=studio&message.id=497",
+          "id": "websites/eqforums.station.sony.com/20060720003339/eq/board/message?board.id=studio&message.id=497",
+          "source_sha256": "5c3c71a2b2a4f66e4219e7c78e9b14b9cc26f9159decba332f6023e014c0553f"
+        },
+        {
+          "url": "https://web.archive.org/web/20061008070452/http://eqforums.station.sony.com/eq/board/message?board.id=messenger&message.id=137",
+          "label": "2006-10-08 · eqforums.station.sony.com / eq/board/message?board.id=messenger&message.id=137",
+          "id": "websites/eqforums.station.sony.com/20061008070452/eq/board/message?board.id=messenger&message.id=137",
+          "source_sha256": "15fb70753204b0c2467e337eac4276608ed93b1915452014cc7127e3612a7cdf"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "issues": []
+    },
+    {
+      "rank": 7,
+      "site": "eqtraders.com",
+      "pages": 90458,
+      "status": "fixed",
+      "policies": [
+        "EQ Traders recipes/vendors",
+        "vBulletin"
+      ],
+      "finding": "Existing recipe/vendor and vBulletin policies remain appropriate. Shared missing-entity handling improves generated forum responses; empty source captures cannot be reconstructed by chunking.",
+      "samples": 23,
+      "verified": 23,
+      "changed": 1,
+      "max_tokens": 480,
+      "before_chunks": 1254,
+      "after_chunks": 1251,
+      "checks": [
+        "23 before/after captures have identical source hashes.",
+        "23 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "bb4e8a6667f251b79670acde141352ad4b922ffab905327a042c8f803793540a",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20040414033142/http://mboards.eqtraders.com/eq/forumdisplay.php",
+          "label": "2004-04-14 · mboards.eqtraders.com / eq/forumdisplay.php",
+          "id": "websites/mboards.eqtraders.com/20040414033142/eq/forumdisplay.php",
+          "source_sha256": "078ec59a554eb23be0c84cc3324c94725c602eb4fb4d698de9e716c1e60a4f24"
+        },
+        {
+          "url": "https://web.archive.org/web/20031019185309/http://www.eqtraders.com/items/show_item.php?item=2249&menustr=080030900000",
+          "label": "2003-10-19 · www.eqtraders.com / items/show_item.php?item=2249&menustr=080030900000",
+          "id": "websites/www.eqtraders.com/20031019185309/items/show_item.php?item=2249&menustr=080030900000",
+          "source_sha256": "9671d2e85d74786c5d170c67867be8eadb8b843e91b9a269547ae09ed648a0a8"
+        },
+        {
+          "url": "https://web.archive.org/web/20040923234405/http://mboards.eqtraders.com/eq/archive/index.php/t-15549.html",
+          "label": "2004-09-23 · mboards.eqtraders.com / eq/archive/index.php/t-15549.html",
+          "id": "websites/mboards.eqtraders.com/20040923234405/eq/archive/index.php/t-15549.html",
+          "source_sha256": "9d99fef0dc842a212ddccd5fd899d473a69f4dfc2b5a61d4bfc4a58c0ac76518"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "comparison": {
+        "before": "html_structure · 3 chunks\n\nEQTC Forums\nEQTC Forums\n\nvBulletin Message\n\n\n\nEQTC Forums\nQuoted correspondence:\n> No Forum specified. If you followed a valid link, please notify the webmaster\n\n  \n\n\n",
+        "after": "archive_status · 0 chunks\n"
+      },
+      "issues": []
+    },
+    {
+      "rank": 8,
+      "site": "eqclasses.com",
+      "pages": 82763,
+      "status": "covered",
+      "policies": [
+        "Snitz topic/review/composer",
+        "phpBB"
+      ],
+      "finding": "Retain the shared forum policies. Sampled Snitz quotes and topic-review messages already keep independent authors and bodies, including long discussions.",
+      "samples": 10,
+      "verified": 10,
+      "changed": 0,
+      "max_tokens": 480,
+      "before_chunks": 1797,
+      "after_chunks": 1797,
+      "checks": [
+        "10 before/after captures have identical source hashes.",
+        "10 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "e6f695a1668023fcf339b0ef1bf823aa9bdb534632420823a8d8d5b7e7d41bd2",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20040912171400/http://necro.eqclasses.com/forum/viewtopic.php?t=2063&amp",
+          "label": "2004-09-12 · necro.eqclasses.com / forum/viewtopic.php?t=2063&amp",
+          "id": "websites/necro.eqclasses.com/20040912171400/forum/viewtopic.php?t=2063&amp",
+          "source_sha256": "7d99f27557614a8879ab58997ddec90c62af0cc745de21f811e1ba821ad2598f"
+        },
+        {
+          "url": "https://web.archive.org/web/20020706010441/http://necro.eqclasses.com/forums/post.asp?method=ReplyQuote&REPLY_ID=40741&TOPIC_ID=5097&FORUM_ID=2&CAT_ID=1&Forum_Title=General%20Discussions&Topic_Title=Weee!!&M=",
+          "label": "2002-07-06 · necro.eqclasses.com / forums/post.asp?method=ReplyQuote&REPLY_ID=40741&TOPIC_ID=5097&FORUM_ID=2&CAT_ID=1&Forum_Title=Gener",
+          "id": "websites/necro.eqclasses.com/20020706010441/forums/post.asp?method=ReplyQuote&REPLY_ID=40741&TOPIC_ID=5097&FORUM_ID=2&CAT_ID=1&Forum_Title=General Discussions&Topic_Title=Weee!!&M=",
+          "source_sha256": "440b7d99f9317c17363aacf04488d5a8f3f5f8e1b2c68cca07c4dbadbd422cf8"
+        },
+        {
+          "url": "https://web.archive.org/web/20040331235739/http://necro.eqclasses.com/forum/post.asp?method=ReplyQuote&REPLY_ID=236430&TOPIC_ID=22857&FORUM_ID=22",
+          "label": "2004-03-31 · necro.eqclasses.com / forum/post.asp?method=ReplyQuote&REPLY_ID=236430&TOPIC_ID=22857&FORUM_ID=22",
+          "id": "websites/necro.eqclasses.com/20040331235739/forum/post.asp?method=ReplyQuote&REPLY_ID=236430&TOPIC_ID=22857&FORUM_ID=22",
+          "source_sha256": "3f4f73805bd4651adee536ca5774184ac5c9e8fb33460cb6d47872f9e3ced210"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "issues": []
+    },
+    {
+      "rank": 9,
+      "site": "afterlifeguild.org",
+      "pages": 78755,
+      "status": "generic",
+      "policies": [
+        "Generic data tables and headings"
+      ],
+      "finding": "No dedicated policy needed in the sampled DKP/history pages: character identity already appears in the request title, and every table continuation carries the full DKP column labels.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 0,
+      "max_tokens": 480,
+      "before_chunks": 840,
+      "after_chunks": 840,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "52950774a6935df463bb365a039fa101a98a57eb1cc43cd18efe817fc22123b4",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20030714224815/http://www.afterlifeguild.org/dkp.cgi?history=Kaeryn&htype=Full&id=183165",
+          "label": "2003-07-14 · www.afterlifeguild.org / dkp.cgi?history=Kaeryn&htype=Full&id=183165",
+          "id": "websites/www.afterlifeguild.org/20030714224815/dkp.cgi?history=Kaeryn&htype=Full&id=183165",
+          "source_sha256": "36ff6917407e54664d0728e9064d7490fea1cefb84a001b312d27d880c0350d3"
+        },
+        {
+          "url": "https://web.archive.org/web/20031116232112/http://www.afterlifeguild.org/dkp.cgi?history=Mymm&htype=Full&id=219082",
+          "label": "2003-11-16 · www.afterlifeguild.org / dkp.cgi?history=Mymm&htype=Full&id=219082",
+          "id": "websites/www.afterlifeguild.org/20031116232112/dkp.cgi?history=Mymm&htype=Full&id=219082",
+          "source_sha256": "c66b60b9b350a757dd74002f6fef21ab10ff94d09b55e77331b1cdfb5ee5b9a4"
+        },
+        {
+          "url": "https://web.archive.org/web/20030606155120/http://www.afterlifeguild.org/dkp.cgi?history=Spry&htype=Full&id=156967",
+          "label": "2003-06-06 · www.afterlifeguild.org / dkp.cgi?history=Spry&htype=Full&id=156967",
+          "id": "websites/www.afterlifeguild.org/20030606155120/dkp.cgi?history=Spry&htype=Full&id=156967",
+          "source_sha256": "5d361c0f3549d478e4b71d9cee0469ea57912442e63039c3d1f3d35968a9ca99"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "issues": []
+    },
+    {
+      "rank": 10,
+      "site": "eqinterface.com",
+      "pages": 72385,
+      "status": "fixed",
+      "policies": [
+        "EQInterface catalog",
+        "vBulletin"
+      ],
+      "finding": "Remove the proven category-menu table and bind actual catalog column headings to continuation chunks; keep download descriptions, screenshots, code and forum bodies.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 3,
+      "max_tokens": 480,
+      "before_chunks": 764,
+      "after_chunks": 762,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "9d036d7e2cae192b0ffb5ce1d88821976e8cb71902ceff32367bc834b98f688c",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20030819130836/http://www.eqinterface.com/links.php?op=ratelink&lid=2&ttitle=The_Rathe_Travel_Agency",
+          "label": "2003-08-19 · www.eqinterface.com / links.php?op=ratelink&lid=2&ttitle=The_Rathe_Travel_Agency",
+          "id": "websites/www.eqinterface.com/20030819130836/links.php?op=ratelink&lid=2&ttitle=The_Rathe_Travel_Agency",
+          "source_sha256": "1b92d824669c82faf1b4233a96964655d91b6ccb4a8141627a802dafda990e85"
+        },
+        {
+          "url": "https://web.archive.org/web/20040516145115/http://www.eqinterface.com/sdownload/picture.php?s=&id=2641",
+          "label": "2004-05-16 · www.eqinterface.com / sdownload/picture.php?s=&id=2641",
+          "id": "websites/www.eqinterface.com/20040516145115/sdownload/picture.php?s=&id=2641",
+          "source_sha256": "1d251704200148ab0a79df7ecf0a189323af11b427d39b776eb448b2fd6d1e4f"
+        },
+        {
+          "url": "https://web.archive.org/web/20040604222001/http://www.eqinterface.com/list.php?s=&skinnerid=55902",
+          "label": "2004-06-04 · www.eqinterface.com / list.php?s=&skinnerid=55902",
+          "id": "websites/www.eqinterface.com/20040604222001/list.php?s=&skinnerid=55902",
+          "source_sha256": "1fd55c82110031a97c4fcebc711f447b485c04c719db7d5654c7c8c4227d480b"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "comparison": {
+        "before": "html_structure · 2 chunks\n\nEQ Interface - Your Everquest modification source\n|\nUser CP |\nMembers |\nF.A.Q |\nSearch\n\n  \n\n**Menu**\n\n**·** Home  \n**·** Forums  \n**·** **FAQ**  \n  \n**·** **Downloads** [+]  \n\n**·** **Complete Featured!**  \n**·** Complete Sets  \n**·** Mix & Match  \n**·** AA window  \n**·** Bank window  \n**·\n\nEQ Interface - Your Everquest modification source\n**The Rathe Travel Agency**\n\n* Please do not vote for the same resource more than once.* The scale is 1 - 10, with 1 being poor and 10 being excellent.* Please be objective in your vote, if everyone receives a 1 or a 10, the ratings aren't \n",
+        "after": "eqinterface_catalog · 1 chunks\n\nEQ Interface - Your Everquest modification source\n|\nUser CP |\nMembers |\nF.A.Q |\nSearch\n\n  \n\n**Login**\n\nDon't have an account?   \nfor one now!  \n  \nLost Password\n\n  \n\n**Search Files**\n\n**Advanced Search**\n\n  \n\n**Gu Comic**\n\n  \n\n**Disclaimer**\n\nAuthor Credit is given on a simple basis. We cr\n"
+      },
+      "issues": []
+    },
+    {
+      "rank": 11,
+      "site": "eqdiva.com",
+      "pages": 53881,
+      "status": "fixed",
+      "policies": [
+        "EQDiva armor/location catalogs",
+        "ASP.NET Forums"
+      ],
+      "finding": "Split repeated armor/resist tables at captured slot/set headings and carry stat labels on continuations. Bind song-location pages to their visible location; retain shared ASP.NET discussion handling.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 3,
+      "max_tokens": 480,
+      "before_chunks": 1006,
+      "after_chunks": 1135,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "43a6b38b96cfe542b15fc800ef8b5f6091badbfa22dcb70f41382add3932212e",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20030522213403/http://www.eqdiva.com/items/resistGear.asp?&&id=172&mode=V",
+          "label": "2003-05-22 · www.eqdiva.com / items/resistGear.asp?&&id=172&mode=V",
+          "id": "websites/www.eqdiva.com/20030522213403/items/resistGear.asp?&&id=172&mode=V",
+          "source_sha256": "ea0490ed4598bf725687f521b083e2f1431358e3a162749a912a6bd169048b0f"
+        },
+        {
+          "url": "https://web.archive.org/web/20030826135453/http://www.eqdiva.com/locations.asp?loc=K&song=7",
+          "label": "2003-08-26 · www.eqdiva.com / locations.asp?loc=K&song=7",
+          "id": "websites/www.eqdiva.com/20030826135453/locations.asp?loc=K&song=7",
+          "source_sha256": "9d22fa397f803250a50ffc6284778e81c866196380c9417cffb9d4db0cb928ea"
+        },
+        {
+          "url": "https://web.archive.org/web/20040109043629/http://www.eqdiva.com/armor/default.asp?&&id=18",
+          "label": "2004-01-09 · www.eqdiva.com / armor/default.asp?&&id=18",
+          "id": "websites/www.eqdiva.com/20040109043629/armor/default.asp?&&id=18",
+          "source_sha256": "81477869eb47aa7be563cd9e67b90ba97ab38c06e7c4272091a6f38dee3c77c2"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "comparison": {
+        "before": "html_structure · 32 chunks\n\nEQdiva.com - Bards of Everquest Bard Resist Gear\nEQDiva.com - Bards of Everquest\n\n\n\nEQdiva.com - Bards of Everquest Bard Resist Gear\n|  |  |\n| --- | --- |\n| **Welcome from Druzzil Ro** | **Bards of Norrath unite!** |\n\n\n",
+        "after": "eqdiva_catalog · 159 chunks\n\nEQdiva.com - Bards of Everquest Bard Resist Gear\nEQDiva.com - Bards of Everquest\n\n\n\nEQdiva.com - Bards of Everquest Bard Resist Gear\n|  |  |\n| --- | --- |\n| **Welcome from Druzzil Ro** | **Bards of Norrath unite!** |\n\n\n"
+      },
+      "issues": []
+    },
+    {
+      "rank": 12,
+      "site": "tok2.com",
+      "pages": 48043,
+      "status": "fixed",
+      "policies": [
+        "Generic content",
+        "Nested-script repair"
+      ],
+      "finding": "Mixed hosting accounts have no single site-wide content policy. Shared repair removes leaking generated ad scripts while preserving the Japanese content and unfamiliar CGI boards/directories.",
+      "samples": 29,
+      "verified": 29,
+      "changed": 10,
+      "max_tokens": 480,
+      "before_chunks": 491,
+      "after_chunks": 487,
+      "checks": [
+        "29 before/after captures have identical source hashes.",
+        "29 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "224b6eceef2072cf04232f35e48c6fc99bc99d91c14aecc4be6c20dd06983610",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20021130080207/http://www27.tok2.com/home/tenma/cgi-bin/yomi-search2/regist_ys.cgi?mode=enter&id=401",
+          "label": "2002-11-30 · www27.tok2.com / home/tenma/cgi-bin/yomi-search2/regist_ys.cgi?mode=enter&id=401",
+          "id": "websites/www27.tok2.com/20021130080207/home/tenma/cgi-bin/yomi-search2/regist_ys.cgi?mode=enter&id=401",
+          "source_sha256": "aaf7a5e3438992cbf6dab643a8b6f9b0124a73ba50685aecd4ed561776920bd5"
+        },
+        {
+          "url": "https://web.archive.org/web/20030418125552/http://www27.tok2.com/home/tenma/cgi-bin/yomi-search3/regist_ys.cgi?mode=enter&id=49",
+          "label": "2003-04-18 · www27.tok2.com / home/tenma/cgi-bin/yomi-search3/regist_ys.cgi?mode=enter&id=49",
+          "id": "websites/www27.tok2.com/20030418125552/home/tenma/cgi-bin/yomi-search3/regist_ys.cgi?mode=enter&id=49",
+          "source_sha256": "7af64c401955722ce15511e3a89be398b74099a91729cea74dd071ed9ba61522"
+        },
+        {
+          "url": "https://web.archive.org/web/20030430075104/http://www27.tok2.com/home/tenma/cgi-bin/yomi-search/rank.cgi?mode=rank&kt=07_02",
+          "label": "2003-04-30 · www27.tok2.com / home/tenma/cgi-bin/yomi-search/rank.cgi?mode=rank&kt=07_02",
+          "id": "websites/www27.tok2.com/20030430075104/home/tenma/cgi-bin/yomi-search/rank.cgi?mode=rank&kt=07_02",
+          "source_sha256": "ce0de2f90ac8a07bd5153206592767d6197fe02f1b31b7dcf0e25d0aa7aee500"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "comparison": {
+        "before": "html_structure · 2 chunks\n\nパスワード認証画面/登録データの修正・削除\n|  |  |\n| --- | --- |\n| ' ); } if( i == 1 ){ document.write( ' | ' ); } if( i == 2 ){ document.write( '' ); } //--> |\n\n  \n\n\n\n\nパスワード認証画面/登録データの修正・削除\n新着作品 -\n更新作品 -\n人気ランキング -\nキーワードランキング -\nおすすめ作品 -\n\n---\n\n  \n\nホーム　>\n\n【パスワード認証画面】\n  \n\n１．登録データの修正  \n  \n\n変更する人：\n  \nID:  \nPASS:  \nパスワードを記録する  \nパスワードを記録しない\n\n[登録データ]  \n\n■タイトル：  \n夢見るリリー  \n■URL：  \nhttp://www8.gateway.ne.jp/~friend/dtd/img400/dd0401.htm\n\n\n",
+        "after": "html_structure · 1 chunks\n\nパスワード認証画面/登録データの修正・削除\n新着作品 -\n更新作品 -\n人気ランキング -\nキーワードランキング -\nおすすめ作品 -\n\n---\n\n  \n\nホーム　>\n\n【パスワード認証画面】\n  \n\n１．登録データの修正  \n  \n\n変更する人：\n  \nID:  \nPASS:  \nパスワードを記録する  \nパスワードを記録しない\n\n[登録データ]  \n\n■タイトル：  \n夢見るリリー  \n■URL：  \nhttp://www8.gateway.ne.jp/~friend/dtd/img400/dd0401.htm\n\n\n"
+      },
+      "issues": []
+    },
+    {
+      "rank": 13,
+      "site": "eqatlas.com",
+      "pages": 41562,
+      "status": "generic",
+      "policies": [
+        "Generic map tables, guides and code"
+      ],
+      "finding": "Retain map location keys, zone titles, landmarks and authored code. Sampled maps already retain source labels; a domain-only content selector would put varied guides and CGI content at risk.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 0,
+      "max_tokens": 480,
+      "before_chunks": 150,
+      "after_chunks": 150,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "0c1b1d4fa90ed5ff8ca1b3582c4055830a856035a57bb9f738afba57ac85820b",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20020127120800/http://www.eqatlas.com/cgi-bin/ubb/postings.cgi?action=editpost&forum=Dirt%20Scratches&number=1&topic=000344.cgi&ReplyNum=000007&TopicSubject=Luclin%20Problems%20Info%20from%20Verant%20CS",
+          "label": "2002-01-27 · www.eqatlas.com / cgi-bin/ubb/postings.cgi?action=editpost&forum=Dirt Scratches&number=1&topic=000344.cgi&ReplyNum=000",
+          "id": "websites/www.eqatlas.com/20020127120800/cgi-bin/ubb/postings.cgi?action=editpost&forum=Dirt Scratches&number=1&topic=000344.cgi&ReplyNum=000007&TopicSubject=Luclin Problems Info from Verant CS",
+          "source_sha256": "a30a31a6c7fae0adaeb4ab2d27a92b7ceaebb780dd491101c55ff633fc6d542d"
+        },
+        {
+          "url": "https://web.archive.org/web/20030623111929/http://www.eqatlas.com/southernkaranamap.html",
+          "label": "2003-06-23 · www.eqatlas.com / southernkaranamap.html",
+          "id": "websites/www.eqatlas.com/20030623111929/southernkaranamap.html",
+          "source_sha256": "aac0a8af1e077667d1f6c5bb9ed62aed803804a8b8cb31e38f7beb48aa7b75a2"
+        },
+        {
+          "url": "https://web.archive.org/web/20040920085916/http://www.eqatlas.com/index.html",
+          "label": "2004-09-20 · www.eqatlas.com / index.html",
+          "id": "websites/www.eqatlas.com/20040920085916/index.html",
+          "source_sha256": "edd827c8ac1471f9533d8ee56ef59f683f6619e4794ac718e0a72bc2bdfbe98a"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "issues": []
+    },
+    {
+      "rank": 14,
+      "site": "big.or.jp",
+      "pages": 40164,
+      "status": "generic",
+      "policies": [
+        "Generic content",
+        "Nested-script repair"
+      ],
+      "finding": "Treat this as a mixed hosting platform. Keep account boundaries and conservative content extraction; use shared advertising repair rather than imposing one layout on unrelated Japanese sites.",
+      "samples": 29,
+      "verified": 29,
+      "changed": 0,
+      "max_tokens": 480,
+      "before_chunks": 2509,
+      "after_chunks": 2509,
+      "checks": [
+        "29 before/after captures have identical source hashes.",
+        "29 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "1cab642be71dd98462a2c70e6a3d2868d413f531b76220b776a4c15959f410f2",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20020924183317/http://www22.big.or.jp/~eyes/cgi-bin/mm2ibbs1/board.cgi?board=1&cmd=delete&wparam=1585",
+          "label": "2002-09-24 · www22.big.or.jp / ~eyes/cgi-bin/mm2ibbs1/board.cgi?board=1&cmd=delete&wparam=1585",
+          "id": "websites/www22.big.or.jp/20020924183317/~eyes/cgi-bin/mm2ibbs1/board.cgi?board=1&cmd=delete&wparam=1585",
+          "source_sha256": "66921b0fc7d3386f7317ffa300e77d795c2e899a2cd938da3808ce79f409517d"
+        },
+        {
+          "url": "https://web.archive.org/web/20010529115932/http://www22.big.or.jp/~eyes/cgi-bin/mm2ibbs1/board.cgi?board=1&cmd=edit&wparam=914",
+          "label": "2001-05-29 · www22.big.or.jp / ~eyes/cgi-bin/mm2ibbs1/board.cgi?board=1&cmd=edit&wparam=914",
+          "id": "websites/www22.big.or.jp/20010529115932/~eyes/cgi-bin/mm2ibbs1/board.cgi?board=1&cmd=edit&wparam=914",
+          "source_sha256": "cf938215314573fe81381804e92677e80b0ffb36338438af0c805f5af434e54e"
+        },
+        {
+          "url": "https://web.archive.org/web/20010112010500/http://www7.big.or.jp/~lev/eq/spell/16/shieldskin.html",
+          "label": "2001-01-12 · www7.big.or.jp / ~lev/eq/spell/16/shieldskin.html",
+          "id": "websites/www7.big.or.jp/20010112010500/~lev/eq/spell/16/shieldskin.html",
+          "source_sha256": "5463a41cec1a6cf2426d164d93fafd7c99e86eb7b938f9a3f46a4c6b9d4263ee"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. 3 legacy account-before-date path(s) have no reconstructed link. Chunk counts are diagnostics, not a relevance score.",
+      "issues": []
+    },
+    {
+      "rank": 15,
+      "site": "maximumeq.com",
+      "pages": 38747,
+      "status": "fixed",
+      "policies": [
+        "MaximumEQ equipment catalog",
+        "UltraBoard"
+      ],
+      "finding": "Remove the source-proven navigation panel and recognize actual item/stat headers. Preserve item descriptions, effects, quest notes and existing UltraBoard discussion boundaries.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 8,
+      "max_tokens": 480,
+      "before_chunks": 228,
+      "after_chunks": 227,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "f403fd485e24e6824b0becbd6088f771b47a8c3bee67211e8c387b2ccc1cc3b1",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20000229031241/http://maximumeq.com/quests/bloodforge_hammer.shtml",
+          "label": "2000-02-29 · maximumeq.com / quests/bloodforge_hammer.shtml",
+          "id": "websites/maximumeq.com/20000229031241/quests/bloodforge_hammer.shtml",
+          "source_sha256": "e4f3586111f486dea1b1019f2ff1b8bcf4c867cf2501ee46fa687595ca0b8f7f"
+        },
+        {
+          "url": "https://web.archive.org/web/20000229031950/http://maximumeq.com/weapons/individual/stiletto_of_the_bloodclaw.shtml?",
+          "label": "2000-02-29 · maximumeq.com / weapons/individual/stiletto_of_the_bloodclaw.shtml?",
+          "id": "websites/maximumeq.com/20000229031950/weapons/individual/stiletto_of_the_bloodclaw.shtml?",
+          "source_sha256": "b15c95f4ab91aa2f7b5264a1002c80b2cdbee69dfb1d125e08e9b088dc58e80d"
+        },
+        {
+          "url": "https://web.archive.org/web/20000301014310/http://maximumeq.com/cleric/armour/neck_mana.shtml",
+          "label": "2000-03-01 · maximumeq.com / cleric/armour/neck_mana.shtml",
+          "id": "websites/maximumeq.com/20000301014310/cleric/armour/neck_mana.shtml",
+          "source_sha256": "1f5e44219b39bf1a690d1d6abba9e28f47f24d186da5640213c01eceb8666ad8"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "comparison": {
+        "before": "html_structure · 3 chunks\n\nMaximumEQ - Bloodforge Hammer Quest\n**The News**\n\n**All Zones**\n\n**Getting Started  \nSpells  \nTrade Skills  \nQuests  \nGuilds  \nFaction**\n\n**Weapons Armour  \nInventory**  \n **General  \nQuests  \nStrategies  \nBards  \nClerics  \nDruids  \nEnchanters  \nMagicians  \nMonks  \nNecromance\n\nMaximumEQ - Bloodforge Hammer Quest\nBloodforge Hammer Quest\n\n|  |  |\n| --- | --- |\n| **Item Rewards:** | **Zones:** |\n|  | Butcherblock Mountains  Kaladim  South Qeynos |\n| **Increased Faction:** | **Decreased Faction:** |\n\n\n",
+        "after": "maximumeq_catalog · 3 chunks\n\nMaximumEQ - Bloodforge Hammer Quest\nBloodforge Hammer Quest\n\n**Bloodforge Hammer Quest**\n\n  \n\n1) Kill both rare Ogres that spawn in the Butcherblock mountains. Their names are Corfulnk and Zarchoomi. Take their heads to Byzar Bloodforge in the Warriors' Guild in Kaladim.  \n  \n2) Head to Qeynos and vi\n\nMaximumEQ - Bloodforge Hammer Quest\nBloodforge Hammer Quest\n\n|  |  |\n| --- | --- |\n| **Item Rewards:** | **Zones:** |\n|  | Butcherblock Mountains  Kaladim  South Qeynos |\n| **Increased Faction:** | **Decreased Faction:** |\n\n\n"
+      },
+      "issues": []
+    },
+    {
+      "rank": 16,
+      "site": "eqrankings.com",
+      "pages": 38442,
+      "status": "fixed",
+      "policies": [
+        "EQRankings catalogs"
+      ],
+      "finding": "Remove exact account/search menu containers and preserve ranking/profile tables. Promote only source-evidenced column labels; never infer character identity from an arbitrary URL parameter.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 5,
+      "max_tokens": 480,
+      "before_chunks": 304,
+      "after_chunks": 304,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "6cc1acfd9669c6549853b9a66c4977f7805f7d1e693e807bb5e4fd8238394d48",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20060104230803/http://www.eqrankings.com/index.php?p=list&page=400&limit=100&charserver=All&charlevel=All&charrace=All&charclass=Necromancer&filterorder=Name&filterorder2=Name",
+          "label": "2006-01-04 · www.eqrankings.com / index.php?p=list&page=400&limit=100&charserver=All&charlevel=All&charrace=All&charclass=Necromancer&",
+          "id": "websites/www.eqrankings.com/20060104230803/index.php?p=list&page=400&limit=100&charserver=All&charlevel=All&charrace=All&charclass=Necromancer&filterorder=Name&filterorder2=Name",
+          "source_sha256": "c20ed9130648a880ad141de410d26aa1d211cc6672821d3aee2ad3b1e0d44bfe"
+        },
+        {
+          "url": "https://web.archive.org/web/20060228001052/http://www.eqrankings.com/guilds.php?",
+          "label": "2006-02-28 · www.eqrankings.com / guilds.php?",
+          "id": "websites/www.eqrankings.com/20060228001052/guilds.php?",
+          "source_sha256": "635301b8b7dd1aff5746a619c17c00f91ff52716b18025c8758d87e3d8d70f57"
+        },
+        {
+          "url": "https://web.archive.org/web/20061118023840/http://www.eqrankings.com/index.php?p=list&page=6300&limit=100&charserver=All&charlevel=All&charrace=All&charclass=Warrior&filterorder=Name&filterorder2=Name",
+          "label": "2006-11-18 · www.eqrankings.com / index.php?p=list&page=6300&limit=100&charserver=All&charlevel=All&charrace=All&charclass=Warrior&fil",
+          "id": "websites/www.eqrankings.com/20061118023840/index.php?p=list&page=6300&limit=100&charserver=All&charlevel=All&charrace=All&charclass=Warrior&filterorder=Name&filterorder2=Name",
+          "source_sha256": "6dd1275a2b0785b4f94f575b429e04ff700e2b047c9360feaeea276fc6c38d1e"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "comparison": {
+        "before": "html_structure · 18 chunks\n\nEQRankings\n• Character Search  \n• Item Search\n\n• Guild Search (lfg)  \n• Guild Rankings  \n• Guild Registration  \n• Guild Management\n\n\n\nAdd/Update Profile - Overview - Search - Popular Profiles - Resist Freaks - Guilds - FAQ - Forums\n\n\n\nEQRankings\n|  |  |  |  |  |  |  |  |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| Class | Race | Server | First Order | Second Order | Level | Auth |  |\n\n\n",
+        "after": "eqrankings_catalog · 18 chunks\n\nEQRankings\n• Guild Search (lfg)  \n• Guild Rankings  \n• Guild Registration  \n• Guild Management\n\n\n\nAdd/Update Profile - Overview - Search - Popular Profiles - Resist Freaks - Guilds - FAQ - Forums\n\n\n\nEQRankings\n|  |  |  |  |  |  |  |  |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n| Class | Race | Server | First Order | Second Order | Level | Auth |  |\n\n\n"
+      },
+      "issues": []
+    },
+    {
+      "rank": 17,
+      "site": "eqguild.net",
+      "pages": 36514,
+      "status": "fixed",
+      "policies": [
+        "Generic content",
+        "Calendar scaffolding"
+      ],
+      "finding": "Shared calendar recognition benefits full-name weekday grids. Keep populated events, hosted guild material and uncertain Ikonboard forms; samples do not establish a single safe custom extraction layout.",
+      "samples": 23,
+      "verified": 23,
+      "changed": 3,
+      "max_tokens": 480,
+      "before_chunks": 377,
+      "after_chunks": 371,
+      "checks": [
+        "23 before/after captures have identical source hashes.",
+        "23 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "f59999c24d90b08f875d3c6362fa22e71972e80d01987f4a7013805de598fd5b",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20020730190454/http://www.eqguild.net/cgi-bin/calendar/calendar.pl?month=7&calendar=defaultdemo&month=10",
+          "label": "2002-07-30 · www.eqguild.net / cgi-bin/calendar/calendar.pl?month=7&calendar=defaultdemo&month=10",
+          "id": "websites/www.eqguild.net/20020730190454/cgi-bin/calendar/calendar.pl?month=7&calendar=defaultdemo&month=10",
+          "source_sha256": "b658bbe7a0a4fa8fb5275669f65b1cc84e1313c381f1620bc860632b896fbc2d"
+        },
+        {
+          "url": "https://web.archive.org/web/20030523080121/http://www.eqguild.net/cgi-bin/calendar/calendar.pl?month=3&calendar=floo&year=2004&year=2005",
+          "label": "2003-05-23 · www.eqguild.net / cgi-bin/calendar/calendar.pl?month=3&calendar=floo&year=2004&year=2005",
+          "id": "websites/www.eqguild.net/20030523080121/cgi-bin/calendar/calendar.pl?month=3&calendar=floo&year=2004&year=2005",
+          "source_sha256": "e1670637fec6a6ce6d074d8bb3294e0742bc52f26b988b443bd6094ee48d2fd4"
+        },
+        {
+          "url": "https://web.archive.org/web/20040114084228/http://www.eqguild.net/cgi-bin/calendar/calendar.pl?month=9&calendar=gatheringofminds&month=5",
+          "label": "2004-01-14 · www.eqguild.net / cgi-bin/calendar/calendar.pl?month=9&calendar=gatheringofminds&month=5",
+          "id": "websites/www.eqguild.net/20040114084228/cgi-bin/calendar/calendar.pl?month=9&calendar=gatheringofminds&month=5",
+          "source_sha256": "cc82ea3e2833d558df6262fd160e3d953e4fc99a2ba8aef279982b7e4890a25b"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "comparison": {
+        "before": "html_structure · 4 chunks\n\nCalendar\n|  |  |  |  |  |  |  |  |  |  |  |  |  |  |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| **< 2001** | **Jan** | **Feb** | **Mar** | **Apr** | **May** | **Jun** | **Jul** | **Aug** | **Sep** | **Oct\n\nCalendar\n**Grid**\n\n**List**\n\n  \n\n**Today**\n\n**Week**\n\n**2-Week**\n\n**3-Week**\n\n**4-Week**\n\n**Month**\n\n  \n\n**Search**\n\n\n",
+        "after": "html_structure · 2 chunks\n\nCalendar\n|  |  |  |  |  |  |  |  |  |  |  |  |  |  |\n| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n| **< 2001** | **Jan** | **Feb** | **Mar** | **Apr** | **May** | **Jun** | **Jul** | **Aug** | **Sep** | **Oct\n\nCalendar\n**Grid**\n\n**List**\n\n  \n\n**Today**\n\n**Week**\n\n**2-Week**\n\n**3-Week**\n\n**4-Week**\n\n**Month**\n\n  \n\n**Search**\n\nPowered by CalendarScript\n\n"
+      },
+      "issues": []
+    },
+    {
+      "rank": 18,
+      "site": "interealms.com",
+      "pages": 36499,
+      "status": "fixed",
+      "policies": [
+        "vBulletin"
+      ],
+      "finding": "Retain vBulletin and its stripped archive policy. A skinned thread with one missing closing comment can use its proven post cell without losing all other message boundaries.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 2,
+      "max_tokens": 480,
+      "before_chunks": 1052,
+      "after_chunks": 961,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "2ef25d14a6b2c940405d9757ce78a230388411e382051c1ae2ca73f7b5f80474",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20030913000009/http://forums.interealms.com/ranger/showthread.php?s=&threadid=5190",
+          "label": "2003-09-13 · forums.interealms.com / ranger/showthread.php?s=&threadid=5190",
+          "id": "websites/forums.interealms.com/20030913000009/ranger/showthread.php?s=&threadid=5190",
+          "source_sha256": "9777c0804fa93fdc04077e01885c32f9a0e0aab2bfd1f9dd1daf6d7ae0524831"
+        },
+        {
+          "url": "https://web.archive.org/web/20051230062642/http://forums.interealms.com/shaman/showthread.php?postid=272335",
+          "label": "2005-12-30 · forums.interealms.com / shaman/showthread.php?postid=272335",
+          "id": "websites/forums.interealms.com/20051230062642/shaman/showthread.php?postid=272335",
+          "source_sha256": "a13e77741f73dd3e6ef1a19014bb45bc57280df7abc6d0a9872dac472a40597a"
+        },
+        {
+          "url": "https://web.archive.org/web/20030510235708/http://forums.interealms.com/shaman/archive/index.php/t-1588/index.html",
+          "label": "2003-05-10 · forums.interealms.com / shaman/archive/index.php/t-1588/index.html",
+          "id": "websites/forums.interealms.com/20030510235708/shaman/archive/index.php/t-1588/index.html",
+          "source_sha256": "02ea20bfbdf528b7b2f98a0e7beea882aeeb651a409a43da9145b9840c736b7a"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "comparison": {
+        "before": "html_structure · 67 chunks\n\nInterealms - The Ranger's Glade - Blue Diamonds -- A Hunting Guide\n|  |  |\n| --- | --- |\n| Interealms - The Ranger's Glade | top\\_register.gif top\\_calendar.gif top\\_members.gif top\\_faq.gif top\\_search.gif top\\_home.gif |\n\n\n\nInterealms - The Ranger's Glade - Blue Diamonds -- A Hunting Guide\n|  |  |\n| --- | --- |\n| vb\\_bullet.gif | Interealms - The Ranger's Glade > Guides > New Guides > Blue Diamonds -- A Hunting Guide |\n\n\n",
+        "after": "forum_posts · 55 chunks\n\nInterealms - The Ranger's Glade - Blue Diamonds -- A Hunting Guide\nPost by Elessar Elfstone 06-26-2002, 07:23 PM\n\nPost by Elessar Elfstone | 06-26-2002, 07:23 PM\n-----------------------------------------------\n\nSince Blue Diamonds are so expensive & useful now with tradeskills, I've put together this hunting guide for players wishing to loot Blue Diamo\n\nInterealms - The Ranger's Glade - Blue Diamonds -- A Hunting Guide\nPost by Elessar Elfstone 06-26-2002, 07:23 PM 1)Ulthork Tusks\n\n**1)Ulthork Tusks**  \n*Difficulty*-easy for 50+ Ranger to solo Ulthorks Warriors/Hunters, Man o Wars slighty tougher  \n*Rarity*-random/rare reward, expect 1 Blue Diamond per 3-4 sets of Tus"
+      },
+      "issues": []
+    },
+    {
+      "rank": 19,
+      "site": "everquest-online.com",
+      "pages": 35739,
+      "status": "fixed",
+      "policies": [
+        "EverQuest Online item catalogs"
+      ],
+      "finding": "Give each source-proven item entry an explicit boundary and keep its stats, classes and races together. Preserve complete single-item pages and other unknown layouts.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 4,
+      "max_tokens": 479,
+      "before_chunks": 203,
+      "after_chunks": 330,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "cc708b2d818f6fd8c5575bcfc3b6ba2a4062c623609e0acf2b310b37eeaacdde",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20041101011935/http://www.everquest-online.com/armor/S-3.php",
+          "label": "2004-11-01 · www.everquest-online.com / armor/S-3.php",
+          "id": "websites/www.everquest-online.com/20041101011935/armor/S-3.php",
+          "source_sha256": "bdc0065c082e8a352e706b2d692db79dec76ed85cf056c7ed58c9d415e710c95"
+        },
+        {
+          "url": "https://web.archive.org/web/20041208074217/http://www.everquest-online.com/armor/hands/index.html",
+          "label": "2004-12-08 · www.everquest-online.com / armor/hands/index.html",
+          "id": "websites/www.everquest-online.com/20041208074217/armor/hands/index.html",
+          "source_sha256": "317b4c6faaa6ad4ac5318f3efc9a65c03a83a9a1505c9b2f2f5a961fdce3e247"
+        },
+        {
+          "url": "https://web.archive.org/web/20061230103701/http://www.everquest-online.com/weapons/2h-blunt/L.php",
+          "label": "2006-12-30 · www.everquest-online.com / weapons/2h-blunt/L.php",
+          "id": "websites/www.everquest-online.com/20061230103701/weapons/2h-blunt/L.php",
+          "source_sha256": "86f0b10b73286f9851b3c31ef3ad2418235a46f7a6a43914215a0cf9540c5879"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "comparison": {
+        "before": "html_structure · 17 chunks\n\nEQ Everquest Armor - S - 3\nEQ Everquest Armor - S - 3\n==========================\n\n  \n\n1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25  \n26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35\n\n  \n\n**Search Arm\n\nEQ Everquest Armor - S - 3\n31 | 32 | 33 | 34 | 35\n\n  \n\n**Search Armor:**   [ Advanced Search ]\n\n* Sanguine Gloves  \n  **Stats:** Armor AC:30 STR:+15 STA:+10 DEX:+10 WIS:+7 INT:+7 HP:+100 MANA:+50 FR:+7 CR:+7 DR:+7 MR:+7 PR:+7   \n  **Effect:** Vengeance III  \n  **Clas\n",
+        "after": "item_catalog · 55 chunks\n\nEQ Everquest Armor - S - 3\nEQ Everquest Armor - S - 3\n==========================\n\n  \n\n1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15 | 16 | 17 | 18 | 19 | 20 | 21 | 22 | 23 | 24 | 25  \n26 | 27 | 28 | 29 | 30 | 31 | 32 | 33 | 34 | 35\n\n  \n\n**Search Arm\n\nEQ Everquest Armor - S - 3\nItem: Sanguine Gloves\n\nItem: Sanguine Gloves\n---------------------\n\nSanguine Gloves  \n**Stats:** Armor AC:30 STR:+15 STA:+10 DEX:+10 WIS:+7 INT:+7 HP:+100 MANA:+50 FR:+7 CR:+7 DR:+7 MR:+7 PR:+7   \n**Effect:** Vengeance III  \n**Class:** WAR CLR PAL RNG SHD BRD ROG\n"
+      },
+      "issues": []
+    },
+    {
+      "rank": 20,
+      "site": "stratics.com",
+      "pages": 33746,
+      "status": "fixed",
+      "policies": [
+        "UBB.classic",
+        "Generic maps/articles"
+      ],
+      "finding": "Shared legacy UBB support improves captured discussions. Keep map libraries, class guides and news; a single giant source outside the audit byte bound is recorded as unverified.",
+      "samples": 29,
+      "verified": 28,
+      "changed": 2,
+      "max_tokens": 480,
+      "before_chunks": 1585,
+      "after_chunks": 1639,
+      "checks": [
+        "28 before/after captures have identical source hashes.",
+        "28 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "6d04cb35f1a1283c0beeb54910d31008f526817bd4bbd574dd353ce91827da15",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/19991127082147/http://boards.stratics.com/forums/Forum71/HTML/000725.html",
+          "label": "1999-11-27 · boards.stratics.com / forums/Forum71/HTML/000725.html",
+          "id": "websites/boards.stratics.com/19991127082147/forums/Forum71/HTML/000725.html",
+          "source_sha256": "75973838cf169f4eafbfc8881941c91e62e8a6682611e0058c84851b32c394ff"
+        },
+        {
+          "url": "https://web.archive.org/web/20010415201241/http://boards.stratics.com/forums/Forum71/HTML/001314.html",
+          "label": "2001-04-15 · boards.stratics.com / forums/Forum71/HTML/001314.html",
+          "id": "websites/boards.stratics.com/20010415201241/forums/Forum71/HTML/001314.html",
+          "source_sha256": "a8f08d3729f3e32d1fffcc6d42c400c6245e3bd80662bb2dc7516289f263864f"
+        },
+        {
+          "url": "https://web.archive.org/web/20030409233235/http://eq.stratics.com/content/maps/khan/infectedpaw.shtml",
+          "label": "2003-04-09 · eq.stratics.com / content/maps/khan/infectedpaw.shtml",
+          "id": "websites/eq.stratics.com/20030409233235/content/maps/khan/infectedpaw.shtml",
+          "source_sha256": "37521fc58403cba5bceb1e7858606345e3852539c1a867d28c536eb91a2bb2f5"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. 1 sample(s) could not be planned within the audit source/time bounds. Chunk counts are diagnostics, not a relevance score.",
+      "comparison": {
+        "before": "html_structure · 7 chunks\n\nNewbie Questions! - The Stratics Message Forums\nUBBFriend: Email This Page to Someone!\n\n Asheron's Call General Discussions     [all categories]    Call Hall     Newbie Questions!  Post New Topic  Post A Reply   profile | | preferences | faq | search |\n\nnext newest topic | next oldest to\n\nNewbie Questions! - The Stratics Message Forums\n|  |  |\n| --- | --- |\n| **Author** | **Topic:   Newbie Questions!** |\n| **Ninvaen** Visitor Member since: 07-18-1999 Total posts: 16 | posted October 12, 1999 04:47 PM     Click Here to See the Profile for Ninvaen     Edit/Delete Message  -\n",
+        "after": "forum_posts · 5 chunks\n\nNewbie Questions!\nPost by Ninvaen October 12, 1999 04:47 PM\n\nPost by Ninvaen | October 12, 1999 04:47 PM\n-------------------------------------------\n\nHello!\n\nI can't even decide what \"class\" I'd like to play. Currently I'm leaning toward a War Mage or an Archer.\n\nThe War mage appeals because at level\n\nNewbie Questions!\nPost by Gelum Fyre October 13, 1999 06:12 AM\n\nPost by Gelum Fyre | October 13, 1999 06:12 AM\n----------------------------------------------\n\nAs far as role playing, as a non-magic using character, I have great respect for the mages. I am wary of magics and feel that giving them proper \n"
+      },
+      "issues": [
+        {
+          "id": "websites/eq.stratics.com/20020614115602/cgi-bin/news/viewnews.cgi?newsall",
+          "reason": "Source exceeds the 4 MiB per-file audit limit."
+        }
+      ]
+    },
+    {
+      "rank": 21,
+      "site": "therunes.net",
+      "pages": 32096,
+      "status": "covered",
+      "policies": [
+        "phpBB",
+        "Generic spell/quest guides"
+      ],
+      "finding": "Retain the shared phpBB policy and conservative printer-page fallback. Spell quests and authored guides already preserve their content; there is no evidence for an extra host-specific selector.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 0,
+      "max_tokens": 480,
+      "before_chunks": 313,
+      "after_chunks": 313,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "0b8cbe7cc73d74b119a89e92d2be8aadc6e85d7eb3d80a1177a7c922b145c74a",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20050222144540/http://www.therunes.net/forums/viewtopic.php?p=50006",
+          "label": "2005-02-22 · www.therunes.net / forums/viewtopic.php?p=50006",
+          "id": "websites/www.therunes.net/20050222144540/forums/viewtopic.php?p=50006",
+          "source_sha256": "20d8f6f068ffb06de378abb54d6bc6ee621b6561d3644c2d5a771de4b67928eb"
+        },
+        {
+          "url": "https://web.archive.org/web/20050427191648/http://www.therunes.net/forums/viewtopic.php?t=7440",
+          "label": "2005-04-27 · www.therunes.net / forums/viewtopic.php?t=7440",
+          "id": "websites/www.therunes.net/20050427191648/forums/viewtopic.php?t=7440",
+          "source_sha256": "01391a41bed7345b212558fe5ed40a75a2408b96a408903c9e5f5fa8bb086f08"
+        },
+        {
+          "url": "https://web.archive.org/web/20050515044608/http://www.therunes.net/forums/viewtopic.php?p=2710",
+          "label": "2005-05-15 · www.therunes.net / forums/viewtopic.php?p=2710",
+          "id": "websites/www.therunes.net/20050515044608/forums/viewtopic.php?p=2710",
+          "source_sha256": "abafade879b1944aff665c37ef7198694f7d50f56c43aa04d02f31e5fac34b86"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "issues": []
+    },
+    {
+      "rank": 22,
+      "site": "gameglow.com",
+      "pages": 30054,
+      "status": "fixed",
+      "policies": [
+        "vBulletin",
+        "UBB.classic",
+        "phpBB"
+      ],
+      "finding": "Extend the shared legacy UBB policy for older EQCleric discussions. Keep populated reply forms and the existing vBulletin/phpBB policies across generations of this site.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 1,
+      "max_tokens": 480,
+      "before_chunks": 648,
+      "after_chunks": 652,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "419cc2dd64c45c76e22f16f8a14a69f8766b2397d49c0d5599f57a765f12c65b",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20000407113752/http://eqcleric.gameglow.com/ubb/Forum3/HTML/000822.html",
+          "label": "2000-04-07 · eqcleric.gameglow.com / ubb/Forum3/HTML/000822.html",
+          "id": "websites/eqcleric.gameglow.com/20000407113752/ubb/Forum3/HTML/000822.html",
+          "source_sha256": "aece8f8b6cc4ebac7a443ff4b321ea2f5c13292d3c2e5370c6814a16573076cb"
+        },
+        {
+          "url": "https://web.archive.org/web/20050316035903/http://eqcleric.gameglow.com/eq2/viewtopic.php?t=35&amp",
+          "label": "2005-03-16 · eqcleric.gameglow.com / eq2/viewtopic.php?t=35&amp",
+          "id": "websites/eqcleric.gameglow.com/20050316035903/eq2/viewtopic.php?t=35&amp",
+          "source_sha256": "0d1fae862eb2b29311fd673e11dbe0bf4123dd9c7c6653edeee6355976c65776"
+        },
+        {
+          "url": "https://web.archive.org/web/20010702205229/http://eqcleric.gameglow.com/cgi-bin/postings.cgi?action=reply&forum=General%20Forum&number=1&topic=006437.cgi&TopicSubject=The%20Rollercoaster%20that%20was%20my%20weekend....&replyto=3",
+          "label": "2001-07-02 · eqcleric.gameglow.com / cgi-bin/postings.cgi?action=reply&forum=General Forum&number=1&topic=006437.cgi&TopicSubject=The Rol",
+          "id": "websites/eqcleric.gameglow.com/20010702205229/cgi-bin/postings.cgi?action=reply&forum=General Forum&number=1&topic=006437.cgi&TopicSubject=The Rollercoaster that was my weekend....&replyto=3",
+          "source_sha256": "9d4c710296e00128a73d65f6ef6d95669c65831df5ddb48bcd2dbf5261c25ffb"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "comparison": {
+        "before": "html_structure · 7 chunks\n\nCleric armor screenshot (Halfling) - EQ Cleric - Forums\nUBBFriend: Email This Page to Someone!\n\n EQ Cleric - Forums    Quests/Items     Cleric armor screenshot (Halfling)  Post New Topic  Post A Reply   profile | | preferences | faq | search |\n\nnext newest topic | next oldest topic\n\n\n\nCleric armor screenshot (Halfling) - EQ Cleric - Forums\n|  |  |\n| --- | --- |\n| **Author** | **Topic:   Cleric armor screenshot (Halfling)** |\n| **Arzos** Junior Member Posts: 4 Registered: Jan 2000 | posted 03-09-2000 03:19 PM     Click Here to See the Profile for Arzos   Click Here to Email Ar\n",
+        "after": "forum_posts · 11 chunks\n\nCleric armor screenshot (Halfling)\nPost by Arzos 03-09-2000 03:19 PM\n\nPost by Arzos | 03-09-2000 03:19 PM\n-----------------------------------\n\nThere's not too many of us Halfling clerics out there, so you may not have seen a screen shot. Even though I'm still missing the bracers, you get the general idea.\n\nAr\n\nCleric armor screenshot (Halfling)\nPost by Tiganos 03-09-2000 03:58 PM\n\nPost by Tiganos | 03-09-2000 03:58 PM\n-------------------------------------\n\nThat looks cool\n\nI get alot of comments on how good I look in all gold, maybe I should toss a pic up sometime...\n\n\n"
+      },
+      "issues": []
+    },
+    {
+      "rank": 23,
+      "site": "sakura.ne.jp",
+      "pages": 27363,
+      "status": "generic",
+      "policies": [
+        "Generic content",
+        "Calendar scaffolding",
+        "Nested-script repair"
+      ],
+      "finding": "Use shared cleanup across this mixed hosting platform. Retain Japanese guides, maps and uncertain custom CGI forums rather than treating every account as one structured website.",
+      "samples": 29,
+      "verified": 29,
+      "changed": 0,
+      "max_tokens": 476,
+      "before_chunks": 1431,
+      "after_chunks": 1431,
+      "checks": [
+        "29 before/after captures have identical source hashes.",
+        "29 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "0255d7c505c1dc0faeb93da8320c03b8a8b1893ca3bbd4dcff17ebc05e8c13e5",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20010707082721/http://www.nx.sakura.ne.jp/~chizuya/haijin/flashbbs.cgi?id=&md=set&tn=0204",
+          "label": "2001-07-07 · www.nx.sakura.ne.jp / ~chizuya/haijin/flashbbs.cgi?id=&md=set&tn=0204",
+          "id": "websites/www.nx.sakura.ne.jp/20010707082721/~chizuya/haijin/flashbbs.cgi?id=&md=set&tn=0204",
+          "source_sha256": "c2a84382a2b18dab678e5df12d6bd74b64cfd467b05687a204cbcb37c32a060e"
+        },
+        {
+          "url": "https://web.archive.org/web/20020717195317/http://nx.sakura.ne.jp/~chizuya/lanys/forum/wwwforum.cgi?id=2&az=delete&number=21",
+          "label": "2002-07-17 · nx.sakura.ne.jp / ~chizuya/lanys/forum/wwwforum.cgi?id=2&az=delete&number=21",
+          "id": "websites/nx.sakura.ne.jp/20020717195317/~chizuya/lanys/forum/wwwforum.cgi?id=2&az=delete&number=21",
+          "source_sha256": "d544ed73dd19cfe12aa26a1b94c936125184b4b86ea2abe00118a620cac322e6"
+        },
+        {
+          "url": "https://web.archive.org/web/20010708155327/http://www.nx.sakura.ne.jp/~chizuya/forum/wwwforum.cgi?id=5&az=reply&parent=14&quote=auto",
+          "label": "2001-07-08 · www.nx.sakura.ne.jp / ~chizuya/forum/wwwforum.cgi?id=5&az=reply&parent=14&quote=auto",
+          "id": "websites/www.nx.sakura.ne.jp/20010708155327/~chizuya/forum/wwwforum.cgi?id=5&az=reply&parent=14&quote=auto",
+          "source_sha256": "dc60497f487d27038306b366375c3fa266364e4fd090180abf904c4356a02f8a"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "issues": []
+    },
+    {
+      "rank": 24,
+      "site": "crgaming.com",
+      "pages": 26776,
+      "status": "covered",
+      "policies": [
+        "phpBB"
+      ],
+      "finding": "Existing phpBB body/author boundaries handle sampled topics well. Preserve forum indexes and uncertain utility captures on the generic path; no additional domain-specific forum policy is justified.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 0,
+      "max_tokens": 480,
+      "before_chunks": 368,
+      "after_chunks": 368,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "f1700c5200a99a55fb8903b7f3505ecf6df79fb88cc2141d7a79dcaa613477ef",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20041205034931/http://forums.crgaming.com/eqbb/viewtopic.php?p=910191&amp",
+          "label": "2004-12-05 · forums.crgaming.com / eqbb/viewtopic.php?p=910191&amp",
+          "id": "websites/forums.crgaming.com/20041205034931/eqbb/viewtopic.php?p=910191&amp",
+          "source_sha256": "3753632fb6dfc61b60b999ae56f9586000299af0e64d586146999b0a9cf0e8fd"
+        },
+        {
+          "url": "https://web.archive.org/web/20040513083611/http://forums.crgaming.com/eqbb/viewforum.php?f=302&amp",
+          "label": "2004-05-13 · forums.crgaming.com / eqbb/viewforum.php?f=302&amp",
+          "id": "websites/forums.crgaming.com/20040513083611/eqbb/viewforum.php?f=302&amp",
+          "source_sha256": "c351ed60a2fa6dbf4404ad191b79f0ca86c7d15fe7d221554fcae7a4ee4c22fc"
+        },
+        {
+          "url": "https://web.archive.org/web/20050121112912/http://forums.crgaming.com/eqbb/viewtopic.php?t=41053&amp",
+          "label": "2005-01-21 · forums.crgaming.com / eqbb/viewtopic.php?t=41053&amp",
+          "id": "websites/forums.crgaming.com/20050121112912/eqbb/viewtopic.php?t=41053&amp",
+          "source_sha256": "a59a06d7bfa48e1ca8a93961a22f73cbfba01093fd58af5c56cb93b9c894777e"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "issues": []
+    },
+    {
+      "rank": 25,
+      "site": "thesteelwarrior.org",
+      "pages": 26263,
+      "status": "covered",
+      "policies": [
+        "vBulletin"
+      ],
+      "finding": "Retain shared vBulletin and archive policies: sampled topics preserve each post, date, quoted material and long authored explanations.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 0,
+      "max_tokens": 480,
+      "before_chunks": 887,
+      "after_chunks": 887,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "5036daa8f1e76162edf22eb51759984a99752bc7c646453d363a162121e6ea6a",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20050123203036/http://www.thesteelwarrior.org/forum/archive/index.php/t-4145.html",
+          "label": "2005-01-23 · www.thesteelwarrior.org / forum/archive/index.php/t-4145.html",
+          "id": "websites/www.thesteelwarrior.org/20050123203036/forum/archive/index.php/t-4145.html",
+          "source_sha256": "7eecd8d1da552c8f69e0041858d8b0940572ed4545b83594f4cd125fd2ab168e"
+        },
+        {
+          "url": "https://web.archive.org/web/20041226123040/http://www.thesteelwarrior.org/forum/archive/index.php/t-3973.html",
+          "label": "2004-12-26 · www.thesteelwarrior.org / forum/archive/index.php/t-3973.html",
+          "id": "websites/www.thesteelwarrior.org/20041226123040/forum/archive/index.php/t-3973.html",
+          "source_sha256": "0ba7a9e5ecf9792ff563a828ebdebcc9d980dc2486687457584cff05eee5dc95"
+        },
+        {
+          "url": "https://web.archive.org/web/20050111052909/http://www.thesteelwarrior.org/forum/archive/index.php/t-6900.html",
+          "label": "2005-01-11 · www.thesteelwarrior.org / forum/archive/index.php/t-6900.html",
+          "id": "websites/www.thesteelwarrior.org/20050111052909/forum/archive/index.php/t-6900.html",
+          "source_sha256": "64783734d970af9d6755feedd91ba2c9768d5666ca590c32df229409ba00bcc4"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "issues": []
+    },
+    {
+      "rank": 26,
+      "site": "gameznet.com",
+      "pages": 25806,
+      "status": "generic",
+      "policies": [
+        "Generic database/article extraction"
+      ],
+      "finding": "Retain equipment descriptions, quest instructions and news content. Samples contain several generations of EQ'Lizer layouts; no stable source boundary justifies a separate content-dropping selector.",
+      "samples": 23,
+      "verified": 23,
+      "changed": 0,
+      "max_tokens": 480,
+      "before_chunks": 903,
+      "after_chunks": 903,
+      "checks": [
+        "23 before/after captures have identical source hashes.",
+        "23 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "a039111c996aa041342a6d4fbb9423f369d0e13415216222969db098fcfcdf4b",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20010802213049/http://gameznet.com/eq/equipment/truewindearring.html",
+          "label": "2001-08-02 · gameznet.com / eq/equipment/truewindearring.html",
+          "id": "websites/gameznet.com/20010802213049/eq/equipment/truewindearring.html",
+          "source_sha256": "f0fdb250790c60f8dd3a2b683b76acde739e2a2618d1fb4f5a2de0112e5ce828"
+        },
+        {
+          "url": "https://web.archive.org/web/20030912115056/http://gameznet.com/eq/index.shtml/item.php_id=16286",
+          "label": "2003-09-12 · gameznet.com / eq/index.shtml/item.php_id=16286",
+          "id": "websites/gameznet.com/20030912115056/eq/index.shtml/item.php_id=16286",
+          "source_sha256": "73890caf1e79141440cd8ba0b0ca4c02b12684d6f042bad1b3ed731db5276b1d"
+        },
+        {
+          "url": "https://web.archive.org/web/20020221000226/http://mmo.gameznet.com/eq/new/quest/westernwastes.shtml",
+          "label": "2002-02-21 · mmo.gameznet.com / eq/new/quest/westernwastes.shtml",
+          "id": "websites/mmo.gameznet.com/20020221000226/eq/new/quest/westernwastes.shtml",
+          "source_sha256": "f2491cd1e4748557d90b46d9125b0a67dcdf30336998d455afa157244ea7ab3e"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "issues": []
+    },
+    {
+      "rank": 27,
+      "site": "ign.com",
+      "pages": 25041,
+      "status": "fixed",
+      "policies": [
+        "Snowboards/VN Boards",
+        "Generic news and screenshots"
+      ],
+      "finding": "Add the shared Snowboards row-triplet policy for VN discussions, retaining each author/date/subject/body. Independent EQ Vault columns, news and screenshot captions remain conservative.",
+      "samples": 29,
+      "verified": 29,
+      "changed": 3,
+      "max_tokens": 480,
+      "before_chunks": 647,
+      "after_chunks": 671,
+      "checks": [
+        "29 before/after captures have identical source hashes.",
+        "29 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "f51b9807f87a4653260e3c937051593c3a8dd242d6ee89977e15a7348b48c04e",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20040405034937/http://vnboards.ign.com/Eci_Unofficial_Raid_Planning_Board/b5429/63977043/p2/index.html",
+          "label": "2004-04-05 · vnboards.ign.com / Eci_Unofficial_Raid_Planning_Board/b5429/63977043/p2/index.html",
+          "id": "websites/vnboards.ign.com/20040405034937/Eci_Unofficial_Raid_Planning_Board/b5429/63977043/p2/index.html",
+          "source_sha256": "6f7e9067999ecd1eeaef9478b99adf6a4f035be538d51a55c49a961a9280c652"
+        },
+        {
+          "url": "https://web.archive.org/web/20040530005338/http://vnboards.ign.com/Eci_Board/b5011/65591519/?55/index.html",
+          "label": "2004-05-30 · vnboards.ign.com / Eci_Board/b5011/65591519/?55/index.html",
+          "id": "websites/vnboards.ign.com/20040530005338/Eci_Board/b5011/65591519/?55/index.html",
+          "source_sha256": "848e5c1e7028dcbef5c98e60ea4ebea509e81cb817884222461111ca6c63512b"
+        },
+        {
+          "url": "https://web.archive.org/web/20040530075848/http://vnboards.ign.com:80/EQ_Tech_Board/b5005/64241014/?1/index.html",
+          "label": "2004-05-30 · vnboards.ign.com:80 / EQ_Tech_Board/b5005/64241014/?1/index.html",
+          "id": "websites/vnboards.ign.com:80/20040530075848/EQ_Tech_Board/b5005/64241014/?1/index.html",
+          "source_sha256": "b5c107417f81a3a0c828f8a77bebda8cb4519385a5b76c214e2bc172621e530d"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "comparison": {
+        "before": "html_structure · 15 chunks\n\nVN Boards - Dishonorable individuals in Arete\n[EQVault]\n VN Boards\n» EverQuest Server Boards\n»\nE'ci Unofficial Raid Planning Board\n»\n Dishonorable individuals in Arete\n\n|\n|\nSearch |\nOptions |\nHelp\n| Board Rules\n| **Contact Mods**\n| UXO Vault Crest Contest!\n\nPost Reply |\nActive Topic No\n\nVN Boards - Dishonorable individuals in Arete\n|  |  |  |\n| --- | --- | --- |\n| Author | Topic: Dishonorable individuals in Arete | |\n| Giland 301 posts   Posts: 301 Registered: Nov 01 | Date Posted: 2/9 9:26pm Subject: RE: Dishonorable individuals in Arete | |\n| Regardless of what leve\n",
+        "after": "forum_posts · 26 chunks\n\nRE: Dishonorable individuals in Arete\nPost by Giland 2/9 9:26pm RE: Dishonorable individuals in Arete\n\nPost by Giland | 2/9 9:26pm | RE: Dishonorable individuals in Arete\n-------------------------------------------------------------------\n\nRegardless of what level a persons toon is, from lvl 65 and 300+ AAs, to lvl 1, there should be respect\n\nRE: Dishonorable individuals in Arete\nPost by Asmodeur 2/10 6:49am RE: Dishonorable individuals in Arete\n\nPost by Asmodeur | 2/10 6:49am | RE: Dishonorable individuals in Arete\n----------------------------------------------------------------------\n\nEmily been a bad girl?\n  \n  \n Shame on you!\n\n-----signature-----\n\nTailpower!\n  \n "
+      },
+      "issues": []
+    },
+    {
+      "rank": 28,
+      "site": "eqprices.com",
+      "pages": 24872,
+      "status": "fixed",
+      "policies": [
+        "EQPrices item comments"
+      ],
+      "finding": "Carry the visible item identity into every comment-page request instead of the generic View Item Comments title. Require matching captured Stats/Attributes structure; keep prices and comments.",
+      "samples": 23,
+      "verified": 23,
+      "changed": 3,
+      "max_tokens": 480,
+      "before_chunks": 302,
+      "after_chunks": 302,
+      "checks": [
+        "23 before/after captures have identical source hashes.",
+        "23 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "9c05a95fe734e2b23f0b8e4e57b06f96fffd4ece1eeb94c1d15e2b2d64f4eec0",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20011116224004/http://eqprices.com/Cgi-bin/showcomments.asp?itemcode=4598",
+          "label": "2001-11-16 · eqprices.com / Cgi-bin/showcomments.asp?itemcode=4598",
+          "id": "websites/eqprices.com/20011116224004/Cgi-bin/showcomments.asp?itemcode=4598",
+          "source_sha256": "f75082adc2550bd096a1dd72850d61b448f8a1e210eca53ef89535bbc2f0bb70"
+        },
+        {
+          "url": "https://web.archive.org/web/20050115162945/http://eqprices.com/scripts/showcomments.asp?itemcode=993",
+          "label": "2005-01-15 · eqprices.com / scripts/showcomments.asp?itemcode=993",
+          "id": "websites/eqprices.com/20050115162945/scripts/showcomments.asp?itemcode=993",
+          "source_sha256": "ad2ebb0317d96aee51800947b337dc559d535c0c14efa71635971e040a33c42f"
+        },
+        {
+          "url": "https://web.archive.org/web/20020816100845/http://www.eqprices.com/scripts/showcomments.asp?itemcode=7618",
+          "label": "2002-08-16 · www.eqprices.com / scripts/showcomments.asp?itemcode=7618",
+          "id": "websites/www.eqprices.com/20020816100845/scripts/showcomments.asp?itemcode=7618",
+          "source_sha256": "3e03c650d081e41a99c63680f67c615c7475f2b51c0df9f941e1d6b3ef78282d"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "comparison": {
+        "before": "html_structure · 1 chunks\n\nEQPrices.Com - User Comments\n**1 - Select Item Type**  \n  \n  \n**2 - Select Race**  \n  \n  \n**3 - Select Class**  \n  \n  \n**4 - Select Stats**  \n  \n  \n**5 - Select Price Range**  \n  \n  \n**6 - Include NO DROP?**  \n  \n  \n**7 - Sort By**  \n  \n  \n**8 - Optional Keywords**\n\n**\n",
+        "after": "eqprices_catalog · 1 chunks\n\nMaleficent Crown\n**1 - Select Item Type**  \n  \n  \n**2 - Select Race**  \n  \n  \n**3 - Select Class**  \n  \n  \n**4 - Select Stats**  \n  \n  \n**5 - Select Price Range**  \n  \n  \n**6 - Include NO DROP?**  \n  \n  \n**7 - Sort By**  \n  \n  \n**8 - Optional Keywords**\n\n**\n"
+      },
+      "issues": []
+    },
+    {
+      "rank": 29,
+      "site": "eqloft.com",
+      "pages": 24045,
+      "status": "fixed",
+      "policies": [
+        "Generic content",
+        "Calendar scaffolding"
+      ],
+      "finding": "Shared two-letter weekday recognition removes empty calendar widgets while retaining patch notes, polls, guild pages, item lists and authored multilingual content.",
+      "samples": 29,
+      "verified": 29,
+      "changed": 2,
+      "max_tokens": 480,
+      "before_chunks": 560,
+      "after_chunks": 556,
+      "checks": [
+        "29 before/after captures have identical source hashes.",
+        "29 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "ca3300b721397b4b442c7b15f4ff1ad2f10a7f0262f5f519e32d0bab06cbaced",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20040619140230/http://www.eqloft.com/page.php?url=/uk/Community/Guilds/_index.htm",
+          "label": "2004-06-19 · www.eqloft.com / page.php?url=/uk/Community/Guilds/_index.htm",
+          "id": "websites/www.eqloft.com/20040619140230/page.php?url=/uk/Community/Guilds/_index.htm",
+          "source_sha256": "61562e1ce3c43d9c7ddb78613880f037ea33643fa3ec8d372ebd61e128cdb122"
+        },
+        {
+          "url": "https://web.archive.org/web/20041010003445/http://www.eqloft.com/fullpost.php?languesite=uk&id=8170",
+          "label": "2004-10-10 · www.eqloft.com / fullpost.php?languesite=uk&id=8170",
+          "id": "websites/www.eqloft.com/20041010003445/fullpost.php?languesite=uk&id=8170",
+          "source_sha256": "aff12bf758be684893af53bfad096ce40e165a6989f74cc5cd1c9a245b5bf3d3"
+        },
+        {
+          "url": "https://web.archive.org/web/20020505030355/http://uenaelar.eqloft.com/robots.txt",
+          "label": "2002-05-05 · uenaelar.eqloft.com / robots.txt",
+          "id": "websites/uenaelar.eqloft.com/20020505030355/robots.txt",
+          "source_sha256": "8a40a1334f2b3735f1d2b6387203f347094e9271dd8ce3d939b28443fdf401cb"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "comparison": {
+        "before": "html_structure · 8 chunks\n\nEQLoft\nEQ Loft\n\nEQ Loft\n\nEQ Loft\n\n\n\nEQLoft\n|  |  |  |  |  |  |  |\n| --- | --- | --- | --- | --- | --- | --- |\n|  | **June 2004** | | | | |  |\n| Su | Mo | Tu | We | Th | Fr | Sa |\n| 30 | 31 | 1 | 2 | 3 | 4 | 5 |\n| 6 | 7 | 8 | 9 | 10 | 11 | 12 |\n| 13 | 14 | 15 | 16 | 17 | 18 | 19 |\n| \n",
+        "after": "html_structure · 6 chunks\n\nEQLoft\nEQ Loft\n\nEQ Loft\n\nEQ Loft\n\nHome > Community > **Guilds**\n\n  \n\n[ Hall of Guilds! ]\n\n- Creating a Guild -\n\n**Guild Leaders**   \nUsually your first task as a new player is to find the proper non-player character\nguild for your class and meet i\n\nEQLoft\nJoining/Leaving a Guild\n\n**Joining/Leaving a Guild**   \nBefore you join a player-created guild, find out whether the guild's plans are\nsimilar to those of your character. Most guilds have a web site that lists their\ncharter, goals and requirements. To join a non-pl\n"
+      },
+      "issues": []
+    },
+    {
+      "rank": 30,
+      "site": "planeteverquest.com",
+      "pages": 23464,
+      "status": "generic",
+      "policies": [
+        "Generic guides, galleries and equipment tables"
+      ],
+      "finding": "Retain the mixed editorial, screenshot and equipment content. The sampled structure does not establish one safe custom selector; keep archived errors visible rather than guessing at missing source.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 0,
+      "max_tokens": 480,
+      "before_chunks": 567,
+      "after_chunks": 567,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "6dbbe868c56b4e127bdef473ad4add57af920cc7c5f80c9c826c0173fc7d48e1",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20011205143604/http://www.planeteverquest.com/eqwadb/detail.asp?ID=1547",
+          "label": "2001-12-05 · www.planeteverquest.com / eqwadb/detail.asp?ID=1547",
+          "id": "websites/www.planeteverquest.com/20011205143604/eqwadb/detail.asp?ID=1547",
+          "source_sha256": "febd9b109b02d4dbb9f248b3a1cd4e0a901ceeea0a6aaf84c16ac84e0dc1ec6f"
+        },
+        {
+          "url": "https://web.archive.org/web/20010507082249/http://www.planeteverquest.com/cazicthule/players/photo.asp?id=181",
+          "label": "2001-05-07 · www.planeteverquest.com / cazicthule/players/photo.asp?id=181",
+          "id": "websites/www.planeteverquest.com/20010507082249/cazicthule/players/photo.asp?id=181",
+          "source_sha256": "d20f4bd603cd754bb1b913e99767267e36375be90b24808e703e3a1d849b20b4"
+        },
+        {
+          "url": "https://web.archive.org/web/20020112050145/http://www.planeteverquest.com/cazicthule/stories/horrorstories/%20%20advertise%20%20/index.html",
+          "label": "2002-01-12 · www.planeteverquest.com / cazicthule/stories/horrorstories/  advertise  /index.html",
+          "id": "websites/www.planeteverquest.com/20020112050145/cazicthule/stories/horrorstories/  advertise  /index.html",
+          "source_sha256": "0893058b738633d0cfea49c5295dfc564972d20f3f74ec811b7a5041419b2d7b"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "issues": []
+    },
+    {
+      "rank": 31,
+      "site": "planeteq.com",
+      "pages": 22431,
+      "status": "generic",
+      "policies": [
+        "Generic guides, galleries and equipment tables"
+      ],
+      "finding": "Existing extraction retains art captions, tradeskill guides and item pages. A dedicated domain policy is not supported by the sampled mixed layouts; preserve uncertain database fields.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 0,
+      "max_tokens": 480,
+      "before_chunks": 656,
+      "after_chunks": 656,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "05e4e5d859421a44e342c01e495bc5071870633b0c58d2a64bb0a55ed7a7e7a0",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20030423055946/http://www.planeteq.com/features/artgallery/johnthomas/index.shtml",
+          "label": "2003-04-23 · www.planeteq.com / features/artgallery/johnthomas/index.shtml",
+          "id": "websites/www.planeteq.com/20030423055946/features/artgallery/johnthomas/index.shtml",
+          "source_sha256": "2d1ae4126cc3e0db0de0500467f666a702c9a7b478db61e20c74d2a732d3f0f9"
+        },
+        {
+          "url": "https://web.archive.org/web/20030423101629/http://www.planeteq.com/character/trades/baking/index.html",
+          "label": "2003-04-23 · www.planeteq.com / character/trades/baking/index.html",
+          "id": "websites/www.planeteq.com/20030423101629/character/trades/baking/index.html",
+          "source_sha256": "d61dfffd2f273b2a1224cf14af34ecaf8d0081eb90cbdbe169b69e25d6f48c0e"
+        },
+        {
+          "url": "https://web.archive.org/web/20030506184725/http://www.planeteq.com/reference/items/item.asp?it_id=573",
+          "label": "2003-05-06 · www.planeteq.com / reference/items/item.asp?it_id=573",
+          "id": "websites/www.planeteq.com/20030506184725/reference/items/item.asp?it_id=573",
+          "source_sha256": "450c9bc92862b2cd480c7b428c01ce982efe1a1845368f18b64f2fbca39af8cf"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "issues": []
+    },
+    {
+      "rank": 32,
+      "site": "ethernalquest.com",
+      "pages": 22082,
+      "status": "fixed",
+      "policies": [
+        "UBB.classic",
+        "Generic technical content"
+      ],
+      "finding": "Shared legacy UBB boundaries improve old static discussions. Keep installation instructions, source code, profile data and populated reply content; do not filter authored troubleshooting.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 3,
+      "max_tokens": 480,
+      "before_chunks": 464,
+      "after_chunks": 482,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "74a1f3f95abfb3d21a0cbbdfc98e7baeaf19a443606da94c92b10ee28f5a735b",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20010303083646/http://www.ethernalquest.com/ubb/Forum1/HTML/001078-2.html",
+          "label": "2001-03-03 · www.ethernalquest.com / ubb/Forum1/HTML/001078-2.html",
+          "id": "websites/www.ethernalquest.com/20010303083646/ubb/Forum1/HTML/001078-2.html",
+          "source_sha256": "9b1f5397e4c17ac439776e080ee42c2b7d9713937e25fbd43048017bd8e30f8c"
+        },
+        {
+          "url": "https://web.archive.org/web/20010908095230/http://www.ethernalquest.com/ubb/Forum1/HTML/003864.html",
+          "label": "2001-09-08 · www.ethernalquest.com / ubb/Forum1/HTML/003864.html",
+          "id": "websites/www.ethernalquest.com/20010908095230/ubb/Forum1/HTML/003864.html",
+          "source_sha256": "a10a88c595c49ff9c196cbeda50abc2373c575bcba17c2ac74491fb6138e71ca"
+        },
+        {
+          "url": "https://web.archive.org/web/20011121082306/http://www.ethernalquest.com/ubb/Forum3/HTML/002146.html",
+          "label": "2001-11-21 · www.ethernalquest.com / ubb/Forum3/HTML/002146.html",
+          "id": "websites/www.ethernalquest.com/20011121082306/ubb/Forum3/HTML/002146.html",
+          "source_sha256": "99d8fa464f04b0c0699a2b3682d35a6408048044ae8805dc4a5e6c6b987b6c1b"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "comparison": {
+        "before": "html_structure · 8 chunks\n\nMY HAPPY LIST - HackersQuest Discussion Board\nHackersQuest Discussion Board\n  \n  HackersQuest Main Forum\n  \n  MY HAPPY LIST (Page 2)\n\nPost New Topic  Post A Reply\n  \nprofile | | preferences | faq | search\n\n\n\nMY HAPPY LIST - HackersQuest Discussion Board\n|  |  |\n| --- | --- |\n| UBBFriend: Email This Page to Someone!  This topic is 2 pages long:   1  2 | next newest topic | next oldest topic |\n\n\n",
+        "after": "forum_posts · 3 chunks\n\nMY HAPPY LIST\nPost by +sYn 02-22-2001 05:59 PM\n\nPost by +sYn | 02-22-2001 05:59 PM\n----------------------------------\n\nTwo more to add to the list:\n\nIn Unrest: Pull mobs from the house via the porch area and run along the wall towards the hedge. As soon as you cross the hedge line the mo\n\nMY HAPPY LIST\nPost by Beandog 02-23-2001 03:30 AM\n\nPost by Beandog | 02-23-2001 03:30 AM\n-------------------------------------\n\ntwo quick ones, you listed most of mine\n\nDalnirs, dunno if this still works, but after you zone in there's a small rectangular room. Stand against the wall right w\n"
+      },
+      "issues": []
+    },
+    {
+      "rank": 33,
+      "site": "erollisimarr.com",
+      "pages": 19353,
+      "status": "fixed",
+      "policies": [
+        "vBulletin"
+      ],
+      "finding": "Retain the existing vBulletin discussion policy and broaden exact generated missing-forum/post responses. Profiles and genuine topics remain preserved.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 2,
+      "max_tokens": 480,
+      "before_chunks": 298,
+      "after_chunks": 290,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "fc41cc6bfa176e54f9871693604d7fadcf132eb63825ac4026f907a357a16bd4",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20060714090702/http://erollisimarr.com/forum/forumdisplay.php?s=237d1107f79c68fa192300a350d7e2c3&amp;f=5",
+          "label": "2006-07-14 · erollisimarr.com / forum/forumdisplay.php?s=237d1107f79c68fa192300a350d7e2c3&amp;f=5",
+          "id": "websites/erollisimarr.com/20060714090702/forum/forumdisplay.php?s=237d1107f79c68fa192300a350d7e2c3&amp;f=5",
+          "source_sha256": "118576786259b26c1d1021dade215fccf6ff0aca45d66cf82ad2a3f96f944d5a"
+        },
+        {
+          "url": "https://web.archive.org/web/20060714091011/http://erollisimarr.com/forum/forumdisplay.php?s=25c9d406d583d99ed0e5f2e75b60d32a&amp;f=23",
+          "label": "2006-07-14 · erollisimarr.com / forum/forumdisplay.php?s=25c9d406d583d99ed0e5f2e75b60d32a&amp;f=23",
+          "id": "websites/erollisimarr.com/20060714091011/forum/forumdisplay.php?s=25c9d406d583d99ed0e5f2e75b60d32a&amp;f=23",
+          "source_sha256": "944db07a62f0c32bd7d02aac314175bfefc00d7711023ffddfbb2a001d28bc3d"
+        },
+        {
+          "url": "https://web.archive.org/web/20061123050107/http://erollisimarr.com/forum/profile.php?do=addlist&userlist=buddy&u=5471",
+          "label": "2006-11-23 · erollisimarr.com / forum/profile.php?do=addlist&userlist=buddy&u=5471",
+          "id": "websites/erollisimarr.com/20061123050107/forum/profile.php?do=addlist&userlist=buddy&u=5471",
+          "source_sha256": "363dd8f455f804e04c450009e85cef194d16173a8c33e0432dd5b17e1e4b97f4"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "comparison": {
+        "before": "html_structure · 4 chunks\n\nErollisiMarr.Com Forum\n|  |  |\n| --- | --- |\n| ErollisiMarr.Com Forum | [ support us with a donation ] |\n\n\n\nErollisiMarr.Com Forum\nvBulletin Message\n\n\n",
+        "after": "archive_status · 0 chunks\n"
+      },
+      "issues": []
+    },
+    {
+      "rank": 34,
+      "site": "brellrants.net",
+      "pages": 18558,
+      "status": "covered",
+      "policies": [
+        "phpBB"
+      ],
+      "finding": "Retain the shared phpBB policy; sampled stories, replies and long threads already keep speaker boundaries and dates. No extra domain-specific exception is needed.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 0,
+      "max_tokens": 474,
+      "before_chunks": 384,
+      "after_chunks": 384,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "d21a5e2441f5b8db55af99a23ca256aa6fcf6b5382c546aeba19418edb994c99",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20050105030646/http://www.brellrants.net/brell/viewtopic.php?t=232&amp",
+          "label": "2005-01-05 · www.brellrants.net / brell/viewtopic.php?t=232&amp",
+          "id": "websites/www.brellrants.net/20050105030646/brell/viewtopic.php?t=232&amp",
+          "source_sha256": "6651142b2d13367fe6281b57843f397fddecbfacc4e351da74b061567eddb783"
+        },
+        {
+          "url": "https://web.archive.org/web/20040818154919/http://www.brellrants.net/brell/viewtopic.php?t=5665&amp",
+          "label": "2004-08-18 · www.brellrants.net / brell/viewtopic.php?t=5665&amp",
+          "id": "websites/www.brellrants.net/20040818154919/brell/viewtopic.php?t=5665&amp",
+          "source_sha256": "def5715efe603c4200115fe598e19d9b8059575f81b08a4b170cc7210e286eb4"
+        },
+        {
+          "url": "https://web.archive.org/web/20041116221634/http://www.brellrants.net/brell/viewtopic.php?t=9230&amp",
+          "label": "2004-11-16 · www.brellrants.net / brell/viewtopic.php?t=9230&amp",
+          "id": "websites/www.brellrants.net/20041116221634/brell/viewtopic.php?t=9230&amp",
+          "source_sha256": "97db3214504dc8671300bbe3c2a51361eb8f42c2e3117a6a3192a53967484775"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "issues": []
+    },
+    {
+      "rank": 35,
+      "site": "eqrangers.com",
+      "pages": 17279,
+      "status": "covered",
+      "policies": [
+        "phpBB",
+        "Generic spell tables"
+      ],
+      "finding": "Keep existing phpBB message boundaries and complete spell lists. The source tables/guides remain conservative; source captions and links survive.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 0,
+      "max_tokens": 407,
+      "before_chunks": 253,
+      "after_chunks": 253,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "40599ac44a1fc8838a4c9a38294fc30c7910c39374b4a1d1c93345a853d286dd",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20040520131539/http://www.eqrangers.com/forum/viewtopic.php?t=5164&amp",
+          "label": "2004-05-20 · www.eqrangers.com / forum/viewtopic.php?t=5164&amp",
+          "id": "websites/www.eqrangers.com/20040520131539/forum/viewtopic.php?t=5164&amp",
+          "source_sha256": "804f3bed590e3e816510f11400fd750f5945a9d4644823e343e6860887b754fb"
+        },
+        {
+          "url": "https://web.archive.org/web/20041221063300/http://www.eqrangers.com/forum/viewtopic.php?p=67989&amp",
+          "label": "2004-12-21 · www.eqrangers.com / forum/viewtopic.php?p=67989&amp",
+          "id": "websites/www.eqrangers.com/20041221063300/forum/viewtopic.php?p=67989&amp",
+          "source_sha256": "404e90878f5286c83c1327e6e787afe7235f0e330fed67387f5a6b86faf4ebd3"
+        },
+        {
+          "url": "https://web.archive.org/web/20050104053835/http://www.eqrangers.com/forum/viewtopic.php?t=8740&amp",
+          "label": "2005-01-04 · www.eqrangers.com / forum/viewtopic.php?t=8740&amp",
+          "id": "websites/www.eqrangers.com/20050104053835/forum/viewtopic.php?t=8740&amp",
+          "source_sha256": "53d68e0ea9aab2a5c3e13bff804a8cbacaabc571770b9c26b3a1bfcd7d8a4f43"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "issues": []
+    },
+    {
+      "rank": 36,
+      "site": "shadowknight.org",
+      "pages": 16945,
+      "status": "fixed",
+      "policies": [
+        "vBulletin"
+      ],
+      "finding": "Retain existing recognized vBulletin bodies and archives. Exact generated invalid attachments/missing posts no longer create semantic passages; unfamiliar old skins retain their complete content.",
+      "samples": 23,
+      "verified": 23,
+      "changed": 4,
+      "max_tokens": 480,
+      "before_chunks": 1341,
+      "after_chunks": 1325,
+      "checks": [
+        "23 before/after captures have identical source hashes.",
+        "23 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "064b9512d41572a6bc3fd5a43b2154789ce47954e75ab9e13cea8858a36ad596",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20051030200749/http://forums.shadowknight.org/attachment.php?s=0b3c7984ed6ac682fb9451a8ab3a46da&amp;attachmentid=734",
+          "label": "2005-10-30 · forums.shadowknight.org / attachment.php?s=0b3c7984ed6ac682fb9451a8ab3a46da&amp;attachmentid=734",
+          "id": "websites/forums.shadowknight.org/20051030200749/attachment.php?s=0b3c7984ed6ac682fb9451a8ab3a46da&amp;attachmentid=734",
+          "source_sha256": "9efa08ec36a71f1a09dc5964cc50594ee900bed00dfa5cf41cb2c6a3f37d77cb"
+        },
+        {
+          "url": "https://web.archive.org/web/20051216084208/http://forums.shadowknight.org/showpost.php?s=bbcdd1b29f2dd4fa9b82c5540db3d20f&amp;p=306353&amp;postcount=100",
+          "label": "2005-12-16 · forums.shadowknight.org / showpost.php?s=bbcdd1b29f2dd4fa9b82c5540db3d20f&amp;p=306353&amp;postcount=100",
+          "id": "websites/forums.shadowknight.org/20051216084208/showpost.php?s=bbcdd1b29f2dd4fa9b82c5540db3d20f&amp;p=306353&amp;postcount=100",
+          "source_sha256": "ba096de81c7efd7272a9040e9b12b77b9f7493c05063cfcd94bdfa41dc37d43a"
+        },
+        {
+          "url": "https://web.archive.org/web/20051114193846/http://www.shadowknight.org/forums/showpost.php?s=e6fab596840731f1e3e56d2e5d13f434&amp;p=231442&amp;postcount=4",
+          "label": "2005-11-14 · www.shadowknight.org / forums/showpost.php?s=e6fab596840731f1e3e56d2e5d13f434&amp;p=231442&amp;postcount=4",
+          "id": "websites/www.shadowknight.org/20051114193846/forums/showpost.php?s=e6fab596840731f1e3e56d2e5d13f434&amp;p=231442&amp;postcount=4",
+          "source_sha256": "15f64779c721152d49a1230e1717cfb29dea3642d0052b5478ae91966c20c141"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "comparison": {
+        "before": "html_structure · 4 chunks\n\nShadowKnight.org\n|  |  |\n| --- | --- |\n| ShadowKnight.org | IGE Banner |\n\n\n\nShadowKnight.org\nvBulletin Message\n\n\n",
+        "after": "archive_status · 0 chunks\n"
+      },
+      "issues": []
+    },
+    {
+      "rank": 37,
+      "site": "eqbeastlord.com",
+      "pages": 15580,
+      "status": "covered",
+      "policies": [
+        "phpBB"
+      ],
+      "finding": "The shared phpBB policy already handles sampled topics across forum versions. Preserve long authored FAQ content and source tables rather than treating all utility-looking URLs as empty.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 0,
+      "max_tokens": 476,
+      "before_chunks": 250,
+      "after_chunks": 250,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "d81f8be27d0a3efd7b2ed2ada0aa543244a57683de92b5518f4baafada572e39",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20030421052800/http://www.eqbeastlord.com/forums/index.php",
+          "label": "2003-04-21 · www.eqbeastlord.com / forums/index.php",
+          "id": "websites/www.eqbeastlord.com/20030421052800/forums/index.php",
+          "source_sha256": "03093357f0d778a4f2d9691c6aace0b623755b74c555e822bb9210ad23765e01"
+        },
+        {
+          "url": "https://web.archive.org/web/20040703040636/http://www.eqbeastlord.com/forums/viewtopic.php?t=1278&amp",
+          "label": "2004-07-03 · www.eqbeastlord.com / forums/viewtopic.php?t=1278&amp",
+          "id": "websites/www.eqbeastlord.com/20040703040636/forums/viewtopic.php?t=1278&amp",
+          "source_sha256": "242bfc2eb3398034524eb4e04c0d326d4d4f62d891ddb154f210fd957f3512a4"
+        },
+        {
+          "url": "https://web.archive.org/web/20041228002840/http://www.eqbeastlord.com/forums3/viewtopic.php?p=34978&amp",
+          "label": "2004-12-28 · www.eqbeastlord.com / forums3/viewtopic.php?p=34978&amp",
+          "id": "websites/www.eqbeastlord.com/20041228002840/forums3/viewtopic.php?p=34978&amp",
+          "source_sha256": "3cd45de55d9f66e75a6d5c7a0e06443d3786c76f7fcf69b2324ac8f1ec8cf980"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "issues": []
+    },
+    {
+      "rank": 38,
+      "site": "tritonguild.com",
+      "pages": 15164,
+      "status": "covered",
+      "policies": [
+        "UBB.classic",
+        "phpBB",
+        "Generic roster/raid tables"
+      ],
+      "finding": "Keep the shared forum policies and source-preserving guild/news/raid extraction. Sampled raid attendance and character tables do not justify a separate destructive layout selector.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 0,
+      "max_tokens": 480,
+      "before_chunks": 1079,
+      "after_chunks": 1079,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "4594f91762a6f66fec89b84784b347b4b902f72622dfee8ae7847ee935607bde",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20020817185811/http://www.tritonguild.com/cgi-bin/triton/ultimatebb.cgi?ubb=send_topic&t=000086&f=11",
+          "label": "2002-08-17 · www.tritonguild.com / cgi-bin/triton/ultimatebb.cgi?ubb=send_topic&t=000086&f=11",
+          "id": "websites/www.tritonguild.com/20020817185811/cgi-bin/triton/ultimatebb.cgi?ubb=send_topic&t=000086&f=11",
+          "source_sha256": "e71724ab7943a7a900ae79a601a0ac05faf704661784b9646f625ce939c5943a"
+        },
+        {
+          "url": "https://web.archive.org/web/20030727190150/http://www.tritonguild.com/db/character.php?name=Mishtar",
+          "label": "2003-07-27 · www.tritonguild.com / db/character.php?name=Mishtar",
+          "id": "websites/www.tritonguild.com/20030727190150/db/character.php?name=Mishtar",
+          "source_sha256": "6f0cdf9e3f0aaef4cb0e4f3cfc4f36eb396c262edaad0b3486638a204b417c3b"
+        },
+        {
+          "url": "https://web.archive.org/web/20020629095055/http://www.tritonguild.com/db/raid.php?encounter=8489&date=11/17/2001/index.html",
+          "label": "2002-06-29 · www.tritonguild.com / db/raid.php?encounter=8489&date=11/17/2001/index.html",
+          "id": "websites/www.tritonguild.com/20020629095055/db/raid.php?encounter=8489&date=11/17/2001/index.html",
+          "source_sha256": "7814657f5eb97c13df4c69631dc0e35963312dc19bf1fa71879ffff0f2a1e268"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "issues": []
+    },
+    {
+      "rank": 39,
+      "site": "berthall.com",
+      "pages": 13626,
+      "status": "generic",
+      "policies": [
+        "Generic profile/guild tables"
+      ],
+      "finding": "Retain the heterogeneous profile, guild, calendar and forum records. Their source structures do not establish a single safe new policy; preserve data and original attribution instead of selecting a guessed main region.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 0,
+      "max_tokens": 480,
+      "before_chunks": 300,
+      "after_chunks": 300,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "89681402bdcd03eb846f60276ada3e79b3c42e30f4487a36a4fc1850ac97a2d8",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20020330164631/http://www.berthall.com/calendar/?Event_ID=&home=1626&stamp=1012586400&go=next/index.html",
+          "label": "2002-03-30 · www.berthall.com / calendar/?Event_ID=&home=1626&stamp=1012586400&go=next/index.html",
+          "id": "websites/www.berthall.com/20020330164631/calendar/?Event_ID=&home=1626&stamp=1012586400&go=next/index.html",
+          "source_sha256": "fea5b6696a96d484ce48120c6c24745e56eebdfe8c05063f94bee210b51803d6"
+        },
+        {
+          "url": "https://web.archive.org/web/20040514092949/http://www.berthall.com/guilds/guilddetail.php?id=386",
+          "label": "2004-05-14 · www.berthall.com / guilds/guilddetail.php?id=386",
+          "id": "websites/www.berthall.com/20040514092949/guilds/guilddetail.php?id=386",
+          "source_sha256": "dfdc245431e52e0d722bf54e6ecb49040f27833aaa4e696983df103a3f7d9fa4"
+        },
+        {
+          "url": "https://web.archive.org/web/20020820011442/http://www.berthall.com/forums/member.php?action=getinfo&find=lastposter&threadid=2665",
+          "label": "2002-08-20 · www.berthall.com / forums/member.php?action=getinfo&find=lastposter&threadid=2665",
+          "id": "websites/www.berthall.com/20020820011442/forums/member.php?action=getinfo&find=lastposter&threadid=2665",
+          "source_sha256": "36a200c16c41656ade8b1f918a243962f14e1fcfd07a824d9f707c4e14102e64"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "issues": []
+    },
+    {
+      "rank": 40,
+      "site": "guildmagic.com",
+      "pages": 13435,
+      "status": "generic",
+      "policies": [
+        "Generic roster/statistics tables"
+      ],
+      "finding": "Preserve guild identities, rosters, diplomacy text, numeric distributions and zero values. These compact sampled records do not justify dropping fields or imposing a new guild-only body selector.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 0,
+      "max_tokens": 480,
+      "before_chunks": 91,
+      "after_chunks": 91,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "68781c30ff98d7d12e08c2554f8edaf2baa065294b304664e1213b5a7f07e557",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20030510192251/http://eq.guildmagic.com/guild_stats.cfm?ID=4471",
+          "label": "2003-05-10 · eq.guildmagic.com / guild_stats.cfm?ID=4471",
+          "id": "websites/eq.guildmagic.com/20030510192251/guild_stats.cfm?ID=4471",
+          "source_sha256": "5d5eecfa8ad8953ee194c642c75c710e39c70cf3a0670ef7d50a99b20b595b9b"
+        },
+        {
+          "url": "https://web.archive.org/web/20030509073157/http://eq.guildmagic.com/guild_stats.cfm?ID=3871",
+          "label": "2003-05-09 · eq.guildmagic.com / guild_stats.cfm?ID=3871",
+          "id": "websites/eq.guildmagic.com/20030509073157/guild_stats.cfm?ID=3871",
+          "source_sha256": "9c18bd7feb8aee43344de8624e5920ffca83355b0fc4a11ccb7085206e49e089"
+        },
+        {
+          "url": "https://web.archive.org/web/20030726190041/http://eq.guildmagic.com/guild_stats.cfm?ID=11773",
+          "label": "2003-07-26 · eq.guildmagic.com / guild_stats.cfm?ID=11773",
+          "id": "websites/eq.guildmagic.com/20030726190041/guild_stats.cfm?ID=11773",
+          "source_sha256": "0c3c0b27c813daafd65b9a15f1444d79fa2f0829303e75032719471a1d186fa5"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "issues": []
+    },
+    {
+      "rank": 41,
+      "site": "darkenbane.com",
+      "pages": 13369,
+      "status": "fixed",
+      "policies": [
+        "Generic content",
+        "Structured navigation"
+      ],
+      "finding": "Shared compact navigation recognition improves repeated guild menus while preserving biographies, roster/outfit stats and authored news across different games.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 2,
+      "max_tokens": 480,
+      "before_chunks": 381,
+      "after_chunks": 381,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "f9bbd16c8c6c9977247fffc0614e307a8a8405863932772f16d6f2a7cab74554",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20040104200949/http://www.darkenbane.com/psoutfit.php?id=7357",
+          "label": "2004-01-04 · www.darkenbane.com / psoutfit.php?id=7357",
+          "id": "websites/www.darkenbane.com/20040104200949/psoutfit.php?id=7357",
+          "source_sha256": "96cb72c5cd47229c010580808f4260c3ff3ae5c5f1141cdd84439e91885f727b"
+        },
+        {
+          "url": "https://web.archive.org/web/20040123100317/http://www.darkenbane.com/psoutfit.php?id=13002&sort=4&dir=1",
+          "label": "2004-01-23 · www.darkenbane.com / psoutfit.php?id=13002&sort=4&dir=1",
+          "id": "websites/www.darkenbane.com/20040123100317/psoutfit.php?id=13002&sort=4&dir=1",
+          "source_sha256": "f96e2d62b01f3a57673649fd3b1939a3767bfad5e221c89c89b6fb169c5109ea"
+        },
+        {
+          "url": "https://web.archive.org/web/20050118213942/http://www.darkenbane.com/images.php?id=54512",
+          "label": "2005-01-18 · www.darkenbane.com / images.php?id=54512",
+          "id": "websites/www.darkenbane.com/20050118213942/images.php?id=54512",
+          "source_sha256": "7986402f46b98dde52352fcf042624c555e52aef55852966130241cf5fd92caf"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "comparison": {
+        "before": "html_structure · 4 chunks\n\nDarkenbane\nMain\n\nNews\n\nArchive\n\nForums\n\nIRC\n\nMember list\n\nPlanetside stats\n\nShadowbane maps\n\nScreenshots\n\nEverquest\n\nOther\n\nPlanetside\n\nShadowbane\n\nWorld of Warcraft\n\nMembers\n\nMMORPG.com\n\n• Realms of Torment : New In-Game Movie!  \n• Guild Wars : New A\n\nDarkenbane\n|  |  |\n| --- | --- |\n| Name: | Vanu 139th Special Forces |\n| Empire: | Vanu Sovereignty |\n| Points: | 108218 |\n| Leader: | FLYFAST |\n| Members: | 22 |\n\n\n",
+        "after": "html_structure · 4 chunks\n\nDarkenbane\nMain\n\nScreenshots\n\nEverquest\n\nOther\n\nPlanetside\n\nShadowbane\n\nWorld of Warcraft\n\nMembers\n\nMMORPG.com\n\n• Realms of Torment : New In-Game Movie!  \n• Guild Wars : New Artwork!  \n• Dark Age Of Camelot : Trials of Atlantis Review  \n• Ninth Domain\n\nDarkenbane\n|  |  |\n| --- | --- |\n| Name: | Vanu 139th Special Forces |\n| Empire: | Vanu Sovereignty |\n| Points: | 108218 |\n| Leader: | FLYFAST |\n| Members: | 22 |\n\n\n"
+      },
+      "issues": []
+    },
+    {
+      "rank": 42,
+      "site": "fnord.net",
+      "pages": 12959,
+      "status": "generic",
+      "policies": [
+        "Generic content",
+        "phpBB"
+      ],
+      "finding": "The sampled Lucy item/spell responses are empty in the saved HTML; chunking cannot reconstruct absent data. Keep captured forum FAQ content. No speculative item records or synthesized fields are added.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 0,
+      "max_tokens": 408,
+      "before_chunks": 56,
+      "after_chunks": 56,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "cf6bff5c8dd84ea9fd5a00818d2d5bbcd09b5399efa7930aca04f697e6ea2bfe",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20030509170845/http://lucy.fnord.net/item.html?id=7048",
+          "label": "2003-05-09 · lucy.fnord.net / item.html?id=7048",
+          "id": "websites/lucy.fnord.net/20030509170845/item.html?id=7048",
+          "source_sha256": "9772f26ed99d2cb295e25edc988a02ed829d4481047371debaa8ccd12794d75a"
+        },
+        {
+          "url": "https://web.archive.org/web/20030731011831/http://lucy.fnord.net/spell.html?source=Live&id=1891",
+          "label": "2003-07-31 · lucy.fnord.net / spell.html?source=Live&id=1891",
+          "id": "websites/lucy.fnord.net/20030731011831/spell.html?source=Live&id=1891",
+          "source_sha256": "e49e2d4db168fc853821b39d56dc4812a6d3c59109cb9937fa41343a2f0ddbc3"
+        },
+        {
+          "url": "https://web.archive.org/web/20030514004519/http://lucy.fnord.net/spelllist.html?searchtext=Ethereal%20Stun",
+          "label": "2003-05-14 · lucy.fnord.net / spelllist.html?searchtext=Ethereal Stun",
+          "id": "websites/lucy.fnord.net/20030514004519/spelllist.html?searchtext=Ethereal Stun",
+          "source_sha256": "97222196c6ea5a074eed74bbea8f405202105db5f78bb22cb50c835b75e62c26"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "issues": []
+    },
+    {
+      "rank": 43,
+      "site": "eqspoilers.com",
+      "pages": 12822,
+      "status": "fixed",
+      "policies": [
+        "EQSpoilers entity catalogs"
+      ],
+      "finding": "Bind a visible database heading to its matching Discuss label, giving faction/creature/equipment records meaningful entity context. Remove only the exact source-proven database menu.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 5,
+      "max_tokens": 480,
+      "before_chunks": 267,
+      "after_chunks": 267,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "27e808049c90dd548abcf3a300ba9fc65d6f106620194178609f786702c74b28",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20021017001627/http://www.eqspoilers.com/cgi-bin/webdata_pro.pl?_cgifunction=Search&_layout=eqbestiaryfull&eqbestiary.mob_name=%22Charayan%20the%20Crusader%22",
+          "label": "2002-10-17 · www.eqspoilers.com / cgi-bin/webdata_pro.pl?_cgifunction=Search&_layout=eqbestiaryfull&eqbestiary.mob_name=\"Charayan the ",
+          "id": "websites/www.eqspoilers.com/20021017001627/cgi-bin/webdata_pro.pl?_cgifunction=Search&_layout=eqbestiaryfull&eqbestiary.mob_name=\"Charayan the Crusader\"",
+          "source_sha256": "24cefd96faad19456b703b9981c027a0e4eebc6ffb96e71d2dcc056eee277de5"
+        },
+        {
+          "url": "https://web.archive.org/web/20021225131446/http://www.eqspoilers.com/cgi-bin/eqs/webdata_pro.pl?_cgifunction=Search&_layout=factionfull&eqfaction.faction_name=%22Lizard%20Man%22",
+          "label": "2002-12-25 · www.eqspoilers.com / cgi-bin/eqs/webdata_pro.pl?_cgifunction=Search&_layout=factionfull&eqfaction.faction_name=\"Lizard Ma",
+          "id": "websites/www.eqspoilers.com/20021225131446/cgi-bin/eqs/webdata_pro.pl?_cgifunction=Search&_layout=factionfull&eqfaction.faction_name=\"Lizard Man\"",
+          "source_sha256": "aeaa1da3cc419458dd1464fca889a6df9d1be4efd30497079a24de36956c046e"
+        },
+        {
+          "url": "https://web.archive.org/web/20030506195223/http://www.eqspoilers.com/cgi-bin/eqs/webdata_pro.pl?_cgifunction=Search&_layout=eqbestiaryfull&eqbestiary.mob_name=%22A%20Charred%20Corpse%22",
+          "label": "2003-05-06 · www.eqspoilers.com / cgi-bin/eqs/webdata_pro.pl?_cgifunction=Search&_layout=eqbestiaryfull&eqbestiary.mob_name=\"A Charred",
+          "id": "websites/www.eqspoilers.com/20030506195223/cgi-bin/eqs/webdata_pro.pl?_cgifunction=Search&_layout=eqbestiaryfull&eqbestiary.mob_name=\"A Charred Corpse\"",
+          "source_sha256": "9c12bd08088b65e1e4ad25211f05c998f70d21ada61e94f92c1e0873a2938271"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "comparison": {
+        "before": "html_structure · 3 chunks\n\nSearch Results\nSubscribe\nto the Most Advanced Everquest Database on the Internet!\n\n**Home**  \n **AAXP**\nBy\nClass **Atlas**\nAdvanced Search\nBy Type  \nBy Zone **Bestiary**  \nAdvanced Search  \nBy Zone **Classes  \nEquipment**Advanced SearchBy Slot   \nBy Zone \n\nSearch Results\nDiscuss Charayan the Crusader\n\nQuoted correspondence:\n> Your Comments\n\n  \n  \n  \n  \n\n",
+        "after": "eqspoilers_catalog · 3 chunks\n\nCharayan the Crusader\nSubscribe\nto the Most Advanced Everquest Database on the Internet!\n\n**Home**  \n **AAXP**\nBy\nClass **Atlas**\nAdvanced Search\nBy Type  \nBy Zone **Bestiary**  \nAdvanced Search  \nBy Zone **Classes  \nEquipment**Advanced SearchBy Slot   \nBy Zone \n\nCharayan the Crusader\nDiscuss Charayan the Crusader\n\nQuoted correspondence:\n> Your Comments\n\n  \n  \n  \n  \n\n"
+      },
+      "issues": []
+    },
+    {
+      "rank": 44,
+      "site": "eqgov.com",
+      "pages": 12626,
+      "status": "fixed",
+      "policies": [
+        "vBulletin",
+        "Generic gallery/hosted content"
+      ],
+      "finding": "Keep source-proven forum bodies, images and hosted material. Shared missing-entity detection improves generated responses; newly published account sources were verified from local Git objects without fetching.",
+      "samples": 23,
+      "verified": 23,
+      "changed": 2,
+      "max_tokens": 480,
+      "before_chunks": 260,
+      "after_chunks": 252,
+      "checks": [
+        "23 before/after captures have identical source hashes.",
+        "23 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "412ef3e436e0e3298ec044a305491821b35390375933ca4792775675c3d01459",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20010920144751/http://www.eqgov.com/forums/forumdisplay.php",
+          "label": "2001-09-20 · www.eqgov.com / forums/forumdisplay.php",
+          "id": "websites/www.eqgov.com/20010920144751/forums/forumdisplay.php",
+          "source_sha256": "ca2427d8965f9d1983b67b5992f1f86b132878d126413351ebec6c000100d435"
+        },
+        {
+          "url": "https://web.archive.org/web/20061207045314/http://www.eqgov.com/forums/forumdisplay.php?s=b9c29d361cbc07f47274c40104a3a6da&amp;do=markread",
+          "label": "2006-12-07 · www.eqgov.com / forums/forumdisplay.php?s=b9c29d361cbc07f47274c40104a3a6da&amp;do=markread",
+          "id": "websites/www.eqgov.com/20061207045314/forums/forumdisplay.php?s=b9c29d361cbc07f47274c40104a3a6da&amp;do=markread",
+          "source_sha256": "4099d72ed76c8f577314d3d6fa0a046f7fe2b798e1efba59b7973c35aa17de12"
+        },
+        {
+          "url": "https://web.archive.org/web/20061116170102/http://www.eqgov.com/forums/member.php?u=155",
+          "label": "2006-11-16 · www.eqgov.com / forums/member.php?u=155",
+          "id": "websites/www.eqgov.com/20061116170102/forums/member.php?u=155",
+          "source_sha256": "e4ae121848d28358ed4e50977363a5e2ceb1aee5d1769383faaeaf3021524799"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "comparison": {
+        "before": "html_structure · 4 chunks\n\nGuardians of Veeshan\nHome\nForum\nHere you can view your subscribed threads, work with private messages and edit your profile and preferences\nRegistration is free!\nCalendar\nFind other members\nFrequently Asked Questions\nSearch\n\n**Menu**\n\n**·** Home  \n  \n**·** Our \n\nGuardians of Veeshan\n|  |  |\n| --- | --- |\n| **September 2001** | Calendar |\n\n\n",
+        "after": "archive_status · 0 chunks\n"
+      },
+      "issues": []
+    },
+    {
+      "rank": 45,
+      "site": "eqcleric.com",
+      "pages": 12349,
+      "status": "covered",
+      "policies": [
+        "vBulletin"
+      ],
+      "finding": "Retain the existing vBulletin source-region and archive policy. Sampled recognized posts keep their authors and dates; damaged older skins remain content-preserving fallbacks.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 0,
+      "max_tokens": 480,
+      "before_chunks": 453,
+      "after_chunks": 453,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "0534852acc4f41e23cd0869a6ec9bd3eb03e5b8f751ba4229b72d2001d7a94d9",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20040608175159/http://www.eqcleric.com/forums/showthread.php?postid=56257",
+          "label": "2004-06-08 · www.eqcleric.com / forums/showthread.php?postid=56257",
+          "id": "websites/www.eqcleric.com/20040608175159/forums/showthread.php?postid=56257",
+          "source_sha256": "ba193d665a1d5ef317ed7dd894cd8554445a48936221f8cba1ef585397909ab0"
+        },
+        {
+          "url": "https://web.archive.org/web/20050114040746/http://www.eqcleric.com/forums/showthread.php?postid=17503",
+          "label": "2005-01-14 · www.eqcleric.com / forums/showthread.php?postid=17503",
+          "id": "websites/www.eqcleric.com/20050114040746/forums/showthread.php?postid=17503",
+          "source_sha256": "c1eb2644224ab1cb0d40d79267bc40473b38e203754af2f6a971f6351f2961ed"
+        },
+        {
+          "url": "https://web.archive.org/web/20041215024652/http://www.eqcleric.com/forums/showthread.php?postid=73400",
+          "label": "2004-12-15 · www.eqcleric.com / forums/showthread.php?postid=73400",
+          "id": "websites/www.eqcleric.com/20041215024652/forums/showthread.php?postid=73400",
+          "source_sha256": "3e658c8fa91c5bef307ee064bba32f1067ee3280282b4de3f65f3ffc075a597c"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "issues": []
+    },
+    {
+      "rank": 46,
+      "site": "magecompendium.com",
+      "pages": 11920,
+      "status": "covered",
+      "policies": [
+        "phpBB"
+      ],
+      "finding": "Retain shared phpBB handling. Sampled magician questions, guides and lengthy raid discussions preserve author/date/body boundaries without another host exception.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 0,
+      "max_tokens": 480,
+      "before_chunks": 287,
+      "after_chunks": 287,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "d0c9f5a59aa8a15f3a0f2b056c1d3e866cf13c59b16260bc75ad1e0f2e176ca0",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20031228150225/http://forum.magecompendium.com/tower/viewtopic.php?p=874&amp",
+          "label": "2003-12-28 · forum.magecompendium.com / tower/viewtopic.php?p=874&amp",
+          "id": "websites/forum.magecompendium.com/20031228150225/tower/viewtopic.php?p=874&amp",
+          "source_sha256": "2589b2e2b05478717745a3b2237eed4bd60f32e9540f855e8fddec90e0b10cba"
+        },
+        {
+          "url": "https://web.archive.org/web/20041019003645/http://forum.magecompendium.com/viewtopic.php?t=125&amp",
+          "label": "2004-10-19 · forum.magecompendium.com / viewtopic.php?t=125&amp",
+          "id": "websites/forum.magecompendium.com/20041019003645/viewtopic.php?t=125&amp",
+          "source_sha256": "201e8df0bf57831d1d3674562ef6145b39efa55d6b39aa386157c3e3214bc4b7"
+        },
+        {
+          "url": "https://web.archive.org/web/20041011114810/http://forum.magecompendium.com/viewforum.php?f=21&amp",
+          "label": "2004-10-11 · forum.magecompendium.com / viewforum.php?f=21&amp",
+          "id": "websites/forum.magecompendium.com/20041011114810/viewforum.php?f=21&amp",
+          "source_sha256": "bcb5af4908d22c071c0107ef6f2e5f48ec891fa70423c68cb018394cd12bdf39"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "issues": []
+    },
+    {
+      "rank": 47,
+      "site": "hackersquest.org",
+      "pages": 11739,
+      "status": "fixed",
+      "policies": [
+        "phpBB",
+        "UBB.classic"
+      ],
+      "finding": "Add shared old UBB static-page coverage alongside the existing phpBB policy. Preserve authored technical explanations and source code even when they discuss errors.",
+      "samples": 17,
+      "verified": 17,
+      "changed": 1,
+      "max_tokens": 475,
+      "before_chunks": 600,
+      "after_chunks": 601,
+      "checks": [
+        "17 before/after captures have identical source hashes.",
+        "17 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "b7befe8452a112d1b793a3f80e37494458b6432f28fdec088dfc217eea9a0ba3",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20020213072701/http://www.hackersquest.org/ubb/Forum11/HTML/000132.html",
+          "label": "2002-02-13 · www.hackersquest.org / ubb/Forum11/HTML/000132.html",
+          "id": "websites/www.hackersquest.org/20020213072701/ubb/Forum11/HTML/000132.html",
+          "source_sha256": "a1bc1599e9144ed41ac610df3e755ef8616842aade12fcc8fe1bd9d9c30a47ff"
+        },
+        {
+          "url": "https://web.archive.org/web/20050930211749/http://www.hackersquest.org/phpBB2/viewtopic.php?t=5684&amp",
+          "label": "2005-09-30 · www.hackersquest.org / phpBB2/viewtopic.php?t=5684&amp",
+          "id": "websites/www.hackersquest.org/20050930211749/phpBB2/viewtopic.php?t=5684&amp",
+          "source_sha256": "a3076c290542ed03ea6ca45770592a528d708bf0b4a1c238e4df72c4b3b1574d"
+        },
+        {
+          "url": "https://web.archive.org/web/20040620153854/http://www.hackersquest.org/boards/viewtopic.php?p=19684&amp",
+          "label": "2004-06-20 · www.hackersquest.org / boards/viewtopic.php?p=19684&amp",
+          "id": "websites/www.hackersquest.org/20040620153854/boards/viewtopic.php?p=19684&amp",
+          "source_sha256": "5ca1b99e8c07429510e8b71402ee1b2141290168d5d151439114621a794f46d4"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "comparison": {
+        "before": "html_structure · 6 chunks\n\nColor con of mobs formula - HackersQuest Discussion Board\nHackersQuest Discussion Board\n  \n  Dark Age of Camelot\n  \n  Color con of mobs formula\n\nPost New Topic  Post A Reply\n  \nprofile | | preferences | faq | search\n\n\n\nColor con of mobs formula - HackersQuest Discussion Board\n|  |  |\n| --- | --- |\n| UBBFriend: Email This Page to Someone! | next newest topic | next oldest topic |\n\n\n",
+        "after": "forum_posts · 7 chunks\n\nColor con of mobs formula\nPost by EQwefwef 01-07-2002 02:20 PM\n\nPost by EQwefwef | 01-07-2002 02:20 PM\n--------------------------------------\n\nTaken from camelotherald.com...\n\n<< How can you determine a color range? Simple - Level divided by ten plus one. So, to a level 40 player (40/10 + 1), 36-40 is y\n\nColor con of mobs formula\nPost by Slicer 01-07-2002 05:49 PM\n\nPost by Slicer | 01-07-2002 05:49 PM\n------------------------------------\n\nAnd that formula isn't correct. They might SAY it is, but it doesn't match at the edges of the con colors (grey/green border and red/purple border)\n\n\n"
+      },
+      "issues": []
+    },
+    {
+      "rank": 48,
+      "site": "graffe.com",
+      "pages": 11659,
+      "status": "fixed",
+      "policies": [
+        "Graffe spell catalog",
+        "vBulletin"
+      ],
+      "finding": "Bind each spell header to its matching source data ID and carry the spell name through raw-field continuations. Keep every spell value and existing vBulletin messages; do not merge adjacent spells.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 2,
+      "max_tokens": 480,
+      "before_chunks": 516,
+      "after_chunks": 529,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "26d3c8dd6a004ca95bfa35964293a7d45e2902e188e79772d3327ad7c6739418",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20050205093127/http://www.graffe.com/spells.php?level=20",
+          "label": "2005-02-05 · www.graffe.com / spells.php?level=20",
+          "id": "websites/www.graffe.com/20050205093127/spells.php?level=20",
+          "source_sha256": "0192f589db7b9a5e5a5f99adabd3f98c7d062bd81d1f7fe3514828fbaf5dc8b6"
+        },
+        {
+          "url": "https://web.archive.org/web/20050205095142/http://www.graffe.com/spells.php?level=39",
+          "label": "2005-02-05 · www.graffe.com / spells.php?level=39",
+          "id": "websites/www.graffe.com/20050205095142/spells.php?level=39",
+          "source_sha256": "2c076e4b8e7c6aa579e5c401d785f8f7471c1ae52c7cc04708a9f9e6830033fb"
+        },
+        {
+          "url": "https://web.archive.org/web/20000620061601/http://www.graffe.com/armor/misc/misc.htm",
+          "label": "2000-06-20 · www.graffe.com / armor/misc/misc.htm",
+          "id": "websites/www.graffe.com/20000620061601/armor/misc/misc.htm",
+          "source_sha256": "f030de9a52b6a5760c88d4987ea8974befcadac36da28dfd6aca69b5f553bfdc"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "comparison": {
+        "before": "html_structure · 241 chunks\n\nWizard Spells\nWizard Spells\n=============\n\n**AA 1 4 8 12 14 16 18 20 24 29 34 39 44 46 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70**\n\n  \n\n\n\nWizard Spells\nAA 1 4 8 12 14 16 18 20 24 29 34 39 44 46 49 50 5\n\n|  |  |  |\n| --- | --- | --- |\n| Blessing of Bertoxxulous | Summon Item: #81830 [*mana:* 60, *resist:* Unresistable] | » |\n\n\n",
+        "after": "spell_catalog · 244 chunks\n\nWizard Spells\nWizard Spells\n=============\n\n\n\nWizard Spells\nAA 1 4 8 12 14 16 18 20 24 29 34 39 44 46 49 50 5\n\n**AA 1 4 8 12 14 16 18 20 24 29 34 39 44 46 49 50 51 52 53 54 55 56 57 58 59 60 61 62 63 64 65 66 67 68 69 70**\n\n  \n\n\n"
+      },
+      "issues": []
+    },
+    {
+      "rank": 49,
+      "site": "enlighteneddark.org",
+      "pages": 11383,
+      "status": "fixed",
+      "policies": [
+        "phpBB 1",
+        "Generic guild news"
+      ],
+      "finding": "Add classless phpBB 1 row support with source ISO timestamps and matching profile/edit actions. Preserve each message and the unrelated guild news archive.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 2,
+      "max_tokens": 476,
+      "before_chunks": 159,
+      "after_chunks": 168,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "35c9478fddc6ad7390f6a2f29c16495a125cb80f736c87074f759360f5c44521",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20030116105830/http://www.enlighteneddark.org/Forums/viewtopic.php?topic=1457&forum=1",
+          "label": "2003-01-16 · www.enlighteneddark.org / Forums/viewtopic.php?topic=1457&forum=1",
+          "id": "websites/www.enlighteneddark.org/20030116105830/Forums/viewtopic.php?topic=1457&forum=1",
+          "source_sha256": "1009a000b80dcd2e62c5aa1c59650f0e0a4eb423079c6e60d1e5546b93f03c9a"
+        },
+        {
+          "url": "https://web.archive.org/web/20030907062201/http://www.enlighteneddark.org/Forums/viewtopic.php?mode=viewtopic&topic=6638&forum=1&start=0",
+          "label": "2003-09-07 · www.enlighteneddark.org / Forums/viewtopic.php?mode=viewtopic&topic=6638&forum=1&start=0",
+          "id": "websites/www.enlighteneddark.org/20030907062201/Forums/viewtopic.php?mode=viewtopic&topic=6638&forum=1&start=0",
+          "source_sha256": "b536876d4a715bad4e3ddc11c58aee0bc9fdd183ed51b4609bb03e0137eb3856"
+        },
+        {
+          "url": "https://web.archive.org/web/20030927190540/http://www.enlighteneddark.org/Forums/editpost.php?post_id=11049&topic=1920&forum=1",
+          "label": "2003-09-27 · www.enlighteneddark.org / Forums/editpost.php?post_id=11049&topic=1920&forum=1",
+          "id": "websites/www.enlighteneddark.org/20030927190540/Forums/editpost.php?post_id=11049&topic=1920&forum=1",
+          "source_sha256": "49e3ba7eb9f0def628ad7e93839c1ae9f16ee78d2ed48f113c675a4f349a8876"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "comparison": {
+        "before": "html_structure · 5 chunks\n\nEnlightened Dark - Public Discussion - New Site\n[] \n[Forums] \n[FAQ] \n[]\n\nEnlightened Dark\n**» »**\nPublic Discussion **» »** New Site\n\n  \n\n\n\nEnlightened Dark - Public Discussion - New Site\n|  |  |\n| --- | --- |\n|  | New Site |\n| **Horaxe**   Joined: Mar 11, 2002 Posts: 54 | Posted: 2002-05-15 10:21  ---  the Oracle    I've been teaching myself HTML and such lately, and have been wanting to make my very own site for some time.\n",
+        "after": "forum_posts · 5 chunks\n\nEnlightened Dark - Public Discussion - New Site\nPost by Horaxe 2002-05-15 10:21\n\nPost by Horaxe | 2002-05-15 10:21\n---------------------------------\n\nthe Oracle\n  \n  \nI've been teaching myself HTML and such lately, and have been wanting to make my very own site for some time. This is my first attempt. It's not done yet,\n\nEnlightened Dark - Public Discussion - New Site\nPost by Ainalda 2002-05-16 10:39\n\nPost by Ainalda | 2002-05-16 10:39\n----------------------------------\n\nDon't use Office (Excel or Word) to create webpages. Yeah, I started that way myself, but the code these programs create just plane sucks. Even Frontpage sucks for this.\n"
+      },
+      "issues": []
+    },
+    {
+      "rank": 50,
+      "site": "ralloszek.net",
+      "pages": 11149,
+      "status": "fixed",
+      "policies": [
+        "WWWThreads/UBBThreads",
+        "Generic statistics/code"
+      ],
+      "finding": "Extend shared UBBThreads recognition to font.post bodies and use the message date instead of registration metadata. Keep the complete generated statistics and directory/code captures on the conservative path.",
+      "samples": 11,
+      "verified": 11,
+      "changed": 1,
+      "max_tokens": 480,
+      "before_chunks": 5838,
+      "after_chunks": 5830,
+      "checks": [
+        "11 before/after captures have identical source hashes.",
+        "11 selected views have complete offsets and pinned-tokenizer requests of at most 480 tokens.",
+        "The audit does not write archive sources, reader text, vectors or production records."
+      ],
+      "sample_manifest_sha256": "f88239dd0eea7ea113b7856faf97ec377410b3203dc1109e89cb2ec73c20026b",
+      "evidence": [
+        {
+          "url": "https://web.archive.org/web/20020729180549/http://www.ralloszek.net/ubbthreads/showflat.php?Cat=&Board=news&Number=15469&page=2&view=collapsed&sb=6&o=&fpart=1",
+          "label": "2002-07-29 · www.ralloszek.net / ubbthreads/showflat.php?Cat=&Board=news&Number=15469&page=2&view=collapsed&sb=6&o=&fpart=1",
+          "id": "websites/www.ralloszek.net/20020729180549/ubbthreads/showflat.php?Cat=&Board=news&Number=15469&page=2&view=collapsed&sb=6&o=&fpart=1",
+          "source_sha256": "17b34ff16745b9d91355bf711043f66278d7ce38bdb6e3e9589897b67d22fd90"
+        },
+        {
+          "url": "https://web.archive.org/web/20020315073645/http://www.ralloszek.net/images/icons/?S=A/index.html",
+          "label": "2002-03-15 · www.ralloszek.net / images/icons/?S=A/index.html",
+          "id": "websites/www.ralloszek.net/20020315073645/images/icons/?S=A/index.html",
+          "source_sha256": "ef7dbb68edb801b5d7e5724af6ac947a4b45dfa656f3d5b6a4a8cb33b4cdd5a0"
+        },
+        {
+          "url": "https://web.archive.org/web/20020729094209/http://www.ralloszek.net/ubbthreads/showprofile.php?Cat=&User=datal&Number=5623&Board=news&what=showflat&page=0&view=collapsed&sb=6&o=&fpart=1&vc=1",
+          "label": "2002-07-29 · www.ralloszek.net / ubbthreads/showprofile.php?Cat=&User=datal&Number=5623&Board=news&what=showflat&page=0&view=collapse",
+          "id": "websites/www.ralloszek.net/20020729094209/ubbthreads/showprofile.php?Cat=&User=datal&Number=5623&Board=news&what=showflat&page=0&view=collapsed&sb=6&o=&fpart=1&vc=1",
+          "source_sha256": "4ceda60d39760d48ee462de5ca4bc9de8dfe8607e61f01750ba495804a2a0231"
+        }
+      ],
+      "limitations": "Sample audit of several layouts and dates; unfamiliar templates retain the conservative fallback. Capture links are reconstructed from archive paths. Chunk counts are diagnostics, not a relevance score.",
+      "comparison": {
+        "before": "html_structure · 9 chunks\n\nTitle Changes - Forums powered by UBB.threads™\n**RallosZek.Net™**\n\nMain Index\n|\nSearch\n|\nNew user\n|\n|\nWho's Online\n|\nFAQ\n\n  \n\nAnnouncements\n>>\nNews and Announcements\n\n\n\nTitle Changes - Forums powered by UBB.threads™\n|  |  |  |  |  |\n| --- | --- | --- | --- | --- |\n| Previous thread Previous | View all threads Index | Next thread Next | \\* Flat | Threaded Mode Threaded |\n\n  \n\n\n",
+        "after": "forum_posts · 1 chunks\n\nTitle Changes - Forums powered by UBB.threads™\nPost by datal 06/19/02 06:54 PM Title Changes\n\nPost by datal | 06/19/02 06:54 PM | Title Changes\n-------------------------------------------------\n\nOK I have added the ability for each user to change their own title. PLEASE be nice. If I find anyone with a inappropiate title. I will rem\n"
+      },
+      "issues": []
+    }
+  ],
+  "policy": "eq-passages-480-v12",
+  "created": "2026-11-09T16:07:54.073967+00:00",
+  "verification": "Offline source/structure and pinned-tokenizer validation; no paid model scoring or retrieval relevance benchmark."
+}

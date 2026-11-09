@@ -121,11 +121,16 @@ def create_app(root=None, origin=None, start_worker=True):
     def screen(request):
         return FileResponse(STATIC / "review.html", media_type="text/html")
 
+    def chunking_audit(request):
+        return FileResponse(STATIC / 'chunking-audit.html', media_type='text/html')
+
     def asset(request):
         filename = request.path_params["name"]
-        if filename not in ("review.js", "review.css", "theme.js"):
+        if filename not in ("review.js", "review.css", "theme.js", 'chunking-audit.js',
+                            'chunking-audit.css', 'chunking-audit.json'):
             return PlainTextResponse("Not found", status_code=404)
-        return FileResponse(STATIC / filename, media_type="text/javascript" if filename.endswith("js") else "text/css")
+        media = 'application/json' if filename.endswith('.json') else 'text/javascript' if filename.endswith('.js') else 'text/css'
+        return FileResponse(STATIC / filename, media_type=media)
 
     def listing(request):
         compact = request.query_params.get('compact') == '1'
@@ -629,7 +634,8 @@ def create_app(root=None, origin=None, start_worker=True):
             return automation.configure(root, payload, kube=kube)
         return JSONResponse(await run_in_threadpool(configure))
 
-    app = Starlette(routes=[Route("/", screen), Route("/assets/{name}", asset), Route("/healthz", health),
+    app = Starlette(routes=[Route("/", screen), Route('/chunking-audit', chunking_audit),
+                            Route("/assets/{name}", asset), Route("/healthz", health),
                             Route('/api/cancel-resume', cancel_capture_resume, methods=['POST']),
                             Route('/api/pause-publication-retry',pause_publication_retry,methods=['POST']),
                             Route('/api/pause-capture-retries', pause_capture_retries, methods=['POST']),

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#173f32"><title>Chunking audit — EQ Archives</title>
+  <script src="/assets/theme.js"></script>
+  <link rel="stylesheet" href="/assets/chunking-audit.css">
+  <script defer src="/assets/chunking-audit.js"></script>
+</head>
+<body>
+  <header><a href="/">← Curation</a><a href="https://github.com/dbsanfte/eq-archives-software" target="_blank" rel="noopener noreferrer">GitHub</a></header>
+  <main>
+    <p class="eyebrow">EQ ARCHIVES · QUALITY</p><h1>Chunking audit</h1>
+    <p>The 50 largest archive site groups. Open a site to see its layouts, policy decision and source-backed checks.</p>
+    <section id="summary" aria-label="Audit progress"></section>
+    <details id="methodology"><summary>Scope, versions &amp; verification</summary><p id="scope" class="muted"></p><p id="deployment" class="muted"></p></details>
+    <div class="filters">
+      <label>Find a site or policy<input id="search" type="search" placeholder="Domain, engine or finding…"></label>
+      <label>Decision<select id="decision" aria-label="Decision"><option value="all">All decisions</option><option value="fixed">Policy improved</option><option value="covered">Existing policy retained</option><option value="generic">Generic policy retained</option><option value="pending">Awaiting audit</option></select></label>
+      <button id="reload" type="button">Refresh</button>
+    </div>
+    <p id="status" role="status">Loading audit…</p>
+    <section id="sites" aria-label="Site audits"></section>
+    <noscript>This dashboard needs JavaScript. The report is also available as <a href="/assets/chunking-audit.json">JSON</a>.</noscript>
+  </main>
+</body>
+</html>

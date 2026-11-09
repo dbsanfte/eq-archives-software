@@ -6,6 +6,7 @@ panels and data values retain the ordinary conservative extraction path.
 import re
 from bs4 import BeautifulSoup
 from .passage_forums import words, row_cells
+from . import passage_catalogs
 
 
 def _heading(soup,node,title):
@@ -140,4 +141,4 @@ def project(soup,host,path,title,excluded):
     if host=='eqtraders.com':return eqtraders(soup,path,title,excluded)
     if host in ('magelo.com','eq.magelo.com') and (path.endswith('/eq_view_profile.html') or re.match(r'/profile/\d+(?:/|$)',path)):
         return magelo(soup,path,title,excluded)
-    return None
+    return passage_catalogs.project(soup,host,path,title,excluded)

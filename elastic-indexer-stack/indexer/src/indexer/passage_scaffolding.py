@@ -4,6 +4,10 @@ from bs4 import BeautifulSoup
 from .passage_forums import words
 
 PROTECTED='pre,code,blockquote,article,main,.postbody,.posttext,.msg_text_cell,[id^=post_message_]'
+WEEKDAYS={name:short for short,names in (
+    ('sun',('sun','sunday','su')),('mon',('mon','monday','mo')),('tue',('tue','tuesday','tu')),
+    ('wed',('wed','wednesday','we')),('thu',('thu','thursday','th')),('fri',('fri','friday','fr')),
+    ('sat',('sat','saturday','sa'))) for name in names}
 
 
 def expand_fallbacks(soup,excluded):
@@ -23,9 +27,9 @@ def clean(soup,excluded):
         # Named events or prose veto removal. This also handles ASP.NET widgets.
         cells=[c for c in table.find_all(['td','th']) if c.find_parent('table') is table]
         values=[words(c) for c in cells]
-        days={v.lower() for v in values}&{'sun','mon','tue','wed','thu','fri','sat'}
+        days={WEEKDAYS[v.lower()] for v in values if v.lower() in WEEKDAYS}
         numbers=sum(bool(re.fullmatch(r'\d{1,2}',v)) for v in values)
-        rest=' '.join(v for v in values if v.lower() not in days and not re.fullmatch(r'\d{1,2}',v))
+        rest=' '.join(v for v in values if v.lower() not in WEEKDAYS and not re.fullmatch(r'\d{1,2}',v))
         rest=re.sub(r'\b(?:January|February|March|April|May|June|July|August|September|October|November|December)\b|\d{4}|[<>«»\s]','',rest,flags=re.I)
         if len(days)==7 and numbers>=14 and not rest:
             table.decompose();excluded.append('calendar_navigation')

@@ -2504,11 +2504,70 @@ async def selection_quality_flow(browser,base,width):
     finally:await context.close()
 
 
+async def chunking_audit_flow(browser,base,width):
+    context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
+    page=await context.new_page();errors=[];posts=[];failed=False
+    page.on('pageerror',lambda error:errors.append(str(error)))
+    page.on('request',lambda request:posts.append(request.url) if request.method=='POST' else None)
+    response=await context.request.get(base+'/assets/chunking-audit.json');report=await response.json()
+    assert len(report['sites'])==50
+    first=report['sites'][0]
+    first.update(status='fixed',samples=10,verified=10,changed=2,max_tokens=480,
+        finding='<img src=x onerror="window.auditUnsafe=true"> Source structure verified.',
+        policies=['Shared forum policy'],checks=['Every sampled message retained.'],
+        comparison={'before':'Navigation and two messages mixed.','after':'Each message has its own author and date.'},
+        evidence=[{'url':'https://web.archive.org/web/20000101000000/http://example.org/','label':'Captured source'}])
+    async def fixture(route):
+        if failed:await route.fulfill(status=503,body='unavailable')
+        else:await route.fulfill(status=200,json=report)
+    await page.route('**/assets/chunking-audit.json',fixture)
+    try:
+        await page.goto(base);await settled(page)
+        await page.get_by_role('button',name='Open tools and history').click()
+        link=page.get_by_role('link',name='Chunking audit',exact=True)
+        box=await link.bounding_box();assert box and box['height']>=44
+        await link.click()
+        await expect(page).to_have_url(base+'/chunking-audit')
+        await expect(page.locator('#sites > details')).to_have_count(50)
+        await expect(page.locator('#status')).to_contain_text('50 of 50')
+        assert (await page.locator('#sites summary').first.bounding_box())['y']<844
+        await page.get_by_label('Find a site or policy').fill('ezboard.com')
+        await expect(page.locator('#sites > details')).to_have_count(1)
+        for theme in ('light','dark'):
+            await page.evaluate('(theme)=>document.documentElement.dataset.theme=theme',theme)
+            await page.locator('#sites summary').click()
+            await expect(page.locator('.audit-body')).to_be_visible()
+            await expect(page.locator('.audit-body')).to_contain_text('<img src=x')
+            assert await page.locator('.audit-body img,.audit-body script').count()==0
+            assert not await page.evaluate('Boolean(window.auditUnsafe)')
+            assert await page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+            for selector in ('#search','#decision','#reload','#sites summary','.evidence a'):
+                box=await page.locator(selector).first.bounding_box()
+                assert box and box['height']>=44,(width,selector,box)
+            if width<600:assert await page.locator('.comparison').evaluate('e=>getComputedStyle(e).gridTemplateColumns.split(" ").length')==1
+            await page.screenshot(path=f'/tmp/curation-chunking-audit-{width}-{theme}.png',full_page=True)
+            await page.locator('#sites summary').click()
+        await page.get_by_label('Find a site or policy').fill('no-such-site.example')
+        await expect(page.locator('#sites > details')).to_have_count(0)
+        await expect(page.locator('#status')).to_contain_text('0 of 50')
+        await page.get_by_label('Find a site or policy').fill('')
+        await page.get_by_label('Decision',exact=True).select_option('fixed')
+        expected=sum(s['status']=='fixed' for s in report['sites'])
+        await expect(page.locator('#sites > details')).to_have_count(expected)
+        failed=True;await page.get_by_role('button',name='Refresh',exact=True).click()
+        await expect(page.locator('#status')).to_contain_text('Could not load')
+        failed=False;await page.get_by_role('button',name='Refresh',exact=True).click()
+        await expect(page.locator('#status')).to_contain_text('of 50')
+        assert not errors and not posts,(errors,posts)
+    finally:await context.close()
+
+
 async def check(base):
     async with async_playwright() as playwright:
         browser=await playwright.chromium.launch()
         try:
             for width in (320,390,430,768,1280):
+                await chunking_audit_flow(browser,base,width)
                 await collapsed_pipeline_flow(browser,base,width)
                 if width in (390,1280):await selection_quality_flow(browser,base,width)
                 if width in (390,1280):await capture_retry_flow(browser,base,width)

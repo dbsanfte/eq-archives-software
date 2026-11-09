@@ -835,7 +835,14 @@ dismissal is fabricated and no Luna request is made to classify this known adver
 
 ## Imported search content
 
-Imported text uses the shared `eq-passages-480-v11` search policy: real titles,
+**More → Chunking audit** opens the read-only LAN dashboard for the fifty largest
+site/platform groups, with each policy decision, sample counts, source links and
+before/after evidence. It does not start work or read the archive during a page
+request. See the [audit guide](../../scripts/chunk-audit/README.md) for sampling and
+validation limits. Historical captures and indexed records change only through
+normal import/maintenance, independently of this report.
+
+Imported text uses the shared `eq-passages-480-v12` search policy: real titles,
 section/table context and attributed forum/mail quotations, with full reader
 content retained separately. Verified raster assets also receive local Gemma
 visual vectors through `gemma-image-embeddings`. This does not call Luna or change
@@ -951,7 +958,7 @@ handles at most 2,000 records or ten minutes, checks for imports between embeddi
 batches, and yields cooperatively. A 15-minute Kubernetes deadline bounds hard
 failures. Maintenance waits for existing broad Jobs to finish naturally; rollout
 never modifies their specs, pods, prepared sources or checkpoints. The current
-v10 reindex can finish unchanged; its completion is not a claim of v11 coverage.
+v10 reindex can finish unchanged; its completion is not a claim of v12 coverage.
 Subsequent slices upgrade stale policies without downgrading newer checkpoints.
 
 Durable cursors, rejection history and an exclusive process lease live in

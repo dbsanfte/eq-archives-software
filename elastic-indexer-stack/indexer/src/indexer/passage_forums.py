@@ -6,6 +6,7 @@ None and keep the generic content-preserving path. Archival readers are untouche
 from dataclasses import dataclass
 from html.parser import HTMLParser
 import re
+from urllib.parse import urlsplit
 from bs4 import BeautifulSoup, Comment
 
 DATE = re.compile(r'\b\d{1,2}/\d{1,2}/\d{2,4}(?:\s*:\s*|\s+)\d{1,2}:\d{2}(?::\d{2})?(?:\s*[ap]m)?', re.I)
@@ -246,7 +247,7 @@ def phpbb_print(soup):
 
 def wwwthreads(soup):
     posts=[];seen=set()
-    for body in soup.select('p.post'):
+    for body in soup.select('p.post,font.post'):
         profile=body.find_previous('td',attrs={'rowspan':'2'})
         if profile is None or not profile.select_one('a[name^=Post]'):
             # Partial recognition must never silently discard another body.
@@ -261,8 +262,12 @@ def wwwthreads(soup):
             guest=BeautifulSoup(str(profile),'html.parser')
             for metadata in guest.select('.small,small'):metadata.decompose()
             name=words(guest)
-        seen.add(id(profile));date=DATE.search(words(profile))
-        posts.append(section(name,date[0] if date else '',body_copy(body),words(subject)))
+        seen.add(id(profile));date=DATE.search(words(subject_cell)) or DATE.search(words(profile))
+        message=BeautifulSoup(body_copy(body),'html.parser')
+        for control in list(message.select('.small,small')):
+            if re.match(r'^Post Extras:\s*',words(control),re.I) and control.find('a',href=re.compile(r'printthread\.(?:pl|php)',re.I)):
+                control.decompose()
+        posts.append(section(name,date[0] if date else '',str(message),words(subject)))
     if posts:return Thread('\n'.join(posts),'wwwthreads')
 
 
@@ -456,6 +461,17 @@ def vbulletin(soup):
     posts=[];covered=set()
     for marker in markers:
         nodes=comment_region(marker,'message');header=vbulletin_header(marker)
+        if nodes is None and header is not None:
+            # Some vB skins lose one closing comment while retaining complete
+            # two-column post cells and their immediately preceding post row.
+            # Use only that cell, never the enclosing multi-message table.
+            cell=marker.parent;row=cell.find_parent('tr');cells=row_cells(row) if row else []
+            preceding=row.find_previous_sibling('tr') if row else None
+            if (cell.name=='td' and len(cells)==2 and cells[1] is cell
+                    and preceding is not None and preceding.find('a',attrs={'name':re.compile(r'^post\d+$')})
+                    and not cell.find('a',attrs={'name':re.compile(r'^post\d+$')})
+                    and sum(str(n).strip()=='message' for n in cell.find_all(string=lambda n:isinstance(n,Comment)))==1):
+                nodes=list(marker.next_siblings)
         # A broken boundary/header must keep the complete generic view, rather
         # than drop one body or attach it to its neighbour's author.
         if nodes is None or header is None:return None
@@ -587,7 +603,7 @@ def ultraboard(soup):
 
 def ubbclassic(soup):
     if not (re.search(r'Ultimate\s+Bulletin\s+Board|UBB\.classic',words(soup),re.I)
-            or soup.find('a',href=re.compile(r'(?:ultimatebb|Ultimate)\.cgi\?.*ubb=',re.I))):return None
+            or soup.find('a',href=re.compile(r'(?:ultimatebb\.cgi\?.*ubb=|ubbmisc\.cgi\?action=(?:getbio|getip))',re.I))):return None
     headers=[]
     for row in soup.find_all('tr'):
         if row.find_parent(['blockquote','pre','code']):continue
@@ -605,13 +621,25 @@ def ubbclassic(soup):
         if len(cells)!=2:continue
         profile,body=cells;stamp_node=body.find(string=re.compile(r'^\s*posted\s+',re.I))
         separators=body.find_all('hr',recursive=False)
-        if not separators:continue
+        nested_rule=body.find('hr') if not separators else None
+        if not separators and (nested_rule is None or nested_rule.find_parent('tr') is not row
+                               or nested_rule.find_parent(['blockquote','pre','code'])):continue
         if stamp_node is not None and stamp_node.find_parent('tr') is not row:continue
         if stamp_node is None:
             if re.search(r'Member\s*#|Unregistered|Rate Member',words(profile),re.I) and words(body):return None
             continue
         stamp=dated(str(stamp_node));author=profile.find(['b','strong'])
         if not stamp or not author:return None
+        if nested_rule is not None:
+            # UBB 5.x puts the date, separator and entire message in nested
+            # fonts. Direct-sibling slicing misses those bodies across hosts.
+            message=BeautifulSoup(after_rule(body),'html.parser')
+            for footer in list(message.find_all('p',align='right')):
+                if (footer.find('a',href=re.compile(r'ubbmisc\.cgi\?action=getip',re.I))
+                        and re.fullmatch(r'IP:\s*Logged',words(footer),re.I)):
+                    footer.decompose()
+            posts.append(section(words(author),stamp,body_copy(message)))
+            continue
         nodes=[]
         for node in separators[0].next_siblings:
             if getattr(node,'name',None)=='hr' and re.match(r'\s*Posts:',words(node.find_next_sibling()),re.I):break
@@ -621,7 +649,7 @@ def ubbclassic(soup):
 
 
 def ezboard(soup,host):
-    if not host.endswith('ezboard.com'):return None
+    if not re.fullmatch(r'(?:[^/:]+\.)*ezboard\.com(?::(?:80|443))?',host,re.I):return None
     posts=[];covered=set()
     for table in soup.find_all('table'):
         if any(id(parent) in covered for parent in table.parents):continue
@@ -661,7 +689,7 @@ def ezboard(soup,host):
         bodies=[]
         for row in cells[header+1:]:
             if len(row)!=2:
-                if any(words(c) for c in row):return None
+                if any(words(c) for c in row) and not advertising_only(row[0] if len(row)==1 else None):return None
                 continue
             if all(c.name=='th' or 'headings' in c.get('class',[]) for c in row):continue
             author=nonempty_link(row[0],r'\.show(?:User)?PublicProfile(?:[?/#]|$)')
@@ -672,6 +700,18 @@ def ezboard(soup,host):
             bodies.append(section(name,date[0] if date else '',body_copy(row[1])))
         if bodies:posts.extend(bodies);covered.add(id(table))
     if posts:return Thread('\n'.join(posts),'ezboard')
+
+
+def advertising_only(node):
+    """Prove an interstitial contains only ad-delivery iframe fallback text."""
+    if node is None:return False
+    copy=BeautifulSoup(str(node),'html.parser');found=False
+    for frame in list(copy.find_all('iframe',src=True)):
+        try:host=urlsplit(frame['src']).hostname or ''
+        except ValueError:continue
+        if host.lower().startswith(('ad.','ads.')):
+            frame.decompose();found=True
+    return found and not words(copy) and not copy.find(['img','a','pre','code','blockquote','object'])
 
 
 def reply_form(soup,path):
@@ -707,7 +747,9 @@ def extract(soup,host,path='',raw=None):
     if source_thread:return source_thread
     reviewed=snitz(soup,raw) if (soup.select_one('span.spnMessageText') or raw and re.search(r'Snitz|pop_profile\.asp',raw,re.I)) else None
     if reviewed:return reviewed
-    for parser in (phpbb_print,phpbb,wwwthreads,vbulletin,lithium,ubbclassic,aspnet,ultraboard):
+    from . import passage_legacy_forums as legacy
+    for parser in (phpbb_print,phpbb,legacy.phpbb_one,wwwthreads,vbulletin,lithium,ubbclassic,aspnet,ultraboard,
+                   legacy.snowboards,legacy.magelo_forum):
         result=parser(soup)
         if result:return result
     return ezboard(soup,host) or reply_form(soup,path)
@@ -755,7 +797,7 @@ def excluded_page(soup,title,path):
                          and 'ezboard' in text.lower() and 'System Message' in text)
     message=soup.find(string=re.compile(r'^\s*vBulletin Message\s*$',re.I))
     missing_thread=(message is not None and not message.find_parent(['blockquote','pre','code'])
-                     and re.search(r'No Thread specified\.\s*If you followed a valid link, please notify the (?:administrator|webmaster)\b',text,re.I))
+                     and re.search(r'(?:No (?:Thread|Forum|Post)|Invalid Attachment) specified\.\s*If you followed a valid link, please notify the (?:administrator|webmaster)\b',text,re.I))
     function=r'(?:[\w:]+\([^)]{0,1000}\)\s*:\s*)?'
     warning=r'Warning\s*:\s*'+function+r'failed to open stream:\s*No such file or directory\s+in\s+\S+\s+on line \d+\s*'
     required=r"(?:'[^']{1,1000}'|\"[^\"]{1,1000}\"|\S{1,1000})"
@@ -780,6 +822,11 @@ def excluded_page(soup,title,path):
                     and all(form.find('input',attrs={'name':name}) is not None for name in ('board.id','message.id','notification.type'))
                     and not any(len(words(p))>40 and not p.find_parent('form') for p in soup.find_all('p'))):
                 return 'forum_utility_page'
+    if (re.search(r'\.showAdd(?:Topic|Reply)Screen(?:FromWeb)?$',path,re.I)
+            and re.fullmatch(r'(?:New Topic|Add Reply|Reply)\s*-\s*(?:www\.)?ezboard\.com',title,re.I)
+            and soup.find('form') and soup.find('textarea') is not None
+            and soup.select_one('input[type=password]')):
+        return 'forum_utility_page'
     utility_path=re.search(r'(?:^|/)(?:newpost|newuser|register|login|posting|post|newreply)\.(?:pl|php|asp)$',path,re.I)
     utility_title=re.match(r'(?:Make a New Post|New user|Register|Log ?in)(?:\b|\s*-)',title,re.I)
     if (utility_path or utility_title) and soup.find('form') and soup.select_one('textarea,input[type=password],input[name=Username],input[name=Subject]'):

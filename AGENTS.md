@@ -257,7 +257,7 @@ extraction checkpoints, enrichment, source identity, dates and last_indexed. No
 paid enrichment during this backfill. Do not reuse Nomic checkpoints as Gemma
 completion. The Nomic repair entry point remains for historical recovery only.
 Follow the embedding-service migration runbook for operator-authorized handoffs.
-Gemma text uses `eq-passages-480-v11`: budget title/context with every 480-token
+Gemma text uses `eq-passages-480-v12`: budget title/context with every 480-token
 request, retain full reader text, verify source-bound selected-view coverage and
 store view offsets/provenance separately. Unknown layouts retain content;
 format-specific navigation/post/table handling needs regression evidence. Resume
@@ -311,6 +311,20 @@ unique summaries/full content, quotes, real code and tables, and escapes literal
 fence decorations before Markdown chunking. Damaged XML keeps content through a
 conservative fallback; never fetch XML entities or remote entry content. Preserve
 raw readers, discussion identity and v9 checkpoints during operator handoffs.
+The v12 fifty-site audit adds shared Snowboards, phpBB 1, old UBB and Magelo forum
+boundaries, retaining quotes, data tables and attachments. Ezboard ad-only rows
+must not invalidate message recognition; vBulletin can use a proven post cell
+when one closing comment is absent, never borrow a previous author's metadata.
+Catalog specializations require captured structural evidence: EQInterface,
+EQRankings, MaximumEQ, EQDiva, EQPrices, EQSpoilers, Graffe spell IDs and EverQuest
+Online item entries. Bind entity/section/column context to continuations without
+merging distinct spell/item entries. Keep raw fields, zero values and unknown
+templates; shared calendar/ad/navigation cleanup cannot remove authored content.
+The read-only LAN `/chunking-audit` dashboard stores all fifty decisions and bounded
+source-linked before/after receipts. Full source fixtures and plans remain outside
+Git. Run `python3 -m unittest discover -s scripts/chunk-audit -v`; never label
+sample diagnostics as a corpus-wide quality or retrieval relevance score.
+Preserve v11 checkpoints; exact source/view/request proof is required for reuse.
 The v11 policy adds evidence-gated EQ Traders recipes/vendor sections and Magelo
 profile panels, carrying source identity and column labels into every relevant
 chunk. Bind detached profile headers to real data; remove only proven controls

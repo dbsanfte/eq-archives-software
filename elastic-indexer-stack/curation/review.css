@@ -376,6 +376,7 @@ body[data-panel=reader] .site-header .scope { display:none; }
 .dialog-heading h2 { font-size:24px; }
 .tool-links { display:grid; gap:10px; margin:20px 0; }
 .tool-links button { text-align:left; }
+.tool-links a { display:flex; align-items:center; min-height:44px; }
 .operation-log { margin:12px 0; border-top:1px solid var(--line); padding-top:12px; }
 .operation-log p { font-size:12px; }
 footer { display:flex; flex-direction:column; gap:8px; margin-top:32px; padding-top:16px; border-top:1px solid var(--line); color:var(--faint); font-size:10px; overflow-wrap:anywhere; }
