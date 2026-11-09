@@ -6,11 +6,13 @@ import sqlite3
 import time
 
 from candidate_checks import require_finished, start as start_check
-from common import CrawlError, capture_scope, digest, now
+from common import CrawlError, digest, now
 from coverage_check import refresh, require_new
 from daily_budget import DailyBudget, DailyBudgetPause, AutomaticStopped, EnrichmentPriorityPause
 from portal import Stage, candidate_filter, decorate
-from review import _apply_decisions, record
+from review import _apply_decisions, record, checked_sources
+from grading import current_rating
+from selection_policy import automatic_scope, automatic_reason, VERSION as SELECTION_VERSION
 from spending import Spending
 from state import Lane, OPERATION_KINDS, active_operation, connect, enqueue, unpack
 from capture_flow import UNDO_SECONDS
@@ -105,7 +107,7 @@ def promote(root, account):
         rows = candidate_filter(decorate(store, [record(store, row) for row in store.db.execute('''SELECT * FROM candidates
             WHERE state='approval_pending' AND rating IS NOT NULL ORDER BY
             json_extract(rating,'$.grade') DESC,priority DESC,rowid''')]))
-        row = next((row for row in rows if eligible(store, row) and
+        row = next((row for row in rows if eligible(store, row) and current_rating(row['rating']) and
                     row['rating'].get('grading_criteria', '') == config['grading_criteria']), None)
         if not row:
             return
@@ -117,17 +119,20 @@ def promote(root, account):
             if json.loads(policy_lock.execute('SELECT value FROM settings WHERE id=1').fetchone()[0]) != config:
                 return
             row = decorate(store, [record(store, store.db.execute('SELECT * FROM candidates WHERE id=?', (row['id'],)).fetchone())])[0]
-            if not eligible(store, row):
+            if (not eligible(store, row) or not current_rating(row['rating'])
+                    or row['rating'].get('grading_criteria', '') != config['grading_criteria']):
                 return
             require_finished(store, row)
-            accepted = row['rating']['grade'] >= config['min_grade']
+            documents = checked_sources(store, row)
+            reason = automatic_reason(row['rating'], config['min_grade'])
+            accepted = reason is None
             if accepted:
                 require_new(store, row['url'])
-                # Pristine directory suggestions become whole sites/accounts.
-                # Explicit human scope edits are excluded by eligible().
-                if row['scope_mode'] == 'directory':
-                    coverage = {**row['coverage'], 'scope_mode': 'site'}
-                    scope = capture_scope(row['url'], 'site')
+                # A deep EQ page cannot authorize unrelated parent-host content.
+                # Landing-page proof can widen a dedicated EQ site/account.
+                scope, mode = automatic_scope(row, documents)
+                if (scope, mode) != (row['scope'], row['scope_mode']):
+                    coverage = {**row['coverage'], 'scope_mode': mode}
                     store.db.execute('UPDATE candidates SET scope=?,coverage=? WHERE id=?',
                                      (scope, json.dumps(coverage), row['id']))
                     row = record(store, store.db.execute('SELECT * FROM candidates WHERE id=?', (row['id'],)).fetchone())
@@ -136,7 +141,8 @@ def promote(root, account):
             grant = json.loads(store.db.execute('SELECT decision FROM candidates WHERE id=?', (row['id'],)).fetchone()[0])
             grant['automatic'] = {'revision': config['revision'], 'min_grade': config['min_grade'],
                                   'daily_usd': config['daily_usd'], 'monthly_usd':config.get('monthly_usd',200), 'grading_criteria': config['grading_criteria'],
-                                  'enrichment_budget': 'daily-v1', 'grade': row['rating']['grade']}
+                                  'enrichment_budget': 'daily-v1', 'grade': row['rating']['grade'],
+                                  'selection_policy': SELECTION_VERSION, 'selection_reason': reason}
             grant['origin'] = 'automatic_policy'
             store.db.execute('UPDATE candidates SET decision=? WHERE id=?', (json.dumps(grant), row['id']))
             store.db.execute('INSERT INTO events(candidate,action,detail,created) VALUES (?,?,?,?)',
@@ -187,12 +193,14 @@ def schedule(root, account):
                 and activity.get('revision') == config['revision']):
             return
         rows = decorate(store, [record(store, row) for row in store.db.execute("""SELECT * FROM candidates
-            WHERE state IN ('discovered','sampled','approval_pending') AND rating IS NULL ORDER BY priority DESC,rowid""")])
+            WHERE state IN ('discovered','sampled','approval_pending') ORDER BY priority DESC,rowid""")])
         for row in rows:
-            if not eligible(store, row):
+            if current_rating(row['rating']) or not eligible(store, row):
                 continue
-            if store.db.execute("SELECT 1 FROM operations WHERE kind='candidate_check' AND json_extract(payload,'$.id')=?", (row['id'],)).fetchone():
-                continue
+            previous = store.db.execute("SELECT state,payload FROM operations WHERE kind='candidate_check' AND json_extract(payload,'$.id')=? ORDER BY created DESC,rowid DESC LIMIT 1", (row['id'],)).fetchone()
+            if previous and (not row['rating'] or previous['state'] != 'completed'
+                    or json.loads(previous['payload']).get('selection_policy') == SELECTION_VERSION):
+                continue  # A policy upgrade never replenishes failed/unknown attempts.
             try:
                 start_check(store, {'id': row['id'], 'manifest_sha256': row['manifest_sha256'],
                                    'max_usd': 2, 'grading_criteria': config['grading_criteria'], 'automatic': True})

@@ -110,7 +110,7 @@ def test_legacy_paid_grade_can_be_restored_after_custom_regrade(tmp_path, monkey
 def response():
     return {'status': 'completed', 'usage': {'input_tokens': 100, 'output_tokens': 100},
             'output': [{'type': 'message', 'content': [{'type': 'output_text', 'text': json.dumps({
-                'grade': 3, 'category': 'guild', 'confidence': 'high', 'reason': 'An EQ guild.',
+                'relevance_grade':3,'quality_grade':3,'content_kind':'substantive','site_type':'unknown','scope_evidence':[],'grade': 3, 'category': 'guild', 'confidence': 'high', 'reason': 'An EQ guild.',
                 'evidence': [{'slot': 0, 'excerpt': 'EverQuest guild history.'}]})}]}]}
 
 

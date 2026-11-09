@@ -111,6 +111,8 @@ class SampleDownloader:
     def call(self,request):
         self.requests.append(request)
         if request['op']=='list':
+            if request['url']=='http://new-guild.example/':
+                return {'captures':[],'listing_limited':False,'available_rows':0,'identity_variants':[]}
             assert request['url']=='http://new-guild.example/eq/News.html?x=1'
             assert request['from']=='19990101000000' and request['to']=='20011231235959'
             return {'captures':[{'url':request['url'],'timestamp':'20000101000000','digest':'fixture','length':100}],
@@ -133,7 +135,7 @@ def test_manual_site_gets_normal_coverage_sources_grade_and_review_without_spide
     submitted='https://web.archive.org/web/20050304000000/http://new-guild.example/eq/News.html?x=1'
     op=call(app,'POST','/api/submit-site',{'url':submitted,'max_usd':0.2,'grading_criteria':'Guild sites'}).json()['operation']
     response={'status':'completed','output':[{'type':'message','content':[{'type':'output_text','text':json.dumps({
-        'grade':3,'category':'guild','confidence':'high','reason':'EQ guild history.',
+        'relevance_grade':3,'quality_grade':3,'content_kind':'substantive','site_type':'unknown','scope_evidence':[],'grade':3,'category':'guild','confidence':'high','reason':'EQ guild history.',
         'evidence':[{'slot':0,'excerpt':'EverQuest guild history.'}]})}]}],'usage':{'input_tokens':100,'output_tokens':100}}
     monkeypatch.setattr('acquisition.Downloader',SampleDownloader)
     worker=Worker(root)

@@ -42,7 +42,7 @@ def test_default_off_and_get_polling_never_schedule_or_pay(candidate):
         assert response['candidates'][0]['state'] == row['state']
 
 
-def test_auto_promotes_whole_site_and_remembers_low_grades_with_manual_restore(tmp_path):
+def test_auto_preserves_subsite_and_remembers_low_grades_with_manual_restore(tmp_path):
     root = tmp_path / 'state'
     high = add_candidate(root, 'http://guild.example/eq/deep/news.html', grade=3)
     low = add_candidate(root, 'http://other.example/', grade=1)
@@ -50,7 +50,7 @@ def test_auto_promotes_whole_site_and_remembers_low_grades_with_manual_restore(t
     assert automation.promote(root, account)['id'] == high['id']
     promoted = get_candidate(root, high['id'])
     assert promoted['state'] == 'approved_waiting_batch'
-    assert promoted['scope'] == 'http://guild.example/' and promoted['scope_mode'] == 'site'
+    assert promoted['scope'] == 'http://guild.example/eq/deep/' and promoted['scope_mode'] == 'directory'
     assert promoted['decision']['origin'] == 'automatic_policy'
     assert promoted['decision']['automatic']['enrichment_budget'] == 'daily-v1'
     assert promoted['decision']['manifest_sha256'] == promoted['manifest_sha256']

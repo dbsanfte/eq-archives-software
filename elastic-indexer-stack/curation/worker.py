@@ -79,7 +79,7 @@ def campaign(root, operation):
             discover(args, run)
             run.set("discovery_completed", True)
         if acquire and not run.get("sampling_completed"):
-            args = options.parse_args(["--work-dir", str(directory), "sample", "--max-candidates", str(payload["max_candidates"]),
+            args = options.parse_args(["--work-dir", str(directory), "sample", "--selection-context", "--max-candidates", str(payload["max_candidates"]),
                                        "--max-seconds", "1800", "--retry-unresolved"])
             if downloader is None:
                 sample(args, run)

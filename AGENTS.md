@@ -456,8 +456,27 @@ while heartbeat-backed import demand remains, and automatically resume original
 operations without renewing their limits/deadlines. Per-site failures cannot keep
 priority indefinitely. Do not change caps or enable while an older paid Job lacks
 shared monthly accounting. Never alter existing paid Jobs to add it.
-Automatic promotion requires verified grading and coverage, preserves board/shared
-account boundaries, and uses whole-site scopes only for pristine suggestions.
+Automatic promotion requires current `eq-site-selection-v2` source-bound grading,
+verified coverage and high confidence. The displayed 0–3 selection grade is capped
+by separate EQ relevance and archival-substance grades and the operator's focus.
+Titles, redirects, frame notices, parked/error pages and empty forms cannot count
+as substantive evidence. Small guilds, concise character/item data, useful link
+collections and community life can be valuable without a minimum word count.
+Preserve board/shared-account boundaries and explicit human scope edits. Expand
+a deep link only to a source-evidenced dedicated EQ homepage/subsite boundary;
+never infer a mixed parent host's topic from an EQ child. Within an established
+EQ boundary capture generously: all descendants, assets, dates, galleries, social
+pages, lore and off-topic community discussion. Do not add per-page EQ keyword
+filters. Optional context uses the same serial Wayback client and cumulative
+budgets: at most two in-scope frame/entry targets and two homepage boundaries
+(one source-linked ancestor plus the account root), at most two dated captures
+per homepage. Keep complete grading text within 120,000 characters; missing parent
+evidence keeps a narrower useful scope. Parent context outside the approved scope
+must never leak into captured/indexed output. Version paid grades/caches; existing
+legacy approvals remain verifiable with their known original grader signature.
+Pending legacy grades need the new assessment before automatic approval, under
+their original ledger/budget; preserve cached responses, manual decisions and all
+active/completed capture/import/reindex Jobs.
 Keep lower grades in Saved for later and exclude their identities from discovery.
 Restore, Undo and manual scope edits must prevent automatic reapproval. Preserve
 explicit human decisions. Exhausted link frontiers wait five minutes. Candidate recovery retains its explicit/owned rules. Approved publication transport

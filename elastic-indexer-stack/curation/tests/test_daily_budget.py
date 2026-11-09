@@ -166,7 +166,7 @@ def test_copied_grade_cache_cannot_settle_another_requests_reused_attempt_id(can
     class Luna:
         def request(self, payload):
             calls.append(payload)
-            rating = {'grade': 3, 'category': 'guild', 'confidence': 'high', 'reason': 'EQ guild',
+            rating = {'relevance_grade':3,'quality_grade':3,'content_kind':'substantive','site_type':'unknown','scope_evidence':[],'grade': 3, 'category': 'guild', 'confidence': 'high', 'reason': 'EQ guild',
                       'evidence': [{'slot': 0, 'excerpt': 'EverQuest guild history.'}]}
             return {'status': 'completed', 'usage': {'input_tokens': 100, 'output_tokens': 100},
                     'output': [{'type': 'message', 'content': [{'type': 'output_text', 'text': json.dumps(rating)}]}]}

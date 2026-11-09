@@ -6,7 +6,8 @@ from pathlib import Path
 
 from common import capture_scope, digest
 from captures import archive_path
-from grading import SIGNATURE, sources
+from grading import SIGNATURE, sources, grader_signature
+from selection_policy import VERSION as SELECTION_VERSION
 from review import record
 from state import connect
 
@@ -33,7 +34,9 @@ def fixture(root):
             store.db.execute("INSERT INTO candidates(id,url,scope,priority,coverage,evidence,captures,state) VALUES (?,?,?,100,'{}','[]',?,'approval_pending')",
                              (identifier,url,capture_scope(url),json.dumps(captures)))
             current=store.db.execute('SELECT * FROM candidates WHERE id=?',(identifier,)).fetchone()
-            rating={'grade':grade,'category':'guild','confidence':'high','origin':'model',
+            rating={'selection_policy':SELECTION_VERSION,'grader_signature':grader_signature(),
+                    'relevance_grade':grade,'quality_grade':grade,'content_kind':'substantive',
+                    'site_type':'unknown','scope_evidence':[],'grade':grade,'category':'guild','confidence':'high','origin':'model',
                     'reason':'Contemporary EQ information. <script>window.pwned=true</script>',
                     'evidence':[{'slot':0,'excerpt':'Early EverQuest guild history.'}],
                     'signature':digest({'grader':SIGNATURE,'documents':sources(store,current,120000)})}

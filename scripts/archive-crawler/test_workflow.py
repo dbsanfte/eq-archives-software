@@ -19,7 +19,7 @@ from wayback_transport import SharedWayback, TransportUnavailable
 
 
 def response(excerpt="EverQuest guild history", status="completed"):
-    rating = {"grade": 3, "category": "guild", "confidence": "high", "reason": "Contemporary guild history.",
+    rating = {"relevance_grade":3,"quality_grade":3,"content_kind":"substantive","site_type":"unknown","scope_evidence":[],"grade": 3, "category": "guild", "confidence": "high", "reason": "Contemporary guild history.",
               "evidence": [{"slot": 0, "excerpt": excerpt}]}
     return {"status": status, "output": [{"type": "message", "content": [{"type": "output_text", "text": json.dumps(rating)}]}],
             "usage": {"input_tokens": 500, "output_tokens": 150}}

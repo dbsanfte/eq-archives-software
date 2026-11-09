@@ -7,13 +7,16 @@ from pathlib import Path
 
 from capture_flow import Action, transition
 from common import CrawlError, digest, now, save, original_url, within_capture_scope
-from grading import judgment_signature, sources
+from grading import judgment_signature, sources, current_rating
 
 
 def checked_sources(store, row):
     documents = sources(store, row, 10000000)
     rating = row["rating"]
-    if rating and rating.get("signature") != judgment_signature(documents, rating.get('grading_criteria', '')):
+    allowed = {judgment_signature(documents, (rating or {}).get('grading_criteria', ''))}
+    if rating and not current_rating(rating):
+        allowed.add(judgment_signature(documents, rating.get('grading_criteria', ''), legacy=True))
+    if rating and rating.get('signature') not in allowed:
         raise CrawlError("Source judgment is stale; grade and review again")
     return documents
 
@@ -23,6 +26,7 @@ def metadata(row):
     result = dict(row)
     for field in ("coverage", "evidence", "captures", "rating", "decision"):
         result[field] = json.loads(result[field]) if result[field] else None
+    result["selection_current"] = current_rating(result["rating"])
     result["scope_mode"] = (result["coverage"] or {}).get("scope_mode", "directory")
     result["manifest_sha256"] = digest({key: result[key] for key in ("id", "url", "scope", "scope_mode", "captures", "rating")})
     return result

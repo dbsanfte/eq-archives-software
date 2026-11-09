@@ -1029,3 +1029,40 @@ pod termination statuses (list permission, no logs/exec/mutations). OOM failures
 are explicit in the workspace. A failed old 512 MiB Job can continue once as a new
 numbered Job under the current profile, original manifest, paid cache and budget;
 OOM under the current profile requires attention while other sites proceed.
+
+
+### Source quality and EQ site selection
+
+New candidate judgments use `eq-site-selection-v2`. Luna reports separate EQ
+relevance and archival-substance grades; the displayed selection grade is their
+minimum, further capped by any saved operator focus. Automatic approval also
+requires high confidence. A guild title, redirect, frames notice or empty template
+cannot earn a top selection grade. Useful small guild records, character data,
+curated resource directories and concise guides can; there is no minimum length,
+traffic or presentation requirement. Lower grades and uncertain judgments stay in
+Saved for later with an explicit reason and remain available for manual approval.
+
+Production sampling can recover up to two same-scope frame/entry pages, then
+inspect a source-linked ancestor homepage and the site/account homepage. It uses
+the existing persistent Wayback session, date tiers and cumulative limits, with
+up to two versions per homepage and at most 120,000 complete extracted characters
+for grading. Missing/oversized context keeps the candidate's useful evidence and
+a conservative boundary. The grader's scope evidence must quote a captured landing
+page; a good `/eq/` or `/crimson/` page cannot authorize unrelated parent-host pages.
+A proven EQ section can expand to its own homepage, including siblings beneath
+that EQ boundary. Parent context remains grading evidence and is excluded from
+capture output when it lies outside the final approved scope.
+
+Once an EQ site or section is established, capture remains deliberately generous:
+all child pages, images, files and dated versions from 1999–2006, including member
+biographies, fiction, jokes, galleries and off-topic community discussion. There
+is no individual-page EQ classifier or keyword filter. Explicit custom scopes and
+whole-board Ezboard/SitePowerUp identities retain their existing controls.
+
+Old paid judgments, responses and approvals remain source-verifiable under their
+original known signature. An unapproved legacy judgment cannot trigger automatic
+capture until rechecked with the new policy; that recheck retains the original
+operation and cumulative spend cap, shared daily/monthly ledger and enrichment
+priority. The UI offers **Update quality assessment** and shows the two grades on
+current judgments. Existing approvals, published captures, index records and
+running Jobs are preserved; this policy does not retroactively delete content.

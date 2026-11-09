@@ -10,7 +10,8 @@ sys.path[:0] = [str(SOFTWARE / "scripts/archive-crawler"), str(Path(__file__).re
 
 from common import capture_scope, digest
 from captures import archive_path
-from grading import SIGNATURE, sources
+from grading import SIGNATURE, sources, grader_signature
+from selection_policy import VERSION as SELECTION_VERSION
 from review import record
 from state import connect
 
@@ -29,7 +30,9 @@ def add_candidate(root, url="http://guild.example/eq/news.html", body=None, iden
                          (identifier, url, capture_scope(url), 100, '{"status":"absent_host"}', '[]', json.dumps([capture])))
         row = store.db.execute("SELECT * FROM candidates WHERE id=?", (identifier,)).fetchone()
         if grade is not None:
-            rating = {"grade": grade, "category": "guild", "confidence": "high", "reason": "A contemporary EQ guild.",
+            rating = {"selection_policy":SELECTION_VERSION,"grader_signature":grader_signature(),
+                      "relevance_grade":grade,"quality_grade":grade,"content_kind":"substantive",
+                      "site_type":"unknown","scope_evidence":[],"grade": grade, "category": "guild", "confidence": "high", "reason": "A contemporary EQ guild.",
                       "evidence": [{"slot": 0, "excerpt": "EverQuest guild history."}], "origin": "model",
                       "signature": digest({"grader": SIGNATURE, "documents": sources(store, row, 120000)})}
             store.db.execute("UPDATE candidates SET rating=?,state='approval_pending' WHERE id=?", (json.dumps(rating), identifier))

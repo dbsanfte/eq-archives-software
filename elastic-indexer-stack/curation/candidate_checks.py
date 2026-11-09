@@ -9,7 +9,8 @@ from common import CrawlError, Store, candidate_exclusion, digest, now
 from coverage_check import refresh, require_new
 from crawler import parser
 from ezboard import address as ezboard_address, shard as ezboard_shard
-from grading import criteria, grade, sources
+from grading import criteria, grade, sources, current_rating
+from selection_policy import VERSION as SELECTION_VERSION
 from portal import Stage, decorate
 from review import record
 from state import Lane, active_operation, connect, enqueue, unpack
@@ -60,12 +61,12 @@ def start(store, payload):
     previous = store.db.execute("SELECT * FROM operations WHERE kind='candidate_check' AND json_extract(payload,'$.id')=? ORDER BY created DESC,rowid DESC LIMIT 1", (row['id'],)).fetchone()
     previous = unpack(previous) if previous else None
     focus = criteria(payload.get('grading_criteria', previous['payload'].get('grading_criteria', '') if previous else (row['rating'] or {}).get('grading_criteria', '')))
-    payload = {**payload, 'grading_criteria': focus}
+    payload = {**payload, 'grading_criteria': focus, 'selection_policy': SELECTION_VERSION}
     if previous and previous['state'] in ('queued', 'running'):
         if focus != previous['payload'].get('grading_criteria', ''):
             raise CrawlError('This check is already running with saved grading criteria. Wait for it to finish before changing them.')
         return {'operation': previous['id'], 'max_usd': previous['payload']['max_usd'], 'existing': True}
-    if row['rating'] and row['captures'] and focus == row['rating'].get('grading_criteria', ''):
+    if current_rating(row['rating']) and row['captures'] and focus == row['rating'].get('grading_criteria', ''):
         raise CrawlError('This candidate already has a source grade for these criteria. Review its capture scope or change the criteria.')
     if previous:
         if (previous['payload']['manifest_sha256'] != row['manifest_sha256']
@@ -75,7 +76,7 @@ def start(store, payload):
             raise CrawlError('Another discovery or evidence check is queued or running. Retry when it finishes.')
         # A changed capture scope can reuse the same samples, cached grade and
         # budget. Bind the next merge to the newly reviewed scope, never an old one.
-        resumed = {**previous['payload'], 'manifest_sha256': row['manifest_sha256'], 'grading_criteria': focus}
+        resumed = {**previous['payload'], 'manifest_sha256': row['manifest_sha256'], 'grading_criteria': focus, 'selection_policy': SELECTION_VERSION}
         store.db.execute('INSERT INTO events(candidate,action,detail,created) VALUES (?,?,?,?)',
                          (row['id'], 'grading_requested', json.dumps({'operation': previous['id'], 'grading_criteria': focus}), now()))
         store.db.execute("UPDATE operations SET state='queued',payload=?,error=NULL,updated=? WHERE id=?",
@@ -98,7 +99,7 @@ def run(root, operation):
     refresh(root, candidate_id=payload['id'], force=True)
     with connect(root) as main:
         raw, row = current(main, payload)
-        if row['rating'] and row['captures'] and row['rating'].get('grading_criteria', '') == payload.get('grading_criteria', ''):
+        if current_rating(row['rating']) and row['captures'] and row['rating'].get('grading_criteria', '') == payload.get('grading_criteria', ''):
             return {'candidate_id': row['id'], 'phase': 'complete'}
         if not os.environ.get('ARCHIVE_REPO'):
             raise CrawlError('Archive metadata is not configured; evidence recovery cannot continue.')
@@ -134,7 +135,7 @@ def run(root, operation):
         candidate = run_store.candidates()[0]
         if not json.loads(candidate['captures']):
             progress('sampling')
-            args = options.parse_args(['--work-dir', str(directory), 'sample', '--max-candidates', '1',
+            args = options.parse_args(['--work-dir', str(directory), 'sample', '--selection-context', '--max-candidates', '1',
                                        '--max-seconds', '1800', '--retry-unresolved'])
             sample(args, run_store)
         if json.loads(run_store.candidates()[0]['captures']):
