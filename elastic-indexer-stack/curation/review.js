@@ -541,7 +541,7 @@ function renderCandidate(root,row) {
   const evidence=panel(row.rating ? 'Why capture this site?' : 'Source evidence',row.rating?.reason || 'This site needs verified source evidence before approval.');
   if (row.rating) evidence.prepend(badge(`${row.selection_current===false ? 'Previous Luna grade' : 'Luna grade'} ${row.rating.grade}/3 · ${row.rating.category.replaceAll('_',' ')}`));
   for (const excerpt of row.rating?.evidence || []) evidence.append(node('blockquote',excerpt.excerpt,'evidence'));
-  if (row.rating && row.selection_current!==false && Number.isInteger(row.rating.relevance_grade) && Number.isInteger(row.rating.quality_grade)) evidence.append(node('p',`EQ relevance ${row.rating.relevance_grade}/3 · Archival substance ${row.rating.quality_grade}/3`,'grading-focus'));
+  if (row.rating && row.selection_current!==false && Number.isInteger(row.rating.relevance_grade) && Number.isInteger(row.rating.quality_grade)) evidence.append(node('p',`EQ relevance ${row.rating.relevance_grade}/3 · Archival substance ${row.rating.quality_grade}/3`,'quality-scores meta'));
   if (row.rating && row.selection_current===false) evidence.append(node('p','This older grade needs the updated quality and site-boundary assessment before automatic approval.','status-help'));
   if (row.rating) evidence.append(node('p',`${row.rating.confidence} confidence · AI assessment, awaiting your decision`,'meta'));
   if (row.rating) evidence.append(node('p',`Graded for: ${row.rating.grading_criteria || 'General EverQuest relevance'}`,'grading-focus'));
