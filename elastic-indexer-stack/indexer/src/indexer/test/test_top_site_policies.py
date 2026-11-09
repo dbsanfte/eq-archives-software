@@ -201,3 +201,16 @@ def test_vbulletin_missing_message_close_can_use_its_own_proven_body_cell():
     # A truly uncertain author/boundary keeps the complete generic document.
     p=plan(raw.replace('<a name="post2"></a>',''))
     assert 'Unique message 1.' in p.view
+
+
+def test_guildmagic_guild_and_server_follow_every_statistics_chunk():
+    header='<table><tr><td><div class="rosterguildname">Hand of Dawn</div></td><td><a href="browse_server.cfm?id=30">Rallos Zek</a><a href="guild_stats.cfm?ID=42">View stats</a><a href="guild_characters.cfm?ID=42">View roster</a></td></tr></table>'
+    body=''.join(f'<p>Captured statistic {i}: 0 warriors, 2 clerics, 6 characters.</p>' for i in range(100))
+    p=plan('<title>Guild Magic</title>'+header+body,'eq.guildmagic.com','guild_stats.cfm?ID=42')
+    assert p.method=='guildmagic_roster'
+    assert all('Hand of Dawn' in x.request and 'Rallos Zek' in x.request for x in p.passages)
+    assert all(f'Captured statistic {i}: 0 warriors' in p.view for i in range(100))
+    for raw in (header.replace('guild_characters.cfm?ID=42','guild_characters.cfm?ID=99')+body,
+                header+'<div class="rosterguildname">Another guild</div>'+body):
+        p=plan('<title>Guild Magic</title>'+raw,'eq.guildmagic.com')
+        assert p.method!='guildmagic_roster' and 'Captured statistic 99' in p.view

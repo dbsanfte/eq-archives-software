@@ -316,7 +316,8 @@ boundaries, retaining quotes, data tables and attachments. Ezboard ad-only rows
 must not invalidate message recognition; vBulletin can use a proven post cell
 when one closing comment is absent, never borrow a previous author's metadata.
 Catalog specializations require captured structural evidence: EQInterface,
-EQRankings, MaximumEQ, EQDiva, EQPrices, EQSpoilers, Graffe spell IDs and EverQuest
+EQRankings, MaximumEQ, EQDiva, EQPrices, EQSpoilers, GuildMagic guild/server context,
+Graffe spell IDs and EverQuest
 Online item entries. Bind entity/section/column context to continuations without
 merging distinct spell/item entries. Keep raw fields, zero values and unknown
 templates; shared calendar/ad/navigation cleanup cannot remove authored content.

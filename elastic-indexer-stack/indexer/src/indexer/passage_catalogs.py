@@ -73,6 +73,19 @@ def linked_menu(node,required):
 
 def project(soup,host,path,title,excluded):
     host=host.lower().removeprefix('www.').split(':')[0]
+    if host=='guildmagic.com' or host.endswith('.guildmagic.com'):
+        names=soup.select('.rosterguildname')
+        if len(names)!=1 or names[0].find_parent(['blockquote','pre','code','article']):return None
+        container=names[0].find_parent('table')
+        if container is None:return None
+        actions={}
+        for action in ('guild_stats','guild_characters'):
+            link=container.find('a',href=re.compile(r'(?:^|/)'+action+r'\.cfm\?ID=\d+(?:&|$)',re.I))
+            if link:actions[action]=re.search(r'[?&]ID=(\d+)',link['href'],re.I)[1]
+        server=container.find('a',href=re.compile(r'(?:^|/)browse_server\.cfm\?id=\d+',re.I))
+        if (len(actions)!=2 or len(set(actions.values()))!=1 or not words(server) or not words(names[0])):return None
+        excluded.append('guildmagic_guild_context')
+        return 'GuildMagic: '+words(names[0])+' | '+words(server),'guildmagic_roster'
     if host=='graffe.com':
         identified=False
         for table in soup.select('table.spell'):

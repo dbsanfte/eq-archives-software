@@ -705,7 +705,7 @@ the matching header or ownership is uncertain.
 
 Major catalog policies preserve source entity identity, column labels and section
 boundaries for EQInterface, EQRankings, MaximumEQ, EQDiva, EQPrices, EQSpoilers,
-Graffe spells and EverQuest Online items. Spells/items remain separate entries;
+GuildMagic, Graffe spells and EverQuest Online items. Spells/items remain separate entries;
 all raw field values and unknown layouts are retained. Shared calendar, network
 navigation and nested advertising-script rules retain authored content.
 
