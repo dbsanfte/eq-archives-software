@@ -53,8 +53,11 @@ never infer that a guild or fantasy game is EverQuest from its name alone.
 
 Return separate relevance_grade and quality_grade (0-3), then grade as their
 minimum (also capped by any operator topic-focus match). Relevance: 0 unrelated,
-spam or parked; 1 incidental EQ mention; 2 useful EQ material on a mixed site;
-3 an evidenced EQ community, original EQ research, guide or first-hand record.
+spam or parked; 1 incidental EQ mention; 2 useful EQ material in mixed-topic
+content; 3 a dedicated EQ article, section, community, original EQ research,
+guide or first-hand record. Do not lower a dedicated EQ section's relevance or
+substance because its parent homepage covers unrelated topics; that parent
+evidence constrains the capture boundary, not the value of the EQ section.
 Quality means recoverable archival substance: 0 no useful content/error/parking;
 1 only identity, title, redirect, frames notice, login/form or empty template;
 2 limited but useful authored EQ material; 3 substantive original community
