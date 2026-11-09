@@ -2534,19 +2534,22 @@ async def chunking_audit_flow(browser,base,width):
         await page.get_by_label('Find a site or policy').fill('ezboard.com')
         await expect(page.locator('#sites > details')).to_have_count(1)
         for theme in ('light','dark'):
-            await page.evaluate('(theme)=>document.documentElement.dataset.theme=theme',theme)
+            await page.emulate_media(color_scheme=theme)
+            await expect(page.locator('html')).to_have_attribute('data-theme',theme)
             await page.locator('#sites summary').click()
             await expect(page.locator('.audit-body')).to_be_visible()
             await expect(page.locator('.audit-body')).to_contain_text('<img src=x')
             assert await page.locator('.audit-body img,.audit-body script').count()==0
             assert not await page.evaluate('Boolean(window.auditUnsafe)')
             assert await page.evaluate('document.documentElement.scrollWidth<=innerWidth')
-            for selector in ('#search','#decision','#reload','#sites summary','.evidence a'):
+            for selector in ('#theme-toggle','#search','#decision','#reload','#sites summary','.evidence a'):
                 box=await page.locator(selector).first.bounding_box()
                 assert box and box['height']>=44,(width,selector,box)
             if width<600:assert await page.locator('.comparison').evaluate('e=>getComputedStyle(e).gridTemplateColumns.split(" ").length')==1
             await page.screenshot(path=f'/tmp/curation-chunking-audit-{width}-{theme}.png',full_page=True)
             await page.locator('#sites summary').click()
+        await page.get_by_role('button',name='Dark mode',exact=True).click()
+        await expect(page.locator('html')).to_have_attribute('data-theme','light')
         await page.get_by_label('Find a site or policy').fill('no-such-site.example')
         await expect(page.locator('#sites > details')).to_have_count(0)
         await expect(page.locator('#status')).to_contain_text('0 of 50')
