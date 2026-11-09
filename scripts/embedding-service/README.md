@@ -202,7 +202,7 @@ not hold other workers. Missing sources are counted, retain original text/chunks
 and never claim repaired extraction. Unusable old vectors with no corresponding
 text are cleared during replacement. Empty sources are not invented.
 
-`embedding_model` and `text_chunking_version=eq-passages-480-v11` together are the
+`embedding_model` and `text_chunking_version=eq-passages-480-v12` together are the
 text resume checkpoint. Older Gemma records remain eligible for the passage
 upgrade; `REINDEX_PRIORITIZE_UNCONVERTED=true` finishes the old model frontier
 first, then upgrades previously converted Gemma records. Count model conversion
@@ -694,6 +694,28 @@ including large quotations and subheaded articles; separate entries remain
 separate. Bold first-row values alone no longer become table-column metadata.
 Empty malformed table-row wrappers retain their populated descendant rows;
 this restores older EQ Traders clay-conversion tables and unrelated damaged HTML.
+
+### Fifty-site source audit
+
+Policy `eq-passages-480-v12` adds source-evidenced Snowboards/VN, phpBB 1,
+old UBB, UBBThreads `font.post` and Magelo forum message handling. Ezboard ad-only
+interstitials cannot invalidate a complete thread. A missing vBulletin message
+comment may use its own proven post cell, retaining conservative fallback when
+the matching header or ownership is uncertain.
+
+Major catalog policies preserve source entity identity, column labels and section
+boundaries for EQInterface, EQRankings, MaximumEQ, EQDiva, EQPrices, EQSpoilers,
+GuildMagic, Graffe spells and EverQuest Online items. Spells/items remain separate entries;
+all raw field values and unknown layouts are retained. Shared calendar, network
+navigation and nested advertising-script rules retain authored content.
+
+The LAN curation portal's **More → Chunking audit** dashboard records the fifty
+site decisions, bounded source samples and before/after projections. See the
+[audit guide](../chunk-audit/README.md) for scope and verification limits. These
+are source/structure/token checks, not a retrieval relevance benchmark. Existing
+v10/v11 checkpoints remain valid historical progress. New imports use v12;
+bounded curation maintenance upgrades old same-model records after existing broad
+writers finish naturally. Do not restart the active broad Job for this delivery.
 Archive-status projections clear summary/OCR vectors with body vectors atomically,
 using the typed projection status rather than an incomplete diagnostic allowlist.
 

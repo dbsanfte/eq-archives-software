@@ -19,9 +19,9 @@ from bs4 import BeautifulSoup, Comment
 from . import gemma
 from .chunking import SourceChunk, chunk_source
 from .html_extraction import website_markdown, repair_script_markup
-from . import passage_forums, passage_sites, passage_scaffolding
+from . import passage_forums, passage_sites, passage_scaffolding, passage_catalogs
 
-VERSION = "eq-passages-480-v11"
+VERSION = "eq-passages-480-v12"
 MAX_TOKENS = 480
 ASSETS = {".js", ".css", ".map", ".ico", ".svg", ".woff", ".woff2"}
 CONTROLS = re.compile(r"^(?:reply(?: to (?:item|topic))?(?: with quote)?|quote|edit|delete|"
@@ -329,6 +329,9 @@ def _structured_navigation(soup,excluded):
         signals=sum(any(re.fullmatch(pattern,label) for label in labels) for pattern in
                     (r'(?:current )?news',r'news archive',r'poll archive',r'submit news',
                      r'contact(?: us)?',r'(?:log ?in|register)',r'(?:home|main)',r'search'))
+        extended=sum(any(re.fullmatch(pattern,label) for label in labels) for pattern in
+                     (r'(?:current )?news',r'archive(?:s)?',r'forums?',r'irc',r'member list',
+                      r'contact(?: us)?',r'(?:home|main)',r'screenshots'))
         linked=sum(len(passage_forums.words(a)) for a in links)
         menu_roles=(len(node.select('a.menuItem'))>=3 and node.select_one('.menuSection') is not None)
         data=any(len(cells:=passage_forums.row_cells(row))>1 and
@@ -336,7 +339,7 @@ def _structured_navigation(soup,excluded):
                  for row in node.find_all('tr'))
         # Require multiple exact UI roles and negligible authored descriptions.
         unlinked=len(text)-linked
-        if (signals>=3 or menu_roles) and linked/max(1,len(text))>(.65 if menu_roles else .78) and unlinked<max(80,len(links)*(8 if menu_roles else 5)) and not data:
+        if (signals>=3 or menu_roles or extended>=5 and not node.find(['h1','h2','h3'])) and linked/max(1,len(text))>(.65 if menu_roles else .78) and unlinked<max(80,len(links)*(8 if menu_roles else 5)) and not data:
             node.decompose();excluded.append('structured_navigation')
 
 
@@ -463,6 +466,8 @@ def _html_view(raw, host, _preserve_layout=False, path=""):
         passage_scaffolding.expand_fallbacks(soup,excluded)
         _encoded_advertising(soup,excluded)
         passage_scaffolding.clean(soup,excluded)
+        if host.endswith(('everlore.com','castersrealm.com','allakhazam.com')):
+            passage_catalogs.network_navigation(soup,excluded)
     reason=None if thread else (passage_forums.excluded_page(soup,title,path) or passage_scaffolding.status(soup,title,excluded) or _layout_utility(soup,path))
     if reason:
         return "",title,"archive_status",excluded+[reason]
@@ -545,9 +550,9 @@ def _html_view(raw, host, _preserve_layout=False, path=""):
                     and not node.select("#headerrow,th,caption")):
                 excluded.append("legacy_aggregator_navigation")
                 node.decompose()
-    if host.endswith("allakhazam.com"):
+    if not thread and host.endswith("allakhazam.com"):
         title = _allakhazam(soup,source_title,excluded,path)
-    elif host.endswith("everlore.com"):
+    elif not thread and host.endswith("everlore.com"):
         heading = soup.find(["h1", "h2"])
         if heading:
             title = heading.get_text(" ", strip=True)
@@ -861,7 +866,8 @@ def prepare(text, record_id="", title="", *, html_source=None, mime_type=""):
     if view:view += "\n"
     elif text.strip():excluded.append("no_visible_content")
     title=_short(title)
-    passages=_chunks(view,title,document_context,strict_sections=method=='feed_entries' and 'feed_entry_structure' not in excluded) if view.strip() else ()
+    strict=(method=='feed_entries' and 'feed_entry_structure' not in excluded or method in ('spell_catalog','item_catalog'))
+    passages=_chunks(view,title,document_context,strict_sections=strict) if view.strip() else ()
     plan=Plan(digest(text),raw_hash,view,title,method,tuple(sorted(set(excluded))),passages)
     verify(text,plan)
     return plan

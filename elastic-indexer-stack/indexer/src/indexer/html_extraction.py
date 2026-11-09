@@ -33,19 +33,23 @@ def repair_script_markup(raw):
         first=closing.search(raw,match.end())
         if first is None:break
         cursor=first.end()
-        # Normal script boundaries need no JS scan. Only an immediately
-        # following quote can satisfy the repair proof below.
-        if cursor==len(raw) or raw[cursor] not in '\"\'`':continue
+        # A literal closing tag can occur halfway through generated iframe /
+        # noscript HTML, not just immediately before the JS closing quote.
+        # Scan only scripts which actually contain a nested script literal.
+        if cursor==len(raw) or (raw[cursor] not in '\"\'`' and
+                not opening.search(raw,match.end(),first.start())):continue
         i=match.end();limit=min(len(raw),i+65536)
-        state='code';quote='';bracket=False;previous='';proved=False
+        state='code';quote='';bracket=False;previous='';proved=False;embedded=False
         while i<limit:
             char=raw[i]
             if state=='string':
                 inner=closing.match(raw,i)
                 if inner and inner.start()==first.start():
-                    proved=inner.end()<len(raw) and raw[inner.end()]==quote
+                    embedded=True
                 if char=='\\':i+=2;continue
-                if char==quote:state='code';previous='value'
+                if char==quote:
+                    if embedded and re.match(r'\s*(?:[+),;]|$)',raw[i+1:]):proved=True
+                    state='code';previous='value'
             elif state=='regex':
                 if char=='\\':i+=2;continue
                 if char=='[':bracket=True

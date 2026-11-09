@@ -230,10 +230,10 @@ Infrastructure recovery is automatic; application/integrity failures remain
 visible for a correction. Inspect Job conditions and logs rather than assuming
 that a Running pod has made progress.
 
-The current source policy is `eq-passages-480-v11`, with both model and passage
+The current source policy is `eq-passages-480-v12`, with both model and passage
 policy required for completion in a newly prepared Job. Deployment leaves an
 already running v10 Job and its checkpoints unchanged; completion of that Job
-does not imply v11 coverage. The regular curation loop upgrades stale same-model passages in bounded slices
+does not imply v12 coverage. The regular curation loop upgrades stale same-model passages in bounded slices
 after the old broad writer finishes, yielding to foreground imports. A separately
 authorized, prepared model migration still prioritizes the unfinished model frontier. Retain the old
 Job and prepared checkout. A separate `render-reindex.py --images` Job can index

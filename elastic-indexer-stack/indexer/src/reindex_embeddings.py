@@ -173,7 +173,7 @@ def migrate_record(client, index, hit, repo, embedder, preparation_pool=None, *,
     saved=[tuple(p.get(k) for k in ('text_chunk','title','context','kind','source_start','source_end'))
            for p in source.get('text') or []]
     reuse=(source.get('embedding_model')==gemma.MODEL and not missing
-           and prior_version in ('eq-passages-480-v4','eq-passages-480-v5','eq-passages-480-v6','eq-passages-480-v7','eq-passages-480-v8','eq-passages-480-v9','eq-passages-480-v10',passages.VERSION) and previous.get('version')==prior_version
+           and prior_version in ('eq-passages-480-v4','eq-passages-480-v5','eq-passages-480-v6','eq-passages-480-v7','eq-passages-480-v8','eq-passages-480-v9','eq-passages-480-v10','eq-passages-480-v11',passages.VERSION) and previous.get('version')==prior_version
            and patch.get('text_full',source.get('text_full'))==source.get('text_full')
            and same_sources and expected==saved)
     if reuse:
