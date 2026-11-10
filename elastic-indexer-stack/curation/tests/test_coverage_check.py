@@ -26,6 +26,30 @@ def archive(tmp_path, files):
     return repo
 
 
+def test_coverage_refresh_releases_each_write_before_checking_the_next_site(tmp_path, monkeypatch):
+    root = tmp_path / 'state'
+    add_candidate(root, url='http://first.example/eq/')
+    add_candidate(root, url='http://second.example/eq/')
+    repo = archive(tmp_path, ['other.example/20000101000000/index.html'])
+    monkeypatch.setenv('ARCHIVE_REPO', str(repo))
+    checks = []
+    def check(*args, **kwargs):
+        if checks:
+            with connect(root) as writer:
+                writer.db.execute('PRAGMA busy_timeout=0')
+                writer.db.execute('BEGIN IMMEDIATE')
+                writer.db.execute("INSERT INTO meta VALUES ('concurrent-worker','true')")
+                writer.db.commit()
+        checks.append(True)
+        return {'status': 'new_site', 'complete': True}
+    monkeypatch.setattr('coverage_check.SiteInventory.check', check)
+    refresh(root)
+    assert len(checks) == 2
+    with connect(root) as store:
+        assert store.get('concurrent-worker') is True
+        assert all(json.loads(row['coverage'])['site_check']['status'] == 'new_site' for row in store.candidates())
+
+
 @pytest.mark.parametrize('new_state', ['capturing', 'rejected', 'approved_waiting_batch'])
 def test_slow_coverage_refresh_cannot_overwrite_a_concurrent_claim_or_decision(tmp_path, monkeypatch, new_state):
     root = tmp_path / 'state'

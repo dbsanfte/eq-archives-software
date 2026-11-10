@@ -214,6 +214,109 @@ def failed_import(root,row):
     return batch
 
 
+def test_slow_index_retry_verification_keeps_http_health_responsive(candidate, monkeypatch):
+    import asyncio
+    import threading
+    import httpx
+    import index_captures
+    from server import create_app
+    from test_server import ORIGIN
+    root, row = candidate
+    batch = failed_import(root, row)
+    app = create_app(root, start_worker=False)
+    entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+    original = index_captures.read_batch
+    def slow(*args):
+        entered.set()
+        # An external safety timer also releases the old blocking implementation,
+        # so a regression fails rather than deadlocking this test's event loop.
+        assert release.wait(5)
+        try:return original(*args)
+        finally:finished.set()
+    monkeypatch.setattr(index_captures, 'read_batch', slow)
+    timer = threading.Timer(2, release.set)
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app, client=('192.168.50.20',1234)),base_url=ORIGIN) as client:
+            pending = asyncio.create_task(client.post('/api/index-retry',json={
+                'id':batch['id'],'manifest_sha256':batch['manifest_sha256'],'job_name':batch['job']['name']},
+                headers={'Origin':ORIGIN,'X-Curation-Request':'1'}))
+            try:
+                assert await asyncio.to_thread(entered.wait, 3)
+                response = await asyncio.wait_for(client.get('/healthz'), 1)
+                assert response.status_code == 200 and not finished.is_set()
+            finally:
+                release.set()
+                assert (await pending).status_code == 202
+    try:
+        timer.start();asyncio.run(run())
+    finally:
+        release.set();timer.cancel();timer.join()
+
+
+def test_retry_verifies_sources_without_holding_the_database_writer(candidate, monkeypatch):
+    import index_captures
+    from server import create_app
+    from test_server import call
+    root, row = candidate
+    batch = failed_import(root, row)
+    original = index_captures.read_batch
+    def verify(*args):
+        with connect(root) as writer:
+            writer.db.execute('PRAGMA busy_timeout=0')
+            writer.db.execute('BEGIN IMMEDIATE')
+            writer.db.execute("INSERT INTO meta VALUES ('concurrent-import','true')")
+            writer.db.commit()
+        return original(*args)
+    monkeypatch.setattr(index_captures, 'read_batch', verify)
+    response = call(create_app(root,start_worker=False),'POST','/api/index-retry',{
+        'id':batch['id'],'manifest_sha256':batch['manifest_sha256'],'job_name':batch['job']['name']})
+    assert response.status_code == 202
+    with connect(root) as store:assert store.get('concurrent-import') is True
+
+
+def test_busy_index_retry_returns_retryable_503_without_changing_the_approval(candidate):
+    from server import create_app
+    from test_server import call
+    root, row = candidate
+    batch = failed_import(root, row)
+    app = create_app(root, start_worker=False)
+    payload = {'id':batch['id'],'manifest_sha256':batch['manifest_sha256'],'job_name':batch['job']['name']}
+    with connect(root) as holder:
+        holder.db.execute('BEGIN IMMEDIATE')
+        response = call(app,'POST','/api/index-retry',payload)
+        assert response.status_code == 503 and response.headers['retry-after'] == '1'
+        assert 'retained' in response.json()['error']
+        assert holder.db.execute('SELECT state FROM batches').fetchone()[0] == 'index_failed'
+        assert not holder.db.execute("SELECT 1 FROM events WHERE action='site_indexing_retried'").fetchone()
+        holder.db.rollback()
+    assert call(app,'POST','/api/index-retry',payload).status_code == 202
+
+
+@pytest.mark.parametrize('changed', ['state', 'job', 'publication', 'manifest_sha256'])
+def test_retry_rechecks_current_approval_after_source_io(candidate, monkeypatch, changed):
+    import index_captures
+    from server import create_app
+    from test_server import call
+    root, row = candidate
+    batch = failed_import(root, row)
+    original = index_captures.read_batch
+    values = {'state':'indexing_declined', 'job':json.dumps({'name':'replaced-job'}),
+              'publication':json.dumps({'commit':'c'*40}), 'manifest_sha256':'d'*64}
+    def replace(*args):
+        saved = original(*args)
+        with connect(root) as writer:
+            writer.db.execute(f'UPDATE batches SET {changed}=? WHERE id=?', (values[changed],batch['id']))
+            writer.db.commit()
+        return saved
+    monkeypatch.setattr(index_captures, 'read_batch', replace)
+    response = call(create_app(root,start_worker=False),'POST','/api/index-retry',{
+        'id':batch['id'],'manifest_sha256':batch['manifest_sha256'],'job_name':batch['job']['name']})
+    assert response.status_code == 409
+    with connect(root) as store:
+        assert store.db.execute(f'SELECT {changed} FROM batches').fetchone()[0] == values[changed]
+        assert not store.db.execute("SELECT 1 FROM events WHERE action='site_indexing_retried'").fetchone()
+
+
 def test_explicit_index_retry_preserves_failed_jobs_publication_and_approved_site(candidate,monkeypatch):
     import copy
     from server import create_app

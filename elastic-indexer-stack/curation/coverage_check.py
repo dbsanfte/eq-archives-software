@@ -101,6 +101,10 @@ def refresh(root, candidate_id=None, force=False):
                 if changed.rowcount and state != row['state']:
                     store.db.execute('INSERT INTO events(candidate,action,detail,created) VALUES (?,?,?,?)',
                                      (row['id'], 'site_coverage_changed', json.dumps({'previous_state': row['state'], 'state': state, 'coverage': site_check}), now()))
+            # Cache hits do not commit for us. Keep each conditional update and
+            # its event atomic, releasing the writer before the next Git check.
+            # A large warm inventory must not monopolize the shared database.
+            store.db.commit()
         store.db.commit()
 
 
