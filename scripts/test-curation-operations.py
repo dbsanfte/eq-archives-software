@@ -100,8 +100,9 @@ class DeploymentTests(unittest.TestCase):
         role = requests[0][2]
         self.assertEqual(role, {"cluster": [], "indices": [{"names": ["eq-archive"], "privileges": ["read", "create_doc"]}]})
         self.assertEqual(requests[1][2], {"password": "dummy-writer", "roles": ["eqarchives-capture-import"]})
-        self.assertEqual(set(requests[2][2]["properties"]), {"embedding_model", "archive_source_sha256", "archive_source_manifest", "archive_commit", "llm_enrichment_signature"})
+        self.assertEqual(set(requests[2][2]["properties"]), {"embedding_model", "archive_source_sha256", "archive_source_manifest", "archive_commit", "llm_enrichment_signature", "site_first_indexed_at"})
         self.assertEqual(requests[2][2]["properties"]["embedding_model"], {"type": "keyword"})
+        self.assertEqual(requests[2][2]["properties"]["site_first_indexed_at"], {"type": "date"})
         rendered = json.loads(output.getvalue())
         self.assertEqual([item["metadata"]["name"] for item in rendered["items"]],
                          ["eqarchives-curation-secrets", "eqarchives-capture-indexer-secrets",'eqarchives-policy-indexer-secrets'])

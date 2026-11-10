@@ -27,6 +27,10 @@ ES_FIELDS = {
         "mapping": {"type": "keyword"},
         "default": None
     },
+    "site_first_indexed_at": {
+        "mapping": {"type": "date"},
+        "default": None
+    },
     "last_indexed": {
         "mapping": {"type": "date"},
         "default": None  # We'll set this later if None

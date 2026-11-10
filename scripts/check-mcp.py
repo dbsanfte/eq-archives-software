@@ -4,11 +4,13 @@
 import argparse
 from datetime import datetime, timezone
 import json
+import time
 import urllib.request
 
 
 def check(endpoint, query, host=None):
     def rpc(method, params=None):
+        time.sleep(0.22)  # Respect the public five-request/second ingress limit.
         headers = {
             "Content-Type": "application/json", "Accept": "application/json, text/event-stream",
             "MCP-Protocol-Version": "2025-11-25",
@@ -26,7 +28,7 @@ def check(endpoint, query, host=None):
     init = rpc("initialize", {"protocolVersion": "2025-11-25", "capabilities": {}, "clientInfo": {"name": "eqarchives-deploy-check", "version": "1.0"}})
     assert init["serverInfo"]["name"] == "EQ Archives"
     tools = {tool["name"]: tool for tool in rpc("tools/list")["tools"]}
-    assert set(tools) == {"search", "fetch", "search_archive", "list_sources"}
+    assert set(tools) == {"search", "fetch", "search_archive", "list_sources", "list_sites", "list_captures"}
     for tool in tools.values():
         assert tool["annotations"]["readOnlyHint"] and not tool["annotations"]["destructiveHint"]
         assert tool["_meta"]["securitySchemes"] == [{"type": "noauth"}]
@@ -74,7 +76,29 @@ def check(endpoint, query, host=None):
     for result in date_page["results"]:
         timestamp = datetime.fromisoformat(result["metadata"]["capture_date"].replace("Z", "+00:00"))
         assert timestamp.replace(tzinfo=timestamp.tzinfo or timezone.utc).astimezone(timezone.utc).date() == day
-    print('MCP schemas, search/fetch, 14 distinct paged sources, source discovery, exact source filters and inclusive dates passed.')
+    indexed = call("search_archive", {"query": query, "filters": {"collections": ["websites"]},
+                                       "sort": "last_indexed_desc", "limit": 2})
+    assert indexed["results"]
+    recent = next(r for r in indexed["results"] if r["metadata"].get("last_indexed"))
+    indexed_day = recent["metadata"]["last_indexed"][:10]
+    intersection = call("search_archive", {"query": query, "filters": {
+        "date_field": "last_indexed", "date_from": indexed_day, "date_to": indexed_day,
+        "capture_from": recent["metadata"]["capture_date"][:10],
+        "capture_to": recent["metadata"]["capture_date"][:10]}, "sort": "last_indexed_asc", "limit": 2})
+    assert intersection["results"] and all(r["metadata"]["last_indexed"][:10] == indexed_day for r in intersection["results"])
+    for kind in ("theme", "tag", "mime_type", "collection"):
+        directory = call("list_sources", {"source_type": kind, "query": query, "limit": 2})
+        assert directory["source_type"] == kind
+    sites = call("list_sites", {"query": query, "limit": 2})
+    assert sites["sites"] and sites["sites"][0]["latest_indexed"]
+    for site in sites["sites"]:
+        assert site["document_count"] > 0 and site["scope_url"].startswith("http://")
+    grouped = call("search_archive", {"query": query, "group_by": "discussion", "limit": 2})
+    assert grouped["results"] and grouped["results"][0]["group"]["kind"] in ("page", "discussion", "record")
+    history = call("list_captures", {"id": recent["id"], "limit": 2})
+    assert history["results"] and history["group_by"] == "page"
+    assert call("fetch", {"id": history["results"][0]["id"]})["text"]
+    print('MCP six-tool schemas, keyword/semantic search, dates, facets, recent sites, verified grouping, dated history and exact fetch passed.')
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@ from test_research import search_response, never_embed
 def test_research_tools_are_discoverable_without_changing_legacy_contracts():
     with TestClient(create_app(make_archive())) as client:
         tools = {tool['name']: tool for tool in rpc(client, 'tools/list').json()['result']['tools']}
-        assert set(tools) == {'search', 'fetch', 'search_archive', 'list_sources'}
+        assert set(tools) == {'search', 'fetch', 'search_archive', 'list_sources', 'list_sites', 'list_captures'}
         assert set(tools['search']['inputSchema']['properties']) == {'query'}
         assert set(tools['fetch']['inputSchema']['properties']) == {'id'}
         for tool in tools.values():
@@ -39,7 +39,7 @@ def test_research_tools_are_discoverable_without_changing_legacy_contracts():
     ("search_archive", {"filters": {"date_to": "now/d"}}),
     ("search_archive", {"filters": {"date_from": 915148800}}),
     ("search_archive", {"filters": {"date_from": "2000-01-01", "date_to": "1999-12-31"}}),
-    ("search_archive", {"filters": {"date_field": "last_indexed"}}),
+    ("search_archive", {"filters": {"date_field": "_script"}}),
     ("search_archive", {"filters": {"domains": [" "]}}),
     ("search_archive", {"filters": {"domains": ["x"] * 11}}),
     ("search_archive", {"filters": {"domains": ["x" * 256]}}),

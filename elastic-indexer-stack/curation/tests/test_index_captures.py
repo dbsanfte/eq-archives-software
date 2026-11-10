@@ -400,3 +400,56 @@ def test_discussion_feed_evidence_is_learned_before_print_views_without_extra_en
     assert document['discussion']['source_sha256']==captures[0]['sha256']
     assert document['discussion']['evidence_id']==captures[1]['archive_path']
     services.discussions.close()
+
+
+@pytest.mark.parametrize('count,known,expected', [(0,0,'2026-11-10T12:00:00Z'),
+    (3,3,'2026-11-09T12:00:00Z'),(3,0,None),(3,2,None)])
+def test_new_site_arrival_is_forward_only_and_legacy_dates_remain_unknown(tmp_path,count,known,expected):
+    calls=[];saved=[]
+    def handler(request):
+        body=json.loads(request.content)
+        if request.url.path.endswith('/_search'):
+            calls.append(body)
+            assert body['_source'] is False and body['track_total_hits'] is True
+            prefixes=[c['prefix']['id'] for c in body['query']['bool']['should']]
+            assert 'websites/example.org/' in prefixes and 'websites/www.example.org_80/' in prefixes
+            return httpx.Response(200,json={'hits':{'total':{'value':count,'relation':'eq'}},
+                'aggregations':{'first':{'value_as_string':'2026-11-09T12:00:00Z'},'known':{'value':known}}})
+        saved.append(body)
+        return httpx.Response(201,json={'result':'created'})
+    instance=service(tmp_path,handler)
+    try:
+        for path in ('a.html','b.html'):
+            doc={'id':'websites/example.org/20000101000000/'+path,'domain_name':'www.example.org:80',
+                 'last_indexed':'2026-11-10T12:00:00Z'}
+            assert instance.create(doc['id'],doc)
+        assert len(calls)==1
+        assert all(d.get('site_first_indexed_at')==expected for d in saved)
+    finally:instance.close()
+
+
+@pytest.mark.parametrize('failure',['timeout','incomplete','bad','http','conflict'])
+def test_site_arrival_provenance_failure_is_unknown_and_conflicts_recheck(tmp_path,failure,capsys):
+    saved=[];reads=[]
+    def handler(request):
+        if request.url.path.endswith('/_search'):
+            reads.append(json.loads(request.content))
+            if failure=='timeout':raise httpx.ConnectTimeout('private endpoint')
+            if failure=='http':return httpx.Response(503)
+            if failure=='bad':return httpx.Response(200,json={'secret':'private'})
+            return httpx.Response(200,json={'timed_out':failure=='incomplete','hits':{'total':{'value':0,'relation':'eq'}},
+                'aggregations':{'known':{'value':0},'first':{}}})
+        saved.append(json.loads(request.content))
+        return httpx.Response(409 if failure=='conflict' else 201,json={'result':'created'})
+    instance=service(tmp_path,handler)
+    doc={'id':'websites/example.org:8080/20000101000000/x','domain_name':'example.org:8080','last_indexed':'2026-11-10T12:00:00Z'}
+    try:
+        assert instance.create(doc['id'],doc) is (failure!='conflict')
+        assert len(reads[0]['query']['bool']['should'])==2
+        if failure=='conflict':
+            instance.create(doc['id'],doc)
+            assert len(reads)==2
+        else:
+            assert 'site_first_indexed_at' not in saved[0]
+            assert 'evidence_unavailable' in capsys.readouterr().out
+    finally:instance.close()

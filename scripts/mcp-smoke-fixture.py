@@ -15,8 +15,65 @@ DOCUMENTS = [{"_id": f"test/ancient-cyclops-{i:02d}.txt", "_source": {
     "domain_name": "alpha.example.org" if i < 12 else "beta.example.org",
     "mailing_list_name": "eq_wizards", "file_type": "text",
     "capture_date": "1999-11-05T19:21:11.000Z" if i < 12 else "2000-01-01T00:00:00.000Z",
-    "llm_guessed_date": "1999-11-05",
+    "llm_guessed_date": "1999-11-05", "last_indexed": "2026-11-10T12:00:00.000Z",
+    "mime_type": "text/plain", "llm_content_flavour": "quest", "llm_tags": ["cyclops", "quest"],
+    "llm_model_name": "fixture-model",
 }} for i in range(26)]
+
+# Keep the legacy 26-document paging fixture, with real website identities for
+# metadata directories/history. No production URLs or credentials are used.
+for document in DOCUMENTS:
+    source = document["_source"]
+    path = document["_id"].split("/", 1)[1]
+    source["id"] = document["_id"] = "websites/"+source["domain_name"]+"/19991105192111/"+path
+    source["url"] = "https://web.archive.org/web/19991105192111/http://"+source["domain_name"]+"/"+path
+
+
+def matches(clause, document):
+    source = document["_source"]
+    if "match_all" in clause or "simple_query_string" in clause:
+        return True
+    if "bool" in clause:
+        node = clause["bool"]
+        if not all(matches(c, document) for c in node.get("must", [])+node.get("filter", [])):
+            return False
+        if any(matches(c, document) for c in node.get("must_not", [])):
+            return False
+        return sum(matches(c, document) for c in node.get("should", [])) >= node.get("minimum_should_match", 0)
+    if "match_phrase" in clause:
+        field, value = next(iter(clause["match_phrase"].items()))
+        return value in source.get(field, "")
+    if "ids" in clause:
+        return document["_id"] in clause["ids"]["values"]
+    if "exists" in clause:
+        return source.get(clause["exists"]["field"]) is not None
+    if "regexp" in clause:
+        import re
+        field, value = next(iter(clause["regexp"].items()))
+        return re.fullmatch(value["value"] if isinstance(value, dict) else value, source.get(field, "")) is not None
+    for kind in ("term", "terms", "prefix", "range"):
+        if kind not in clause:
+            continue
+        field, value = next(iter(clause[kind].items()))
+        actual = source.get(field)
+        if kind == "term":
+            return actual == value
+        if kind == "terms":
+            return any(v in value for v in actual) if isinstance(actual, list) else actual in value
+        if kind == "prefix":
+            return isinstance(actual, str) and actual.startswith(value)
+        return actual is not None and value.get("gte", "") <= actual <= value.get("lte", "9999")
+    raise AssertionError("Unsupported fixture query")
+
+
+def metrics(hits):
+    def date_metric(field, maximum=False):
+        values = [h["_source"][field] for h in hits if h["_source"].get(field)]
+        return {"value_as_string": (max(values) if maximum else min(values))} if values else {"value": None}
+    return {"doc_count": len(hits), "latest": date_metric("last_indexed", True),
+            "first": date_metric("site_first_indexed_at"),
+            "known_first": {"value": sum(bool(h["_source"].get("site_first_indexed_at")) for h in hits)},
+            "earliest": date_metric("capture_date"), "newest": date_metric("capture_date", True)}
 
 
 class Fixture(BaseHTTPRequestHandler):
@@ -59,25 +116,31 @@ class Fixture(BaseHTTPRequestHandler):
             assert len(body["knn"]) == 4
             assert any(branch["field"] == "image_vector" for branch in body["knn"])
             assert all(len(item["query_vector"]) == 768 for item in body["knn"])
-        elif body["query"] != {"match_all": {}}:
-            assert "bool" in body["query"], "Legacy search unexpectedly lost its embeddings"
-            for clause in body["query"]["bool"]["filter"]:
-                if "terms" in clause:
-                    field, values = next(iter(clause["terms"].items()))
-                    hits = [d for d in hits if d["_source"].get(field) in values]
-                else:
-                    field, dates = next(iter(clause["range"].items()))
-                    hits = [d for d in hits if field in d["_source"]
-                            and dates.get("gte", "") <= d["_source"][field] <= dates.get("lte", "9999")]
+        else:
+            hits = [d for d in hits if matches(body["query"], d)]
             for sort in body.get("sort", [])[:1]:
                 field, order = next(iter(sort.items()))
                 if isinstance(order, dict):
                     hits.sort(key=lambda d: d["_source"].get(field, ""), reverse=order["order"] == "desc")
         result = {"hits": {"hits": [], "total": {"value": len(hits), "relation": "eq"}}}
-        if "aggs" in body:
+        if "sites" in body.get("aggs", {}):
+            domains = {d["_source"]["domain_name"] for d in hits}
+            buckets = [{"key": domain, **metrics([d for d in hits if d["_source"]["domain_name"] == domain])}
+                       for domain in sorted(domains)]
+            buckets.sort(key=lambda b: b["latest"]["value_as_string"], reverse=True)
+            result["aggregations"] = {"sites": {"buckets": buckets[:body["aggs"]["sites"]["terms"]["size"]]}}
+        elif "details" in body.get("aggs", {}):
+            result["aggregations"] = {"details": {"buckets": {domain: metrics([d for d in hits if matches(clause, d)])
+                for domain, clause in body["aggs"]["details"]["filters"]["filters"].items()}}}
+        elif "collections" in body.get("aggs", {}):
+            result["aggregations"] = {"collections": {"buckets": {name: {"doc_count": sum(matches(clause,d) for d in hits)}
+                for name, clause in body["aggs"]["collections"]["filters"]["filters"].items()}}}
+        elif "aggs" in body:
             composite = body["aggs"]["sources"]["composite"]
             field = composite["sources"][0]["value"]["terms"]["field"]
-            counts = Counter(d["_source"].get(field) for d in hits if d["_source"].get(field))
+            counts = Counter(value for d in hits for value in
+                             (d["_source"].get(field) if isinstance(d["_source"].get(field), list)
+                              else [d["_source"].get(field)]) if value)
             keys = sorted(k for k in counts if k > composite.get("after", {}).get("value", ""))
             keys = keys[:composite["size"]]
             aggregation = {"buckets": [{"key": {"value": k}, "doc_count": counts[k]} for k in keys]}

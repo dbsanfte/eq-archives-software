@@ -37,8 +37,10 @@ def main():
     put("/_security/role/eqarchives-capture-import", {"cluster": [], "indices": [{"names": ["eq-archive"], "privileges": ["read", "create_doc"]}]})
     put("/_security/user/" + username, {"password": password, "roles": ["eqarchives-capture-import"]})
     # Only additive provenance mappings; no existing field or index changes.
-    put("/eq-archive/_mapping", {"properties": {name: {"type": "keyword"} for name in
-                                               ("embedding_model", "archive_source_sha256", "archive_source_manifest", "archive_commit", "llm_enrichment_signature")}})
+    put("/eq-archive/_mapping", {"properties": {
+        **{name: {"type": "keyword"} for name in
+           ("embedding_model", "archive_source_sha256", "archive_source_manifest", "archive_commit", "llm_enrichment_signature")},
+        "site_first_indexed_at": {"type": "date"}}})
     aliases=request_json('/_alias/eq-archive')
     if not isinstance(aliases,dict) or len(aliases)!=1:
         raise SystemExit('Policy maintenance requires exactly one archive index; no credentials rendered')
