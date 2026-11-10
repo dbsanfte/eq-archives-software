@@ -1001,6 +1001,14 @@ state and the Luna ledger with the existing PVC.
 
 ## Publication resilience
 
+Coverage refresh commits each candidate's conditional update and event before
+checking the next site, so a large cached pass cannot monopolize SQLite's writer.
+Indexing retry performs source verification in a worker thread without holding a
+write transaction, then rechecks the current Job, manifest, publication and state
+before a short atomic update. A busy writer returns HTTP 503 with `Retry-After: 1`;
+the original approval and sources remain intact. Health and polling can continue
+while verification runs, and a concurrent decline or replacement wins.
+
 The private bare publisher has an exclusive OS lease for every Git operation.
 Verified files are hashed in 512-path batches through Git's `--stdin-paths`, with
 Git C quoting, disabled content filters and exact output count/object-ID checks.

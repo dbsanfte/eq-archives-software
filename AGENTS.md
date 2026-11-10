@@ -573,6 +573,11 @@ external work succeeds, retry only its metadata transaction, never downloads or
 Git publication. Preflight/import reconciliation contention stays retryable rather
 than marking a site's content failed. Preserve shutdown, leases and checkpoints;
 other database failures remain visible. Test real writer contention and HTTP health.
+Coverage refresh commits each conditional candidate update/event before the next
+site check; never retain SQLite's writer across a warm whole-corpus pass. Indexing
+retry runs source verification off the HTTP event loop and outside the write lock,
+then rechecks Job/manifest/publication/state atomically. Busy admission returns a
+sanitized 503 with Retry-After; stale decisions cannot advance or duplicate a Job.
 Keep pipeline status as a compact collapsed disclosure on each stage and site
 workspace, outside disabled manual discovery controls. Navigation to another
 stage collapses it; polling preserves the user-opened state. Show worker/queue/

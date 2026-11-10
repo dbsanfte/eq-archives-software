@@ -5,6 +5,7 @@ import ipaddress
 import json
 import os
 from pathlib import Path
+import sqlite3
 
 from starlette.applications import Starlette
 from starlette.concurrency import run_in_threadpool
@@ -15,7 +16,7 @@ from starlette.routing import Route
 from common import CrawlError, capture_scope, digest, now, site_identity
 from review import apply_decisions, checked_sources, queue, record
 from captures import LIMITS, TEXT_LIMIT, check_manifest, document, readable, verified_path
-from state import Lane, active_operation, connect, enqueue, operation_lane, unpack, valid_id
+from state import Lane, active_operation, connect, enqueue, operation_lane, unpack, valid_id, database_busy
 from worker import Worker
 from coverage_check import refresh, require_new
 from capture_flow import Action, UNDO_SECONDS, transition
@@ -381,27 +382,42 @@ def create_app(root=None, origin=None, start_worker=True):
         if (not isinstance(payload,dict) or set(payload) != {'id','manifest_sha256','job_name'}
                 or not all(isinstance(value,str) for value in payload.values())):
             raise CrawlError('Indexing retry requires the site review ID, manifest hash and failed Job name')
-        with connect(root) as store:
-            store.db.execute('BEGIN IMMEDIATE')
-            reviewed = get_site_review(store,payload['id'])
-            if (reviewed['state'] != 'index_failed' or reviewed['manifest_sha256'] != payload['manifest_sha256']
-                    or (reviewed['job'] or {}).get('name') != payload['job_name']
-                    or import_name(reviewed) != payload['job_name']):
-                raise CrawlError('This indexing failure changed or is already queued for retry')
+        def retry():
+            with connect(root) as store:
+                reviewed = get_site_review(store,payload['id'])
+                if (reviewed['state'] != 'index_failed' or reviewed['manifest_sha256'] != payload['manifest_sha256']
+                        or (reviewed['job'] or {}).get('name') != payload['job_name']
+                        or import_name(reviewed) != payload['job_name']):
+                    raise CrawlError('This indexing failure changed or is already queued for retry')
             # Revalidate the original published approval and every source. Never
-            # republish, mutate a terminal Job or change the approved budget.
+            # hold SQLite's writer or the HTTP event loop during source I/O.
             from index_captures import read_batch
             published = read_batch(root,f"batches/{reviewed['id']}/approved.json",reviewed['manifest_sha256'])
             if published['publication']['commit'] != (reviewed['publication'] or {}).get('commit'):
                 raise CrawlError('Published approval changed before indexing retry')
-            job = {'attempt':import_attempt(reviewed)+1,'previous_name':payload['job_name'],'state':'retry_queued'}
-            import_name({**reviewed,'job':job})  # Validate the next immutable Job identity.
-            store.db.execute("UPDATE batches SET state='published_waiting_index',job=?,error=NULL,updated=? WHERE id=?",
-                             (json.dumps(job),now(),reviewed['id']))
-            store.db.execute('INSERT INTO events(candidate,action,detail,created) VALUES (?,?,?,?)',
-                             (reviewed['manifest']['sites'][0]['id'],'site_indexing_retried',json.dumps(payload),now()))
-            store.db.commit()
-        return JSONResponse({'state':'published_waiting_index','attempt':job['attempt']},status_code=202)
+            with connect(root) as store:
+                store.db.execute('PRAGMA busy_timeout=250')
+                store.db.execute('BEGIN IMMEDIATE')
+                row = store.db.execute('SELECT id,state,manifest_sha256,publication,job FROM batches WHERE id=?',
+                                       (reviewed['id'],)).fetchone()
+                current = unpack(row) if row else {}
+                if any(current.get(key) != reviewed[key] for key in ('state','manifest_sha256','publication','job')):
+                    raise CrawlError('This indexing failure changed or is already queued for retry')
+                job = {'attempt':import_attempt(reviewed)+1,'previous_name':payload['job_name'],'state':'retry_queued'}
+                import_name({**reviewed,'job':job})
+                store.db.execute("UPDATE batches SET state='published_waiting_index',job=?,error=NULL,updated=? WHERE id=?",
+                                 (json.dumps(job),now(),reviewed['id']))
+                store.db.execute('INSERT INTO events(candidate,action,detail,created) VALUES (?,?,?,?)',
+                                 (reviewed['manifest']['sites'][0]['id'],'site_indexing_retried',json.dumps(payload),now()))
+                store.db.commit()
+            return {'state':'published_waiting_index','attempt':job['attempt']}
+        try:
+            return JSONResponse(await run_in_threadpool(retry),status_code=202)
+        except sqlite3.OperationalError as error:
+            if not database_busy(error):
+                raise
+            return JSONResponse({'error':'Curation database is busy; saved sources and approval are retained. Retry shortly.'},
+                                status_code=503,headers={'Retry-After':'1'})
 
     async def prepare_retry(request):
         payload = await body(request)
