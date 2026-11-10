@@ -242,7 +242,7 @@ def index_batch(root, batch, services, chunker=chunk_source):
         title_node=BeautifulSoup(source,'html.parser').title
         title=repaired_title(capture.get('title'),title_node.string if title_node else None,decoded)
         plan = passages.prepare(content, record_id, title or '',
-                                html_source=source, mime_type=source_type(capture))
+                                html_source=source, mime_type=media_type(capture))
         if not plan.passages:
             preserved += 1
             continue

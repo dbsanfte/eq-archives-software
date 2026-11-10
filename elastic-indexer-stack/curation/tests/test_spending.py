@@ -154,7 +154,7 @@ def test_unconfigured_shared_account_does_not_hide_legacy_spend(tmp_path):
     assert Spending(tmp_path).snapshot(NOW)['today']['estimated_usd'] == .12
 
 
-@pytest.mark.parametrize('damage', ['corrupt', 'negative', 'fractional', 'invalid-settings'])
+@pytest.mark.parametrize('damage', ['corrupt', 'negative', 'fractional', 'invalid-settings', 'missing-settings'])
 def test_bad_shared_accounting_is_visible_without_falling_back_to_partial_totals(tmp_path, monkeypatch, damage):
     account = DailyBudget(tmp_path / 'luna-budget')
     account.configure({'enabled': True, 'daily_usd': 20, 'monthly_usd': 200,
@@ -165,6 +165,8 @@ def test_bad_shared_accounting_is_visible_without_falling_back_to_partial_totals
         with account.database() as db:
             if damage == 'invalid-settings':
                 db.execute("UPDATE settings SET value='invalid json'")
+            elif damage == 'missing-settings':
+                db.execute('DELETE FROM settings')
             else:
                 db.execute('INSERT INTO reservations VALUES (?,?,?,?,?)',
                            ('bad', '2026-10-08', -1 if damage == 'negative' else .5, None, NOW.isoformat()))

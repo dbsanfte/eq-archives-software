@@ -105,7 +105,9 @@ class Spending:
             database.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
             database.execute('BEGIN')
             row = database.execute('SELECT value FROM settings WHERE id=1').fetchone()
-            if not row or not json.loads(row[0]).get('configured'):
+            if not row:
+                raise ValueError('Shared accounting settings are unavailable')
+            if not json.loads(row[0]).get('configured'):
                 return None
             # Range uses reservation_day. All four totals share one read snapshot,
             # with integer nanodollars and the admission ledger's UTC boundaries.
