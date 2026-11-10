@@ -280,7 +280,8 @@ class Archive(Catalog):
                 # ES may return an after_key different from the last bucket.
                 next_after = aggregation.get("after_key", {}).get("value") if len(sources) == limit else None
                 return SourcePage(source_type=source_type, sources=sources, next_after=next_after,
-                    note="Exact source values and matching document counts, alphabetically paged. Reuse the same query, filters and source_type with next_after; a final page may be empty. Counts exclude records missing this field.")
+                    note=("Exact source values and matching document counts, alphabetically paged. Reuse the same query, filters and source_type with next_after; a final page may be empty. Counts exclude records missing this field."
+                          + (" Themes and tags are model-generated, not human classifications; verify against source text." if source_type in ("theme", "tag") else "")))
             except (AttributeError, KeyError, TypeError, ValueError):
                 raise ToolError("Archive sources are temporarily unavailable. Please retry.") from None
 

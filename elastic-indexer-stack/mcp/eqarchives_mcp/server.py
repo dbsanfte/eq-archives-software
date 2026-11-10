@@ -107,6 +107,7 @@ def create_app(archive: Archive | None = None):
         the same source_type/query/filters to continue; the final page may be empty.
         Use returned values verbatim in filters; domains such as www.example.org and
         example.org are distinct. Missing/empty source fields are omitted.
+        Themes and tags are model-generated, not human classifications; verify sources.
         """
         return await archive.list_sources(source_type, query, filters, after, limit)
 

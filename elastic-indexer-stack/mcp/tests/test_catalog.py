@@ -228,7 +228,9 @@ def test_added_facets_use_fixed_keyword_fields(kind,field):
         body = json.loads(request.content)
         assert body['aggs']['sources']['composite']['sources'][0]['value']['terms']['field'] == field
         return search_response(aggregations={'sources':{'buckets':[]}})
-    assert run(make_archive(es).list_sources(kind)).sources == []
+    page = run(make_archive(es).list_sources(kind))
+    assert page.sources == []
+    assert ('model-generated' in page.note) is (kind in ('theme','tag'))
 
 
 @pytest.mark.parametrize('method,args', [('list_sites',{}),('list_captures',{'document_id':'x'})])
