@@ -1095,3 +1095,9 @@ operation and cumulative spend cap, shared daily/monthly ledger and enrichment
 priority. The UI offers **Update quality assessment** and shows the two grades on
 current judgments. Existing approvals, published captures, index records and
 running Jobs are preserved; this policy does not retroactively delete content.
+
+New imports conservatively record `site_first_indexed_at` for previously empty
+website host/www/default-port scopes. A resumed import reuses an established date;
+legacy or partially known history remains unknown. Optional provenance failures
+are logged without blocking capture imports. This metadata is exposed by the MCP
+`list_sites` tool and is distinct from Wayback capture dates and Git publication.

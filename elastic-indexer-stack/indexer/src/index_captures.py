@@ -165,10 +165,54 @@ class Services:
             time.sleep(2 * (attempt + 1))
         raise CrawlError("Embedding service is busy; batch remains resumable")
 
+    def site_first_indexed(self, document):
+        """Never infer legacy arrival dates from captures or backfill timestamps.
+
+        Only an empty host scope or entirely provenance-tracked prior imports can
+        establish a date. Shared-host legacy content conservatively stays unknown.
+        """
+        if not document.get("id", "").startswith("websites/") or not document.get("domain_name") or not document.get("last_indexed"):
+            return None, None
+        host = urlsplit("http://" + document["domain_name"])
+        name = host.hostname.removeprefix("www.")
+        aliases = [prefix + name + suffix for prefix in ("", "www.")
+                   for suffix in (("", ":80", ":443", "_80", "_443") if host.port in (None, 80, 443)
+                                  else (":" + str(host.port),))]
+        key = tuple(aliases)
+        cache = getattr(self, "first_indexed_cache", None)
+        if cache is None:
+            cache = self.first_indexed_cache = {}
+        if key not in cache:
+            try:
+                response = self.client.post(f"{self.es_url}/{quote(self.index, safe='')}/_search", json={
+                    "size": 0, "timeout": "8s", "track_total_hits": True, "_source": False,
+                    "query": {"bool": {"minimum_should_match": 1, "should": [
+                        {"prefix": {"id": "websites/" + alias + "/"}} for alias in aliases]}},
+                    "aggs": {"first": {"min": {"field": "site_first_indexed_at"}},
+                             "known": {"value_count": {"field": "site_first_indexed_at"}}}})
+                response.raise_for_status()
+                data = response.json()
+                total = data["hits"]["total"]
+                if data.get("timed_out") or data.get("_shards", {}).get("failed") or total["relation"] != "eq":
+                    raise ValueError("Incomplete first-indexed evidence")
+                count = total["value"]
+                cache[key] = (document["last_indexed"] if count == 0 else
+                              data["aggregations"]["first"]["value_as_string"]
+                              if data["aggregations"]["known"]["value"] == count else None)
+            except (httpx.HTTPError, KeyError, TypeError, ValueError):
+                # Optional arrival provenance cannot block an otherwise valid import.
+                print(json.dumps({"site_first_indexed": "unknown", "reason": "evidence_unavailable"}), flush=True)
+                cache[key] = None
+        return key, cache[key]
+
     def create(self, record_id, document):
+        key, first = self.site_first_indexed(document)
+        if first:
+            document = {**document, "site_first_indexed_at": first}
         response = self.client.put(f"{self.es_url}/{quote(self.index, safe='')}/_create/{quote(record_id, safe='')}",
                                    content=vector_json(document),headers={'Content-Type':'application/json'})
         if response.status_code == 409:
+            getattr(self, "first_indexed_cache", {}).pop(key, None)
             return False  # Another writer won; preserve its document/enrichment.
         if response.status_code != 201 or response.json().get("result") != "created":
             raise CrawlError(f"Elasticsearch create failed (HTTP {response.status_code}); upstream details omitted")

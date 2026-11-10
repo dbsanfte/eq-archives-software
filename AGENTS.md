@@ -874,13 +874,21 @@ text or substitute generated summaries; keep OCR/date estimates labelled.
 Never expose upstream credentials, errors, vectors or arbitrary Elasticsearch DSL.
 Keep retrieval/cache limits appropriate for the shared single-slot model server.
 The additive `search_archive` tool provides keyword research with exact source
-filters, inclusive UTC capture/estimated-publication dates, sorting and a bounded
+filters, independent inclusive UTC capture/publication/indexing windows, sorting and a bounded
 1,000-result window (1–50 results per page). Preserve the explicit lower-bound
 total and limit-reached signals. Pagination uses the live index; do not claim
 snapshot consistency. Keep replica preference and legacy-record tie ordering.
-`list_sources` discovers domain/mailing-list/file-type values with composite
-aggregation paging (1–100 values), using ES's returned after-key. Both tools share
-retrieval limits and must not call the embedding service. Cover filtering, invalid
+`list_sources` discovers domain/mailing-list/file-type/MIME/theme/tag values with
+composite paging (1–100 values), using ES's returned after-key, plus fixed archive
+collections. Model tags/themes are labelled. Literal URL/account scopes are parsed
+into escaped ID queries, never fetched; Ezboard membership requires archived board
+links. `list_sites` is a metadata-only newest-domain directory with a second bounded
+aggregation for exact per-shard counts. Keep historical first-arrival dates unknown;
+new imports record conservative forward provenance without updating old records.
+`list_captures` returns exact dated IDs, and optional search grouping uses exact
+page or source-verified discussion identity; disclose the 1,000-record scan bound.
+Availability filters mean indexed field presence; fetch reports nonempty text/OCR.
+These research tools share retrieval limits and must not call the embedding service. Cover filtering, invalid
 dates, pagination boundaries and old search/fetch compatibility with regressions.
 The user chose direct public MCP access with a top-right MCP icon and a connection
 screen for ChatGPT developer mode and Claude. Do not prepare or submit an official

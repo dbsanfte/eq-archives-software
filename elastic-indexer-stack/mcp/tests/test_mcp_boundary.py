@@ -30,7 +30,7 @@ def receiver(body):
     return receive
 
 
-@pytest.mark.parametrize("name", ["search", "search_archive", "list_sources"])
+@pytest.mark.parametrize("name", ["search", "search_archive", "list_sources", "list_sites"])
 @pytest.mark.parametrize("query", ["a/" * 101, "漢" * 101, '"' + "a " * 101 + '"'])
 def test_all_mcp_search_tools_reject_excessive_analysis_before_upstream(name, query):
     calls = []
@@ -153,7 +153,7 @@ def test_supported_modern_discovery_and_fetch_keep_the_contract_and_honest_capab
             assert info["capabilities"] == {"tools": {"listChanged": False}}
         assert legacy["serverInfo"]["name"] == "EQ Archives"
         assert "2026-07-28" in discovered["supportedVersions"]
-        assert len(modern("tools/list", {}).json()["result"]["tools"]) == 4
+        assert len(modern("tools/list", {}).json()["result"]["tools"]) == 6
         response = modern("tools/call", {"name": "fetch", "arguments": {"id": HIT["_id"]}})
         result = response.json()["result"]
         assert response.status_code == 200 and not result.get("isError")
@@ -232,11 +232,23 @@ def test_mcp_upload_deadline_disconnect_and_partial_send_release_capacity(monkey
 def test_mcp_total_deadline_cancels_sdk_work_and_releases_retrieval(monkeypatch):
     from eqarchives_mcp import mcp_boundary as boundary
     monkeypatch.setattr(boundary, "REQUEST_TIMEOUT", .03)
+    cancelled = asyncio.Event()
     async def es(request):
-        await asyncio.sleep(1)
+        try:
+            await asyncio.sleep(1)
+        finally:
+            cancelled.set()
     archive = make_archive(es)
     with TestClient(create_app(archive)) as client:
         response = rpc(client, "tools/call", {"name": "fetch", "arguments": {"id": "x"}})
         assert response.status_code == 503 and response.headers["retry-after"] == "5"
+        async def released():
+            # The transport signals the SDK's separate tool task. Observe its
+            # cancellation on the server loop, not a cross-thread response race.
+            async with asyncio.timeout(.25):
+                await cancelled.wait()
+                while archive.requests._value != 4:
+                    await asyncio.sleep(0)
+        client.portal.call(released)
         assert archive.requests._value == 4
         assert rpc(client, "ping").status_code == 200

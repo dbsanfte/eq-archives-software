@@ -12,8 +12,10 @@ there is no official OpenAI directory submission or publisher account dependency
 | --- | --- | --- |
 | `search` | `query`: 1–1000 characters | `results`: up to ten `{id, title, url}` sources |
 | `fetch` | `id`: exact search result ID, 1–2048 characters | `{id, title, text, url, metadata}` |
-| `search_archive` | `query`, `filters`, `offset`, `limit`, `sort` | Paged keyword results with provenance, bounded totals and `next_offset` |
+| `search_archive` | `query`, `filters`, `offset`, `limit`, `sort`, `group_by` | Paged keyword results with provenance, bounded totals and `next_offset` |
 | `list_sources` | `source_type`, `query`, `filters`, `after`, `limit` | Exact source values and matching document counts, with `next_after` |
+| `list_sites` | `query`, `filters`, `limit` (1–50) | Newest matching website domains, index/capture dates and exact matching counts |
+| `list_captures` | `id`, `group_by` (`page`/`discussion`), `offset`, `limit` | Exact dated IDs for a page or verified discussion, newest first |
 
 All tools declare output schemas, read-only/non-destructive/idempotent annotations,
 and anonymous authentication metadata. Results are returned in `structuredContent`
@@ -26,7 +28,7 @@ listing/calls and initialized/cancelled notifications. SDK defaults such as
 `subscriptions/listen`, prompts, resources and tasks are rejected before dispatch.
 Both protocol eras advertise only tools, without change subscriptions.
 
-Search combines source-text/title retrieval with existing 768-dimensional Nomic
+Search combines source-text/title retrieval with existing 768-dimensional EmbeddingGemma
 vectors (source chunks, summaries and images). Explicit phrases and simple
 operators use lexical search with AND as the default join so excluded terms cannot
 broaden the search and semantic matches do not bypass constraints. Use `|` for
@@ -50,25 +52,103 @@ structured result and its JSON text representation. A source that exceeds that
 wire limit returns an explicit HTTP 413 JSON-RPC error asking the client to open
 it on the archive website; source text is never silently truncated.
 
+## Dates, filters and navigation
+
+`last_indexed` is returned by `search_archive` and `fetch`. It is the timestamp
+when a record entered the search index; text/embedding backfills preserve it.
+It is distinct from the original capture timestamp and model-estimated publication
+date, and does not establish when files entered the Git archive.
+
+Existing `date_field`/`date_from`/`date_to` calls remain valid; `date_field` also
+accepts `last_indexed`. Independent inclusive UTC windows are `capture_from/to`,
+`indexed_from/to` and `publication_from/to`. These combine with AND. If a legacy
+window and an independent window address the same field they intersect;
+contradictory or invalid dates fail before upstream work. Sorts additionally
+accept `last_indexed_asc` and `last_indexed_desc`; missing dates sort last.
+
+```json
+{
+  "query": "cleric guild",
+  "filters": {
+    "capture_from": "1999-01-01", "capture_to": "2001-12-31",
+    "indexed_from": "2026-11-01", "collections": ["websites"],
+    "has_text": true
+  },
+  "sort": "last_indexed_desc", "group_by": "discussion", "limit": 20
+}
+```
+
+Exact-value lists (at most ten per category) include `domains`, `mailing_lists`,
+`file_types`, `mime_types`, `themes` and `tags`. Values within one category are OR;
+categories are AND. `list_sources` supports `domain`, `mailing_list`, `file_type`,
+`mime_type`, `theme`, `tag` and `collection`. Themes/content flavours and tags are
+model-generated, not verified classifications. `metadata.llm_tags` is a JSON array
+encoded as a string, retaining the existing string-valued metadata contract.
+Collections are `websites`, `mailing_lists` and `newsgroups`; website counts include
+supporting assets. Facet counts are matching documents, not unique pages.
+
+Optional strict booleans `has_text`, `has_ocr` and `has_enrichment` filter indexed
+field presence. Enrichment means an enrichment-model/signature field is present,
+not human verification or proof of a complete summary. Legacy empty text/OCR fields
+can satisfy presence filters; `fetch` separately reports actual nonempty text/OCR
+availability. Missing metadata is retained as unknown, never fabricated.
+
+`url_scopes` accepts up to three `{ "url": "http://host/account/", "kind":
+"directory" }` values, OR within the list. Kinds are `host`, `directory`, `page`
+and `ezboard_board`. Use `page` for exact query-string URLs; directories match
+whole path segments and cannot leak into sibling accounts. Scopes include bare/www
+and literal/legacy default-port aliases; nondefault ports stay separate. Exact
+`domains` retain their previous literal semantics. Wayback replay URLs are accepted
+but are never fetched. Unsafe URLs, credentials, traversal and arbitrary regex/DSL
+are rejected. Ezboard scopes take a top-level `bboard` URL, read at most ten archived
+board-index captures, and admit only forum tokens linked from those sources across
+known Ezboard shards, including directory-index board homepages. Large forum
+lists are split into bounded literal alternatives under the database's existing
+1,000-character regex limit. Missing evidence fails explicitly. Older or unlinked forums
+can be absent; this is disclosed rather than inferred from ambiguous name prefixes.
+
+`group_by=documents` preserves existing search behavior. `page` groups exact
+original page URLs. `discussion` requires the stored `forum-discussions-v1`
+source/evidence hashes, valid platform/origin/topic and matching identity digest;
+otherwise it falls back to exact pages or individual records. Grouped searches
+inspect at most 1,000 matching metadata records, with representatives chosen by the
+requested sort. Group counts and `matching_captures_in_window` describe that bounded
+window. `total.relation=gte` and `limit_reached` disclose incomplete scans. Paging
+uses the same unchanged query, filters, grouping and sort.
+
+`list_captures` accepts an exact result ID and revalidates all returned members.
+It returns IDs and metadata, not source text. Choose a date and call `fetch` with
+that exact ID. History scans at most 1,000 records; legacy versions without indexed
+source IDs may be absent. An unverified discussion falls back to its exact page.
+
+`list_sites` lists up to 50 newest matching **domains**, not inferred account-wide
+identities. Narrow shared hosts with `url_scopes`. Safe `scope_url` values normalize legacy
+default-port folders; unsafe/unusable domain metadata has a null scope URL. Counts and capture ranges are
+computed by a second bounded filters aggregation so they include every shard;
+counts describe the supplied filters and include assets. A changing live index can
+shift observations between the directory/count queries. `has_more` asks callers
+to narrow dates or sources; this newest-sites directory has no unbounded scan.
+
+`first_indexed` is unknown for historical sites. New curation imports record
+`site_first_indexed_at` only when their host/www/default-port scope was empty, or
+all existing records already carry that provenance. Resumed imports reuse the
+known first timestamp. Legacy records, incomplete evidence and mixed known/unknown
+history stay unknown; failed optional provenance checks do not block imports.
+No historical dates are guessed from Wayback or Git. Existing records and running
+Jobs are untouched. Site first dates are forward observations of search ingestion,
+not proof of the first archival act. The field is additively mapped before new
+curation imports are deployed.
+
 ## Filtered research and source discovery
 
 `search_archive` uses keyword matching, including the same phrase/operator rules,
 without semantic broadening or embedding requests. Empty `query` browses the
-filtered archive. Filters are optional:
-
-- `domains`, `mailing_lists`, `file_types`: up to ten exact values per category.
-  Values within a category are OR; different categories are AND. Discover values
-  with `list_sources` instead of guessing. Domain prefixes such as `www` matter.
-- `date_field`: `capture_date` (default) or `estimated_publication_date`.
-  The latter filters `llm_guessed_date`, a model estimate, not a verified date.
-- `date_from`, `date_to`: inclusive UTC calendar days in `YYYY-MM-DD` form.
-  Either bound can be omitted. Impossible or reversed dates are rejected.
-  A date range excludes documents without that date.
+filtered archive. The filter/date/scope contract is described above.
 
 `limit` defaults to 20 and allows 1–50 results; `offset` defaults to zero.
-Pass `next_offset` with unchanged query/filters/sort/limit to continue. `sort`
-accepts `relevance`, `capture_date_asc`, `capture_date_desc`,
-`estimated_publication_date_asc` and `estimated_publication_date_desc`.
+Pass `next_offset` with unchanged query/filters/sort/group_by/limit to continue.
+Sorts accept `relevance` and ascending/descending capture, estimated publication
+or indexing dates.
 Unknown dates sort last. Archive IDs break ties; a fixed replica preference and
 document-order fallback retain legacy records missing an ID field.
 Pagination reads the live index, not a frozen snapshot: indexing changes can
@@ -81,8 +161,8 @@ when `next_offset` is null: `limit_reached=true` explicitly asks the caller to
 narrow the query or filters, rather than implying the archive is exhausted.
 Result metadata includes source/date provenance; full text remains in `fetch`.
 
-`list_sources` accepts `source_type` of `domain` (default), `mailing_list` or
-`file_type`, plus the same optional keyword query and filters. It returns
+`list_sources` accepts the fixed source types above (`domain` by default),
+plus the same optional keyword query and filters. It returns
 alphabetically ordered values and matching document counts, omitting empty/missing
 values. `limit` defaults to 20 and allows 1–100; pass `next_after` as `after` with
 unchanged source type/query/filters to continue. The cursor comes from
@@ -109,7 +189,8 @@ For example, discover mailing lists with
 ```
 
 Fetch selected IDs to check the original evidence and date estimates. Neither
-tool accepts arbitrary Elasticsearch DSL, field names, index names or URLs.
+tool accepts arbitrary Elasticsearch DSL, field names or index names. Literal
+URL scopes are parsed into fixed archive-ID queries, never followed as network URLs.
 
 ## Local development and tests
 

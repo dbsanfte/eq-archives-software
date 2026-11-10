@@ -38,7 +38,7 @@ def check(base, mcp_base=None):
     status,raw=call(path,{'size':0,'query':{'match_all':{}}})
     assert status==200 and 'hits' in json.loads(raw),'Valid search unavailable after rejected requests'
     rpc_headers={'Accept':'application/json, text/event-stream','MCP-Protocol-Version':'2025-11-25'}
-    for tool in ('search','search_archive','list_sources'):
+    for tool in ('search','search_archive','list_sources','list_sites'):
         status,raw=call('/mcp',{'jsonrpc':'2.0','id':1,'method':'tools/call',
             'params':{'name':tool,'arguments':{'query':'a/'*101}}},rpc_headers,mcp_base)
         assert status==200 and json.loads(raw)['result']['isError'],'MCP query bypassed analyzed-text limits'
