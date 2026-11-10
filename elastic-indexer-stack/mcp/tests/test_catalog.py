@@ -321,3 +321,17 @@ def test_null_legacy_url_uses_stored_page_identity_and_encoded_controls_are_reje
     assert page_identity(hit)[0] == 'page:http://example.org/forum.php?t=42'
     with pytest.raises(ValidationError):
         URLScope(url='http://example.org/a?x=%00',kind='page')
+
+
+@pytest.mark.parametrize('board_url', ['http://pub110.ezboard.com/beqasylum',
+    'http://pub110.ezboard.com/beqasylum/', 'http://pub110.ezboard.com/beqasylum/index.html'])
+def test_real_archive_board_directory_indices_establish_forum_membership(board_url):
+    import re
+    scope = URLScope(url=board_url,kind='ezboard_board')
+    hit = {'_id':'websites/pub110.ezboard.com/20020805200450/beqasylum/index.html',
+           '_source':{'text_full':'[General](http://pub110.ezboard.com/feqasylumgeneral)'}}
+    pattern = scope_query(scope)['regexp']['id']['value']
+    assert re.fullmatch(pattern,hit['_id'])
+    assert re.fullmatch(pattern,hit['_id'].removesuffix('/index.html'))
+    assert not re.fullmatch(pattern,hit['_id'].replace('/index.html','.showLocalUserPublicProfile?login=someone'))
+    assert board_forums(scope,[hit]) == ['feqasylumgeneral']

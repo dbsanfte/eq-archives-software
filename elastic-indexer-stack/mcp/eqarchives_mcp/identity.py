@@ -37,6 +37,8 @@ def scope_parts(scope):
         raise ValueError("Use page scope for a query-string URL")
     if scope.kind == "host" and path:
         raise ValueError("Host scopes must use the site root")
+    if scope.kind == "ezboard_board":
+        path = re.sub(r"/(?:index\.html?)?$", "", path, flags=re.I)
     if scope.kind == "ezboard_board" and (not re.fullmatch(SHARD, parts.netloc, re.I)
                                           or not re.fullmatch(r"b[a-z0-9_-]{1,100}", path, re.I)):
         raise ValueError("Use a top-level Ezboard board URL, such as http://pub4.ezboard.com/beqasylum")
@@ -73,7 +75,7 @@ def scope_query(scope, forums=()):
     elif scope.kind == "directory":
         suffix = literal(path.rstrip("/")) + "(/.*)?" if path else ".*"
     elif scope.kind == "ezboard_board":
-        suffix = "(" + "|".join([literal(path) + "/?", *[literal(f) + r"([.?/].*)?" for f in forums]]) + ")"
+        suffix = "(" + "|".join([literal(path) + r"(/(index\.html?)?)?", *[literal(f) + r"([.?/].*)?" for f in forums]]) + ")"
     else:
         suffix = literal(path)
     return {"regexp": {"id": {"value": "websites/" + host + "/[0-9]{14}/" + suffix,
@@ -87,7 +89,8 @@ def board_forums(scope, hits):
     for hit in hits:
         source = hit.get("_source", {})
         stored = CAPTURE.fullmatch(source.get("id") or hit.get("_id", ""))
-        if not stored or stored[2].rstrip("/").lower() != board.lower():
+        if (not stored or not re.fullmatch(SHARD, stored[1], re.I)
+                or re.sub(r"/(?:index\.html?)?$", "", stored[2], flags=re.I).lower() != board.lower()):
             continue
         text = source.get("text_full", "")
         if not isinstance(text, str):
