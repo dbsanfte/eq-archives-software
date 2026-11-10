@@ -84,7 +84,7 @@ def test_board_scope_only_adds_source_linked_forums_across_known_shards():
         '[General](http://pub8.ezboard.com/feqasylumgeneral) [Other](http://pub4.ezboard.com/fothergeneral) '
         '[Bad](http://attacker.example/feqasylumprivate)'}}
     assert board_forums(scope, [index]) == ['feqasylumgeneral']
-    query = scope_query(scope, board_forums(scope, [index]))['regexp']['id']['value']
+    query = json.dumps(scope_query(scope, board_forums(scope, [index])))
     assert '(server|pub|p|b)[0-9]+' in query and 'feqasylumgeneral' in query and 'fother' not in query
     async def exercise():
         calls = []
@@ -335,3 +335,32 @@ def test_real_archive_board_directory_indices_establish_forum_membership(board_u
     assert re.fullmatch(pattern,hit['_id'].removesuffix('/index.html'))
     assert not re.fullmatch(pattern,hit['_id'].replace('/index.html','.showLocalUserPublicProfile?login=someone'))
     assert board_forums(scope,[hit]) == ['feqasylumgeneral']
+
+
+
+def test_large_board_uses_bounded_regex_alternatives_without_raising_database_limits():
+    import re
+    scope = URLScope(url='http://pub110.ezboard.com/beqasylum',kind='ezboard_board')
+    forums = ['feqasylum'+('a'*150)+str(i) for i in range(100)]
+    query = scope_query(scope,forums)
+    patterns = [q['regexp']['id']['value'] for q in query['bool']['should']]
+    assert len(patterns) > 2 and all(len(p) <= 1000 for p in patterns)
+    for token in forums:
+        assert any(re.fullmatch(p,'websites/pub8.ezboard.com/20000101000000/'+token+'.showMessage?topicID=1') for p in patterns)
+    assert not any(re.fullmatch(p,'websites/pub8.ezboard.com/20000101000000/feqasylumunverified') for p in patterns)
+    with pytest.raises(ValidationError):
+        URLScope(url='http://example.org/'+('a'*1000),kind='page')
+    hit = website(path='a'*1000)
+    with pytest.raises(ToolError,match='query limits'):
+        run(make_archive(lambda r:search_response([hit],1)).list_captures(hit['_id']))
+
+
+def test_account_scope_matches_children_and_port_aliases_without_sibling_accounts():
+    import re
+    pattern = scope_query(URLScope(url='http://www.example.org/~guild',kind='directory'))['regexp']['id']['value']
+    for host in ('example.org','www.example.org','www.example.org:80','example.org_443'):
+        for path in ('~guild','~guild/','~guild/news.html'):
+            assert re.fullmatch(pattern,f'websites/{host}/20000101000000/{path}')
+    for host,path in [('example.org','~guild2/news.html'),('example.org:8080','~guild/news.html'),
+                      ('attacker.example.org','~guild/news.html'),('example.org','~other/news.html')]:
+        assert not re.fullmatch(pattern,f'websites/{host}/20000101000000/{path}')

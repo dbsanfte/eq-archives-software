@@ -5,7 +5,7 @@ from mcp.server.mcpserver.exceptions import ToolError
 from pydantic import BaseModel
 
 from .identity import (VERSION, board_forums, discussion_identity, group_identity,
-                       literal, page_identity, scope_query, site_scope_url)
+                       literal, page_identity, scope_query, site_scope_url, id_regex)
 from .limits import TextBudget
 from .research import (MAX_RESEARCH_RESULTS, COLLECTION_PREFIXES, GroupInfo, ResearchFilters,
                        ResearchPage, ResultCount, SourcePage, SourceValue, filtered_query,
@@ -155,9 +155,11 @@ class Catalog:
                 selection = {"bool": {"filter": [{"term": {"discussion.version": VERSION}},
                                                   {"term": {"discussion.key": discussion.split(":", 1)[1]}}]}}
             elif page:
-                branches = [{"regexp": {"id": {"value": "websites/"+literal(page[1])+"/[0-9]{14}/"+literal(page[2]),
-                                                 "max_determinized_states": 2000}}},
-                            {"ids": {"values": [document_id]}}]
+                try:
+                    exact = id_regex(literal(page[1]), literal(page[2]))
+                except ValueError:
+                    raise ToolError("This page path exceeds capture-history query limits. Fetch its exact ID or narrow a search by date.") from None
+                branches = [exact, {"ids": {"values": [document_id]}}]
                 try:
                     original = TextBudget().accept(page[0][5:], limit=2048)
                 except ValueError:

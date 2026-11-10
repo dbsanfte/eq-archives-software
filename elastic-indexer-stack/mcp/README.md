@@ -102,7 +102,9 @@ and literal/legacy default-port aliases; nondefault ports stay separate. Exact
 but are never fetched. Unsafe URLs, credentials, traversal and arbitrary regex/DSL
 are rejected. Ezboard scopes take a top-level `bboard` URL, read at most ten archived
 board-index captures, and admit only forum tokens linked from those sources across
-known Ezboard shards. Missing evidence fails explicitly. Older or unlinked forums
+known Ezboard shards, including directory-index board homepages. Large forum
+lists are split into bounded literal alternatives under the database's existing
+1,000-character regex limit. Missing evidence fails explicitly. Older or unlinked forums
 can be absent; this is disclosed rather than inferred from ambiguous name prefixes.
 
 `group_by=documents` preserves existing search behavior. `page` groups exact

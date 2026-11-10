@@ -232,11 +232,23 @@ def test_mcp_upload_deadline_disconnect_and_partial_send_release_capacity(monkey
 def test_mcp_total_deadline_cancels_sdk_work_and_releases_retrieval(monkeypatch):
     from eqarchives_mcp import mcp_boundary as boundary
     monkeypatch.setattr(boundary, "REQUEST_TIMEOUT", .03)
+    cancelled = asyncio.Event()
     async def es(request):
-        await asyncio.sleep(1)
+        try:
+            await asyncio.sleep(1)
+        finally:
+            cancelled.set()
     archive = make_archive(es)
     with TestClient(create_app(archive)) as client:
         response = rpc(client, "tools/call", {"name": "fetch", "arguments": {"id": "x"}})
         assert response.status_code == 503 and response.headers["retry-after"] == "5"
+        async def released():
+            # The transport signals the SDK's separate tool task. Observe its
+            # cancellation on the server loop, not a cross-thread response race.
+            async with asyncio.timeout(.25):
+                await cancelled.wait()
+                while archive.requests._value != 4:
+                    await asyncio.sleep(0)
+        client.portal.call(released)
         assert archive.requests._value == 4
         assert rpc(client, "ping").status_code == 200

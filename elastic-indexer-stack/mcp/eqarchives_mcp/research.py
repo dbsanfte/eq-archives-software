@@ -34,8 +34,8 @@ class URLScope(BaseModel):
 
     @model_validator(mode="after")
     def valid_scope(self):
-        from .identity import scope_parts
-        scope_parts(self)
+        from .identity import scope_query
+        scope_query(self)
         return self
 
 

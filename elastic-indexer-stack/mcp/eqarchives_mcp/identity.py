@@ -78,8 +78,29 @@ def scope_query(scope, forums=()):
         suffix = "(" + "|".join([literal(path) + r"(/(index\.html?)?)?", *[literal(f) + r"([.?/].*)?" for f in forums]]) + ")"
     else:
         suffix = literal(path)
-    return {"regexp": {"id": {"value": "websites/" + host + "/[0-9]{14}/" + suffix,
-                               "max_determinized_states": 2000}}}
+    if scope.kind == "ezboard_board" and forums:
+        # Elasticsearch caps each regex at 1,000 characters. Large real boards
+        # exceed that with one alternation; split literal members into bounded
+        # alternatives rather than changing the database's protection.
+        clauses = [scope_query(scope)]
+        chunk = []
+        for forum in forums:
+            member = literal(forum) + r"([.?/].*)?"
+            if chunk and len("|".join(chunk + [member])) > 650:
+                clauses.append(id_regex(host, "(" + "|".join(chunk) + ")"))
+                chunk = []
+            chunk.append(member)
+        if chunk:
+            clauses.append(id_regex(host, "(" + "|".join(chunk) + ")"))
+        return {"bool": {"minimum_should_match": 1, "should": clauses}}
+    return id_regex(host, suffix)
+
+
+def id_regex(host, suffix):
+    value = "websites/" + host + "/[0-9]{14}/" + suffix
+    if len(value) > 1000:
+        raise ValueError("The escaped URL scope exceeds the archive's query length limit")
+    return {"regexp": {"id": {"value": value, "max_determinized_states": 2000}}}
 
 
 def board_forums(scope, hits):
