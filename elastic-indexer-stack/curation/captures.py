@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 
 from acquisition import Downloader
 from capture_failures import FileRetries
-from archive_layout import archive_path
+from archive_layout import archive_path, legacy_archive_path
 from common import CAPTURE_WINDOW, CrawlError, Page, Store, decode, digest, in_capture_window, now, original_url, save, tier, within_scope, within_capture_scope
 from discovery import SKIP
 from indexer.capture_enrichment import DEFAULT_POLICY, policy_for_sites
@@ -56,8 +56,16 @@ def verified_source(root, capture):
     return path.read_bytes()
 
 
+def source_type(capture):
+    return capture.get('content_type') or capture.get('mimetype') or 'text/html'
+
+
+def media_type(capture):
+    return source_type(capture).split(';', 1)[0].strip().lower()
+
+
 def readable(capture):
-    return (capture.get('content_type') or capture.get('mimetype') or 'text/html').split(';')[0].strip().lower() in (
+    return media_type(capture) in (
         'text/html', 'application/xhtml+xml', 'text/plain')
 
 
@@ -76,9 +84,9 @@ def describe_source(root, capture):
 
 def document(root, capture):
     raw = verified_source(root, capture)
-    text, encoding = decode(raw, capture.get("content_type") or "")
+    text, encoding = decode(raw, source_type(capture))
     page = Page(capture["url"])
-    if (capture.get('content_type') or capture.get('mimetype') or '').split(';')[0] == 'text/plain':
+    if media_type(capture) == 'text/plain':
         page.text = [text]
     else:
         page.feed(text)
@@ -168,12 +176,16 @@ def check_manifest(root, manifest):
                        else within_scope(capture["url"], site["scope"]) if site else False)
         if not permitted:
             raise CrawlError("Capture is outside the approved site scope")
-        if capture.get("archive_path") != archive_path(capture) or capture["archive_path"] in seen:
+        destination = archive_path(capture)
+        if capture.get("archive_path") not in (destination, legacy_archive_path(capture)) or destination in seen:
             raise CrawlError("Invalid or duplicate archive destination")
-        seen.add(capture["archive_path"])
+        seen.add(destination)
         if not capture.get('supporting_source'):
             verified.add((capture['url'], capture['timestamp'], capture['sha256']))
         size += capture["bytes"]
+    if any('/'.join(path.split('/')[:index]) in seen for path in seen
+           for index in range(1, len(path.split('/')))):
+        raise CrawlError('Archive destinations collide as a file and directory; saved sources are retained')
     reference_cache = {}
     while deferred:
         pending = []

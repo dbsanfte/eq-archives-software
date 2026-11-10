@@ -1,12 +1,15 @@
 """Cached, read-only totals from the portal's paid-request ledgers, never sources."""
 
 from datetime import datetime, timezone
+import json
 import math
 from pathlib import Path
 import re
 import sqlite3
 import threading
 import time
+
+from daily_budget import SCALE
 
 
 class Spending:
@@ -57,7 +60,10 @@ class Spending:
             complete = True
             seen = set()
             try:
-                for path in self.ledgers():
+                shared = self.shared(today, month, deadline)
+                if shared is not None:
+                    totals = shared
+                for path in (() if shared is not None else self.ledgers()):
                     if time.monotonic() > deadline:
                         complete = False
                         break
@@ -76,13 +82,49 @@ class Spending:
                     for key in totals:
                         for field in totals[key]:
                             totals[key][field] += values[key][field]
-            except OSError:
+            except (OSError, sqlite3.Error, ValueError, TypeError, KeyError):
                 complete = False
             self.cache = {path: value for path, value in self.cache.items() if path in seen}
             self.result = {**totals, 'complete': complete, 'currency': 'USD', 'timezone': 'UTC',
                            'day': period[0], 'month_start': period[1], 'as_of': instant.isoformat()}
             self.expires = time.monotonic() + (10 if complete else 1)
             return self.result
+
+    def shared(self, today, month, deadline):
+        """Use the same seeded, atomic ledger as admission once configured.
+
+        This also counts reservations whose local attempt transaction was lost.
+        Before configuration, legacy per-operation ledgers remain authoritative.
+        Opening read-only never initializes accounting or changes settings.
+        """
+        path = self.root / 'luna-budget' / 'budget.sqlite3'
+        if not path.exists():
+            return None
+        database = sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True, timeout=.1)
+        try:
+            database.set_progress_handler(lambda: int(time.monotonic() > deadline), 1000)
+            database.execute('BEGIN')
+            row = database.execute('SELECT value FROM settings WHERE id=1').fetchone()
+            if not row or not json.loads(row[0]).get('configured'):
+                return None
+            # Range uses reservation_day. All four totals share one read snapshot,
+            # with integer nanodollars and the admission ledger's UTC boundaries.
+            row = database.execute('''SELECT
+                COALESCE(SUM(CASE WHEN day=? THEN COALESCE(actual,0) ELSE 0 END),0),
+                COALESCE(SUM(CASE WHEN day=? AND actual IS NULL THEN reserved ELSE 0 END),0),
+                COALESCE(SUM(actual),0),
+                COALESCE(SUM(CASE WHEN actual IS NULL THEN reserved ELSE 0 END),0),
+                COALESCE(SUM(CASE WHEN typeof(reserved)!='integer' OR reserved<0 OR
+                    (actual IS NOT NULL AND (typeof(actual)!='integer' OR actual<0)) THEN 1 ELSE 0 END),0)
+                FROM reservations WHERE day>=? AND day<=?''',
+                (today.date().isoformat(), today.date().isoformat(),
+                 month.date().isoformat(), today.date().isoformat())).fetchone()
+            if row[4]:
+                raise ValueError('Invalid shared cost record')
+            return {'today': {'estimated_usd': row[0]/SCALE, 'unresolved_usd': row[1]/SCALE},
+                    'month': {'estimated_usd': row[2]/SCALE, 'unresolved_usd': row[3]/SCALE}}
+        finally:
+            database.close()
 
     @staticmethod
     def read(path, today, month, instant, deadline):

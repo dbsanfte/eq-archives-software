@@ -1,11 +1,19 @@
 """Exact Linux Wayback downloader paths, shared by operator and portal captures."""
 
 from urllib.parse import unquote_plus, urlsplit
+from pathlib import PurePosixPath
 
 from common import CrawlError, original_url, tier
 
 
 def archive_path(capture):
+    # Linux's downloader writes through the filesystem: repeated separators
+    # inside a decoded query (e.g. next=http://...) are one path separator.
+    return str(PurePosixPath(legacy_archive_path(capture)))
+
+
+def legacy_archive_path(capture):
+    """Previous manifest spelling, retained only to verify immutable approvals."""
     # Match the public downloader's Linux all-timestamps convention, including
     # CGI::unescape and extensionless-page directory/index.html handling. Keep
     # exact original URL identity in the manifest; refuse ambiguous collisions.

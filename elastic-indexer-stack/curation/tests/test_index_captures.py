@@ -16,9 +16,71 @@ def published(row):
     return {'manifest':manifest,'manifest_sha256':digest(manifest),'publication':{'commit':'b'*40}}
 
 
-def test_manifest_indexing_creates_missing_ids_preserves_source_and_skips_existing(candidate):
+@pytest.mark.parametrize('content_type', [None, '', 'text/html', 'TEXT/HTML; charset=utf-8'])
+def test_missing_or_normalized_content_type_keeps_readable_html(candidate, content_type):
+    root, row = candidate
+    capture = {**row['captures'][0], 'content_type': content_type}
+    replay, text = text_document(root, capture)
+    assert 'EverQuest guild history.' in text
+    assert '[Guide](guide.html)' in text
+    assert capture['url'] in replay
+
+
+@pytest.mark.parametrize('metadata', [
+    {'content_type': 'Text/Plain; charset=utf-8'},
+    {'content_type': None, 'mimetype': 'text/plain'},
+])
+def test_plain_text_type_fallback_preserves_literal_markup(candidate, metadata):
+    root, row = candidate
+    capture = {**row['captures'][0], **metadata}
+    raw = b'EverQuest notes: <cleric> & <warrior>\nKeep <item> placeholders.'
+    (root / capture['path']).write_bytes(raw)
+    capture.update(bytes=len(raw), sha256=digest(raw))
+    _, text = text_document(root, capture)
+    assert raw.decode() in text
+
+
+def test_unexpected_import_failure_writes_a_safe_job_bound_diagnostic(candidate, monkeypatch, capsys):
+    import index_captures
+    from import_status import read_status
+    from unittest.mock import Mock
+    root, row = candidate
+    batch = published(row)
+    job = 'eqarchives-captures-' + batch['manifest']['batch_id']
+    monkeypatch.setenv('IMPORT_JOB_NAME', job)
+    monkeypatch.delenv('LUNA_DAILY_BUDGET_ROOT', raising=False)
+    monkeypatch.setattr('sys.argv', ['index_captures', '--root', str(root), '--batch', 'approved.json',
+                                    '--manifest-sha256', batch['manifest_sha256'],
+                                    '--enrichment-root', str(root / 'enrichment')])
+    monkeypatch.setattr(index_captures, 'read_batch', lambda *args: batch)
+    monkeypatch.setattr(index_captures, 'policy', lambda *args: {'max_enrichment_usd': 2})
+    monkeypatch.setattr(index_captures, 'budget_identity', lambda *args: 'a'*32)
+    enricher, services = Mock(), Mock()
+    monkeypatch.setattr(index_captures, 'Enricher', lambda *args, **kwargs: enricher)
+    monkeypatch.setattr(index_captures, 'Services', lambda **kwargs: services)
+    monkeypatch.setattr(index_captures, 'index_batch', Mock(side_effect=AttributeError('private-source-and-key')))
+    assert index_captures.main() == 1
+    diagnostic = read_status(root, {'id': 'a'*32, 'manifest_sha256': batch['manifest_sha256']}, job)
+    assert diagnostic['state'] == 'failed' and diagnostic['code'] == 'indexing'
+    assert diagnostic['job_name'] == job
+    assert 'private-source-and-key' not in json.dumps(diagnostic) + capsys.readouterr().out
+    services.close.assert_called_once()
+
+
+@pytest.mark.parametrize('content_type', [None, '', 'text/html', 'TEXT/HTML; charset=utf-8'])
+@pytest.mark.parametrize('layout', ['normal', 'embedded_url', 'legacy_embedded_url'])
+def test_manifest_indexing_creates_missing_ids_preserves_source_and_skips_existing(candidate, content_type, layout):
     root,row=candidate
+    row['captures'][0]['content_type'] = content_type
+    if layout != 'normal':
+        row['captures'][0]['url'] = 'http://guild.example/eq/news.php?next=http://guild.example/guide.html'
     batch=published(row)
+    if layout == 'legacy_embedded_url':
+        from archive_layout import legacy_archive_path
+        capture = batch['manifest']['captures'][0]
+        capture['archive_path'] = legacy_archive_path(capture)
+        batch['manifest_sha256'] = digest(batch['manifest'])
+    manifest_hash = digest(batch['manifest'])
     class FakeServices:
         def __init__(self): self.docs={}; self.inputs=[]; self.enrichments=[]
         def exists(self,identifier): return identifier in self.docs
@@ -31,12 +93,14 @@ def test_manifest_indexing_creates_missing_ids_preserves_source_and_skips_existi
         def create(self,identifier,document): self.docs[identifier]=document; return True
     services=FakeServices()
     assert index_batch(root,batch,services) == {'created':1,'existing':0,'captures':1}
-    identifier=batch['manifest']['captures'][0]['archive_path']
+    from captures import archive_path
+    identifier=archive_path(batch['manifest']['captures'][0])
     doc=services.docs[identifier]
-    assert identifier == 'websites/guild.example/20000101000000/eq/news.html'
+    assert identifier == ('websites/guild.example/20000101000000/eq/news.html' if layout == 'normal' else
+                          'websites/guild.example/20000101000000/eq/news.php?next=http:/guild.example/guide.html')
     assert 'EverQuest guild history.' in doc['text_full']
     assert '[Guide](guide.html)' in doc['text_full']
-    assert doc['url'] == 'https://web.archive.org/web/20000101000000/http://guild.example/eq/news.html'
+    assert doc['url'] == 'https://web.archive.org/web/20000101000000/' + row['captures'][0]['url']
     assert doc['capture_date'] == '2000-01-01T00:00:00+00:00'
     assert doc['archive_source_sha256'] == row['captures'][0]['sha256']
     assert doc['archive_commit'] == 'b'*40
@@ -49,6 +113,7 @@ def test_manifest_indexing_creates_missing_ids_preserves_source_and_skips_existi
     assert index_batch(root,batch,services)['existing'] == 1
     assert json.dumps(services.docs[identifier],sort_keys=True) == original
     assert len(services.enrichments)==1
+    assert digest(batch['manifest']) == manifest_hash
 
 
 def test_entire_manifest_is_verified_before_any_index_or_embedding_request(candidate):

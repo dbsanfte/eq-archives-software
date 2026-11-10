@@ -83,8 +83,11 @@ def test_git_command_uses_safe_stage_error_on_failure(tmp_path,monkeypatch):
     assert publisher.git('fetch','origin','master',optional=True) is None
 
 
-def test_one_batch_commit_keeps_unrelated_files_and_recovers_repeat_publication(candidate,tmp_path):
+@pytest.mark.parametrize('layout', ['normal', 'embedded_url', 'legacy_embedded_url', 'existing_executable'])
+def test_one_batch_commit_keeps_unrelated_files_and_recovers_repeat_publication(candidate,tmp_path,layout):
     root,row=candidate
+    if layout in ('embedded_url', 'legacy_embedded_url'):
+        row['captures'][0]['url'] = 'http://guild.example/eq/news.php?next=http://guild.example/guide.html'
     repository=tmp_path/'remote-source'
     repository.mkdir()
     git(repository,'init','-q','-b','master')
@@ -95,6 +98,13 @@ def test_one_batch_commit_keeps_unrelated_files_and_recovers_repeat_publication(
     (repository/'a/z.txt').write_text('unchanged nested subtree')
     (repository/'a.txt').write_text('Git tree sorting puts a.txt before a/')
     git(repository,'add','keep.txt','a','a.txt')
+    if layout == 'existing_executable':
+        from captures import archive_path
+        destination = repository / archive_path(row['captures'][0])
+        destination.parent.mkdir(parents=True)
+        destination.write_bytes((root / row['captures'][0]['path']).read_bytes())
+        destination.chmod(0o755)
+        git(repository, 'add', 'websites')
     git(repository,'commit','-qm','Existing archive')
     unrelated_blob=git(repository,'rev-parse','HEAD:keep.txt')
     unrelated_tree=git(repository,'rev-parse','HEAD:a')
@@ -114,12 +124,19 @@ def test_one_batch_commit_keeps_unrelated_files_and_recovers_repeat_publication(
     publisher.git=uncertain_first_push
     try:
         manifest=manifest_for(row)
+        if layout == 'legacy_embedded_url':
+            from archive_layout import legacy_archive_path
+            manifest['captures'][0]['archive_path'] = legacy_archive_path(manifest['captures'][0])
         expected=digest(manifest)
         result=publisher.publish(manifest,expected)
         assert len(pushes)==2 and result['recovered'] is False
         assert git(remote,'rev-list','--count','master') == '2'
         assert git(remote,'show','master:keep.txt') == 'unchanged'
-        assert git(remote,'show','master:'+manifest['captures'][0]['archive_path']).encode() == (root/row['captures'][0]['path']).read_bytes()
+        from pathlib import PurePosixPath
+        stored_path = str(PurePosixPath(manifest['captures'][0]['archive_path']))
+        assert git(remote,'show','master:'+stored_path).encode() == (root/row['captures'][0]['path']).read_bytes()
+        if layout == 'existing_executable':
+            assert git(remote, 'ls-tree', 'master', stored_path).startswith('100755 blob ')
         assert json.loads(git(remote,'show','master:crawl-manifests/'+manifest['batch_id']+'.json'))['manifest_sha256'] == expected
         repeated=publisher.publish(manifest,expected)
         assert repeated['recovered'] is True

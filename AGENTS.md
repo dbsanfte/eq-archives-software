@@ -642,6 +642,10 @@ History, including filtered/paginated rows, without changing other stages. Bulk
 Undo must reject intervening changes atomically. Neither filtering nor polling
 can start paid work. Luna spend in the upper-right header totals UTC today/month from
 the pilot, initialized run and enrichment ledgers, independently of list caps.
+Once shared accounting is configured, report its seeded integer reservation ledger
+through one bounded read-only snapshot; do not rescan per-site databases on each
+poll or double-count their attempts. Legacy reporting remains for unconfigured
+accounts. Broken shared accounting must stay visibly incomplete.
 Keep known usage estimates separate from unresolved reservations; include rejected
 and correction attempts without double-counting cached responses or retries.
 Use bounded, cached, read-only metadata queries; never walk sources or archive Git.
@@ -666,6 +670,15 @@ scope drafts and reading positions during polling and refresh. Exercise long lis
 source races, stage transitions, retries, retirement and touch layouts in Chromium.
 Terminal indexing retries must bind the failed Job and published manifest,
 create a new numbered Job, retain prior Jobs and reuse the original site budget.
+Missing/null content types use the saved MIME fallback and normalized media type
+through readers, enrichment and imports. Unexpected import exceptions must write
+a safe current Job/manifest-bound failure diagnostic before exiting.
+Archive paths collapse repeated separators as the Linux downloader filesystem
+does, including embedded URLs in query filenames. Accept old immutable manifest
+spellings without changing their hashes; use canonical paths for Git and document
+IDs and reject canonical duplicates and file/directory collisions. Retain identical
+existing regular files and their modes, including 100755; never accept symlinks or
+overwrite different bytes as a mode correction.
 The non-root curation UID must have a Unix account so OpenSSH can start; exercise
 the real SSH configuration offline in the built-image smoke check.
 

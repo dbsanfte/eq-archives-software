@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 
 from common import CrawlError, digest
-from captures import check_manifest, verified_path
+from captures import check_manifest, verified_path, archive_path
 from publication_git import PublicationError, lease, recover, run as run_git, category
 
 REMOTE = "git@github.com:dbsanfte/eq-archives.git"
@@ -154,9 +154,11 @@ class Publisher:
                 grouped.setdefault(name, {})[remainder] = oid
             else:
                 old = entries.get(name)
-                if old and old != ("100644", "blob", oid):
+                if old and (old[0] not in ('100644', '100755') or old[1:] != ('blob', oid)):
                     raise CrawlError("Archive destination already contains different data; publication paused")
-                entries[name] = ("100644", "blob", oid)
+                # Historical downloads can be executable regular files. Equal
+                # bytes are already archived; retain their mode and identity.
+                entries[name] = old or ("100644", "blob", oid)
         for name, children in grouped.items():
             old = entries.get(name)
             if old and old[1] != "tree":
@@ -189,7 +191,7 @@ class Publisher:
             objects = output.splitlines()
             if len(objects) != len(batch) or any(not re.fullmatch(rb'[0-9a-f]{40}', oid) for oid in objects):
                 raise CrawlError('Archive blob batch was incomplete or invalid; publication paused')
-            changes.update((capture['archive_path'], oid.decode('ascii'))
+            changes.update((archive_path(capture), oid.decode('ascii'))
                            for capture, oid in zip(batch, objects, strict=True))
         return changes
 

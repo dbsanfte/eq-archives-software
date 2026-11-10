@@ -80,6 +80,13 @@ monthly accounting to finish; those Jobs are never changed. The operator-selecte
 production pacing is **$20/day, capped at $200/month**; deployment preserves saved
 settings and never enables automatic mode.
 
+After shared accounting is configured, the header reads the same integer ledger
+as budget enforcement in one bounded, read-only snapshot. It includes seeded
+legacy costs, corrections and uncertain reservations, including requests whose
+operation metadata was lost. It does not rescan every site's database on each
+poll. Before configuration, the header retains cached legacy-ledger reporting;
+unreadable accounting remains visibly incomplete.
+
 At the cap, paid work saves its position. Discovery resumes under its original
 operation limits and deadline when enough funds within both limits are available; an expired
 run ends before a fresh bounded run starts, retaining pending source samples.
@@ -524,7 +531,11 @@ websites/guild.example/20000401000000/eq/index.html
 The last path represents an extensionless/directory `/eq` capture. Filenames
 use upstream CGI decoding, including `+` and percent decoding. The manifest
 preserves the exact original URL, actual timestamp, raw SHA-256 and staging
-location. Spidered filename collisions are excluded with review notes. Unsafe
+location. Repeated path separators collapse exactly as they do on Linux, including
+`http://` inside decoded query filenames. Older approved manifests retain their
+original spelling and hash; publication and document IDs use the canonical Linux
+path. Canonically equal destinations and file/directory collisions are rejected
+before publication. Spidered filename collisions are excluded with review notes. Unsafe
 names, conflicting initial samples and existing different archive bytes pause
 publication. Do not rename files to
 hashes or silently overwrite a legacy capture. Indexed URLs come from the
@@ -997,6 +1008,9 @@ Git streams source bytes directly; Python retains only paths/object IDs. This
 avoids tens of thousands of Git startups for large sites without adding commits
 or walking the archive. Source verification, the single site commit/push and
 recovery marker remain mandatory.
+An existing regular file with identical bytes is retained even if its historic
+mode is executable; mode alone is not a data collision. Different content,
+symlinks and file/directory conflicts still require attention.
 Before work starts, fixed Git lock paths are checked against live Git processes.
 Abandoned locks move atomically into private `publisher-recovery/` evidence;
 active, symlinked or unexpectedly owned locks are retained. Recovery never walks

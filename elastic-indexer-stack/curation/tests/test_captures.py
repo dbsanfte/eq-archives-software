@@ -14,6 +14,8 @@ from conftest import manifest_for
     ("http://guild.example/forum.php?board=1&start=2","forum.php?board=1&start=2"),
     ("http://guild.example/images/Old%20Sword.html","images/Old Sword.html"),
     ("http://guild.example/news.php?q=old+weapons","news.php?q=old weapons"),
+    ("http://guild.example/news.php?next=http://elsewhere.example/guide.html", "news.php?next=http:/elsewhere.example/guide.html"),
+    ("http://guild.example/eq//news.html", "eq/news.html"),
 ])
 def test_archive_paths_match_existing_linux_downloader_convention(url,path):
     assert archive_path({"url":url,"timestamp":"20000101000000"}) == "websites/guild.example/20000101000000/"+path
@@ -23,6 +25,43 @@ def test_archive_paths_match_existing_linux_downloader_convention(url,path):
 def test_unsafe_legacy_filenames_are_rejected(url):
     with pytest.raises(CrawlError):
         archive_path({"url":url,"timestamp":"20000101000000"})
+
+
+def test_legacy_separator_spelling_is_accepted_without_changing_approved_manifest(candidate):
+    from archive_layout import legacy_archive_path
+    root, row = candidate
+    row['captures'][0]['url'] = 'http://guild.example/eq/news.php?next=http://guild.example/guide.html'
+    manifest = manifest_for(row)
+    capture = manifest['captures'][0]
+    capture['archive_path'] = legacy_archive_path(capture)
+    original = digest(manifest)
+    assert 'http://' in capture['archive_path']
+    check_manifest(root, manifest)
+    assert digest(manifest) == original
+
+
+def test_filesystem_equivalent_urls_cannot_collide_after_separator_normalization(candidate):
+    root, row = candidate
+    manifest = manifest_for(row)
+    other = {**manifest['captures'][0], 'url': 'http://guild.example/eq//news.html'}
+    from archive_layout import legacy_archive_path
+    other['archive_path'] = legacy_archive_path(other)
+    manifest['captures'].append(other)
+    with pytest.raises(CrawlError, match='duplicate archive destination'):
+        check_manifest(root, manifest)
+
+
+@pytest.mark.parametrize('reverse', [False, True])
+def test_file_directory_collision_is_rejected_before_publication(candidate, reverse):
+    root, row = candidate
+    manifest = manifest_for(row)
+    other = {**manifest['captures'][0], 'url': 'http://guild.example/eq/news.html/child.html'}
+    other['archive_path'] = archive_path(other)
+    manifest['captures'].append(other)
+    if reverse:
+        manifest['captures'].reverse()
+    with pytest.raises(CrawlError, match='file and directory'):
+        check_manifest(root, manifest)
 
 
 def test_shared_account_and_deep_directory_boundaries_are_conservative():
