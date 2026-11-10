@@ -21,7 +21,7 @@ import httpx
 from indexer.vector_json import dumps as vector_json
 
 from common import CrawlError, decode, digest, now
-from captures import check_manifest, indexable, verified_source, verified_path
+from captures import check_manifest, indexable, verified_source, verified_path, source_type, media_type, archive_path
 from source_assets import binary_source
 from capture_budget import budget_identity
 from indexer.gemma import CHUNKING_VERSION, DOCUMENT_PREFIX, MODEL, chunk_source
@@ -56,10 +56,11 @@ def read_batch(root, relative, expected):
 
 
 def text_document(root, capture):
-    text, _ = decode(verified_source(root, capture), capture.get("content_type") or "")
+    content_type = source_type(capture)
+    text, _ = decode(verified_source(root, capture), content_type)
     replay = f"https://web.archive.org/web/{capture['timestamp']}/{capture['url']}"
     header = f"<b>Page URL:</b> {html.escape(replay)}<br/><hr/>"
-    content = (website_markdown(header) + '\n\n' + text if capture.get('content_type', '').split(';')[0] == 'text/plain'
+    content = (website_markdown(header) + '\n\n' + text if media_type(capture) == 'text/plain'
                else website_markdown(header + text))
     if not content.strip():
         raise CrawlError("Capture has no readable source text")
@@ -177,8 +178,8 @@ class Services:
 def image_document(root, capture, batch, services):
     path = verified_path(root, capture)
     timestamp = datetime.strptime(capture["timestamp"], "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc).isoformat()
-    document = {"id": capture["archive_path"], "title": capture.get("title") or urlsplit(capture["url"]).path.rsplit('/',1)[-1],
-                "file_type": "image", "mime_type": capture.get("content_type") or "application/octet-stream",
+    document = {"id": archive_path(capture), "title": capture.get("title") or urlsplit(capture["url"]).path.rsplit('/',1)[-1],
+                "file_type": "image", "mime_type": media_type(capture),
                 "domain_name": urlsplit(capture["url"]).netloc, "capture_date": timestamp, "last_indexed": now(),
                 "url": f"https://web.archive.org/web/{capture['timestamp']}/{capture['url']}", "thumbnail": "thumbnails/image.webp",
                 "embedding_model": MODEL, "image_embedding_version": IMAGE_VERSION,
@@ -208,16 +209,17 @@ def index_batch(root, batch, services, chunker=chunk_source):
     if catalog:
         for capture in manifest['captures']:
             if urlsplit(capture['url']).path == '/rss/message':
-                catalog.learn_safe(lithium_feed(capture['archive_path'], verified_source(root, capture),
+                catalog.learn_safe(lithium_feed(archive_path(capture), verified_source(root, capture),
                                           f"https://web.archive.org/web/{capture['timestamp']}/{capture['url']}"))
     created = skipped = preserved = 0
     for capture in manifest["captures"]:
-        image = (capture.get('content_type') or '').split(';')[0].lower() in (
+        record_id = archive_path(capture)
+        image = media_type(capture) in (
             'image/png','image/jpeg','image/gif','image/webp','image/bmp','image/tiff')
         if image:
-            if services.exists(capture['archive_path']):
+            if services.exists(record_id):
                 skipped += 1
-            elif services.create(capture['archive_path'], image_document(root, capture, batch, services)):
+            elif services.create(record_id, image_document(root, capture, batch, services)):
                 created += 1
             else:
                 skipped += 1
@@ -225,7 +227,6 @@ def index_batch(root, batch, services, chunker=chunk_source):
         if not indexable(capture):
             preserved += 1
             continue
-        record_id = capture["archive_path"]
         if services.exists(record_id):
             skipped += 1
             continue
@@ -236,16 +237,16 @@ def index_batch(root, batch, services, chunker=chunk_source):
         replay, content = text_document(root, capture)
         # Model date extraction sees the original body, not our synthetic
         # provenance header or the capture timestamp embedded in its URL.
-        decoded=decode_source(raw,capture.get('content_type') or '')
+        decoded=decode_source(raw,source_type(capture))
         source=decoded.text
         title_node=BeautifulSoup(source,'html.parser').title
         title=repaired_title(capture.get('title'),title_node.string if title_node else None,decoded)
         plan = passages.prepare(content, record_id, title or '',
-                                html_source=source, mime_type=capture.get('content_type') or '')
+                                html_source=source, mime_type=media_type(capture))
         if not plan.passages:
             preserved += 1
             continue
-        metadata = services.enrich(capture, source if capture.get('content_type', '').split(';')[0] == 'text/plain' else website_markdown(source))
+        metadata = services.enrich(capture, source if media_type(capture) == 'text/plain' else website_markdown(source))
         unique, positions = passages.embedding_inputs(plan)
         vectors = [services.embedding(p.text, title=p.title, context=p.context) for p in unique]
         chunks = [{"text_chunk": p.text, "source_start": p.start, "source_end": p.end,
@@ -264,7 +265,7 @@ def index_batch(root, batch, services, chunker=chunk_source):
         timestamp = datetime.strptime(capture["timestamp"], "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc).isoformat()
         document = {"id": record_id, "title": title or urlsplit(capture["url"]).path or "Archived page",
                     "domain_name": urlsplit(capture["url"]).netloc, "capture_date": timestamp, "last_indexed": now(),
-                    "url": replay, "mime_type": (capture.get('content_type') or 'text/html').split(';')[0], "file_type": "text", "thumbnail": "thumbnails/website.webp",
+                    "url": replay, "mime_type": media_type(capture), "file_type": "text", "thumbnail": "thumbnails/website.webp",
                     "text_full": content, "text": chunks, "text_extraction_version": WEBSITE_EXTRACTION_VERSION,
                     "text_chunking_version": passages.VERSION, "text_passage_provenance": {**plan.provenance(),'decoding':decoded.provenance()},
                     "embedding_model": MODEL, "archive_source_sha256": capture["sha256"],
@@ -319,7 +320,9 @@ def main():
         # documents. The controller starts a numbered continuation when funded.
         report('waiting_budget', error)
         print(str(error), flush=True)
-    except (CrawlError, OSError, httpx.HTTPError) as error:
+    except Exception as error:
+        # A programming/metadata failure must also leave a current, safe
+        # diagnostic rather than a stale 'running' status after the Job fails.
         report('failed', error)
         detail = str(error) if isinstance(error, EnrichmentError) else describe('indexing')
         print('Capture indexing failed: ' + detail + ' No existing documents were overwritten.', flush=True)

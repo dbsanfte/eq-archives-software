@@ -6,6 +6,7 @@ import pytest
 
 from common import Store
 from spending import Spending
+from daily_budget import DailyBudget, SCALE
 from server import create_app
 from test_server import call
 
@@ -120,3 +121,76 @@ def test_every_site_ledger_is_counted_beyond_the_batch_inventory_cap(tmp_path):
     totals = Spending(root).snapshot(NOW)
     assert totals['complete']
     assert totals['today']['estimated_usd'] == pytest.approx(.105)
+
+
+def test_configured_shared_accounting_matches_budget_without_scanning_site_ledgers(tmp_path, monkeypatch):
+    account = DailyBudget(tmp_path / 'luna-budget')
+    account.configure({'enabled': False, 'daily_usd': 20, 'monthly_usd': 200,
+                       'min_grade': 2, 'grading_criteria': '', 'revision': 0})
+    with account.database() as db:
+        db.executemany('INSERT INTO reservations VALUES (?,?,?,?,?)', [
+            ('previous-month', '2026-09-30', 9*SCALE, 8*SCALE, '2026-09-30T00:00:00+00:00'),
+            ('legacy:seed', '2026-10-01', 2*SCALE, SCALE, '2026-10-01T00:00:00+00:00'),
+            ('correction', '2026-10-08', SCALE, SCALE//10, '2026-10-08T01:00:00+00:00'),
+            ('unknown', '2026-10-08', SCALE//5, None, '2026-10-08T02:00:00+00:00'),
+        ])
+    totals = Spending(tmp_path)
+    monkeypatch.setattr(totals, 'ledgers', lambda: pytest.fail('Do not rescan individual paid ledgers'))
+    result = totals.snapshot(NOW)
+    assert result['complete']
+    assert result['today'] == pytest.approx({'estimated_usd': .1, 'unresolved_usd': .2})
+    assert result['month'] == pytest.approx({'estimated_usd': 1.1, 'unresolved_usd': .2})
+    assert not result.keys() & {'settings', 'reservations', 'key'}
+    with account.database() as db:
+        db.execute("UPDATE reservations SET actual=? WHERE id='unknown'", (SCALE//20,))
+    totals.expires = 0
+    assert totals.snapshot(NOW)['today'] == pytest.approx({'estimated_usd': .15, 'unresolved_usd': 0})
+    assert totals.snapshot(datetime(2026, 11, 1, tzinfo=timezone.utc))['month']['estimated_usd'] == 0
+
+
+def test_unconfigured_shared_account_does_not_hide_legacy_spend(tmp_path):
+    DailyBudget(tmp_path / 'luna-budget')
+    ledger(tmp_path, [('2026-10-08T00:00:00+00:00', .12, .2)]).close()
+    assert Spending(tmp_path).snapshot(NOW)['today']['estimated_usd'] == .12
+
+
+@pytest.mark.parametrize('damage', ['corrupt', 'negative', 'fractional', 'invalid-settings', 'missing-settings'])
+def test_bad_shared_accounting_is_visible_without_falling_back_to_partial_totals(tmp_path, monkeypatch, damage):
+    account = DailyBudget(tmp_path / 'luna-budget')
+    account.configure({'enabled': True, 'daily_usd': 20, 'monthly_usd': 200,
+                       'min_grade': 2, 'grading_criteria': '', 'revision': 0})
+    if damage == 'corrupt':
+        (account.root / 'budget.sqlite3').write_bytes(b'not sqlite')
+    else:
+        with account.database() as db:
+            if damage == 'invalid-settings':
+                db.execute("UPDATE settings SET value='invalid json'")
+            elif damage == 'missing-settings':
+                db.execute('DELETE FROM settings')
+            else:
+                db.execute('INSERT INTO reservations VALUES (?,?,?,?,?)',
+                           ('bad', '2026-10-08', -1 if damage == 'negative' else .5, None, NOW.isoformat()))
+    totals = Spending(tmp_path)
+    monkeypatch.setattr(totals, 'ledgers', lambda: pytest.fail('A broken shared ledger cannot become a partial total'))
+    assert totals.snapshot(NOW)['complete'] is False
+
+
+def test_shared_reporting_is_read_only_and_uses_one_atomic_wal_snapshot(tmp_path, monkeypatch):
+    account = DailyBudget(tmp_path / 'luna-budget')
+    account.configure({'enabled': True, 'daily_usd': 20, 'monthly_usd': 200,
+                       'min_grade': 2, 'grading_criteria': '', 'revision': 0})
+    with account.database() as db:
+        db.execute('INSERT INTO reservations VALUES (?,?,?,?,?)',
+                   ('paid', '2026-10-08', SCALE, None, NOW.isoformat()))
+    original = sqlite3.connect
+    statements = []
+    def read_only(path, **kwargs):
+        assert path.endswith('?mode=ro') and kwargs['uri']
+        connection = original(path, **kwargs)
+        connection.set_trace_callback(statements.append)
+        return connection
+    monkeypatch.setattr('spending.sqlite3.connect', read_only)
+    result = Spending(tmp_path).snapshot(NOW)
+    assert result['complete'] and result['today']['unresolved_usd'] == 1
+    assert statements[0] == 'BEGIN'
+    assert not any(x.startswith(('INSERT', 'UPDATE', 'DELETE', 'CREATE')) for x in statements)
