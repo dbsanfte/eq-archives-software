@@ -1673,6 +1673,7 @@ async def continuous_mode_flow(browser,base,width):
     await page.locator('#automation-enabled').check()
     await page.locator('#automation-daily').fill('5.50')
     await page.locator('#automation-monthly').fill('150.00')
+    await page.locator('#automation-site').fill('7.50')
     await page.locator('#automation-grade').fill('3')
     await page.locator('#automation-form .grading-options > summary').click()
     await page.locator('#automation-criteria').fill('Cleric guilds')
@@ -1687,21 +1688,22 @@ async def continuous_mode_flow(browser,base,width):
     await expect(page.locator('#automation-enabled')).to_be_checked()
     await expect(page.locator('#automation-daily')).to_have_value('5.50')
     await expect(page.locator('#automation-monthly')).to_have_value('150.00')
+    await expect(page.locator('#automation-site')).to_have_value('7.50')
     await expect(page.locator('#automation-grade')).to_have_value('3')
     await page.locator('#automation-form .grading-options > summary').click()
     await expect(page.locator('#automation-criteria')).to_have_value('Cleric guilds')
     await safe_layout(page,width)
-    for target in ('#automation-save','#automation-reload','.automation-switch','#automation-grade'):
+    for target in ('#automation-save','#automation-reload','.automation-switch','#automation-grade','#automation-site'):
         box=await page.locator(target).bounding_box()
         assert box['height']>=44 and box['width']>=44,(target,box)
     save_release.clear()
     await page.locator('#automation-save').click()
-    for identifier in ('#automation-enabled','#automation-daily','#automation-monthly','#automation-grade','#automation-criteria'):
+    for identifier in ('#automation-enabled','#automation-daily','#automation-monthly','#automation-site','#automation-grade','#automation-criteria'):
         await expect(page.locator(identifier)).to_be_disabled()
     await expect(page.locator('#automation-state')).to_have_text('Off')
     save_release.set();await settled(page)
     await expect(page.locator('#automation-state')).to_have_text('On')
-    assert posts==[('/api/automation',{'enabled':True,'daily_usd':5.5,'monthly_usd':150,'min_grade':3,'grading_criteria':'Cleric guilds','revision':0})]
+    assert posts==[('/api/automation',{'enabled':True,'daily_usd':5.5,'monthly_usd':150,'site_usd':7.5,'min_grade':3,'grading_criteria':'Cleric guilds','revision':0})]
     # Saved automatic mode disables the entire manual pane, even while idle.
     for control in await manual_controls.all():
         await expect(control).to_be_disabled()
@@ -1786,6 +1788,8 @@ async def automatic_indexing_flow(browser,base,width):
     row=snapshot['candidates'][0]
     detail=await (await context.request.get(base+'/api/candidate?id='+row['id'])).json()
     row=detail['candidate'];review=detail['review']
+    review['manifest']['indexing']={'enrichment':True,'model':'gpt-6-luna','max_enrichment_usd':2}
+    snapshot['automation']['settings']['site_usd']=None
     async def fixture(route):
         parsed=urlsplit(route.request.url)
         if route.request.method=='POST':
@@ -1808,7 +1812,11 @@ async def automatic_indexing_flow(browser,base,width):
     await expect(page.locator('#stages button')).to_have_count(4)
     await expect(page.locator('[data-view=review],#review-actions,#review-dialog')).to_have_count(0)
     await expect(page.get_by_role('heading',name='Preparing automatic indexing',exact=True)).to_be_visible()
-    await expect(page.locator('#stage-live')).to_contain_text('up to $2 for this site, including retries')
+    await expect(page.locator('#stage-live')).to_contain_text('up to $2 for this site across all dates, attempts and retries')
+    snapshot['automation']['settings']['site_usd']=5
+    snapshot['automation']['settings']['revision']+=1
+    await page.evaluate('refresh()');await settled(page)
+    await expect(page.locator('#stage-live')).to_contain_text('up to $5 for this site across all dates, attempts and retries')
     assert not posts
     review.update(state='index_preflight_failed',error='Archive coverage is unverified. Retry after checking coverage.')
     row['review_state']='index_preflight_failed'
@@ -2251,6 +2259,7 @@ async def pipeline_activity_flow(browser,base,width):
     await page.locator('#automation-settings > summary').click()
     await page.locator('#automation-daily').fill('5.50')
     await page.locator('#automation-monthly').fill('150.00')
+    await page.locator('#automation-site').fill('7.50')
     # The last automatic result remains available even when omitted from operations.
     workers['candidates']=None;discovery['state']='completed';discovery['result']['progress'].update(phase='complete',stop_reason='links_exhausted')
     auto['activity']={'phase':'links_exhausted','retry_at':auto['resets_at']}
@@ -2260,6 +2269,7 @@ async def pipeline_activity_flow(browser,base,width):
     await expect(page.locator('#activity-candidates')).to_contain_text('Last run: 7/50')
     await expect(page.locator('#automation-daily')).to_have_value('5.50')
     await expect(page.locator('#automation-monthly')).to_have_value('150.00')
+    await expect(page.locator('#automation-site')).to_have_value('7.50')
     discovery['result']['progress']['stop_reason']='archive_unavailable'
     auto['activity']['phase']='archive_unavailable'
     await page.evaluate('refresh()');await settled(page)
@@ -2268,6 +2278,7 @@ async def pipeline_activity_flow(browser,base,width):
     await expect(page.locator('#activity-candidates')).not_to_contain_text('No new links remain')
     await expect(page.locator('#automation-daily')).to_have_value('5.50')
     await expect(page.locator('#automation-monthly')).to_have_value('150.00')
+    await expect(page.locator('#automation-site')).to_have_value('7.50')
     await page.locator('#pipeline-recent > summary').click()
     await expect(page.locator('#pipeline-events')).to_contain_text('Automatically queued for capture')
     await page.evaluate('refresh()');assert await page.locator('#pipeline-recent').get_attribute('open') is not None

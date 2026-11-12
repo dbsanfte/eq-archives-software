@@ -102,11 +102,11 @@ def test_settled_cost_replaces_reservation_but_uncertain_calls_still_hold_budget
     factory = Mock()
     factory.return_value.request.return_value = response()
     directory = tmp_path / 'enrichment'
-    client = Enricher(directory, 'unused', client_factory=factory)
+    client = Enricher(directory, 'unused', maximum=2, client_factory=factory)
     client.store.db.execute("INSERT INTO attempts(candidate,signature,reserved,actual,status) VALUES ('old','old',2,.1,'enriched')")
     client.store.db.commit()
     client.close()
-    client = Enricher(directory, 'unused', client_factory=factory)
+    client = Enricher(directory, 'unused', maximum=2, client_factory=factory)
     try:
         assert client.enrich(capture, SOURCE)['llm_summary'] == RESULT['llm_summary']
         assert factory.return_value.request.call_count == 1

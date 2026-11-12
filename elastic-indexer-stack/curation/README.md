@@ -38,7 +38,7 @@ operator API retains its coverage refresh behavior.
 ## Continuous automatic mode
 
 **Candidates → Automatic mode → Configure automatic mode** is an explicit opt-in.
-It defaults **off**, with proposed **$2/day**, **$200/calendar month**, **Grade 2+** limits and optional
+It defaults **off**, with proposed **$2/day**, **$500/calendar month**, **Grade 2+** limits and optional
 additional grading criteria. Edit the controls and press **Save automatic settings**;
 sliders, unsaved drafts, polling and deployment never enable it. Settings persist on
 the existing PVC, with revision checks against stale browser tabs. Drafts remain
@@ -75,9 +75,12 @@ requests retain their reservation, rejected responses/corrections count, and pai
 caches never count twice. Accounting uses the UTC day on which a request was
 reserved; daily windows reset at **00:00 UTC**, and calendar months at **00:00 UTC
 on the first day**. Existing current-month portal ledgers are included when settings
-are saved. Enabling or changing limits waits for older paid imports without shared
+are first saved, and daily-only legacy settings receive the same month-wide migration.
+After initialization, settings changes use the authoritative shared ledger instead
+of reopening every historical campaign; existing charges and reservations remain.
+Enabling or changing limits waits for older paid imports without shared
 monthly accounting to finish; those Jobs are never changed. The operator-selected
-production pacing is **$20/day, capped at $200/month**; deployment preserves saved
+production pacing is **$20/day, capped at $500/month**, with **$5 lifetime enrichment per site**; deployment preserves saved
 settings and never enables automatic mode.
 
 After shared accounting is configured, the header reads the same integer ledger
@@ -97,8 +100,8 @@ funds, validates the original publication, then creates a **new numbered Job**.
 Previous Jobs, manifests, source hashes and paid caches are retained; existing ES
 IDs are skipped. Every approved import that outlasts the six-hour Kubernetes Job
 deadline continues in a new numbered Job, including older manual approvals. The
-original policy and cache identity remain unchanged: manual $2/site caps are never
-renewed or converted to automatic daily allowances. A saved failure diagnostic
+original policy and cache identity remain unchanged. Retries do not renew a site
+allowance; only an explicit saved per-site limit change authorizes more spending. A saved failure diagnostic
 (including enrichment budget or source-validation failure) still requires
 attention. Imports already marked failed can be requeued with **Retry indexing**;
 subsequent execution timeouts continue automatically. A missing or mismatched
@@ -108,9 +111,13 @@ policy maintenance never hold that slot.
 Raising the cap can resume work before midnight. If the next single reservation
 exceeds the entire daily limit, the displayed required amount must be funded.
 
-New automatic approvals use the shared daily enrichment policy across days,
-allowing large sites to finish without a $2 lifetime ceiling. Manual and existing
-approvals keep their original $2/site cap as well as both configured shared limits.
+New manual and automatic approvals record a $5 cumulative enrichment cap per site,
+in addition to both shared limits. The saved **Lifetime enrichment limit per site**
+setting also governs older approvals without rewriting their immutable manifests.
+Changing this setting requires older paid import Jobs without per-site accounting
+to finish first; broad reindex Jobs remain untouched. Settled charges, uncertain
+reservations and corrections count across every date, Job, retry and UTC reset.
+Exhausting a site cap requires operator attention; calendar resets cannot renew it.
 Failed-file retries retain the original site's policy and enrichment budget/cache.
 Turning automatic mode off stops new automatic discovery and approvals; already
 approved captures and imports continue under both configured limits. Turning
@@ -235,8 +242,8 @@ external navigation links, with no workflow action or paid work on refresh.
    `crawl-manifests/<batch-id>.json`. Import waits only for another unfinished,
    unsuspended foreground capture import in `eqarchives-es`, including pending or
    retrying Jobs with `active=0`. The controller cannot patch, suspend or delete Jobs.
-   AI enrichment uses Luna by default, within both shared limits and the original
-   automatic or manual $2/site policy.
+   AI enrichment uses Luna by default, within both shared limits and the saved
+   cumulative per-site ceiling (new approvals record $5).
    Indexed sites retire to **History** automatically.
 
 Completed ordinary sites and boards with gaps offer **Retry failed files** in Indexing or
@@ -247,7 +254,7 @@ metadata and retain cumulative transport usage. Board retries request only missi
 exact URL/date versions and revalidate board ownership before saving them. The resulting manifest publishes
 and indexes automatically; prior manifests, publications and Jobs stay immutable.
 A retry of published files inherits its original site's enrichment ledger and
-cached responses, so it cannot renew a manual $2 cap or change the automatic daily policy. Existing document IDs are skipped
+cached responses, so it cannot renew the cumulative site allowance or change the original policy. Existing document IDs are skipped
 without paid calls. Pending imports remain serial behind existing Jobs. An older
 import finishing cannot retire a site with newer acquisition still in progress.
 
@@ -658,8 +665,9 @@ the full configured allowance before sending, with verified actual usage settlin
 the charge afterward. Valid cached 4,096-token results and their corrections are
 reused with their original source/request identities.
 
-Each manually approved site has a separate cumulative $2 enrichment cap. Newly
-automatically approved sites instead use the configured shared UTC daily ceiling.
+Every new manual or automatic approval records a cumulative $5 enrichment cap.
+The saved shared per-site ceiling takes precedence for legacy approvals too,
+while retaining their original manifests and cumulative accounting.
 Reservations use conservative long-context rates and precede calls. Once usage
 is verified, its actual cost replaces that request's reservation for admission;
 received responses without usage and ambiguous failures retain their full
@@ -693,8 +701,8 @@ It retains the old response chain and costs, has a stable single-use slot even
 after a lost response, and cannot replenish correction slots. Other failures or
 responses already using 32K receive no extra recovery allowance. Ambiguous initial
 attempts remain jointly bounded across old/new prompt and output-limit signatures.
-Every reservation counts against the original daily or $2/site policy; retries neither reset
-that policy nor silently create an unenriched document. Exhausted corrections require
+Every reservation counts against the site ceiling and both shared calendar limits; retries neither reset
+the original policy nor silently create an unenriched document. Exhausted corrections require
 operator attention rather than another paid loop.
 The approved
 sources/manifests remain read-only in import Jobs. Completed results are reused

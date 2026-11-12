@@ -37,13 +37,14 @@
           <form id="automation-form">
             <label class="automation-switch"><input id="automation-enabled" type="checkbox"> Enable continuous discovery, capture & indexing</label>
             <label for="automation-daily">Daily Luna limit (USD)</label><input id="automation-daily" type="number" min="0.01" max="1000000" step="0.01" inputmode="decimal" value="2" required>
-            <label for="automation-monthly">Monthly Luna limit (USD)</label><input id="automation-monthly" type="number" min="0.01" max="1000000" step="0.01" inputmode="decimal" value="200" required>
+            <label for="automation-monthly">Monthly Luna limit (USD)</label><input id="automation-monthly" type="number" min="0.01" max="1000000" step="0.01" inputmode="decimal" value="500" required>
+            <label for="automation-site">Lifetime enrichment limit per site (USD)</label><input id="automation-site" type="number" min="0.01" max="1000000" step="0.01" inputmode="decimal" value="5" required>
             <label for="automation-grade">Minimum grade to auto-approve <output id="automation-grade-value" for="automation-grade">2</output></label>
             <input id="automation-grade" type="range" min="0" max="3" step="1" value="2">
             <div class="grade-ticks" aria-hidden="true"><span>0 · Any</span><span>1</span><span>2</span><span>3 · Strong EQ content</span></div>
             <details class="grading-options"><summary>Advanced · Grading focus</summary><label for="automation-criteria">Additional criteria for automatic discovery</label><textarea id="automation-criteria" rows="3" maxlength="1000" placeholder="For example: Cleric class sites or EverQuest guilds"></textarea></details>
             <p class="meta">Automatic approval requires a current high-confidence assessment of EQ relevance and archival substance. Whole EQ sites and evidenced EQ sections are captured broadly; mixed hosts retain their EQ boundary. Lower grades and uncertain sites stay in Saved for later. Restoring a saved site or undoing an approval leaves it under your control.</p>
-            <p class="meta">Daily and calendar-month limits cover all portal Luna grading and enrichment, including manual requests and outstanding reservations. Resets use UTC. Approved-site enrichment takes priority over discovery grading. Automatic sites continue across resets; manual approvals retain their original site cap. Turning automatic mode off stops new discovery and approvals; approved work continues within both limits.</p>
+            <p class="meta">Daily and calendar-month limits cover all portal Luna grading and enrichment, including manual requests and outstanding reservations. Resets use UTC. Approved-site enrichment takes priority over discovery grading. The per-site limit covers all enrichment attempts and corrections, including earlier spending and retries. It never resets with the day or month. Turning automatic mode off stops new discovery and approvals; approved work continues within both limits.</p>
             <p id="automation-draft" class="meta"></p>
             <div class="automation-actions"><button id="automation-save" type="submit" class="primary" disabled>Save automatic settings</button><button id="automation-reload" type="button">Reload saved settings</button></div>
           </form>
@@ -82,7 +83,7 @@
       </section>
       <div id="stage-activity" hidden></div>
       <label class="search-label" for="site-search">Find a site</label><input id="site-search" type="search" placeholder="Site name or address" maxlength="200" autocomplete="off">
-      <p id="swipe-help" class="meta" hidden>Swipe right to approve capture · left to dismiss. Approval also publishes and indexes the capture automatically, with up to $2 for AI enrichment per site. Tap for details or to change scope.</p>
+      <p id="swipe-help" class="meta" hidden>Swipe right to approve capture · left to dismiss. Approval also publishes and indexes the capture automatically, with up to $5 for AI enrichment per site. Tap for details or to change scope.</p>
       <div id="candidates" class="site-list"></div>
       <nav id="pagination" aria-label="Site list pages" hidden><button id="previous">Previous</button><span id="page"></span><button id="next">Next</button></nav>
     </section>
