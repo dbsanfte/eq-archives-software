@@ -7,7 +7,7 @@ import pytest
 
 from common import CrawlError, Store, now
 from daily_budget import DailyBudget, DailyBudgetPause, AutomaticStopped, reserve_attempt, settle_attempt, require_automatic
-from indexer.capture_enrichment import Enricher, AUTO_POLICY, DEFAULT_POLICY, policy, policy_for_sites
+from indexer.capture_enrichment import Enricher, AUTO_POLICY, DEFAULT_POLICY, LEGACY_POLICY, policy, policy_for_sites
 from test_enrichment import response, SOURCE
 
 
@@ -113,7 +113,7 @@ def test_auto_policy_requires_original_approval_and_configured_daily_ledger(tmp_
     site = {'decision': {'automatic': {'enrichment_budget': 'daily-v1'}}}
     assert policy_for_sites([site]) == AUTO_POLICY
     assert policy({'indexing': AUTO_POLICY, 'sites': [site]}) == AUTO_POLICY
-    assert policy({}) == DEFAULT_POLICY
+    assert policy({}) == LEGACY_POLICY
     with pytest.raises(CrawlError): policy({'indexing': AUTO_POLICY, 'sites': [{}]})
     with pytest.raises(CrawlError): policy_for_sites([site, {}])
     with pytest.raises(CrawlError): Enricher(tmp_path/'unsafe', 'dummy', maximum=None)
@@ -152,7 +152,7 @@ def test_auto_enrichment_continues_next_day_reuses_cache_and_keeps_manual_site_c
         assert client.enrich(capture, SOURCE + ' Second page.')
         assert len(calls) == 2
         client.close()
-        manual = Enricher(directory, 'dummy', client_factory=Luna)
+        manual = Enricher(directory, 'dummy', maximum=2, client_factory=Luna)
         with pytest.raises(CrawlError, match='dollar budget'): manual.enrich(capture, SOURCE + ' Third page.')
         manual.close()
 

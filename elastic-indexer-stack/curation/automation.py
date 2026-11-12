@@ -71,7 +71,7 @@ def configure(root, payload, kube=None):
     # older images cannot be claimed to honor a newly configured daily ceiling.
     prior=account.settings()
     limits_changed=(payload['daily_usd']!=prior['daily_usd'] or payload.get('monthly_usd',prior['monthly_usd'])!=prior['monthly_usd'])
-    if kube and (payload['enabled'] or not prior['configured'] or limits_changed):
+    if kube and (payload['enabled'] or not prior['configured'] or limits_changed or 'site_usd' in payload):
         from jobs import finished
         for job in kube.jobs():
             if (job['metadata'].get('labels', {}).get('app') == 'eqarchives-capture-import'
@@ -81,6 +81,8 @@ def configure(root, payload, kube=None):
                     raise CrawlError('An earlier enrichment Job is still running without daily budget control. Let it finish before enabling automatic mode.')
                 if not any(item.get('name')=='LUNA_MONTHLY_BUDGET_VERSION' and item.get('value')=='calendar-v1' for item in env):
                     raise CrawlError('An earlier enrichment Job is still running without monthly budget control. Let it finish before changing spending limits.')
+                if 'site_usd' in payload and not any(item.get('name')=='LUNA_SITE_BUDGET_VERSION' and item.get('value')=='site-v1' for item in env):
+                    raise CrawlError('An earlier enrichment Job is still running without per-site budget control. Let it finish before changing site limits.')
     seed_spend(Path(root), account)
     saved = account.configure(payload)
     with connect(root) as store:

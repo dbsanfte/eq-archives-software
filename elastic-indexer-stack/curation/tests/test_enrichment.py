@@ -108,13 +108,13 @@ def test_budget_is_reserved_before_unknown_failure_and_survives_retry(candidate,
         def close(self):pass
     directory=tmp_path/'enrichment'
     for expected in (1,2):
-        client=Enricher(directory,'dummy-key-file',client_factory=Uncertain)
+        client=Enricher(directory,'dummy-key-file',maximum=2,client_factory=Uncertain)
         try:
             with pytest.raises(CrawlError,match='outcome is uncertain'):client.enrich(capture,SOURCE)
             assert client.store.db.execute('SELECT COUNT(*) FROM attempts').fetchone()[0]==expected
             assert client.store.db.execute('SELECT SUM(reserved) FROM attempts').fetchone()[0]>0
         finally:client.close()
-    client=Enricher(directory,'dummy-key-file',client_factory=Uncertain)
+    client=Enricher(directory,'dummy-key-file',maximum=2,client_factory=Uncertain)
     try:
         with pytest.raises(CrawlError,match='outcome is uncertain'):client.enrich(capture,SOURCE)
         assert client.store.db.execute('SELECT COUNT(*) FROM attempts').fetchone()[0]==2
@@ -221,7 +221,7 @@ def test_corrections_cannot_bypass_site_budget_or_spend_again_after_ambiguous_fa
         def request(self,payload):calls.append(payload);raise CrawlError('Private upstream data')
         def close(self):pass
     directory=tmp_path/'enrichment'
-    client=Enricher(directory,'dummy',client_factory=Uncertain)
+    client=Enricher(directory,'dummy',maximum=2,client_factory=Uncertain)
     try:
         signature=digest({'payload':client.payload(capture,TABLE_SOURCE),'raw_source_sha256':capture['sha256']})
         client.store.set('enrichment:'+signature,{'response':response({**table_result(),'llm_summary':'x'*501})})
@@ -233,7 +233,7 @@ def test_corrections_cannot_bypass_site_budget_or_spend_again_after_ambiguous_fa
         client.store.db.commit()
     finally:client.close()
     for attempt in range(4):
-        client=Enricher(directory,'dummy',client_factory=Uncertain)
+        client=Enricher(directory,'dummy',maximum=2,client_factory=Uncertain)
         try:
             with pytest.raises(CrawlError) as error:client.enrich(capture,TABLE_SOURCE)
             assert 'Private upstream' not in str(error.value)

@@ -454,25 +454,28 @@ shared private SQLite daily/monthly reservation ledger across portal grading and
 import Jobs; reserve atomically before calls, retain uncertain costs and count
 corrections. Include prior current-day portal spend on configuration. Use UTC
 midnight resets, retain original operation limits/deadlines, and resume funded
-work automatically. Automatically approved sites use the daily enrichment policy
-across days; existing/manual approvals keep $2/site. Keep both policies explicit
-in original approvals/manifests and preserve them through failed-file lineage.
+work automatically. New manual and automatic approvals record $5/site enrichment.
+Keep original policies explicit and immutable through failed-file lineage. The saved
+shared per-site ceiling authorizes changes for legacy approvals too, counting all
+settled charges, uncertain reservations and corrections in the original site ledger.
+Day/month resets and retries never renew this allowance.
 A daily-budget import pause must remain in Indexing with a current Job/manifest
 bound diagnostic; create a new numbered continuation only when funded. Never
 modify previous Jobs or infer indexing completion from a budget exit. New import
 Jobs require a verified completion diagnostic. All approved imports that exceed
 the Job time limit continue in a new numbered Job, including legacy/manual
 approvals, retaining the original budget/cache and immutable Jobs/manifests. Never
-renew a manual $2 cap, change its policy or override a saved failure diagnostic. Disabling automatic mode stops new
+renew a site allowance, change an immutable policy or override a saved failure diagnostic. Disabling automatic mode stops new
 automatic discovery/approvals; approved work continues under the daily cap.
-The operator-selected limits are $20/day and $200/calendar month; deployment
+The operator-selected limits are $20/day and $500/calendar month, with $5/site; deployment
 preserves saved settings and automatic-mode opt-in. Both limits include actual and
 uncertain reservations across workers, UTC resets and prior current-month costs.
 Approved enrichment has priority over discovery; deny grading before reservation
 while heartbeat-backed import demand remains, and automatically resume original
 operations without renewing their limits/deadlines. Per-site failures cannot keep
 priority indefinitely. Do not change caps or enable while an older paid Job lacks
-shared monthly accounting. Never alter existing paid Jobs to add it.
+shared monthly accounting; changing the site ceiling also requires per-site accounting
+capability in unfinished paid imports. Never alter existing paid Jobs to add it.
 Automatic promotion requires current `eq-site-selection-v2` source-bound grading,
 verified coverage and high confidence. The displayed 0–3 selection grade is capped
 by separate EQ relevance and archival-substance grades and the operator's focus.
@@ -602,8 +605,8 @@ interruptions retain their explicit resume semantics.
 Source reading and scope drafts must not prevent progress polling or lose edits.
 Download completion creates an independent manifest per site and automatically
 queues whole-site publication/indexing under the original capture approval.
-There is no Review tab or second approval. Show the automatic flow and the manual
-$2/site or automatic daily AI enrichment policy before capture approval, including mobile quick actions.
+There is no Review tab or second approval. Show the automatic flow and current
+cumulative site enrichment ceiling before capture approval, including mobile quick actions.
 Preflight original approval, current scope/hash, coverage, policy and every saved
 source before atomically queuing publication once. Persist failures as
 index_preflight_failed in Indexing, requiring explicit manifest-bound retry;

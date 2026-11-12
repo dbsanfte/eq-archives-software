@@ -13,7 +13,7 @@ import yaml
 from common import CrawlError, Store, digest, now
 from grading import Luna, MODEL, PRICING
 from import_status import EnrichmentError
-from daily_budget import attempt_remaining_units, current_budget, reserve_attempt, settle_attempt, units
+from daily_budget import SiteBudgetExceeded, current_budget, reserve_attempt, settle_attempt, units
 
 RESOURCES = Path(__file__).with_name("resources")
 TASKS = ("classification", "summary", "tagging", "date")
@@ -31,8 +31,10 @@ SCHEMA = {"type": "object", "additionalProperties": False, "properties": {
                        "properties": {"date": {"type": "string"}, "excerpt": {"type": "string"}}, "required": ["date", "excerpt"]}}
 }}
 SCHEMA["required"] = list(SCHEMA["properties"])
-DEFAULT_POLICY = {"enrichment": True, "model": MODEL, "max_enrichment_usd": 2}
-AUTO_POLICY = {"enrichment": True, "model": MODEL, "max_enrichment_usd": None, "daily_budget": "portal-utc-v1"}
+LEGACY_POLICY = {"enrichment": True, "model": MODEL, "max_enrichment_usd": 2}
+LEGACY_AUTO_POLICY = {"enrichment": True, "model": MODEL, "max_enrichment_usd": None, "daily_budget": "portal-utc-v1"}
+DEFAULT_POLICY = {"enrichment": True, "model": MODEL, "max_enrichment_usd": 5}
+AUTO_POLICY = {**DEFAULT_POLICY, "daily_budget": "portal-utc-v1"}
 MAX_CORRECTIONS = 2
 MAX_DATE_ITEMS = 1024
 MAX_OUTPUT_TOKENS = 32768
@@ -58,8 +60,9 @@ def policy_for_sites(sites):
 
 
 def policy(manifest):
-    settings = manifest.get("indexing", DEFAULT_POLICY)
-    if settings != DEFAULT_POLICY and (settings != AUTO_POLICY or policy_for_sites(manifest.get('sites', [])) != AUTO_POLICY):
+    settings = manifest.get("indexing", LEGACY_POLICY)
+    if settings not in (DEFAULT_POLICY, LEGACY_POLICY) and (settings not in (AUTO_POLICY, LEGACY_AUTO_POLICY)
+            or policy_for_sites(manifest.get('sites', [])) != AUTO_POLICY):
         raise CrawlError("Import enrichment policy differs from the reviewed default")
     return dict(settings)
 
@@ -177,11 +180,12 @@ def validate(response, source, *, audit=None):
 
 
 class Enricher:
-    def __init__(self, directory, key_file, maximum=2, client_factory=Luna):
+    def __init__(self, directory, key_file, maximum=5, client_factory=Luna):
         daily = current_budget.get()
-        if maximum != DEFAULT_POLICY["max_enrichment_usd"] and not (maximum is None and daily and daily.settings()['configured']):
+        if maximum not in (LEGACY_POLICY['max_enrichment_usd'], DEFAULT_POLICY['max_enrichment_usd']) and not (maximum is None and daily and daily.settings()['configured']):
             raise CrawlError("Enrichment requires the reviewed batch budget")
-        self.store, self.client, self.maximum = Store(directory), None, maximum
+        self.store, self.client = Store(directory), None
+        self.maximum = DEFAULT_POLICY['max_enrichment_usd'] if maximum is None else maximum
         self.client_factory, self.key_file = client_factory, key_file
 
     def close(self):
@@ -223,12 +227,12 @@ class Enricher:
             if correction:
                 return MISSING_RESPONSE  # A lost response consumes its correction slot.
             raise EnrichmentError('request')
-        if self.maximum is not None and units(amount) > attempt_remaining_units(self.store, self.maximum):
-            self.store.db.rollback()
-            raise EnrichmentError('budget')
         attempt = self.store.db.execute('INSERT INTO attempts(candidate,signature,reserved,status,created) VALUES (?,?,?,?,?)',
                                         (capture['archive_path'], signature, amount, 'reserved', now())).lastrowid
-        reserve_attempt(self.store, attempt, amount)
+        try:
+            reserve_attempt(self.store, attempt, amount, site_maximum=self.maximum)
+        except SiteBudgetExceeded:
+            raise EnrichmentError('budget') from None
         self.store.db.commit()
         try:
             self.client = self.client or self.client_factory(self.key_file)

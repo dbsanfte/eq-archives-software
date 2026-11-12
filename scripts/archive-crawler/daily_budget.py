@@ -17,7 +17,7 @@ import uuid
 from common import CrawlError, now
 
 SCALE = 1_000_000_000
-DEFAULT = {'enabled': False, 'configured': False, 'daily_usd': 2.0, 'monthly_usd': 200.0,
+DEFAULT = {'enabled': False, 'configured': False, 'daily_usd': 2.0, 'monthly_usd': 500.0, 'site_usd': None,
            'min_grade': 2, 'grading_criteria': '', 'revision': 0}
 current_budget = ContextVar('luna_daily_budget', default=None)
 automatic_request = ContextVar('automatic_luna_request', default=False)
@@ -62,6 +62,10 @@ class DailyBudgetPause(CrawlError):
     def __init__(self, amount, retry_at, period='daily'):
         self.amount, self.retry_at, self.period = amount, retry_at, period
         super().__init__(f'{period.title()} Luna budget reached; paid work resumes after the UTC {period} reset')
+
+
+class SiteBudgetExceeded(CrawlError):
+    """A lifetime site allowance is exhausted; calendar resets cannot renew it."""
 
 
 class EnrichmentPriorityPause(CrawlError):
@@ -138,11 +142,12 @@ class DailyBudget:
     @staticmethod
     def validate(payload):
         from grading import criteria
-        if (not isinstance(payload, dict) or set(payload)-{'monthly_usd'} != {'enabled', 'daily_usd', 'min_grade', 'grading_criteria', 'revision'}
+        if (not isinstance(payload, dict) or set(payload)-{'monthly_usd', 'site_usd'} != {'enabled', 'daily_usd', 'min_grade', 'grading_criteria', 'revision'}
                 or type(payload['enabled']) is not bool or type(payload['min_grade']) is not int
                 or payload['min_grade'] not in range(4) or type(payload['revision']) is not int
                 or not 0 < units(payload['daily_usd']) <= 1_000_000 * SCALE
-                or not 0 < units(payload.get('monthly_usd',DEFAULT['monthly_usd'])) <= 1_000_000 * SCALE):
+                or not 0 < units(payload.get('monthly_usd',DEFAULT['monthly_usd'])) <= 1_000_000 * SCALE
+                or 'site_usd' in payload and not 0 < units(payload['site_usd']) <= 1_000_000 * SCALE):
             raise CrawlError('Automatic mode needs a daily USD limit, a minimum grade from 0 to 3, and current settings')
         return {**payload, 'grading_criteria': criteria(payload['grading_criteria'])}
 
@@ -194,8 +199,13 @@ class DailyBudget:
         return {'settings': config, 'complete': config['configured'], **{k:v for k,v in limits.items() if not k.startswith('_')},
                 'enrichment_pending':priority,'day': when.date().isoformat(), 'timezone': 'UTC'}
 
-    def reserve(self, amount):
+    def reserve(self, amount, *, site_spent_units=None, site_maximum=None):
         reserved = units(amount)
+        if (site_spent_units is None) != (site_maximum is None):
+            raise CrawlError('Invalid site spend accounting; paid work is paused')
+        if site_spent_units is not None:
+            if type(site_spent_units) is not int or site_spent_units < 0 or not units(site_maximum):
+                raise CrawlError('Invalid site spend accounting; paid work is paused')
         with self.database() as db:
             db.execute('BEGIN IMMEDIATE')
             when = instant()
@@ -203,6 +213,11 @@ class DailyBudget:
             config = json.loads(db.execute('SELECT value FROM settings WHERE id=1').fetchone()[0])
             if automatic_request.get() and not config['enabled']:
                 raise AutomaticStopped()
+            if site_spent_units is not None:
+                maximum = config.get('site_usd') if config['configured'] else None
+                maximum = site_maximum if maximum is None else maximum
+                if site_spent_units + reserved > units(maximum):
+                    raise SiteBudgetExceeded('Site Luna budget reached; paid results are retained')
             limits=self.limits(db,when,config)
             if config['configured'] and reserved>limits['_remaining_units']:
                 raise DailyBudgetPause(amount, limits['resets_at'], limits['budget_period'])
@@ -240,16 +255,26 @@ class DailyBudget:
                 ('legacy:' + identifier, when.date().isoformat(), reserved, actual, created))
 
 
-def reserve_attempt(store, attempt, amount):
+def reserve_attempt(store, attempt, amount, *, site_maximum=None):
     """Call while holding the operation's write transaction, before commit/send."""
-    if budget := current_budget.get():
-        try:
-            receipt = budget.reserve(amount)
+    try:
+        site_spent = None
+        if site_maximum is not None:
+            # The just-inserted attempt is already included in this locked
+            # ledger. Count it exactly once, using the shared integer rounding.
+            site_spent = sum(units(v) for v in attempt_spending(store).values()) - units(amount)
+            if site_spent < 0:
+                raise CrawlError('Invalid site spend accounting; paid work is paused')
+        if budget := current_budget.get():
+            receipt = (budget.reserve(amount) if site_spent is None else
+                       budget.reserve(amount, site_spent_units=site_spent, site_maximum=site_maximum))
             store.db.execute('INSERT OR REPLACE INTO meta VALUES (?,?)',
                              ('daily_reservation:' + str(attempt), json.dumps(receipt)))
-        except BaseException:
-            store.db.rollback()
-            raise
+        elif site_spent is not None and site_spent + units(amount) > units(site_maximum):
+            raise SiteBudgetExceeded('Site Luna budget reached; paid results are retained')
+    except BaseException:
+        store.db.rollback()
+        raise
 
 
 def settle_attempt(store, attempt, actual, usage):

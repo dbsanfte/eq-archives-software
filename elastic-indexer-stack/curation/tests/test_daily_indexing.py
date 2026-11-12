@@ -137,8 +137,14 @@ def test_oom_only_migrates_the_undersized_import_profile_and_preserves_old_job(t
 
 @pytest.mark.parametrize('shared_ledger', [False, True])
 def test_manual_deadline_continues_across_worker_restarts_without_renewing_budget(tmp_path, monkeypatch, shared_ledger):
+    from indexer.capture_enrichment import LEGACY_POLICY
     root = tmp_path/'state'
     row, manifest = completed(root)
+    manifest['indexing'] = dict(LEGACY_POLICY)
+    with connect(root) as store:
+        store.db.execute('UPDATE batches SET manifest=?,manifest_sha256=? WHERE id=?',
+                         (json.dumps(manifest), digest(manifest), manifest['batch_id']))
+        store.db.commit()
     immutable = published(root, manifest, 'indexing')
     with connect(root) as store:
         batch = unpack(store.db.execute('SELECT * FROM batches').fetchone())
