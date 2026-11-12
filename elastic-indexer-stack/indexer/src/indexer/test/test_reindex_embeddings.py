@@ -10,6 +10,7 @@ import httpx
 
 import reindex_embeddings as job
 from indexer import gemma, passages
+from indexer.source_encoding import VERSION as DECODING_VERSION
 from indexer.html_extraction import extraction_version
 
 V = [1.] + [0.] * 767
@@ -202,7 +203,7 @@ def test_clean_completed_record_reuses_vectors_when_only_decoding_checkpoint_is_
     assert diagnostics=={'reused_embeddings':1}
     assert 'text' not in update and 'llm_summary_vector' not in update
     assert update['text_extraction_version']==extraction_version(source['id'])
-    assert update['text_passage_provenance']['decoding']['version']=='source-decoding-v3' and 'llm_image_text_vector' not in update
+    assert update['text_passage_provenance']['decoding']['version']==DECODING_VERSION and 'llm_image_text_vector' not in update
     embedder.get_chunks_and_embeddings.assert_not_called();embedder.embed_text.assert_not_called()
     client.update.return_value={'result':'unexpected'}
     with pytest.raises(ValueError,match='did not update'):job.migrate_record(client,'eq',hit,tmp_path,embedder)
@@ -360,7 +361,7 @@ def test_operator_entrypoint_only_adds_mapping_and_runs_checkpointed_migration(t
     monkeypatch.setattr(job, 'ProcessPoolExecutor', pool)
     migrate = MagicMock(return_value=job.Progress(failed=failures))
     monkeypatch.setattr(job, 'reindex', migrate)
-    assert job.main() == failures
+    assert job.main() == (43 if failures else 0)
     manager.get_client.return_value.indices.put_mapping.assert_called_once_with(
         index='eq', properties={'embedding_model': {'type': 'keyword'}, 'text_chunking_version': {'type': 'keyword'}, 'text_passage_provenance': {'type': 'object', 'enabled': False}})
     assert migrate.call_args.kwargs['preparation_pool'] is None
@@ -383,7 +384,7 @@ def test_source_upgrade_reuses_only_identical_passage_requests_and_advances_chec
     assert stats=={'reused_embeddings':1} and update['text_chunking_version']==passages.VERSION
     assert 'text' not in update and 'llm_summary_vector' not in update
     assert update['text_extraction_version']==extraction_version(source['id'])
-    assert update['text_passage_provenance']['decoding']['version']=='source-decoding-v3'
+    assert update['text_passage_provenance']['decoding']['version']==DECODING_VERSION
     embedder.get_chunks_and_embeddings.assert_not_called()
     # A changed title/context changes the embedding request even if body text
     # and the old provenance hashes are identical. It must get new vectors.

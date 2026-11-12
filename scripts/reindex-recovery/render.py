@@ -65,7 +65,7 @@ def render(previous, name, runner, *, probe_id=None):
            'spec': {'backoffLimit': 6, 'parallelism': 1, 'completions': 1,
                     'podFailurePolicy': {'rules': [
                         {'action': 'FailJob', 'onExitCodes': {'containerName': 'indexer',
-                            'operator': 'In', 'values': [42]}},
+                            'operator': 'In', 'values': [42,43]}},
                         {'action': 'Ignore', 'onPodConditions': [{'type': 'DisruptionTarget', 'status': 'True'}]},
                         {'action': 'Ignore', 'onExitCodes': {'containerName': 'indexer',
                             'operator': 'In', 'values': [143, 255]}}]},

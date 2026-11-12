@@ -33,6 +33,20 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(env['REINDEX_PREPARATION_WORKERS'], '2')
         self.assertEqual(env['SKIP_LLM_ENRICHMENT'], 'true')
 
+    def test_gemma_sources_include_private_publication_objects_readonly_and_fail_once_on_content(self):
+        previous=self.previous();before=deepcopy(previous)
+        job=handoff.render(previous,'reindex-source-recovery','eqarchives-indexer:rtx3080-'+'a'*40,gemma=True)
+        assert previous==before
+        pod=job['spec']['template']['spec'];container=pod['containers'][0]
+        assert pod['securityContext']['runAsUser']==pod['securityContext']['runAsGroup']==10001
+        assert {'name':'publication','mountPath':'/publication','readOnly':True} in container['volumeMounts']
+        assert next(v for v in pod['volumes'] if v['name']=='publication')['hostPath']['path']=='/mnt/samsung/eqarchives-curation/publisher.git'
+        assert {e['name']:e.get('value') for e in container['env']}['REINDEX_PUBLICATION_REPO']=='/publication'
+        assert job['spec']['podFailurePolicy']['rules'][0]['onExitCodes']['values']==[43]
+        job['metadata']['uid']='created-job-uid'
+        repeated=handoff.render(job,'reindex-source-recovery-next','eqarchives-indexer:rtx3080-'+'b'*40,gemma=True)
+        assert sum(v['name']=='publication' for v in repeated['spec']['template']['spec']['volumes'])==1
+
     def test_gemma_handoff_has_its_own_checkpoint_and_keeps_cuda_only(self):
         previous = self.previous()
         job = handoff.render(previous, 'reindex-gemma', 'eqarchives-indexer:rtx3080-'+'a'*40, gemma=True)
@@ -46,7 +60,7 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(env['REINDEX_DIAGNOSTICS_PATH'],'/indexing-state/reindex-failures.sqlite')
         pod=job['spec']['template']['spec']
         self.assertIn(10001,pod['securityContext']['supplementalGroups'])
-        self.assertEqual(pod['volumes'][-1]['hostPath']['path'],'/mnt/samsung/eqarchives-curation/indexing-state')
+        self.assertEqual(next(v for v in pod['volumes'] if v['name']=='indexing-state')['hostPath']['path'],'/mnt/samsung/eqarchives-curation/indexing-state')
         job['metadata']['uid']='new-uid'
         resumed=handoff.render(job,'reindex-gemma-next','eqarchives-indexer:rtx3080-'+'b'*40,gemma=True)
         self.assertEqual(resumed['spec']['template']['spec']['volumes'],pod['volumes'])
