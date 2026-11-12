@@ -54,6 +54,15 @@ def render(previous, name, image, *, gemma=False, images=False, text_hosts=None)
         if existing_mount is None:container['volumeMounts'].append(mount)
         security=pod.setdefault('securityContext',{})
         security['supplementalGroups']=list(dict.fromkeys(security.get('supplementalGroups',[])+[10001]))
+    if gemma and not images and not text_hosts:
+        values['REINDEX_PUBLICATION_REPO']='/publication'
+        publication={'name':'publication','hostPath':{'path':'/mnt/samsung/eqarchives-curation/publisher.git','type':'Directory'}}
+        publication_mount={'name':'publication','mountPath':'/publication','readOnly':True}
+        for items,item in ((pod['volumes'],publication),(container['volumeMounts'],publication_mount)):
+            previous_item=next((v for v in items if v['name']==item['name']),None)
+            if previous_item is not None and previous_item!=item:raise ValueError('Preserve the read-only publication source location')
+            if previous_item is None:items.append(item)
+        pod.setdefault('securityContext',{}).update(runAsUser=10001,runAsGroup=10001)
     if images:
         vision='http://gemma-image-embeddings.eqarchives-es.svc.cluster.local:8080/v1'
         values.update(REINDEX_ENTRYPOINT='index_images.pyc', OPENAI_ENDPOINT=vision,
@@ -85,6 +94,10 @@ def render(previous, name, image, *, gemma=False, images=False, text_hosts=None)
         'spec': {'backoffLimit': previous['spec']['backoffLimit'], 'parallelism': 0, 'completions': 1,
                  'podFailurePolicy': copy.deepcopy(previous['spec']['podFailurePolicy']),
                  'template': {'spec': pod}}}
+    if gemma and not images and not text_hosts:
+        rules=job['spec']['podFailurePolicy']['rules']
+        if not any(r.get('action')=='FailJob' and 43 in r.get('onExitCodes',{}).get('values',[]) for r in rules):
+            rules.insert(0,{'action':'FailJob','onExitCodes':{'containerName':'indexer','operator':'In','values':[43]}})
     return job
 
 

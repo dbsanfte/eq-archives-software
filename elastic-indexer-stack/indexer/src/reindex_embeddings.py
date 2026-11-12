@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import threading
+import tempfile
 
 from elastic_transport import TransportError
 from elasticsearch import ConflictError
@@ -24,13 +25,15 @@ from indexer.openai_manager import OpenAIManager
 from indexer.reindex_diagnostics import Ledger,source_hash,existing_report
 from indexer.reindex_preparation import handler, verify_prepared
 from indexer.source_encoding import repaired_title
+from indexer.source_files import Sources, SourceError
 from reindex_text import completed_records, source_path
 
 LOG = logging.getLogger(__name__)
 FIELDS = ["id", "file_type", "text_full", "text.text_chunk", "text_extraction_version",
           "text.title", "text.context", "text.kind", "text.source_start", "text.source_end",
           "embedding_model", "text_chunking_version", "mime_type", "title",
-          "llm_summary", "llm_image_text_full", "llm_image_text", "text_passage_provenance"]
+          "llm_summary", "llm_image_text_full", "llm_image_text", "text_passage_provenance",
+          "archive_source_sha256", "archive_commit"]
 
 
 def website_text_query():
@@ -55,6 +58,7 @@ class Progress:
     unchanged: int = 0
     unavailable_sources: int = 0
     failed: int = 0
+    retryable_failed: int = 0
     passages: int = 0
     post_passages: int = 0
     table_passages: int = 0
@@ -81,12 +85,38 @@ def remaining_query(ids=None):
                            "llm_summary_vector", "llm_image_text_vector")],
                       "minimum_should_match": 1}}
     query["bool"]["should"].append({"nested": {"path": "text", "query": {"exists": {"field": "text.vector"}}}})
-    if ids:
+    if ids is not None:
+        if not 1<=len(ids)<=1000 or any(not isinstance(value,str) or not value for value in ids):
+            raise ValueError("Explicit retries require 1–1000 exact record IDs")
         query["bool"]["filter"].append({"ids": {"values": ids}})
     return query
 
 
-def prepare(source, repo):
+def prepare(source, repo, publication_repo=None):
+    """Resolve a missing source from verified local Git, never from a remote."""
+    path=source_path(Path(repo),source['id'])
+    expected=source.get('archive_source_sha256')
+    if (path.is_file() and isinstance(expected,str) and re.fullmatch('[0-9a-f]{64}',expected)
+            and source_hash(source,repo)!=expected):
+        raise SourceError('source_integrity')
+    if (not path.is_file() and source.get('file_type')=='text'
+            and (publication_repo or (Path(repo)/'.git/objects').is_dir())):
+        with Sources([repo],publication_repo) as sources:
+            try:data=sources.read(source)
+            except SourceError as error:
+                if error.reason!='source_unavailable':raise
+            else:
+                # A single bounded file is temporary; the prepared checkout,
+                # its index and source objects remain read-only and untouched.
+                with tempfile.TemporaryDirectory(prefix='reindex-source-') as temporary:
+                    target=Path(temporary)/source['id']
+                    target.parent.mkdir(parents=True)
+                    target.write_bytes(data)
+                    return _prepare_local(source,Path(temporary))
+    return _prepare_local(source,repo)
+
+
+def _prepare_local(source, repo):
     """Read an old source only when extraction still needs repairing."""
     text = source.get("text_full") or ""
     patch = {}
@@ -135,23 +165,36 @@ def prepare(source, repo):
             title=BeautifulSoup(raw,'html.parser').title
             corrected=repaired_title(source.get('title'),title.string if title else None,decoded)
             if corrected!=source.get('title'):patch['title']=corrected
-    groups = [(body, passages.prepare(body, record_id, source.get("title") or "",
+    groups = [(body, passages.prepare(body, record_id, patch.get("title",source.get("title")) or "",
                html_source=raw, mime_type=source.get("mime_type") or "")) for body in texts]
+    # Error/supporting projections retain their existing reader. Bind the
+    # empty semantic view to that retained reader too, rather than checkpointing
+    # a different extraction and making the next policy reject its provenance.
+    if ((source.get('text_full') or '').strip() and any(plan.method=='archive_status' or
+            'supporting_asset' in plan.exclusions for _,plan in groups)):
+        body=source['text_full'];patch.pop('text_full',None)
+        groups=[(body,passages.prepare(body,record_id,patch.get('title',source.get('title')) or '',
+                html_source=raw,mime_type=source.get('mime_type') or ''))]
     for body, plan in groups:
         passages.verify(body, plan)
     if decoding:patch['_source_decoding']=decoding
     return groups, patch, missing
 
 
-def migrate_record(client, index, hit, repo, embedder, preparation_pool=None, *, diagnostics=None):
+def migrate_record(client, index, hit, repo, embedder, preparation_pool=None, *, diagnostics=None, publication_repo=None, source_proof=None):
     source = hit["_source"]
     if source.get("id") != hit["_id"]:
         raise ValueError("Stored ID differs from exact Elasticsearch ID")
+    previous=re.fullmatch(r'eq-passages-480-v(\d+)',source.get('text_chunking_version') or '')
+    current=re.fullmatch(r'eq-passages-480-v(\d+)',passages.VERSION)
+    if (source.get('embedding_model')==gemma.MODEL and previous and current and int(previous[1])>int(current[1])):
+        return 0,0  # An older continuation must never downgrade a newer writer.
     complete=source.get("embedding_model") == gemma.MODEL and source.get("text_chunking_version") == passages.VERSION
     if complete and current_source(source):
         return 0, 0
-    groups, patch, missing = (preparation_pool.submit(prepare, source, str(repo)).result()
-                              if preparation_pool else prepare(source, str(repo)))
+    arguments=(source,str(repo),str(publication_repo)) if publication_repo else (source,str(repo))
+    groups, patch, missing = (preparation_pool.submit(prepare, *arguments).result()
+                              if preparation_pool else prepare(*arguments))
     decoding=patch.pop('_source_decoding',None)
     provenance={'version':passages.VERSION,'sources':[plan.provenance() for _,plan in groups]}
     if decoding:provenance['decoding']=decoding
@@ -181,7 +224,9 @@ def migrate_record(client, index, hit, repo, embedder, preparation_pool=None, *,
         patch['text_chunking_version']=passages.VERSION
         response=client.update(index=index,id=hit['_id'],doc=patch,if_seq_no=hit['_seq_no'],if_primary_term=hit['_primary_term'])
         if response.get('result') not in ('updated','noop'):raise ValueError('Elasticsearch did not update the record')
-        if diagnostics is not None:diagnostics['reused_embeddings']=1
+        if diagnostics is not None:
+            diagnostics['reused_embeddings']=1
+        if source_proof is not None and raw_hash:source_proof['sha256']=raw_hash
         return 1,0
     chunks = []
     for body, prepared in groups:
@@ -216,11 +261,12 @@ def migrate_record(client, index, hit, repo, embedder, preparation_pool=None, *,
         diagnostics.update(passages=len(selected),post_passages=sum(p.kind=='post' for p in selected),
                            table_passages=sum(p.kind=='table' for p in selected),quote_passages=sum(p.kind=='quote' for p in selected),
                            short_passages=sum(len(p.text.strip())<80 for p in selected),excluded_documents=int(excluded))
+    if source_proof is not None and raw_hash:source_proof['sha256']=raw_hash
     return 1, missing
 
 
 def reindex(client, index, repo, *, ids=None, limit=0, workers=4, batch_size=100,
-            preparation_pool=None, factory=OpenAIManager, prioritize_unconverted=False,ledger=None,include_completed=False):
+            preparation_pool=None, factory=OpenAIManager, prioritize_unconverted=False,ledger=None,include_completed=False,publication_repo=None):
     if not 1 <= workers <= 8 or limit < 0 or not 1 <= batch_size <= 1000:
         raise ValueError("Invalid migration bounds")
     query = remaining_query(ids)
@@ -236,12 +282,12 @@ def reindex(client, index, repo, *, ids=None, limit=0, workers=4, batch_size=100
             local.embedder = factory(embedding_model_name=gemma.MODEL)
         metrics=getattr(local.embedder,'embedding_cache_metrics',lambda:{})
         before=metrics();before=before if isinstance(before,dict) else {}
-        diagnostics={}
-        result=migrate_record(client, index, hit, repo, local.embedder, preparation_pool,diagnostics=diagnostics)
+        diagnostics={};proof={}
+        result=migrate_record(client, index, hit, repo, local.embedder, preparation_pool,diagnostics=diagnostics,publication_repo=publication_repo,source_proof=proof)
         after=metrics()
         if result[0] and isinstance(after,dict):
             diagnostics.update({'cache_'+key:after.get(key,0)-before.get(key,0) for key in ('hits','misses','evictions')})
-        return *result,diagnostics
+        return *result,diagnostics,proof.get("sha256")
     def scan():
         scanned = 0
         queries=[query]
@@ -271,9 +317,10 @@ def reindex(client, index, repo, *, ids=None, limit=0, workers=4, batch_size=100
     with ThreadPoolExecutor(max_workers=workers) as pool:
         for hit, result, _ in completed_records(scan(), execute, pool, workers):
             try:
-                updated, missing, diagnostics = result()
+                updated, missing, diagnostics, verified_hash = result()
             except ConflictError as error:
                 progress.failed += 1
+                progress.retryable_failed += 1
                 LOG.warning("Concurrent update retained: %s", hit["_id"])
                 if ledger:ledger.record(hit['_id'],model=gemma.MODEL,policy=passages.VERSION,
                                         source_sha256=source_hash(hit['_source'],repo),error=error,job=os.environ.get('REINDEX_JOB_NAME',''))
@@ -283,6 +330,7 @@ def reindex(client, index, repo, *, ids=None, limit=0, workers=4, batch_size=100
                 if ledger:ledger.record(hit['_id'],model=gemma.MODEL,policy=passages.VERSION,
                                         source_sha256=source_hash(hit['_source'],repo),error=error,job=os.environ.get('REINDEX_JOB_NAME',''))
                 if isinstance(error, (OpenAIError, TransportError)):
+                    progress.retryable_failed += 1
                     failures += 1
                     if failures >= 5:
                         raise RuntimeError("Repeated upstream failures; retry resumes completed versions") from None
@@ -295,8 +343,10 @@ def reindex(client, index, repo, *, ids=None, limit=0, workers=4, batch_size=100
                 if ledger:
                     if missing:ledger.record(hit['_id'],model=gemma.MODEL,policy=passages.VERSION,
                                              category='source_unavailable',job=os.environ.get('REINDEX_JOB_NAME',''))
-                    elif ledger.has_pending(hit['_id']):
-                        ledger.resolve(hit['_id'],policy=passages.VERSION,source_sha256=source_hash(hit['_source'],repo),
+                    elif (ledger.has_pending(hit['_id']) and (updated or
+                            hit['_source'].get('text_chunking_version')==passages.VERSION and current_source(hit['_source']))):
+                        ledger.resolve(hit['_id'],policy=passages.VERSION,source_sha256=verified_hash or source_hash(hit['_source'],repo) or
+                                           (hit['_source'].get('text_passage_provenance') or {}).get('decoding',{}).get('source_sha256'),
                                        job=os.environ.get('REINDEX_JOB_NAME',''))
             progress.processed += 1
             if progress.processed % batch_size == 0:
@@ -309,6 +359,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo", type=Path, default=Path(os.getenv("LOCAL_REPO_PATH", "/data/eq-archives")))
     parser.add_argument("--id", action="append", dest="ids")
+    parser.add_argument("--publication-repo",type=Path,default=os.getenv("REINDEX_PUBLICATION_REPO"),
+                        help="Read-only local publication Git objects for capture source recovery")
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--workers", type=int, default=int(os.getenv("REINDEX_WORKERS", "4")))
     parser.add_argument("--preparation-workers", type=int, default=int(os.getenv("REINDEX_PREPARATION_WORKERS", "2")))
@@ -340,10 +392,10 @@ def main():
                                  mp_context=multiprocessing.get_context("spawn")) as preparation_pool:
             progress = reindex(client, manager._index_name, args.repo, ids=ids, limit=args.limit,
                                workers=args.workers, preparation_pool=preparation_pool if args.preparation_workers else None,
-                               prioritize_unconverted=args.prioritize_unconverted,ledger=ledger,include_completed=args.retry_failed)
+                               prioritize_unconverted=args.prioritize_unconverted,ledger=ledger,include_completed=args.retry_failed,publication_repo=args.publication_repo)
     finally:
         if ledger:ledger.close()
-    return 1 if progress.failed else 0
+    return (1 if progress.retryable_failed else 43) if progress.failed or progress.unavailable_sources else 0
 
 
 if __name__ == "__main__":

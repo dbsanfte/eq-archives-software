@@ -728,3 +728,20 @@ after legacy broad writers finish. It yields to foreground imports, preserves al
 previous Jobs, sources, cache/rejection ledgers and the independent image workflow,
 and makes no paid enrichment calls. Explicit model migrations retain prepared
 operator handoffs. See the curation guide for rolling maintenance and diagnostics.
+
+### Publication-backed Gemma tail repairs
+
+Gemma handoffs now retain the prepared checkout and mount
+`/mnt/samsung/eqarchives-curation/publisher.git` at `/publication` read-only.
+`REINDEX_PUBLICATION_REPO` lets source preparation resolve newly published
+captures by exact commit/path and SHA-256 without cloning, fetching or updating
+the source checkout. The shared source resolver is
+`elastic-indexer-stack/indexer/src/indexer/source_files.py`; curation imports it
+through its existing compatibility module.
+
+Use exact-ID probes followed by the bounded `--retry-failed` command for a known
+tail. Preserve previous Jobs, prepared sources, cache and failure history. Exit
+43 reports terminal content/source gaps and is a `FailJob` condition in new
+Gemma handoffs; transient transport failures remain recoverable. Newer passage
+checkpoints are preserved, and rejected IDs resolve only after an acknowledged
+repair or verified current checkpoint. No Luna enrichment runs in this repair.

@@ -5,7 +5,7 @@ import subprocess
 
 import pytest
 
-from policy_sources import Sources,SourceError,relative
+from indexer.source_files import Sources,SourceError,relative
 
 ID='websites/guild.example/20000101000000/guide?.html'
 
@@ -38,7 +38,7 @@ def test_fast_source_reads_are_bounded_and_hash_verified(tmp_path,monkeypatch):
     with pytest.raises(SourceError,match='source_integrity'):sources.read({**source,'archive_source_sha256':'bad hash'})
     with pytest.raises(SourceError,match='source_integrity'):
         sources.read({**source,'text_passage_provenance':{'decoding':{'source_sha256':'b'*64}}})
-    monkeypatch.setattr('policy_sources.LIMIT',8)
+    monkeypatch.setattr('indexer.source_files.LIMIT',8)
     with pytest.raises(SourceError,match='source_too_large'):sources.read(source)
     sources.close()
 

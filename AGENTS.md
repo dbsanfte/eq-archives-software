@@ -277,9 +277,13 @@ boundaries fall back without dropping messages. Upgrade older passage checkpoint
 Source decoding is shared by the crawler, imports and legacy indexer, without
 hostname exceptions. Validate full bytes, support CP932/Shift-JIS, EUC-JP and
 ISO-2022-JP using declaration/script evidence, and preserve unaffected encodings.
+The v4 decoder supports JIS halfwidth-kana designations and assigned Windows
+vendor rows, recovering Western word/copyright bytes only outside shifted JIS
+runs. Count these recoveries in hashed provenance; never relax damaged-byte
+bounds or introduce per-host codec overrides.
 Bounded damaged Japanese sequences retain U+FFFD markers and a counted, hashed
 decoding provenance; excessive damage fails visibly. Website extraction uses
-`html-2026-11-05-script-evidence`; retain mail/newsgroup checkpoints. The Gemma
+`html-2026-11-12-jis-extensions`; retain mail/newsgroup checkpoints. The Gemma
 resume query also requires that checkpoint for textual websites. Reuse vectors
 when the reader and source-bound passage plan are identical; repair corrupted
 readers/vectors atomically and source-proven garbled titles only. Retain original
@@ -388,6 +392,17 @@ temporary transport outages without counting reboot disruptions against the
 Job's lifetime backoff limit. Content/integrity/authentication failures must stay
 visible. Keep the recovery ConfigMap immutable and the local image pinned; never
 rerun source preparation or change extraction/chunking versions to resume.
+
+
+Targeted Gemma source-gap repairs may read the shared `indexer.source_files`
+resolver through `REINDEX_PUBLICATION_REPO`: preserve exact publication commit,
+blob/hash identity, read-only source mounts and remote-free Git objects. Keep
+temporary recovered files bounded; never prepare the full archive again. New
+Gemma handoffs mount publication objects read-only as UID/GID 10001. Exit 43
+means nonretryable source/content gaps after healthy records were processed;
+new Jobs fail once and retain diagnostics. Transport failures remain retryable.
+Do not downgrade a newer same-model passage checkpoint, or resolve its older
+rejection without an acknowledged repair/current-source proof.
 
 ### Search relevance evaluation
 

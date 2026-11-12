@@ -85,12 +85,12 @@ class RecoveryTests(unittest.TestCase):
         self.assertEqual(len(sleeps), 8)
 
     def test_content_failures_never_loop_or_claim_success(self):
-        for failure in (SystemExit(1), ValueError('Invalid source'), RuntimeError('Other failure')):
+        for failure in (SystemExit(1), SystemExit(43), ValueError('Invalid source'), RuntimeError('Other failure')):
             with self.subTest(failure=failure):
                 def execute(): raise failure
                 sleeps = []
                 if isinstance(failure, SystemExit):
-                    self.assertEqual(runner.run(ready=lambda: True, execute=execute, sleep=sleeps.append), 1)
+                    self.assertEqual(runner.run(ready=lambda: True, execute=execute, sleep=sleeps.append), failure.code)
                 else:
                     with self.assertRaises(type(failure)):
                         runner.run(ready=lambda: True, execute=execute, transient=lambda e: False, sleep=sleeps.append)
@@ -155,6 +155,7 @@ class RecoveryTests(unittest.TestCase):
         self.assertFalse(any(name.startswith('REINDEX_SECONDARY_') for name in env))
         rules = job['spec']['podFailurePolicy']['rules']
         self.assertEqual(rules[0]['action'], 'FailJob')
+        self.assertEqual(rules[0]['onExitCodes']['values'], [42,43])
         self.assertEqual(rules[1]['onPodConditions'][0]['type'], 'DisruptionTarget')
         self.assertEqual(rules[2]['onExitCodes']['values'], [143, 255])
         self.assertEqual(rules[2]['action'], 'Ignore')

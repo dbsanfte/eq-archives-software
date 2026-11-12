@@ -192,7 +192,10 @@ The runner waits for authenticated Elasticsearch cluster health, cluster DNS and
 Nomic readiness. Temporary transport failures during processing retry with
 5–60 second backoff and a fresh scan of remaining checkpoints. There is no pause
 between successful embedding requests. Authentication/configuration failures
-stop with exit 42; source/integrity failures retain the worker's failure status.
+stop with exit 42. New Gemma workers exit 43 for terminal source/content gaps,
+including unavailable originals; new Jobs fail once and retain per-ID diagnostics
+instead of repeatedly embedding the same unfinished tail. Transport failures
+retain retry behavior. Existing Jobs are unchanged.
 Pod failure policy excludes Kubernetes disruptions and observed reboot exit
 codes 143/255 from the Job's lifetime retry allowance. These rules are supported
 by eqvm's Kubernetes API; validate each rendered Job with server-side dry-run.
@@ -276,3 +279,32 @@ maintenance. Do not restart a broad Job to deliver an ordinary policy update;
 leave its prepared sources, immutable recovery configuration and checkpoints
 intact. Explicit model/image/extraction recovery operations retain the runbooks
 above. A historical Job's completion validates its own pinned version only.
+
+### Targeted source-tail recovery
+
+`reindex_embeddings.py --publication-repo /publication --retry-failed` retries
+at most 1,000 explicit pending diagnostic IDs; an empty ledger does not start a
+broad scan. Use the original persistent diagnostics/cache and prepared source
+checkout. Probe representative exact IDs first. The shared
+`indexer.source_files` resolver can read absent captures from their recorded
+publication commit and verify their stored SHA-256 against local Git blobs. Its
+remote-free reader cannot fetch promised objects or change either checkout.
+Recovered files are bounded temporary files, removed after source preparation.
+
+New `render-reindex.py --gemma` handoffs mount the private publication Git at
+`/publication` read-only and run as UID/GID 10001. They preserve the original
+Job, source mounts, database CA profile, CUDA route and paid-enrichment disable.
+Old images/Jobs remain immutable. A repaired record atomically replaces its
+reader/chunks/vectors, retaining enrichment, archive identity, dates and
+`last_indexed`; only acknowledged repairs resolve historical rejection rows.
+Newer same-model passage checkpoints are never downgraded by an older writer.
+
+The shared `source-decoding-v4` repair handles extended ISO-2022-JP kana and
+assigned Windows/JIS vendor rows, plus evidenced Western bytes outside shifted
+runs. Recovery counts and original hashes remain in provenance. Unknown damage
+retains counted replacement markers and the existing rejection bounds. Website
+extraction advances to `html-2026-11-12-jis-extensions`; mail/news checkpoints
+stay unchanged. Routine policy maintenance picks up the new extraction revision
+in bounded slices without holding up curation. Completion of an older broad
+run is assessed against its original checkpoint or acknowledged later repairs,
+not by relaunching that older writer over newer records.

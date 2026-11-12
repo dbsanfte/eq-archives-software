@@ -296,3 +296,48 @@ def test_visible_japanese_evidence_remains_valid_alongside_hidden_generator_code
     body='こんにちは。ギルドのみんなで冒険に行きましょう。'
     text='<html><script>// hidden status text</script><p>'+body+'</p></html>'
     assert decode_source(text.encode('cp932')).text==text
+
+
+@pytest.mark.parametrize('body',['｢冒険の記録｣','半角ｶﾅと全角の日本語を保存する。'])
+def test_iso2022_extended_kana_is_valid_content_without_damage_or_host_rules(body):
+    raw=('<html><meta charset="iso-2022-jp"><p>'+body+'</p></html>').encode('iso2022_jp_ext')
+    decoded=decode_source(raw)
+    assert decoded.text=='<html><meta charset="iso-2022-jp"><p>'+body+'</p></html>'
+    assert decoded.invalid_bytes==0 and decoded.source_sha256==hashlib.sha256(raw).hexdigest()
+    assert any(r['kind']=='jis_katakana' for r in decoded.provenance()['recoveries'])
+
+
+def test_pure_jis_halfwidth_designation_is_not_mistaken_for_ascii():
+    text='｢ｶﾅ｣';decoded=decode_source(text.encode('iso2022_jp_ext'))
+    assert decoded.text==text and decoded.invalid_bytes==0
+
+
+@pytest.mark.parametrize('pair,expected',[(b'-!','①'),(b'-"','②'),(b'-6','Ⅱ')])
+def test_vendor_jis_rows_recover_assigned_windows_characters_only_inside_jis(pair,expected):
+    raw=b'<p>\x1b$B'+pair+b'\x1b(B Guild history</p>'
+    decoded=decode_source(raw)
+    assert decoded.text=='<p>'+expected+' Guild history</p>' and decoded.invalid_bytes==0
+    assert any(r['kind']=='jis_vendor_extension' and r['characters']==1 for r in decoded.provenance()['recoveries'])
+    assert decode_source(b'<p>'+pair+b'</p>').text=='<p>'+pair.decode()+'</p>'
+
+
+def test_western_words_and_copyright_stay_western_outside_short_jis_glyphs():
+    raw=b'<html><title>Guild fell\xe1</title><p>I don\xb4t agree. Copyright \xa91999.</p><p>\x1b$B!&amp;\x1b(B</p></html>'
+    decoded=decode_source(raw)
+    assert decoded.text=='<html><title>Guild fellá</title><p>I don´t agree. Copyright ©1999.</p><p>・</p></html>'
+    assert decoded.invalid_bytes==0 and decoded.restored_entities==1
+    assert sum(r.get('bytes',0) for r in decoded.stateful_recoveries if r['kind']=='western_outside_jis')==3
+
+
+def test_unassigned_jis_and_unsupported_controls_are_not_turned_into_western_text():
+    japanese='こんにちは世界。'.encode('iso2022_jp')
+    with pytest.raises(UnicodeError,match='bounded decoding damage'):
+        decode_source(japanese+b'\x1b$B~\x7e\x1b(B'*20)
+    decoded=decode_source(japanese+b'\x81')
+    assert decoded.invalid_bytes==1 and decoded.text.endswith('\ufffd')
+
+
+def test_iso2022_title_repair_requires_exact_extended_source_proof():
+    title='｢冒険の記録｣';decoded=decode_source(title.encode('iso2022_jp_ext'))
+    assert repaired_title(title.encode('iso2022_jp_ext').decode('latin1'),title,decoded)==title
+    assert repaired_title('Operator chosen title',title,decoded)=='Operator chosen title'
