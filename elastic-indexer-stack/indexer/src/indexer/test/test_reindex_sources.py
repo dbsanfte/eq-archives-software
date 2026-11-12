@@ -102,15 +102,17 @@ def test_newer_checkpoint_does_not_silently_resolve_an_unverified_older_rejectio
     client.update.assert_not_called();ledger.close()
 
 
-def test_excluded_source_checkpoint_stays_bound_to_the_reader_that_is_retained(tmp_path):
+@pytest.mark.parametrize('reader',['Existing preserved historical error reader',None])
+def test_excluded_source_checkpoint_stays_bound_to_the_reader_that_is_retained(tmp_path,reader):
     hit,client,embedder=fixture();source=hit['_source']
-    source.update(mime_type='text/html',text_extraction_version='old',text_full='Existing preserved historical error reader')
+    source.update(mime_type='text/html',text_extraction_version='old',text_full=reader)
     path=tmp_path/source['id'];path.parent.mkdir(parents=True)
     path.write_text('<html><title>System Message: Error</title><h1>Error</h1><p>The post you selected no longer exists.</p></html>')
     job.migrate_record(client,'eq-archive',hit,tmp_path,embedder)
     patch=client.update.call_args.kwargs['doc']
-    assert 'text_full' not in patch and patch['text']==[]
-    assert patch['text_passage_provenance']['sources'][0]['source_sha256']==passages.digest(source['text_full'])
+    assert patch['text']==[]
+    if reader:assert 'text_full' not in patch
+    assert patch['text_passage_provenance']['sources'][0]['source_sha256']==passages.digest(patch.get('text_full',reader))
     assert patch['llm_summary_vector'] is patch['llm_image_text_vector'] is None
 
 

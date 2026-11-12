@@ -166,7 +166,7 @@ def _prepare_local(source, repo):
     # Error/supporting projections retain their existing reader. Bind the
     # empty semantic view to that retained reader too, rather than checkpointing
     # a different extraction and making the next policy reject its provenance.
-    if (source.get('text_full','').strip() and any(plan.method=='archive_status' or
+    if ((source.get('text_full') or '').strip() and any(plan.method=='archive_status' or
             'supporting_asset' in plan.exclusions for _,plan in groups)):
         body=source['text_full'];patch.pop('text_full',None)
         groups=[(body,passages.prepare(body,record_id,patch.get('title',source.get('title')) or '',
