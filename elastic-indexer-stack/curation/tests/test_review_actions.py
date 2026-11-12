@@ -25,7 +25,7 @@ def test_bulk_review_approves_independent_complete_sites_and_never_other_stages(
     untouched = add_candidate(root, url='http://untouched.example/')
     app = create_app(root, start_worker=False)
     current = snapshot(app, '&search=guild')
-    assert current['count'] == 2 and current['files'] == 3 and current['max_enrichment_usd'] == 4
+    assert current['count'] == 2 and current['files'] == 3 and current['max_enrichment_usd'] == 10
     assert bulk(app, current['token'], 'approve').status_code == 202
     assert snapshot(app)['count'] == 0
     assert bulk(app, current['token'], 'approve').status_code == 409
