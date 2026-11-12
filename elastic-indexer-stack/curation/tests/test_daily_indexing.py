@@ -133,3 +133,92 @@ def test_oom_only_migrates_the_undersized_import_profile_and_preserves_old_job(t
             assert current['state']=='index_failed' and 'OOMKilled' in current['error'] and not kube.created
         assert old==original and (root/'batches'/batch['id']/'approved.json').read_bytes()==immutable
     finally:worker.close()
+
+
+@pytest.mark.parametrize('shared_ledger', [False, True])
+def test_manual_deadline_continues_across_worker_restarts_without_renewing_budget(tmp_path, monkeypatch, shared_ledger):
+    root = tmp_path/'state'
+    row, manifest = completed(root)
+    immutable = published(root, manifest, 'indexing')
+    with connect(root) as store:
+        batch = unpack(store.db.execute('SELECT * FROM batches').fetchone())
+        approval = store.db.execute('SELECT decision FROM candidates WHERE id=?', (row['id'],)).fetchone()[0]
+    old = import_job(batch, IMAGE)
+    if not shared_ledger:
+        container = old['spec']['template']['spec']['containers'][0]
+        container['env'] = [item for item in container['env'] if item['name'] != 'LUNA_DAILY_BUDGET_ROOT']
+    old['status'] = {'conditions': [{'type': 'Failed', 'status': 'True', 'reason': 'DeadlineExceeded'}]}
+    old['metadata']['uid'] = 'retained-timeout'
+    original = copy.deepcopy(old)
+    reindex = {'metadata': {'name': 'full-reindex', 'uid': 'retained-reindex'}, 'spec': {}, 'status': {'active': 1}}
+    reindex_original = copy.deepcopy(reindex)
+    directory = root/'enrichment'/batch['id']; directory.mkdir(parents=True)
+    retained = directory/'retained-paid-result.json'; retained.write_text('{"paid_result":"retained"}')
+    class Kube:
+        def __init__(self): self.items = [old, reindex]; self.created = []
+        def jobs(self): return copy.deepcopy(self.items)
+        def create(self, value): self.created.append(value); self.items.append(value)
+    kube = Kube(); monkeypatch.setenv('IMPORT_IMAGE', IMAGE)
+    for attempt in (2, 3):
+        worker = Worker(root, kube=kube)
+        try:
+            worker.indexing()
+            with connect(root) as store:
+                queued = unpack(store.db.execute('SELECT * FROM batches').fetchone())
+            assert queued['state'] == 'published_waiting_index'
+            assert queued['job']['attempt'] == attempt
+            assert queued['manifest']['indexing'] == {'enrichment': True, 'model': 'gpt-6-luna', 'max_enrichment_usd': 2}
+            worker.indexing(); worker.indexing()
+            assert len(kube.created) == attempt-1
+            new = kube.created[-1]
+            assert new['metadata']['name'] == old['metadata']['name'] + f'-r{attempt}'
+            assert new['spec']['template']['spec']['containers'][0]['command'] == old['spec']['template']['spec']['containers'][0]['command']
+            assert new['metadata']['annotations']['eqarchives.org/manifest-sha256'] == batch['manifest_sha256']
+            assert (root/'batches'/batch['id']/'approved.json').read_bytes() == immutable
+            assert retained.read_text() == '{"paid_result":"retained"}'
+            if attempt == 2:
+                new['status'] = {'conditions': [{'type': 'Failed', 'status': 'True', 'reason': 'DeadlineExceeded'}]}
+            else:
+                new['status'] = {'conditions': [{'type': 'Complete', 'status': 'True'}]}
+                write_status(directory, new['metadata']['name'], batch['manifest_sha256'], 'completed')
+                worker.indexing()
+                with connect(root) as store:
+                    assert store.db.execute('SELECT state FROM batches').fetchone()[0] == 'indexed'
+                    assert store.db.execute('SELECT decision FROM candidates WHERE id=?', (row['id'],)).fetchone()[0] == approval
+        finally: worker.close()
+    assert old == original and reindex == reindex_original
+
+
+@pytest.mark.parametrize('failure', ['diagnostic', 'source', 'publication', 'different_failure'])
+def test_timeout_recovery_does_not_override_saved_failures_or_changed_sources(tmp_path, monkeypatch, failure):
+    from import_status import EnrichmentError
+    root = tmp_path/'state'
+    row, manifest = completed(root)
+    published(root, manifest, 'indexing')
+    with connect(root) as store:
+        batch = unpack(store.db.execute('SELECT * FROM batches').fetchone())
+    old = import_job(batch, IMAGE)
+    old['status'] = {'conditions': [{'type': 'Failed', 'status': 'True',
+        'reason': 'BackoffLimitExceeded' if failure == 'different_failure' else 'DeadlineExceeded'}]}
+    original = copy.deepcopy(old)
+    if failure == 'diagnostic':
+        directory = root/'enrichment'/batch['id']; directory.mkdir(parents=True)
+        write_status(directory, import_name(batch), batch['manifest_sha256'], 'failed', EnrichmentError('budget'))
+    elif failure == 'source':
+        (root/manifest['captures'][0]['path']).write_bytes(b'changed source')
+    elif failure == 'publication':
+        path = root/'batches'/batch['id']/'approved.json'
+        value = json.loads(path.read_text()); value['publication']['commit'] = 'd'*40
+        path.write_text(json.dumps(value))
+    class Kube:
+        def jobs(self): return [copy.deepcopy(old)]
+        def create(self, value): pytest.fail('A genuine failure must not start another Job')
+    monkeypatch.setenv('IMPORT_IMAGE', IMAGE)
+    worker = Worker(root, kube=Kube())
+    try:
+        worker.indexing(); worker.indexing()
+        with connect(root) as store:
+            current = unpack(store.db.execute('SELECT * FROM batches').fetchone())
+        assert current['state'] == 'index_failed' and current['job']['attempt'] == 1
+        assert old == original
+    finally: worker.close()

@@ -460,8 +460,10 @@ in original approvals/manifests and preserve them through failed-file lineage.
 A daily-budget import pause must remain in Indexing with a current Job/manifest
 bound diagnostic; create a new numbered continuation only when funded. Never
 modify previous Jobs or infer indexing completion from a budget exit. New import
-Jobs require a verified completion diagnostic. Automatic imports that exceed the
-Job time limit can continue in a new numbered Job with the original budget/cache. Disabling automatic mode stops new
+Jobs require a verified completion diagnostic. All approved imports that exceed
+the Job time limit continue in a new numbered Job, including legacy/manual
+approvals, retaining the original budget/cache and immutable Jobs/manifests. Never
+renew a manual $2 cap, change its policy or override a saved failure diagnostic. Disabling automatic mode stops new
 automatic discovery/approvals; approved work continues under the daily cap.
 The operator-selected limits are $20/day and $200/calendar month; deployment
 preserves saved settings and automatic-mode opt-in. Both limits include actual and

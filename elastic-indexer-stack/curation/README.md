@@ -95,9 +95,14 @@ needs more funds writes a manifest/Job-bound `waiting_budget` diagnostic
 and exits successfully. The controller keeps the site in **Indexing**, waits for
 funds, validates the original publication, then creates a **new numbered Job**.
 Previous Jobs, manifests, source hashes and paid caches are retained; existing ES
-IDs are skipped. Automatic sites that outlast the six-hour Kubernetes Job deadline
-also continue in a new numbered Job under the same policy. A missing or mismatched completion diagnostic cannot retire a
-site. Only another unfinished, unsuspended foreground capture import holds the
+IDs are skipped. Every approved import that outlasts the six-hour Kubernetes Job
+deadline continues in a new numbered Job, including older manual approvals. The
+original policy and cache identity remain unchanged: manual $2/site caps are never
+renewed or converted to automatic daily allowances. A saved failure diagnostic
+(including enrichment budget or source-validation failure) still requires
+attention. Imports already marked failed can be requeued with **Retry indexing**;
+subsequent execution timeouts continue automatically. A missing or mismatched
+completion diagnostic cannot retire a site. Only another unfinished, unsuspended foreground capture import holds the
 import slot, including pending/retrying Jobs with active=0. Broad reindexes and
 policy maintenance never hold that slot.
 Raising the cap can resume work before midnight. If the next single reservation
