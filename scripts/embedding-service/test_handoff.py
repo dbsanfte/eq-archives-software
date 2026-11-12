@@ -47,6 +47,22 @@ class HandoffTests(unittest.TestCase):
         repeated=handoff.render(job,'reindex-source-recovery-next','eqarchives-indexer:rtx3080-'+'b'*40,gemma=True)
         assert sum(v['name']=='publication' for v in repeated['spec']['template']['spec']['volumes'])==1
 
+    def test_gemma_publication_identity_overrides_inherited_container_uid(self):
+        previous=self.previous()
+        original_security={'runAsUser':1000,'runAsGroup':1000,'runAsNonRoot':True,
+                           'allowPrivilegeEscalation':False,'capabilities':{'drop':['ALL']}}
+        previous['spec']['template']['spec']['containers'][0]['securityContext']=deepcopy(original_security)
+        before=deepcopy(previous)
+        job=handoff.render(previous,'reindex-private-source','eqarchives-indexer:rtx3080-'+'a'*40,gemma=True)
+        pod=job['spec']['template']['spec'];security=pod['containers'][0]['securityContext']
+        self.assertEqual(security['runAsUser'],10001)
+        self.assertEqual(security['runAsGroup'],10001)
+        self.assertEqual({k:v for k,v in security.items() if k not in ('runAsUser','runAsGroup')},
+                         {k:v for k,v in original_security.items() if k not in ('runAsUser','runAsGroup')})
+        self.assertEqual(previous,before)
+        legacy=handoff.render(previous,'reindex-legacy-source','eqarchives-indexer:rtx3080-'+'b'*40)
+        self.assertEqual(legacy['spec']['template']['spec']['containers'][0]['securityContext'],original_security)
+
     def test_gemma_handoff_has_its_own_checkpoint_and_keeps_cuda_only(self):
         previous = self.previous()
         job = handoff.render(previous, 'reindex-gemma', 'eqarchives-indexer:rtx3080-'+'a'*40, gemma=True)

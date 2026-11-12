@@ -63,6 +63,9 @@ def render(previous, name, image, *, gemma=False, images=False, text_hosts=None)
             if previous_item is not None and previous_item!=item:raise ValueError('Preserve the read-only publication source location')
             if previous_item is None:items.append(item)
         pod.setdefault('securityContext',{}).update(runAsUser=10001,runAsGroup=10001)
+        # Container identity overrides pod defaults on Kubernetes. Retain its
+        # hardening while matching the owner of the private publication store.
+        container.setdefault('securityContext',{}).update(runAsUser=10001,runAsGroup=10001)
     if images:
         vision='http://gemma-image-embeddings.eqarchives-es.svc.cluster.local:8080/v1'
         values.update(REINDEX_ENTRYPOINT='index_images.pyc', OPENAI_ENDPOINT=vision,
