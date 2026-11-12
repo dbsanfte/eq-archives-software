@@ -139,6 +139,14 @@ class DailyBudget:
         with self.database() as db:
             return {**DEFAULT, **json.loads(db.execute('SELECT value FROM settings WHERE id=1').fetchone()[0])}
 
+    def needs_history_seed(self):
+        # A configured calendar-month ledger was seeded before its settings
+        # were saved. Later paid work already reserves/settles here directly.
+        # Daily-only legacy settings still need the month-wide migration.
+        with self.database() as db:
+            saved = json.loads(db.execute('SELECT value FROM settings WHERE id=1').fetchone()[0])
+        return not saved.get('configured') or 'monthly_usd' not in saved
+
     @staticmethod
     def validate(payload):
         from grading import criteria

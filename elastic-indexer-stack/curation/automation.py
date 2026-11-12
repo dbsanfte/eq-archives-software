@@ -83,7 +83,8 @@ def configure(root, payload, kube=None):
                     raise CrawlError('An earlier enrichment Job is still running without monthly budget control. Let it finish before changing spending limits.')
                 if 'site_usd' in payload and not any(item.get('name')=='LUNA_SITE_BUDGET_VERSION' and item.get('value')=='site-v1' for item in env):
                     raise CrawlError('An earlier enrichment Job is still running without per-site budget control. Let it finish before changing site limits.')
-    seed_spend(Path(root), account)
+    if account.needs_history_seed():
+        seed_spend(Path(root), account)
     saved = account.configure(payload)
     with connect(root) as store:
         store.event(None, 'automatic_settings', saved)

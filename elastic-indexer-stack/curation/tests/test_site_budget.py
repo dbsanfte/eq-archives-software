@@ -142,3 +142,58 @@ def test_invalid_site_admission_never_creates_a_reservation(tmp_path,kwargs):
     account=DailyBudget(tmp_path/'budget')
     with pytest.raises(CrawlError):account.reserve(.1,**kwargs)
     assert account.snapshot()['unresolved_usd']==0
+
+
+def test_saving_limits_uses_seeded_calendar_ledger_without_rewalking_old_campaigns(tmp_path,monkeypatch):
+    import automation
+    from common import now
+    root=tmp_path/'portal';account=automation.budget(root)
+    with closing(Store(root)) as store:
+        store.db.execute("INSERT INTO attempts(reserved,actual,status,created) VALUES (3,2,'completed',?)",(now(),))
+        store.db.commit()
+    payload=dict(enabled=False,daily_usd=20,monthly_usd=200,min_grade=2,grading_criteria='',revision=0)
+    assert account.needs_history_seed()
+    result=automation.configure(root,payload)
+    assert result['monthly']['estimated_usd']==2 and not account.needs_history_seed()
+    receipt=account.reserve(.5);account.settle(receipt,.25)
+    # Historical campaigns grow indefinitely. Once seeded, saving must work even
+    # when enumerating those old files would exceed the initialization deadline.
+    def unavailable(_):raise AssertionError('Do not reopen already-counted historical ledgers')
+    monkeypatch.setattr('automation.Spending.ledgers',unavailable)
+    result=automation.configure(root,{**payload,'revision':1,'monthly_usd':500,'site_usd':5})
+    assert result['settings']['monthly_usd']==500 and result['settings']['site_usd']==5
+    assert result['monthly']['estimated_usd']==2.25 and result['monthly']['unresolved_usd']==0
+    with account.database() as db:assert db.execute('SELECT COUNT(*) FROM reservations').fetchone()[0]==2
+
+
+def test_daily_only_legacy_settings_still_seed_earlier_month_spend(tmp_path):
+    import automation
+    from common import now
+    root=tmp_path/'portal';account=automation.budget(root)
+    with closing(Store(root)) as store:
+        store.db.execute("INSERT INTO attempts(reserved,actual,status,created) VALUES (3,2,'completed',?)",(now(),))
+        store.db.commit()
+    settings=account.settings();settings.update(configured=True,enabled=False)
+    settings.pop('monthly_usd');settings.pop('site_usd')
+    with account.database() as db:db.execute('UPDATE settings SET value=? WHERE id=1',(json.dumps(settings),))
+    assert account.needs_history_seed()
+    result=automation.configure(root,dict(enabled=False,daily_usd=20,monthly_usd=500,site_usd=5,
+        min_grade=2,grading_criteria='',revision=0))
+    assert result['monthly']['estimated_usd']==2 and not account.needs_history_seed()
+
+
+def test_seed_failure_keeps_original_shared_costs_and_settings(tmp_path):
+    import automation
+    from common import now
+    root=tmp_path/'portal';account=automation.budget(root)
+    receipt=account.reserve(.5)
+    with closing(Store(root)) as store:
+        store.db.execute("INSERT INTO attempts(reserved,actual,status,created) VALUES (.02,.01,'completed',?)",(now(),))
+        identifier=store.db.execute("INSERT INTO attempts(reserved,status,created) VALUES (.5,'reserved',?)",(now(),)).lastrowid
+        store.set('daily_reservation:'+str(identifier),'missing-shared-receipt');store.db.commit()
+    with pytest.raises(CrawlError,match='unavailable'):automation.seed_spend(root,account)
+    assert account.settings()['configured'] is False
+    assert account.snapshot()['unresolved_usd']==.5 and account.snapshot()['estimated_usd']==.01
+    with account.database() as db:
+        assert db.execute('SELECT COUNT(*) FROM reservations').fetchone()[0]==2
+        assert db.execute('SELECT reserved FROM reservations WHERE id=?',(receipt,)).fetchone()[0]==units(.5)

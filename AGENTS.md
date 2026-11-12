@@ -452,7 +452,9 @@ advanced controls; drafts and budget waits cannot re-enable it. Disabling the sa
 mode restores manual controls and drafts, subject to worker availability. Keep one
 shared private SQLite daily/monthly reservation ledger across portal grading and new
 import Jobs; reserve atomically before calls, retain uncertain costs and count
-corrections. Include prior current-day portal spend on configuration. Use UTC
+corrections. Seed prior portal spend on initial configuration and daily-only
+migrations; later settings changes use the initialized shared monthly ledger
+without reopening historical campaigns. Use UTC
 midnight resets, retain original operation limits/deadlines, and resume funded
 work automatically. New manual and automatic approvals record $5/site enrichment.
 Keep original policies explicit and immutable through failed-file lineage. The saved

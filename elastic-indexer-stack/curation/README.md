@@ -75,7 +75,10 @@ requests retain their reservation, rejected responses/corrections count, and pai
 caches never count twice. Accounting uses the UTC day on which a request was
 reserved; daily windows reset at **00:00 UTC**, and calendar months at **00:00 UTC
 on the first day**. Existing current-month portal ledgers are included when settings
-are saved. Enabling or changing limits waits for older paid imports without shared
+are first saved, and daily-only legacy settings receive the same month-wide migration.
+After initialization, settings changes use the authoritative shared ledger instead
+of reopening every historical campaign; existing charges and reservations remain.
+Enabling or changing limits waits for older paid imports without shared
 monthly accounting to finish; those Jobs are never changed. The operator-selected
 production pacing is **$20/day, capped at $500/month**, with **$5 lifetime enrichment per site**; deployment preserves saved
 settings and never enables automatic mode.
