@@ -737,7 +737,9 @@ Gemma handoffs now retain the prepared checkout and mount
 captures by exact commit/path and SHA-256 without cloning, fetching or updating
 the source checkout. The shared source resolver is
 `elastic-indexer-stack/indexer/src/indexer/source_files.py`; curation imports it
-through its existing compatibility module.
+through its existing compatibility module. Both pod and container identities use
+UID/GID 10001, preserving inherited container hardening; a container UID overrides
+the pod default and must match the private publication directory owner.
 
 Use exact-ID probes followed by the bounded `--retry-failed` command for a known
 tail. Preserve previous Jobs, prepared sources, cache and failure history. Exit
