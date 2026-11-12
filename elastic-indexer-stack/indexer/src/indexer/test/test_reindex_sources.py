@@ -124,3 +124,9 @@ def test_repaired_source_title_is_used_in_every_new_embedding_request(tmp_path):
     groups,patch,missing=job.prepare(source,tmp_path)
     assert patch['title']==title and not missing
     assert all(p.title==title and title in p.request for _,plan in groups for p in plan.passages)
+
+
+def test_materialized_capture_cannot_override_its_authoritative_manifest_hash(tmp_path):
+    root,_,source=publication(tmp_path);prepared=tmp_path/'prepared'
+    path=prepared/ID;path.parent.mkdir(parents=True);path.write_bytes(b'An unrelated capture at the same path')
+    with pytest.raises(SourceError,match='source_integrity'):job.prepare(source,prepared,root/'.git')

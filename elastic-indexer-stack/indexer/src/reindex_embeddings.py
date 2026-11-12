@@ -95,6 +95,10 @@ def remaining_query(ids=None):
 def prepare(source, repo, publication_repo=None):
     """Resolve a missing source from verified local Git, never from a remote."""
     path=source_path(Path(repo),source['id'])
+    expected=source.get('archive_source_sha256')
+    if (path.is_file() and isinstance(expected,str) and re.fullmatch('[0-9a-f]{64}',expected)
+            and source_hash(source,repo)!=expected):
+        raise SourceError('source_integrity')
     if (not path.is_file() and source.get('file_type')=='text'
             and (publication_repo or (Path(repo)/'.git/objects').is_dir())):
         with Sources([repo],publication_repo) as sources:
