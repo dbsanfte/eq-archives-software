@@ -161,8 +161,16 @@ def _prepare_local(source, repo):
             title=BeautifulSoup(raw,'html.parser').title
             corrected=repaired_title(source.get('title'),title.string if title else None,decoded)
             if corrected!=source.get('title'):patch['title']=corrected
-    groups = [(body, passages.prepare(body, record_id, source.get("title") or "",
+    groups = [(body, passages.prepare(body, record_id, patch.get("title",source.get("title")) or "",
                html_source=raw, mime_type=source.get("mime_type") or "")) for body in texts]
+    # Error/supporting projections retain their existing reader. Bind the
+    # empty semantic view to that retained reader too, rather than checkpointing
+    # a different extraction and making the next policy reject its provenance.
+    if (source.get('text_full','').strip() and any(plan.method=='archive_status' or
+            'supporting_asset' in plan.exclusions for _,plan in groups)):
+        body=source['text_full'];patch.pop('text_full',None)
+        groups=[(body,passages.prepare(body,record_id,patch.get('title',source.get('title')) or '',
+                html_source=raw,mime_type=source.get('mime_type') or ''))]
     for body, plan in groups:
         passages.verify(body, plan)
     if decoding:patch['_source_decoding']=decoding

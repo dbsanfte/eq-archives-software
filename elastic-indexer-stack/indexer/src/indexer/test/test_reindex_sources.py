@@ -100,3 +100,25 @@ def test_newer_checkpoint_does_not_silently_resolve_an_unverified_older_rejectio
     result=job.reindex(client,'eq-archive',tmp_path,ids=[identifier],workers=1,factory=lambda **_:embedder,ledger=ledger,include_completed=True)
     assert result.updated==result.failed==0 and ledger.has_pending(identifier)
     client.update.assert_not_called();ledger.close()
+
+
+def test_excluded_source_checkpoint_stays_bound_to_the_reader_that_is_retained(tmp_path):
+    hit,client,embedder=fixture();source=hit['_source']
+    source.update(mime_type='text/html',text_extraction_version='old',text_full='Existing preserved historical error reader')
+    path=tmp_path/source['id'];path.parent.mkdir(parents=True)
+    path.write_text('<html><title>System Message: Error</title><h1>Error</h1><p>The post you selected no longer exists.</p></html>')
+    job.migrate_record(client,'eq-archive',hit,tmp_path,embedder)
+    patch=client.update.call_args.kwargs['doc']
+    assert 'text_full' not in patch and patch['text']==[]
+    assert patch['text_passage_provenance']['sources'][0]['source_sha256']==passages.digest(source['text_full'])
+    assert patch['llm_summary_vector'] is patch['llm_image_text_vector'] is None
+
+
+def test_repaired_source_title_is_used_in_every_new_embedding_request(tmp_path):
+    title='｢冒険の記録｣';raw=('<html><title>'+title+'</title><p>こんにちは。冒険に行きましょう。</p></html>').encode('iso2022_jp_ext')
+    source=dict(id=ID,file_type='text',mime_type='text/html',text_full='Previous reader',
+        title=title.encode('iso2022_jp_ext').decode('latin1'))
+    path=tmp_path/ID;path.parent.mkdir(parents=True);path.write_bytes(raw)
+    groups,patch,missing=job.prepare(source,tmp_path)
+    assert patch['title']==title and not missing
+    assert all(p.title==title and title in p.request for _,plan in groups for p in plan.passages)
