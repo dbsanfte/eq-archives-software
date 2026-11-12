@@ -423,12 +423,15 @@ class Worker:
                 elif diagnostic.get('state') != 'completed':
                     state = 'index_failed'
                     import_error = 'Import completion could not be verified; saved sources and paid results are retained.'
-            if (state == 'index_failed' and daily_job and batch['manifest'].get('indexing', {}).get('daily_budget') == 'portal-utc-v1'
+            if (state == 'index_failed'
                     and any(c.get('type') == 'Failed' and c.get('status') == 'True' and c.get('reason') == 'DeadlineExceeded'
-                            for c in existing.get('status', {}).get('conditions', []))):
-                # Large automatic sites can span the six-hour Job window.
-                # Continue using caches/create-only IDs, retaining old Jobs.
+                            for c in existing.get('status', {}).get('conditions', []))
+                    and (read_status(self.root, batch, name) or {}).get('state') != 'failed'):
+                # Execution limits apply to every approved import, including old
+                # manual $2 sites. Keep the immutable policy/cache identity; a
+                # timeout never renews its budget or overrides a saved failure.
                 state, detail = 'published_waiting_index', self.continue_import(batch, name)
+                detail['recovery_reason'] = 'Import execution deadline reached; continuing saved work under the original enrichment budget.'
             if state == 'index_failed':
                 import_error = import_error or read_error(self.root, batch, name)
                 if not import_error and hasattr(self.kube,'job_failure'):
