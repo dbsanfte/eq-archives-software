@@ -11,6 +11,7 @@ import json
 import math
 from pathlib import Path
 import random
+import ssl
 import statistics
 import subprocess
 import sys
@@ -25,6 +26,8 @@ VERSION = "search-benchmark-v1"
 METADATA = ["discussion", "id", "title", "url", "parent_id", "domain_name", "mailing_list_name", "capture_date", "llm_guessed_date",
             "file_type", "mime_type", "llm_tags", "llm_content_flavour"]
 FILTER_FIELDS = {"domain_name", "mailing_list_name", "file_type", "mime_type", "llm_tags", "llm_content_flavour", "capture_date", "llm_guessed_date"}
+PASSAGE_FIELDS = ["text.text_chunk", "text.title", "text.context", "text.kind", "text.source_start", "text.source_end",
+                  "text_chunking_version", "text_extraction_version"]
 
 
 class BenchmarkError(Exception):
@@ -87,13 +90,14 @@ def validate_suite(queries, configs):
 class HTTP:
     """Credentials stay in memory; errors never include response bodies or headers."""
 
-    def __init__(self, base, headers=None, pause=0):
+    def __init__(self, base, headers=None, pause=0, ca_file=None):
         parsed = urllib.parse.urlsplit(base)
         if parsed.scheme not in ("http", "https") or parsed.username or parsed.password or parsed.query or parsed.fragment:
             raise BenchmarkError("Use an HTTP endpoint without embedded credentials or a query")
         self.base = base.rstrip("/")
         self.headers = {"Content-Type": "application/json", **(headers or {})}
         self.pause = pause
+        self.tls = ssl.create_default_context(cafile=str(ca_file)) if ca_file else None
 
     def request(self, method, path, body=None):
         # Disable redirects so a misconfigured upstream cannot forward credentials.
@@ -103,7 +107,10 @@ class HTTP:
         for attempt in range(3):
             try:
                 request = urllib.request.Request(self.base + path, data=None if body is None else json.dumps(body).encode(), headers=self.headers, method=method)
-                with urllib.request.build_opener(NoRedirect).open(request, timeout=45) as response:
+                handlers = [NoRedirect]
+                if self.tls:
+                    handlers.append(urllib.request.HTTPSHandler(context=self.tls))
+                with urllib.request.build_opener(*handlers).open(request, timeout=45) as response:
                     result = json.load(response)
                 if self.pause:
                     time.sleep(self.pause)
@@ -343,7 +350,8 @@ def run(args):
     if auth.get("es_username"):
         es_headers["Authorization"] = "Basic " + base64.b64encode((auth["es_username"] + ":" + auth["es_password"]).encode()).decode()
     model_headers = {"Authorization": "Bearer " + auth["embedding_api_key"]} if auth.get("embedding_api_key") else {}
-    es, embeddings = Elasticsearch(args.es_url, es_headers), HTTP(args.embedding_url, model_headers, pause=args.pause)
+    es = Elasticsearch(args.es_url, es_headers, ca_file=getattr(args, 'es_ca_file', None))
+    embeddings = HTTP(args.embedding_url, model_headers, pause=args.pause)
     frontend = Frontend(args.node_image)
     try:
         contract = frontend.call({"op": "contract"})
@@ -351,6 +359,7 @@ def run(args):
         metadata = provenance(contract, es, args.index)
         metadata.update(started_at=datetime.now(timezone.utc).isoformat(), status="running", queries=queries, configs=configs, depth=args.depth,
                         archive_git_sha=args.archive_sha, chunking_version=args.chunking_version,
+                        includes_passages=getattr(args, 'include_passages', False),
                         limitation="Pilot cohort; pooled relevance, not exhaustive corpus recall. Timing includes concurrent indexing load.")
         save(output / "manifest.json", metadata)
         cache = Path(args.embedding_cache) if args.embedding_cache else output / "embedding-cache"
@@ -421,7 +430,10 @@ def run(args):
             sources = {}
             for start in range(0, len(all_ids), 30):
                 batch = all_ids[start:start + 30]
-                fetched = snapshot.search({"size": len(batch), "_source": METADATA + ["text_full", "llm_image_text_full"], "query": {"ids": {"values": batch}}})["hits"]["hits"]
+                source_fields = METADATA + ["text_full", "llm_image_text_full"]
+                if getattr(args, 'include_passages', False):
+                    source_fields += PASSAGE_FIELDS
+                fetched = snapshot.search({"size": len(batch), "_source": source_fields, "query": {"ids": {"values": batch}}})["hits"]["hits"]
                 for hit in fetched:
                     source = hit["_source"]
                     sources[hit["_id"]] = {"source": source, "source_sha256": digest(source)}
@@ -451,6 +463,8 @@ def parser():
     collect.add_argument("--es-url", required=True)
     collect.add_argument("--embedding-url", required=True, help="OpenAI-compatible EmbeddingGemma endpoint, ending in /v1")
     collect.add_argument("--credentials", help="Private JSON file: es_username, es_password, embedding_api_key")
+    collect.add_argument("--es-ca-file", type=Path, help="Verified combined CA bundle for the configured database endpoint")
+    collect.add_argument("--include-passages", action="store_true", help="Save fixed source passage fields for offline reranking; never vectors")
     collect.add_argument("--index", default="eq-archive")
     collect.add_argument("--out", required=True)
     collect.add_argument("--queries", default=str(HERE / "queries.json"))

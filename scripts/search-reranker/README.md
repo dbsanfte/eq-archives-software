@@ -79,6 +79,8 @@ account with cluster `monitor` and index `read,view_index_metadata` on the index
 alias **and its resolved concrete index**, as PIT searches need the latter.
 Use the existing verified combined CA profile; never disable TLS validation.
 Preserve a short-lived PIT and its original deadline. Close it before inference.
+Pass `--es-ca-file /private/ca-bundle.pem` from the database profile and
+`--include-passages` to the collection command.
 
 The saved `sources.json` must include the exact, source-bound text passages
 (`text.text_chunk`, `text.title`, `text.context`, `text.kind`, `text.source_start`,
