@@ -68,6 +68,10 @@ Prepare a mode-0600 JSON credential file outside Git from trusted runtime secret
 with `read` and `view_index_metadata` on the index;
 an existing administrative account is not required for document collection.
 Never put credentials in URLs, arguments, checked-in examples or output.
+For TLS, pass `--es-ca-file` with the operator-owned combined CA bundle; certificate
+and hostname verification remain enabled. A PIT reader needs `read` and
+`view_index_metadata` on both the alias and its resolved concrete index, plus
+cluster `monitor` for recorded version metadata. This remains a read-only account.
 
 Use a new private output directory for each retrieval run. Keep the raw files,
 source bodies, vectors, requests and model responses outside Git. Record the
@@ -89,6 +93,10 @@ request pause is 0.2 seconds and inference is serial for the shared Nomic slot.
 There is no LLM work during collection. Each retrieval run is capped at 800
 query/configuration cases; partial shards, timeouts and escaped filters fail it.
 Smoke runs collected with `--depth` below 50 do not report recall@50.
+Optional `--include-passages` saves only the fixed text/title/context/kind/offset
+fields for the [private reranker pilot](../search-reranker/README.md), with complete
+readers and source hashes in the same PIT. It never requests vectors. The default
+source projection remains unchanged; the manifest records this opt-in.
 Do not score failed runs. A rerun needs a new PIT and output directory.
 
 The manifest records the software SHA and source hashes, actual frontend

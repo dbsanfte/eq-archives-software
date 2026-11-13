@@ -11,7 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from ann import exact_documents
-from benchmark import BenchmarkError, Elasticsearch, HTTP, Snapshot, embedding, parser, build_body, digest, filter_matches, grouped, load, rrf, save, validate_suite, validate_vector
+from benchmark import BenchmarkError, Elasticsearch, HTTP, Snapshot, embedding, parser, build_body, digest, filter_matches, grouped, load, rrf, save, validate_suite, validate_vector, run
 from evaluate import average_ranking, paired_interval, report, resolved_parameters, review, scores, valid_ratings
 from grade import response_ratings
 
@@ -321,6 +321,64 @@ class JudgmentTests(unittest.TestCase):
         broken[0]["num_candidates"] = 100
         with self.assertRaises(BenchmarkError):
             validate_suite(queries, broken)
+
+
+class RerankerCollectionTests(unittest.TestCase):
+    def test_custom_ca_retains_certificate_hostname_checks_and_no_redirects(self):
+        import ssl
+        context=ssl.create_default_context()
+        with patch('ssl.create_default_context',return_value=context) as factory:
+            client=HTTP('https://archive.invalid',ca_file=Path('/private/combined.pem'))
+        factory.assert_called_once_with(cafile='/private/combined.pem')
+        self.assertTrue(client.tls.check_hostname)
+        self.assertEqual(client.tls.verify_mode,ssl.CERT_REQUIRED)
+        with patch('urllib.request.build_opener') as builder:
+            builder.return_value.open.return_value=io.BytesIO(b'{"ok":true}')
+            self.assertEqual(client.request('GET','/'),{'ok':True})
+        handlers=builder.call_args.args
+        self.assertIsNone(handlers[0]().redirect_request(None,None,None,None,None,None))
+        self.assertIs(handlers[1]._context,context)
+
+    def test_opt_in_collection_saves_verified_passages_without_vectors(self):
+        for include in (False,True):
+            with self.subTest(include=include),tempfile.TemporaryDirectory() as directory:
+                root=Path(directory);save(root/'queries.json',[{'id':'q','text':'monk weight','split':'tune','filters':[]}])
+                save(root/'configs.json',[{'id':'baseline','mode':'lexical'}])
+                captured=[]
+                class FrontendFixture:
+                    def __init__(self,*_):pass
+                    def call(self,body):
+                        if body['op']=='contract':return {'engine':{'embeddingModel':'fixture'},'defaults':{'boost':10}}
+                        if body['op']=='build':return {'body':{'query':{'match_all':{}},'_source':['id','title']},'semantic_allowed':False}
+                        return ['record:a']
+                    def close(self):pass
+                class SnapshotFixture:
+                    def __init__(self,*_):pass
+                    def __enter__(self):return self
+                    def __exit__(self,*_):pass
+                    def search(self,body):
+                        captured.append(body)
+                        if body['size']==0:return {'hits':{'total':{'value':1,'relation':'eq'}},'aggregations':{}}
+                        source={'id':'a','title':'Monk guide'}
+                        if 'text_full' in body['_source']:
+                            source['text_full']='Complete monk weight guide'
+                            if 'text.text_chunk' in body['_source']:
+                                source['text']=[{'text_chunk':'Weight changes AC','context':'Equipment','source_start':0,'source_end':17}]
+                        return {'hits':{'hits':[{'_id':'a','_index':'eq-archive','_score':1,'_source':source}]}}
+                argv=['run','--es-url','http://fixture','--embedding-url','http://fixture/v1',
+                      '--out',str(root/'out'),'--archive-sha','a'*40,'--chunking-version','',
+                      '--queries',str(root/'queries.json'),'--configs',str(root/'configs.json'),'--pause','0']
+                if include:argv+=['--include-passages']
+                args=parser().parse_args(argv)
+                with patch('benchmark.Frontend',FrontendFixture),patch('benchmark.Snapshot',SnapshotFixture),patch('benchmark.provenance',return_value={}),redirect_stdout(io.StringIO()):
+                    run(args)
+                saved=load(root/'out/sources.json')['a'];source=saved['source']
+                self.assertEqual(saved['source_sha256'],digest(source))
+                self.assertEqual(source['text_full'],'Complete monk weight guide')
+                self.assertEqual('text' in source,include)
+                self.assertEqual(load(root/'out/manifest.json')['includes_passages'],include)
+                request=next(b for b in captured if 'text_full' in b.get('_source',[]))
+                self.assertFalse(any('vector' in field or '*' in field for field in request['_source']))
 
 
 if __name__ == "__main__":
