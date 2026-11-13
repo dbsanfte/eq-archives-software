@@ -311,6 +311,14 @@ class WebAPI:
                     check(len(dict(pairs)) == len(pairs))
                     return dict(pairs)
                 value = json.loads(raw, object_pairs_hook=unique, parse_constant=lambda _: check(False))
+                if operation == "rerank":
+                    keys(value, ["query", "ids"])
+                    # rank_ids validates the complete fixed contract before any I/O.
+                    if self.slots.locked() or self.archive.requests.locked():
+                        raise ToolError("Busy")
+                    async with self.slots, self.archive.requests, asyncio.timeout(4):
+                        ids, status = await self.archive.rank_ids(value.get("query"), value.get("ids"))
+                    return JSONResponse({"ids": ids, "status": status}, headers=headers)
                 if operation == "embedding":
                     keys(value, ["input", "model", "encoding_format"])
                     check(value.get("model") == self.archive.settings.model and value.get("encoding_format", "float") == "float")

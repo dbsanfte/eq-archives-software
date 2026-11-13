@@ -29,7 +29,7 @@ digests, dependency versions, or credentials into new files.
 | Model/image pins, bootstrap and GPU allocation | [runtime.env](elastic-indexer-stack/k8s-manifests/embeddings/runtime.env), [embedding Kustomization](elastic-indexer-stack/k8s-manifests/embeddings/kustomization.yaml), [device plugin](elastic-indexer-stack/k8s-manifests/embeddings/device-plugin.yaml) |
 | Indexer dependencies, tests and mappings | [Indexer Dockerfile](elastic-indexer-stack/indexer/Dockerfile), [test requirements](elastic-indexer-stack/indexer/src/indexer/requirements-dev.txt), [tests](elastic-indexer-stack/indexer/src/indexer/test), [Elasticsearch manager](elastic-indexer-stack/indexer/src/indexer/es_manager.py) |
 | Search relevance evaluation and tuning | [Benchmark guide](scripts/search-benchmark/README.md), [query set](scripts/search-benchmark/queries.json), [experiments](scripts/search-benchmark/configs.json) |
-| Private experimental reranking, model pins and offline latency checks | [Reranker pilot](scripts/search-reranker/README.md), [runtime pins](scripts/search-reranker/runtime.env) |
+| Private CUDA reranking, model pins, production forward and offline checks | [Reranker pilot](scripts/search-reranker/README.md), [runtime pins](scripts/search-reranker/runtime.env) |
 | Website candidate discovery, Wayback staging and approval | [Crawler guide](scripts/archive-crawler/README.md), [seed sites](scripts/archive-crawler/seeds.json), [pinned downloader](scripts/archive-crawler/vendor/wayback-machine-downloader/UPSTREAM.json) |
 
 ## Branching and delivery
@@ -417,6 +417,17 @@ must not be described as human validation. Preserve the tune/validation split,
 report corpus and pooling limits, and validate against the completed corpus
 before changing production defaults. Collection cannot write archive documents
 or mappings; paid Luna grading is a separate explicit command.
+
+Production top-20 reranking uses the shared MCP `rerank.py` client and the private
+Qwen CUDA service. Preserve post-grouping representatives, exact retrieval filters,
+date-sort bypass, head-only permutation and before-pagination ordering. Cache fallback
+orders as well as successes; never move results between pages after a transient outage.
+Keep the fixed ID/query-only browser contract, shared admission, local pinned tokenizer,
+768-token prompts, bounded source preparation, three-second deadline, single scoring
+slot, streamed response bound and complete finite model/score/index validation.
+The operator-owned `eqarchives-reranker` Secret and host SSH forward persist through
+CI; only the API may access the dedicated key/bridge port. Never expose the raw model
+API, alter live Vulkan embeddings or restart index Jobs for reranker deployment.
 
 ### Archive candidate crawler
 

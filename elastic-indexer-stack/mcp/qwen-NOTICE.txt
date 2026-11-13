@@ -1,0 +1,7 @@
+Qwen3-Reranker-0.6B tokenizer
+Source: Qwen/Qwen3-Reranker-0.6B on Hugging Face
+Revision: e61197ed45024b0ed8a2d74b80b4d909f1255473
+https://huggingface.co/Qwen/Qwen3-Reranker-0.6B
+License: Apache-2.0, as declared by the source model card.
+The tokenizer JSON is redistributed unchanged and verified by SHA-256.
+See qwen-LICENSE for the license text.

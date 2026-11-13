@@ -38,6 +38,10 @@ server {
         try_files $uri =404;
     }
 
+    location = /elasticsearch/$ELASTICSEARCH_INDEX/_rerank {
+        if ($request_method != POST) { return 405; }
+        proxy_pass $SEARCH_API_URL;
+    }
     location = /elasticsearch/$ELASTICSEARCH_INDEX/_search {
         if ($request_method != POST) { return 405; }
         proxy_pass $SEARCH_API_URL;

@@ -41,6 +41,33 @@ queries, 62,409 regenerated documents); completed-corpus validation is pending.
 The original `search(query)` and `fetch(id)` input/output contracts remain unchanged.
 Use `search_archive` to investigate beyond the first ten results.
 
+Production relevance searches rerank the first **20** candidates with the private
+Qwen3-Reranker-0.6B Q8_0 CUDA service. `search` retrieves 20 and returns the best ten;
+`search_archive` reranks before slicing pages, after page/discussion grouping when
+requested. Date sorts and empty-query browsing retain their original order.
+Filters, quoted phrases, exclusions, exact IDs and capture representatives remain
+part of retrieval; reranking only permutes its selected candidates.
+
+The browser calls the fixed POST `/elasticsearch/eq-archive/_rerank` operation with
+`{query, ids}` after grouping. It accepts 1–20 unique exact IDs and the same analyzed
+query budget as search, and returns only `{ids, status}`. No model URL, source text,
+scoring options or Elasticsearch clauses are accepted. It shares browser/API
+admission, upload/deadline limits and the read-only ES client. Supporting source
+projections are fixed and exclude vectors. One selected passage per candidate is
+scored with the pinned local Qwen tokenizer and a complete 768-token prompt budget.
+An 8,192-character preparation bound applies to scoring excerpts; readers retain
+full text. Images without text keep their slots.
+
+Scoring has one process-wide slot, a three-second total deadline, a 15-second
+outage cooldown, 128 KiB request / 32 KiB response bounds and strict model/score/index
+validation. Failures preserve retrieval order. A bounded 128-entry, five-minute
+cache retains successful **and fallback** orders for the same query/ordered IDs;
+the browser retains that order for its current search. This stabilizes paging
+through outages, but the live index and expired caches are not snapshots.
+`RERANK_URL` enables scoring; unset it to disable. The dedicated key is read from
+`/run/reranker/api_key`; runtime model downloads and caller-controlled endpoints
+are forbidden. See [deployment instructions](../../scripts/search-reranker/README.md).
+
 `fetch` uses an exact Elasticsearch ID query. Archive paths remain IDs, never
 filesystem paths or request URLs. Original extracted text is returned without
 snippet truncation. Image transcriptions and estimated dates are clearly labelled;

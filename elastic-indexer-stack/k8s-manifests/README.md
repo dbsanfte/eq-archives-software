@@ -281,3 +281,14 @@ ConfigMap; ordinary CI bootstraps it only when absent and preserves HTTPS/privat
 CA trust thereafter. See the [security maintenance runbook](../../scripts/security-maintenance/README.md)
 for the separately authorized database/runtime handoff. Never hardcode HTTP in a
 new database consumer or disable certificate verification.
+
+### CUDA search reranker
+
+The search API now uses Qwen3-Reranker-0.6B for bounded top-20 relevance ordering.
+Before deploying, provision the operator-owned `eqarchives-reranker` Secret with
+`api_key`, and install the private SSH forward described in
+[the reranker guide](../../scripts/search-reranker/README.md). CI preserves this
+Secret and checksums it into the API rollout. Its absence fails deployment
+visibly. Model/tunnel outages retain baseline search results. The API's only new
+egress target is `10.42.0.1:8083`; the static frontend has no model key or direct
+model access. GPU services and running index Jobs keep their existing lifecycles.

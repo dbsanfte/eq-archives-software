@@ -47,12 +47,13 @@ class PublicSecurity(unittest.TestCase):
         self.assertEqual(p['ingress'][0]['from'][0]['namespaceSelector']['matchLabels']['kubernetes.io/metadata.name'],'kube-system')
     def test_api_cannot_reach_control_plane_lan_or_external_urls(self):
         p=self.get('NetworkPolicy','public-search-api')['spec']
-        self.assertEqual(len(p['egress']),3)
-        for rule in p['egress']:
+        self.assertEqual(len(p['egress']),4)
+        for rule in p['egress'][:3]:
             self.assertNotIn('ipBlock',str(rule))
             self.assertTrue(rule['ports'])
         self.assertEqual(p['egress'][1]['to'],[{'podSelector':{'matchLabels':{'app':'elasticsearch'}}}])
         self.assertEqual(p['egress'][2]['to'],[{'podSelector':{'matchLabels':{'app':'nomic-embeddings'}}}])
+        self.assertEqual(p['egress'][3], {'to':[{'ipBlock':{'cidr':'10.42.0.1/32'}}], 'ports':[{'protocol':'TCP','port':8083}]})
     def test_database_keeps_job_access_without_allowing_the_static_frontend(self):
         p=self.get('NetworkPolicy','archive-database-ingress')['spec']
         self.assertEqual(p['policyTypes'],['Ingress'])
