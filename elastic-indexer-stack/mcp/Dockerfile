@@ -7,6 +7,8 @@ RUN pip install --no-cache-dir --require-hashes -r requirements.txt
 COPY requirements-tokenizer.txt download-tokenizer.py ./
 RUN pip install --no-cache-dir --no-deps --require-hashes -r requirements-tokenizer.txt && python download-tokenizer.py
 
+COPY qwen-LICENSE qwen-NOTICE.txt ./
+
 FROM dependencies AS test
 COPY requirements-dev.txt ./
 RUN pip install --no-cache-dir --require-hashes -r requirements-dev.txt
