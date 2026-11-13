@@ -13,6 +13,8 @@ from urllib.parse import urlencode, urlsplit
 import httpx
 from mcp.server.mcpserver.exceptions import ToolError
 
+from .rerank import Reranker
+from .limits import TextBudget
 from .catalog import Catalog, SCOPE_NOTE
 from .models import Document, SearchResult, SearchResults
 from .research import (
@@ -98,7 +100,8 @@ def provenance(source: dict) -> dict[str, str]:
 
 
 class Archive(Catalog):
-    def __init__(self, settings: Settings, es: httpx.AsyncClient, embeddings: httpx.AsyncClient):
+    def __init__(self, settings: Settings, es: httpx.AsyncClient, embeddings: httpx.AsyncClient, reranker=None):
+        self.reranker = reranker
         self.settings = settings
         self.es = es
         self.embeddings = embeddings
@@ -120,11 +123,33 @@ class Archive(Catalog):
             base_url=settings.embedding_url.rstrip("/") + "/",
             headers={"Authorization": "Bearer " + secret("openai_api_key")},
             timeout=3, limits=httpx.Limits(max_connections=1), trust_env=False,
-        ))
+        ), reranker=Reranker.connect())
 
     async def close(self):
         await self.es.aclose()
         await self.embeddings.aclose()
+        if self.reranker:
+            await self.reranker.close()
+
+    async def rank_ids(self, query, ids):
+        TextBudget().accept(query)
+        if (not isinstance(ids, list) or not 1 <= len(ids) <= 20 or
+                any(not isinstance(id, str) or not 0 < len(id) <= 2048 or
+                    any(ord(c) < 32 for c in id) for id in ids) or len(set(ids)) != len(ids)):
+            raise ValueError("Invalid candidate IDs")
+        for id in ids:
+            id.encode("utf-8")
+        if not self.reranker or len(ids) < 2:
+            return list(ids), "disabled" if not self.reranker else "too_few"
+        return await self.reranker.order(self, query, ids)
+
+    async def rank_hits(self, query, hits):
+        if not query.strip() or not hits or not self.reranker:
+            return hits
+        head = hits[:20]
+        ids, _ = await self.rank_ids(query, [hit["_id"] for hit in head])
+        lookup = {hit["_id"]: hit for hit in head}
+        return [lookup[id] for id in ids] + hits[20:]
 
     async def embedding(self, query: str) -> list[float] | None:
         # Invalid caller text must not be mistaken for a shared model outage.
@@ -206,7 +231,7 @@ class Archive(Catalog):
         async with self.requests:
             constrained = has_constraints(query)
             body = {
-                "size": 10, "timeout": "8s", "track_total_hits": False,
+                "size": 20 if self.reranker else 10, "timeout": "8s", "track_total_hits": False,
                 "_source": SEARCH_FIELDS,
                 "query": keyword_query(query),
             }
@@ -221,8 +246,8 @@ class Archive(Catalog):
                         **({"filter": {"term": {"embedding_model": self.settings.model}}}
                            if self.settings.model == "embeddinggemma-2-768-v1" else {}),
                     } for field in ("text.vector", "llm_summary_vector", "llm_image_text_vector", "image_vector")]
-            hits = await self.query(body)
-            return SearchResults(results=[result_from_hit(hit) for hit in hits])
+            hits = await self.rank_hits(query, await self.query(body))
+            return SearchResults(results=[result_from_hit(hit) for hit in hits[:10]])
 
     async def search_archive(self, query: str = "", filters: ResearchFilters | None = None,
                              offset: int = 0, limit: int = 20, sort: SortOrder = "relevance", group_by: GroupBy = "documents") -> ResearchPage:
@@ -232,13 +257,16 @@ class Archive(Catalog):
             limit = min(limit, MAX_RESEARCH_RESULTS - offset)
             if group_by != "documents":
                 return await self.grouped_page(query, filters or ResearchFilters(), offset, limit, sort, group_by)
+            rank = bool(self.reranker and query.strip() and sort == "relevance" and offset < 20)
             data = await self.execute({
-                "from": offset, "size": limit, "timeout": "8s",
+                "from": 0 if rank else offset, "size": max(20, offset + limit) if rank else limit, "timeout": "8s",
                 "track_total_hits": MAX_RESEARCH_RESULTS + 1,
                 "_source": SEARCH_FIELDS + PROVENANCE_FIELDS,
                 "query": await self.selection(query, filters or ResearchFilters()),
                 "sort": research_sort(sort),
             }, stable_order=True)
+            if rank:
+                data["hits"]["hits"] = (await self.rank_hits(query, data["hits"]["hits"]))[offset:offset+limit]
             try:
                 total = ResultCount.model_validate(data["hits"]["total"])
                 results = [ResearchResult(**result_from_hit(hit).model_dump(), metadata=provenance(hit["_source"]))

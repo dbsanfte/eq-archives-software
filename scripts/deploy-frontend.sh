@@ -41,6 +41,9 @@ values = {name: os.environ[name] for name in (
 print(hashlib.sha256(json.dumps(values, sort_keys=True).encode()).hexdigest())
 PY
 )
+# Operator-owned reranker key persists independently of public ES/embedding credentials.
+reranker_checksum=$("${kubectl[@]}" -n eqarchives-es get secret eqarchives-reranker -o json |
+  python3 -c 'import hashlib,json,sys; print(hashlib.sha256(json.dumps(json.load(sys.stdin)["data"],sort_keys=True).encode()).hexdigest())')
 embedding_checksum=$(python3 -c 'import hashlib,os; print(hashlib.sha256(os.environ["FRONTEND_OPENAI_API_KEY"].encode()).hexdigest())')
 cat >> "$work_dir/kustomization.yaml" <<EOF
 images:
@@ -65,6 +68,7 @@ patches:
         path: /spec/template/metadata/annotations
         value:
           checksum/archive-secrets: "$secret_checksum"
+          checksum/reranker-key: "$reranker_checksum"
           checksum/database-client: "$DATABASE_CLIENT_CHECKSUM"
   - target:
       kind: Deployment

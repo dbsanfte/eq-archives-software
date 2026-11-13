@@ -26,6 +26,8 @@ class FrontendBrowserTests(unittest.TestCase):
 
     @staticmethod
     def mock_elasticsearch(route):
+        if route.request.url.endswith('/_rerank'):
+            return route.fulfill(json={'ids': route.request.post_data_json['ids'], 'status': 'fixture'})
         if route.request.url.endswith("/_count"):
             route.fulfill(json={"count": 0})
         else:
@@ -50,6 +52,8 @@ class FrontendBrowserTests(unittest.TestCase):
             page = context.new_page()
             payload = '<img src="/security-marker.png" onerror="window.securityMarker=1"><svg onload="window.securityMarker=2">'
             def archive(route):
+                if route.request.url.endswith('/_rerank'):
+                    return route.fulfill(json={'ids': route.request.post_data_json['ids'], 'status': 'fixture'})
                 if route.request.url.endswith('/_count'):
                     return route.fulfill(json={'count': 1})
                 facets = {f: {'buckets': []} for f in ('domain_name', 'llm_content_flavour', 'file_type', 'mime_type', 'mailing_list_name', 'llm_tags')}
@@ -230,6 +234,8 @@ class FrontendBrowserTests(unittest.TestCase):
                         route.fulfill(json=response(kind, selection))
 
                     def archive(route):
+                        if route.request.url.endswith('/_rerank'):
+                            return route.fulfill(json={'ids': route.request.post_data_json['ids'], 'status': 'fixture'})
                         if route.request.url.endswith('/_search'):
                             searches.append(route.request.post_data_json)
                         return self.mock_elasticsearch(route)
@@ -382,6 +388,8 @@ class FrontendBrowserTests(unittest.TestCase):
                     facets['last_indexed'] = {'buckets': {}}
 
                     def archive(route):
+                        if route.request.url.endswith('/_rerank'):
+                            return route.fulfill(json={'ids': route.request.post_data_json['ids'], 'status': 'fixture'})
                         if route.request.url.endswith('/_count'):
                             return route.fulfill(json={'count': len(records)})
                         body = route.request.post_data_json
@@ -532,6 +540,8 @@ class FrontendBrowserTests(unittest.TestCase):
                     page.on('pageerror', lambda error: errors.append(str(error)))
 
                     def archive(route):
+                        if route.request.url.endswith('/_rerank'):
+                            return route.fulfill(json={'ids': route.request.post_data_json['ids'], 'status': 'fixture'})
                         if route.request.url.endswith('/_search'):
                             requests.append(route.request.post_data_json)
                             if delay:
@@ -682,6 +692,8 @@ class FrontendBrowserTests(unittest.TestCase):
         facets["last_indexed"] = {"buckets": {}}
 
         def archive(route):
+            if route.request.url.endswith('/_rerank'):
+                return route.fulfill(json={'ids': route.request.post_data_json['ids'], 'status': 'fixture'})
             if route.request.url.endswith('/_count'):
                 return route.fulfill(json={"count": 1})
             return route.fulfill(json={
@@ -778,6 +790,8 @@ class FrontendBrowserTests(unittest.TestCase):
                     doc_id = "archives/source with spaces?#.txt"
 
                     def archive(route):
+                        if route.request.url.endswith('/_rerank'):
+                            return route.fulfill(json={'ids': route.request.post_data_json['ids'], 'status': 'fixture'})
                         if route.request.url.endswith('/_count'):
                             return route.fulfill(json={"count": 1})
                         body = route.request.post_data_json
@@ -917,6 +931,48 @@ class FrontendBrowserTests(unittest.TestCase):
                 finally:
                     context.close()
 
+    def test_reranking_preserves_grouped_pages_and_falls_back_on_failure(self):
+        for width in (390, 1280):
+            with self.subTest(width=width):
+                context = self.browser.new_context(viewport={"width": width, "height": 950})
+                try:
+                    page = context.new_page()
+                    ranks = []
+                    records = [{"_id": f"newsgroups/{n}.txt", "_score": 100-n, "_source": {
+                        "id": f"newsgroups/{n}.txt", "title": f"Bard source {n}",
+                        "url": f"https://example.org/{n}", "text_full": "Bard evidence"}} for n in range(25)]
+                    def archive(route):
+                        if route.request.url.endswith('/_count'):
+                            return route.fulfill(json={"count":25})
+                        body = route.request.post_data_json
+                        if route.request.url.endswith('/_rerank'):
+                            ranks.append(body)
+                            if body['query'] == 'offline':
+                                return route.fulfill(status=503, json={"error":"unavailable"})
+                            return route.fulfill(json={"ids":list(reversed(body['ids'])), "status":"applied"})
+                        start=body.get('from',0)
+                        route.fulfill(json={"hits":{"total":{"value":25,"relation":"eq"},
+                            "hits":records[start:start+body['size']]}, "aggregations": {"facet_bucket_all": {
+                                "doc_count":25, **{name:{"buckets":[]} for name in ("domain_name","llm_content_flavour","file_type","mime_type","mailing_list_name","llm_tags")},
+                                "last_indexed":{"buckets":{}}}}})
+                    page.route('**/elasticsearch/**', archive)
+                    page.route('**/openai/**', lambda route: route.fulfill(status=503,json={"error":"fixture"}))
+                    page.goto(self.base_url+'/?q=bard', wait_until='networkidle')
+                    expect(page.locator('.sui-result')).to_have_count(20)
+                    expect(page.locator('.sui-result').first).to_contain_text('Bard source 19')
+                    self.assertEqual(len(ranks),1)
+                    self.assertEqual(len(ranks[0]['ids']),20)
+                    page.get_by_role('button',name='Next',exact=True).click()
+                    expect(page.locator('.sui-result')).to_have_count(5)
+                    expect(page.locator('.sui-result').first).to_contain_text('Bard source 20')
+                    page.get_by_role('button',name='Previous',exact=True).click()
+                    expect(page.locator('.sui-result').first).to_contain_text('Bard source 19')
+                    self.assertEqual(len(ranks),1)
+                    page.goto(self.base_url+'/?q=offline', wait_until='networkidle')
+                    expect(page.locator('.sui-result').first).to_contain_text('Bard source 0')
+                finally:
+                    context.close()
+
     def test_repeated_captures_group_across_pages_and_keep_individual_previews(self):
         for width in (390, 1280):
             with self.subTest(width=width):
@@ -942,6 +998,8 @@ class FrontendBrowserTests(unittest.TestCase):
                     facets["last_indexed"] = {"buckets": {}}
 
                     def archive(route):
+                        if route.request.url.endswith('/_rerank'):
+                            return route.fulfill(json={'ids': route.request.post_data_json['ids'], 'status': 'fixture'})
                         if route.request.url.endswith('/_count'):
                             return route.fulfill(json={"count": len(records)})
                         body = route.request.post_data_json
@@ -1040,6 +1098,8 @@ class FrontendBrowserTests(unittest.TestCase):
                     facets={field:{'buckets':[]} for field in ('domain_name','llm_content_flavour','file_type','mime_type','mailing_list_name','llm_tags')}
                     facets['last_indexed']={'buckets':{}}
                     def archive(route):
+                        if route.request.url.endswith('/_rerank'):
+                            return route.fulfill(json={'ids': route.request.post_data_json['ids'], 'status': 'fixture'})
                         if route.request.url.endswith('/_count'):return route.fulfill(json={'count':len(records)})
                         body=route.request.post_data_json
                         if 'ids' in body.get('query',{}):
@@ -1122,6 +1182,8 @@ class FrontendBrowserTests(unittest.TestCase):
                     facets["last_indexed"] = {"buckets": {}}
 
                     def archive(route):
+                        if route.request.url.endswith('/_rerank'):
+                            return route.fulfill(json={'ids': route.request.post_data_json['ids'], 'status': 'fixture'})
                         if route.request.url.endswith('/_count'):
                             return route.fulfill(json={"count": 2})
                         body = route.request.post_data_json

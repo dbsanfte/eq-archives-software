@@ -6,6 +6,7 @@ import { getConfig } from "../config/config-helper";
 import { createConfig } from "../config/Config";
 import { resolveQuery } from "./Query";
 import filterRegistry from './FilterRegistry';
+import { rerankResults } from './Reranking';
 import { createGroupedSearch } from './GroupedSearch';
 import { embeddingService } from './EmbeddingService';
 
@@ -87,7 +88,7 @@ export const createConnector = (paramsRef) => {
       params: paramsRef.current,
       dateFilters: filterRegistry.applyFilters({}),
       embedding: embeddingService.getEmbedding(state.searchTerm, embeddingModel)
-    }));
+    }), (query, results) => rerankResults(query, results, indexName));
   }
   return connector;
 };

@@ -188,10 +188,12 @@ def create_app(archive: Archive | None = None):
         if request.path_params.get("index", archive.settings.index) != archive.settings.index:
             return JSONResponse({"error": "Not found"}, status_code=404)
         operation = "embedding" if request.url.path == "/openai/v1/embeddings" else (
-            "count" if request.url.path.endswith("/_count") else "search")
+            "count" if request.url.path.endswith("/_count") else
+            "rerank" if request.url.path.endswith("/_rerank") else "search")
         return await web_api.handle(request, operation)
 
-    for path, methods in (("/elasticsearch/{index}/_search", ["POST"]),
+    for path, methods in (("/elasticsearch/{index}/_rerank", ["POST"]),
+                          ("/elasticsearch/{index}/_search", ["POST"]),
                           ("/elasticsearch/{index}/_count", ["GET"]),
                           ("/openai/v1/embeddings", ["POST"])):
         app.router.routes.insert(0, Route(path, browser_request, methods=methods))

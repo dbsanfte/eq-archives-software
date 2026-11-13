@@ -1,15 +1,18 @@
 # Private Qwen reranker pilot
 
-This is an independent **experimental** llama.cpp service on eqvm's loopback
-`127.0.0.1:8083`, with its own API key and systemd unit. Neither the public search
-portal nor MCP calls it. It does not change Elasticsearch documents, embeddings,
-ranking defaults, existing Kubernetes Jobs or the CUDA/Vulkan embedding services.
-The Vulkan profile shares the physical integrated GPU with live query embeddings;
-measure contention before connecting it to production search.
-The optional CUDA profile runs independently on the existing 3080 host, using its
-already tested CUDA image and NVIDIA CDI device. It shares that GPU with ingestion
-without changing the embedding/vision containers or their settings. Bind remains
-loopback on both hosts; use a private SSH tunnel for comparative benchmarks.
+The independent Qwen service runs on the RTX 3080 host's loopback
+`127.0.0.1:8083`, with its own API key and systemd unit. Public search and MCP use
+it through the bounded top-20 API described in the
+[MCP guide](../../elastic-indexer-stack/mcp/README.md). The PN50 test service is
+stopped; live query embeddings retain its Vulkan GPU. The optional Vulkan/CPU
+profiles remain available for isolated experiments.
+
+On eqvm, `eqarchives-reranker-tunnel.service` maintains an SSH forward bound only
+to the CNI bridge `10.42.0.1:8083`. It connects to the GPU host's loopback service,
+using verified SSH host keys and an operator-owned identity. Only the search API
+gets the dedicated reranker key; the static frontend receives no credentials.
+The API egress policy adds only this exact host/port. No public model ingress exists.
+The CUDA embedding and vision containers retain their independent configuration.
 
 `runtime.env` pins the existing Vulkan image, source model, converter revision,
 converted Q8_0 file hash and capacity. The 0.6B source is Apache-2.0 licensed:
@@ -122,3 +125,28 @@ latency is useful. No Luna grading is implicit in this command.
 python3 -m unittest discover -s scripts/search-reranker -v
 bash -n scripts/search-reranker/install.sh
 ```
+
+## Production API connection
+
+After the protected merge, on eqvm install the SSH forward with existing private
+operator files (paths only; never copy their contents into Git):
+
+```bash
+sudo bash scripts/search-reranker/install-tunnel.sh /private/gpu-ssh-key /private/verified-known-hosts
+systemctl status eqarchives-reranker-tunnel.service
+```
+
+Provision the existing private model API key as the operator-owned Kubernetes
+Secret `eqarchives-reranker`, key `api_key`, in `eqarchives-es`, using a trusted
+stdin stream and server-side apply. The deployment reads its checksum and mounts
+it only in the search API. It persists across normal CI reconciliations; do not
+reuse the paid Luna key. CI deploys the API before the frontend; model outages
+fall back to retrieval order without failing readiness. The GPU unit and SSH
+forward restart automatically. A changed SSH identity requires restarting only
+the tunnel unit. Stop the tunnel or clear `RERANK_URL` to disable inference;
+existing cached orders expire within five minutes. Existing index Jobs and model
+services are never restarted by this setup.
+
+The initial latency/evidence report is [RESULTS.md](RESULTS.md). Deployment enables
+the operator-requested trial; selected examples are not independent relevance
+judgments or proof of corpus-wide improvement.

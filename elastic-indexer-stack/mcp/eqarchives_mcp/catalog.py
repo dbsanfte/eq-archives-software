@@ -123,7 +123,12 @@ class Catalog:
                 groups[key].group.matching_captures_in_window += 1
             scanned = len(data["hits"]["hits"])
             bounded = raw_total.relation == "gte" or scanned < raw_total.value
-            results = list(groups.values())[offset:offset+limit]
+            ordered = list(groups.values())
+            if sort == "relevance" and query.strip() and ordered:
+                ids, _ = await self.rank_ids(query, [r.id for r in ordered[:20]])
+                lookup = {r.id: r for r in ordered[:20]}
+                ordered = [lookup[id] for id in ids] + ordered[20:]
+            results = ordered[offset:offset+limit]
             end = offset+len(results)
             more = end < len(groups)
             note = ("Grouped over at most 1,000 matching documents; group counts describe this window only. "
