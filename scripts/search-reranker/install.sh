@@ -7,6 +7,13 @@ fi
 source_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 model_source=${1:?Pass the converted, hash-verified GGUF path}
 key_source=${2:?Pass the private pilot API-key file path}
+profile=${3:-vulkan}
+case "$profile" in
+  vulkan) device=Vulkan0 ;;
+  cuda) device=CUDA0 ;;
+  cpu) device=none ;;
+  *) echo 'Profile must be vulkan, cuda or cpu.' >&2; exit 1 ;;
+esac
 python3 - "$source_dir" "$model_source" <<'PY'
 import sys,hashlib
 from pathlib import Path
@@ -21,6 +28,7 @@ test -s "$key_source"
 install -d -m 0755 /opt/eqarchives-reranker /var/lib/eqarchives-reranker/models
 install -d -m 0750 -o root -g 1000 /etc/eqarchives-reranker
 install -m 0644 "$source_dir/service.py" "$source_dir/runtime.env" /opt/eqarchives-reranker/
+sed -i "s/^DEVICE=.*/DEVICE=$device/" /opt/eqarchives-reranker/runtime.env
 if ! cmp -s -- "$model_source" /var/lib/eqarchives-reranker/models/qwen3-reranker-0.6b-q8_0.gguf; then
   install -m 0644 -- "$model_source" /var/lib/eqarchives-reranker/models/qwen3-reranker-0.6b-q8_0.gguf
 fi

@@ -6,6 +6,10 @@ portal nor MCP calls it. It does not change Elasticsearch documents, embeddings,
 ranking defaults, existing Kubernetes Jobs or the CUDA/Vulkan embedding services.
 The Vulkan profile shares the physical integrated GPU with live query embeddings;
 measure contention before connecting it to production search.
+The optional CUDA profile runs independently on the existing 3080 host, using its
+already tested CUDA image and NVIDIA CDI device. It shares that GPU with ingestion
+without changing the embedding/vision containers or their settings. Bind remains
+loopback on both hosts; use a private SSH tunnel for comparative benchmarks.
 
 `runtime.env` pins the existing Vulkan image, source model, converter revision,
 converted Q8_0 file hash and capacity. The 0.6B source is Apache-2.0 licensed:
@@ -58,6 +62,10 @@ The installer verifies the model, installs under `/opt/eqarchives-reranker`,
 deliberate configuration updates restart only this unit and rerun inference
 health. Stop the unit to roll back the pilot; live search continues unchanged.
 `DEVICE=none` selects an isolated CPU profile without exposing the render device.
+The installer's optional third argument is `vulkan` (default), `cuda` or `cpu`.
+Install `cuda` on the 3080 host only; its Docker/CDI setup already exists. For
+example, `ssh -N -L 127.0.0.1:8084:127.0.0.1:8083 <gpu-host>` permits the same pilot
+client to compare the CUDA service using `--url http://127.0.0.1:8084`.
 CI tests the service configuration/client/ordering; actual installation is an
 explicit host operation, like the separate CUDA embedding service.
 

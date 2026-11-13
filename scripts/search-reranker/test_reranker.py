@@ -47,10 +47,18 @@ class ServingTests(unittest.TestCase):
         self.assertIn('--no-op-offload', args)
         self.assertEqual(args[args.index('--gpu-layers')+1], '0')
 
+    def test_cuda_profile_is_independent_and_uses_pinned_cdi_image(self):
+        config={**self.config(),'DEVICE':'CUDA0'};args=service.command(config)
+        self.assertIn('nvidia.com/gpu=all',args)
+        self.assertNotIn('/dev/dri/renderD128',args)
+        self.assertIn(config['CUDA_IMAGE'],args)
+        self.assertNotIn(config['LLAMA_IMAGE'],args)
+        self.assertEqual(args[args.index('--gpu-layers')+1],'99')
+
     def test_invalid_bind_pins_and_capacity_are_rejected(self):
         original = (Path(__file__).parent/'runtime.env').read_text()
         mutations = [('127.0.0.1', '0.0.0.0'), ('SLOTS=2', 'SLOTS=99'), ('TOKENS_PER_SLOT=1024', 'TOKENS_PER_SLOT=2048'),
-                     ('THREADS=2', 'THREADS=99'), ('DEVICE=Vulkan0', 'DEVICE=CUDA0'),
+                     ('THREADS=2', 'THREADS=99'), ('DEVICE=Vulkan0', 'DEVICE=arbitrary'),
                      ('MODEL_FILE=qwen3-reranker-0.6b-q8_0.gguf', 'MODEL_FILE=../model.gguf'),
                      ('@sha256:', ':latest-'), ('BIND_PORT=8083', 'BIND_PORT=80')]
         with tempfile.TemporaryDirectory() as directory:

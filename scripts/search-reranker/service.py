@@ -25,14 +25,15 @@ def settings(root=ROOT):
             result[name] = value
     if result['BIND_ADDRESS'] != '127.0.0.1' or not 1024 <= int(result['BIND_PORT']) <= 65535:
         raise ValueError('The experimental reranker must bind to loopback')
-    if not re.fullmatch(r'ghcr.io/ggml-org/llama.cpp@sha256:[0-9a-f]{64}', result['LLAMA_IMAGE']):
-        raise ValueError('Use a pinned llama.cpp image')
+    for name in ('LLAMA_IMAGE', 'CUDA_IMAGE'):
+        if not re.fullmatch(r'ghcr.io/ggml-org/llama.cpp@sha256:[0-9a-f]{64}', result[name]):
+            raise ValueError('Use a pinned llama.cpp image')
     if not re.fullmatch(r'[a-zA-Z0-9_.-]+\.gguf', result['MODEL_FILE']):
         raise ValueError('Use a literal model filename')
     if not re.fullmatch(r'[0-9a-f]{64}', result['MODEL_SHA256']):
         raise ValueError('Use a pinned model hash')
-    if result['DEVICE'] not in ('Vulkan0', 'none'):
-        raise ValueError('Use the local Vulkan GPU or isolated CPU profile')
+    if result['DEVICE'] not in ('Vulkan0', 'CUDA0', 'none'):
+        raise ValueError('Use the Vulkan, CUDA or isolated CPU profile')
     if not (1 <= int(result['SLOTS']) <= 8 and 256 <= int(result['TOKENS_PER_SLOT']) <= 2048
             and 256 <= int(result['COMPUTE_BATCH']) <= 4096 and 1 <= int(result['THREADS']) <= 4):
         raise ValueError('Invalid experimental capacity')
@@ -51,14 +52,17 @@ def command(config):
               '--mount', f'type=bind,source={KEY},target=/run/secrets/api_key,readonly']
     if config['DEVICE'] == 'Vulkan0':
         result += ['--device', '/dev/dri/renderD128', '--group-add', '109']
-    result += ['--entrypoint', '/app/llama-server', config['LLAMA_IMAGE'],
+    if config['DEVICE'] == 'CUDA0':
+        result += ['--device', 'nvidia.com/gpu=all', '--env', 'CUDA_CACHE_PATH=/tmp/cache/nvidia']
+    image = config['CUDA_IMAGE'] if config['DEVICE'] == 'CUDA0' else config['LLAMA_IMAGE']
+    result += ['--entrypoint', '/app/llama-server', image,
                '--model', '/models/' + config['MODEL_FILE'], '--alias', config['MODEL_ALIAS'],
                '--host', '0.0.0.0', '--port', '8080', '--reranking', '--pooling', 'rank',
                '--ctx-size', str(int(config['SLOTS']) * int(config['TOKENS_PER_SLOT'])),
                '--parallel', config['SLOTS'], '--batch-size', config['COMPUTE_BATCH'],
                '--ubatch-size', config['COMPUTE_BATCH'], '--threads', config['THREADS'],
                '--threads-batch', config['THREADS'], '--device', config['DEVICE'],
-               '--gpu-layers', '99' if config['DEVICE'] == 'Vulkan0' else '0',
+               '--gpu-layers', '0' if config['DEVICE'] == 'none' else '99',
                '--flash-attn', 'on', '--fit', 'off', '--no-cache-prompt', '--cache-ram', '0',
                '--api-key-file', '/run/secrets/api_key', '--no-webui', '--no-slots',
                '--metrics', '--timeout', '30', '--log-verbosity', '1']
