@@ -125,10 +125,12 @@ class Scheduler:
             for f in futures:
                 if not f.done():
                     f.cancel()
-            await asyncio.gather(joined, return_exceptions=True)
+            # Release bookkeeping before the next await: a disconnect followed
+            # by the lifecycle timeout can cancel this drain a second time.
             owner.requests -= 1
             if owner.requests == 0:
                 self.groups.pop(key, None)
+            await asyncio.gather(joined, return_exceptions=True)
 
     def _take_batch(self, kind):
         queue = self.queues[kind]

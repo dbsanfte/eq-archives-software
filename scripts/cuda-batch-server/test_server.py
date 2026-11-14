@@ -417,6 +417,34 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(any([7] in rows or [8] in rows for _, rows in self.engine.calls))
         self.assertFalse(self.scheduler.groups)
 
+    async def test_repeated_cancellation_cannot_retain_query_group_state(self):
+        draining, release = asyncio.Event(), asyncio.Event()
+        original = asyncio.gather
+
+        def gather(*futures, **kwargs):
+            result = original(*futures, **kwargs)
+            if kwargs.get("return_exceptions"):
+                async def delayed_drain():
+                    draining.set()
+                    await release.wait()
+                    return await result
+                return asyncio.create_task(delayed_drain())
+            return result
+
+        with patch("scheduler.asyncio.gather", side_effect=gather):
+            task = asyncio.create_task(self.scheduler.submit("rerank", [[1]], time.monotonic() + 1,
+                                                             group="cancelled query"))
+            await asyncio.sleep(0)
+            task.cancel()
+            try:
+                await asyncio.wait_for(draining.wait(), 1)
+                task.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await task
+            finally:
+                release.set()
+        self.assertFalse(self.scheduler.groups)
+
     async def test_capacity_and_gpu_fault_are_visible(self):
         with self.assertRaises(Busy):
             await self.scheduler.submit("embed", [[1]] * 9, time.monotonic() + 1)
