@@ -97,7 +97,8 @@ class Layer(C.Structure):
 
 def load_library(path):
     lib = C.CDLL(str(path))
-    if not hasattr(lib, "layer_abi_version") or lib.layer_abi_version() != 3:
+    if (not hasattr(lib, "layer_abi_version") or lib.layer_abi_version() != 4
+            or not hasattr(lib, "layer_features") or lib.layer_features() not in (0, 1)):
         raise RuntimeError("CUDA layer ABI differs; rebuild all selected profiles")
     lib.launch_layer.argtypes = [C.POINTER(Layer), C.c_void_p, C.POINTER(C.c_int), C.c_int]
     lib.launch_layer.restype = C.c_int
@@ -262,6 +263,10 @@ class Model:
             ple = ple.permute(1, 0, 2).contiguous().half()
         maxdim = 512 if self.gemma else 128
         H = self.heads * maxdim
+        fused_attention = bool(lib.layer_features())
+        if fused_attention and self.gemma:
+            raise RuntimeError("Causal attention cannot serve bidirectional embeddings")
+        attention_elements = 0 if fused_attention else b * self.heads * s * s
         alloc = lambda n, dtype=t.float16: t.empty(n, dtype=dtype, device="cuda")
         # Every workspace has a fixed upper shape, reused by all layers. No cache
         # grows with request history and no source text survives the batch.
@@ -276,12 +281,12 @@ class Model:
             q=alloc(b * s * H),
             k=alloc(b * s * H),
             vt=alloc(b * s * H),
-            scores=alloc(b * self.heads * s * s, t.float32),
-            attn=alloc(b * s * H),
+            scores=alloc(attention_elements, t.float32),
+            attn=alloc(0 if fused_attention else b * s * H),
             hidden=alloc(total * 2 * self.ffn, t.float32),
             result=alloc(total * self.width, t.float32),
             qkv_buffer=alloc(total * 3 * H, t.float32),
-            prob=alloc(b * self.heads * s * s),
+            prob=alloc(attention_elements),
         )
         comparisons = []
 

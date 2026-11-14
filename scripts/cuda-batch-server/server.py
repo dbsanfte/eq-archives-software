@@ -211,7 +211,10 @@ class App:
             )
             rows, token_input = validate(kind, body)
             tokens = rows if token_input else await asyncio.to_thread(self.engine.encode, kind, rows)
-            inference = asyncio.create_task(self.scheduler.submit(kind, tokens, time.monotonic() + 10))
+            inference = asyncio.create_task(self.scheduler.submit(
+                kind, tokens, time.monotonic() + 10,
+                group=body["query"] if kind == "rerank" else None,
+            ))
             disconnect = asyncio.create_task(receive())
             try:
                 done, _ = await asyncio.wait([inference, disconnect], return_when=asyncio.FIRST_COMPLETED)

@@ -33,6 +33,15 @@ Both paths dequantize the pinned Q8_0 weights to FP16 and use FP32 accumulators
 and residuals. Arithmetic differs from llama.cpp's Q8 execution; score agreement
 and retrieval quality must be evaluated independently of token/weight identity.
 
+Qwen's fused causal attention streams 64 keys past 32 queries per CTA. Its
+FP32 output accumulators remain in registers, using SM86 `ldmatrix`/`mma.sync`
+Tensor Core instructions and vectorized loads/stores. Online softmax replaces
+the sequence-squared score/probability workspaces, and attention writes directly
+into the packed projection input. Shared causal blocks have a single owner, so
+their attention is calculated once. This device function remains inside the
+complete-layer kernel: **one launch per layer, 28 launches per Qwen forward**.
+ABI 4 advertises this capability before the backend omits those workspaces.
+
 The asynchronous HTTP server has independent embedding and reranking queues,
 worker threads and CUDA streams. Each model has one owner for GPU submission;
 multiple clients feed that model's bounded dynamic batches. Requests are split
@@ -105,10 +114,34 @@ On the private six-query passage fixture, 128 distinct embedding inputs measured
 about 113 inputs/s at eight inputs × four requests, versus 81 inputs/s for the old
 llama.cpp service with the same client settings. One native request at a time
 measured 104 inputs/s. Larger client batches added little throughput and increased
-latency. These are inference measurements, not end-to-end indexing rates. Native
-two-request reranking gains are small at 20–60 documents; no general reranking
-speedup over llama.cpp is claimed. Numerical drift from Q8 inference remains
-distinct from kernel agreement with the independent FP16 layer reference.
+latency. These are inference measurements, not end-to-end indexing rates.
+
+The fused-attention and completion-priority profile measured the following HTTP
+times on that six-query fixture (12 alternating paired repetitions). Each search
+uses the live client's exact-prompt deduplication and four shared batch slots.
+
+| Workload | Native median completion | llama.cpp median completion |
+| --- | ---: | ---: |
+| One top-20 search | 270 ms | 331 ms |
+| Both concurrent top-20 searches | 616 ms | 750 ms |
+| One top-60 search | 830 ms | 1,028 ms |
+| Both concurrent top-60 searches | 1,714 ms | 2,151 ms |
+
+Individual concurrent-request medians also improved: 299 vs 368 ms at top-20,
+and 1,057 vs 1,411 ms at top-60. These are model-service measurements on a small
+fixture, not a universal speedup or complete portal-response times. Report both
+request and whole-pair latency: batching can otherwise hide a slow first result.
+The strict absolute-score comparison with llama.cpp's Q8 arithmetic still fails
+at about 0.048 maximum difference, as with the prior native runtime; top-10 set
+overlap on the top-60 fixture was 100%. This diagnostic is not a passing numerical
+equivalence gate. Independent FP16 layer checks and regression against the prior
+native runtime are separate from Q8 agreement or retrieval relevance judgments.
+Across the same fixture, the new and prior native runtimes retained identical
+top-10 sets, with maximum absolute score drift 0.00219. In the delayed-arrival
+test, short requests of 1/8/20 documents measured 226/342/479 ms medians, versus
+930/1,045/1,223 ms on the prior native service and 1,025/1,150/1,397 ms on
+llama.cpp (six rotated query pairs per size). Already executing GPU work still
+adds bounded waiting time; short searches cannot preempt a forward in progress.
 
 ## HTTP contract
 
@@ -162,6 +195,7 @@ python verify_gpu.py --kind embed --batch 8 --length 512 --oracle \
 python verify_gpu.py --kind rerank --batch 8 --length 768 --oracle \
   --output /private/rerank-check.json
 python verify_concurrency.py --output /private/concurrency.json
+python verify_attention_gpu.py --oracle --output /private/attention.json
 ```
 
 Also check uneven lengths, multiple requests, cancellation, maximum input
@@ -171,6 +205,13 @@ are available through `--profile`; inspect the kernel timeline to verify both
 the full-layer launch count and cross-stream overlap. Profile counter access,
 if needed, belongs only to the isolated profiling process, never the serving
 container or a global host policy change.
+
+The attention regression covers 1/31/32/33/63/64/65/127/128/129/767/768-token
+inputs, partial blocks, duplicates, distinct prefixes with equal suffixes,
+batch reversal and shared versus separate forwards. `--case 2` selects the
+bounded mixed-length ownership case for sanitizer runs. Race/synchronization
+checks may instrument representative `layer_forward` launches; initialization
+checks must retain all producer kernels as described below.
 
 For initialization checks, instrument the complete forward pass, including
 PyTorch's setup and output kernels. Filtering only `layer_forward` excludes the
@@ -189,7 +230,8 @@ turn a large-batch check into repeated copies of one identical input.
 from the search benchmark. It alternates backend order, uses distinct concurrent
 queries and follows the live reranking client's exact-prompt deduplication,
 20-document batches and four shared batch slots. It records complete response
-identity, latency distributions, embedding cosine agreement and ranking/score
+identity, latency distributions, paired whole-workload completion with diagnostic
+bootstrap intervals, embedding cosine agreement and ranking/score
 differences. `--diagnostic` records failed gates; it does not turn them into
 passes. Generated passages, vectors, raw model data and credentials stay
 outside Git. Reusing existing model judgments requires no new paid API calls;
@@ -210,6 +252,22 @@ against separate forwards and the independent layer oracle. It also checks short
 fixture prompts alone and together, and asserts that merging groups cannot
 increase packed dense work. This isolates GPU batching; the HTTP benchmark
 remains the end-to-end concurrency check.
+
+Reranking schedules currently active HTTP batches with the same exact query as
+one group. At each GPU batch boundary it prefers the group with the least
+estimated remaining token work. Other groups can fill spare space only within
+a 10% additional-work allowance, with a small 128-token floor; filling a batch
+must not substantially delay the group it could otherwise finish. Groups that
+have waited one second receive a GPU quantum, preventing continuous short
+arrivals from starving large searches. An already running forward is not
+preempted. Group state disappears after its last submission completes or is
+cancelled; this is not a query/history cache. Embedding scheduling is unchanged.
+
+`benchmark_queue_latency.py` submits a short search 20 ms after a top-60 search
+starts. It compares the deployed service, candidate service and llama.cpp with
+the same four shared HTTP slots. Report short-request latency, large-request
+latency and total completion together; a throughput improvement alone can hide
+short searches waiting behind unrelated work.
 
 `benchmark_mixed.py --fixtures /private/fixtures.json --output /private/mixed.json`
 runs two concurrent top-60 searches while four embedding requests continuously

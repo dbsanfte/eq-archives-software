@@ -20,6 +20,7 @@ PROFILES = {
         "CUTLASS_K": 32,
         "CUTLASS_STAGES": 3,
         "MIN_BLOCKS": 2,
+        "FUSED_ATTENTION": 1,
     },
     "small": {"TILE_M": 32, "TILE_N": 32, "TILE_K": 64, "THREAD_WARPS": 4},
 }
@@ -69,6 +70,7 @@ def main():
             cutlass_commit=COMMIT,
             cutlass_archive_sha256=ARCHIVE_SHA256,
             source_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+            attention_sha256=hashlib.sha256((root / "attention.cuh").read_bytes()).hexdigest(),
             binary_sha256=hashlib.sha256(library.read_bytes()).hexdigest(),
         )
         (output / "resources.txt").write_text(resources)

@@ -10,7 +10,7 @@ from unittest.mock import patch, Mock
 import unittest
 
 from backend import EMBED_MODEL, RERANK_MODEL, packed_layout, load_library
-from benchmark_http import checked_values, rerank_batches
+from benchmark_http import checked_values, rerank_batches, paired_completion
 from benchmark_batching import paired_summary
 from check_kernels import check
 from scheduler import BatchBudget, Busy, Scheduler, unique_batch
@@ -79,13 +79,31 @@ class ContractTests(unittest.TestCase):
             Mock(spec=[]),
             Mock(layer_abi_version=Mock(return_value=1)),
             Mock(layer_abi_version=Mock(return_value=2)),
+            Mock(layer_abi_version=Mock(return_value=3)),
+            Mock(layer_abi_version=Mock(return_value=4), layer_features=Mock(return_value=2)),
         ):
             with patch("backend.C.CDLL", return_value=old), self.assertRaisesRegex(RuntimeError, "ABI"):
                 load_library("unused.so")
-        lib = Mock(layer_abi_version=Mock(return_value=3))
+        lib = Mock(layer_abi_version=Mock(return_value=4), layer_features=Mock(return_value=1))
         with patch("backend.C.CDLL", return_value=lib):
             self.assertIs(load_library("unused.so"), lib)
         lib.launch_layer.assert_not_called()
+
+    def test_http_comparison_retains_completion_of_both_unequal_searches(self):
+        # llama finishes one query early, while native finishes BOTH sooner.
+        # Averaging per-query latencies would misleadingly call native slower.
+        rows = [{"native": {"completion_ms": 600, "request_ms": [580, 600]},
+                 "llama": {"completion_ms": 750, "request_ms": [100, 750]}}] * 4
+        result = paired_completion(rows)
+        self.assertAlmostEqual(result["paired_speedup"], 1.25)
+        self.assertGreater(result["paired_speedup_ci95"][0], 1)
+        self.assertEqual(result["p50_ms"], {"native": 600, "llama": 750})
+        for invalid in (0, -1, float("inf"), float("nan"), True):
+            with self.assertRaises(ValueError):
+                paired_completion([{"native": {"completion_ms": invalid},
+                                    "llama": {"completion_ms": 1}}] * 2)
+        with self.assertRaises(ValueError):
+            paired_completion(rows[:1])
 
     def test_shared_blocks_preserve_query_groups_sequences_and_last_tokens(self):
         common = list(range(64))
@@ -300,6 +318,92 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(two[0][0], 0.3)
         self.assertEqual(len(self.engine.calls), 1)
 
+    async def test_short_rerank_finishes_before_an_older_large_request(self):
+        self.scheduler.capacity = 16
+        long_rows = [[i] * 384 for i in range(1, 7)]
+        short_rows = [[9] * 384]
+        long_result, short_result = await asyncio.gather(
+            self.scheduler.submit("rerank", long_rows, time.monotonic() + 1),
+            self.scheduler.submit("rerank", short_rows, time.monotonic() + 1),
+        )
+        self.assertEqual([row[0] for row in self.engine.calls[0][1]], [9])
+        self.assertEqual((len(long_result), len(short_result)), (6, 1))
+
+    async def test_finishing_request_is_not_padded_with_unrelated_gpu_work(self):
+        self.scheduler.batch, self.scheduler.capacity = 32, 32
+        rows = [[i] * 384 for i in range(1, 11)]
+        await asyncio.gather(
+            self.scheduler.submit("rerank", rows[:2], time.monotonic() + 1),
+            self.scheduler.submit("rerank", rows[2:], time.monotonic() + 1),
+        )
+        self.assertEqual([row[0] for row in self.engine.calls[0][1]], [1, 2])
+
+    async def test_http_batches_of_one_search_share_remaining_work_and_cleanup(self):
+        self.scheduler.batch, self.scheduler.capacity = 8, 16
+        await asyncio.gather(
+            self.scheduler.submit("rerank", [[1] * 64, [2] * 64], time.monotonic() + 1, group="large"),
+            self.scheduler.submit("rerank", [[3] * 64, [4] * 64], time.monotonic() + 1, group="large"),
+            self.scheduler.submit("rerank", [[5] * 64, [6] * 64, [7] * 64], time.monotonic() + 1,
+                                  group="small"),
+        )
+        self.assertEqual([row[0] for row in self.engine.calls[0][1]], [5, 6, 7])
+        self.assertEqual([row[0] for row in self.engine.calls[1][1]], [1, 2, 3, 4])
+        self.assertFalse(self.scheduler.groups)
+
+    async def test_new_short_search_runs_after_current_nonpreemptible_batch(self):
+        self.scheduler.batch, self.scheduler.capacity = 2, 16
+        started, release = asyncio.Event(), threading.Event()
+        loop, original = asyncio.get_running_loop(), self.engine.run
+
+        def run(kind, rows):
+            if not self.engine.calls:
+                loop.call_soon_threadsafe(started.set)
+                if not release.wait(2):
+                    raise RuntimeError("Test batch was not released")
+            return original(kind, rows)
+
+        self.engine.run = run
+        long = asyncio.create_task(self.scheduler.submit("rerank", [[i] * 384 for i in range(1, 5)],
+                                                         time.monotonic() + 2))
+        try:
+            await asyncio.wait_for(started.wait(), 1)
+            short = asyncio.create_task(self.scheduler.submit("rerank", [[9] * 384], time.monotonic() + 1))
+            await asyncio.sleep(0)
+        finally:
+            release.set()
+        await asyncio.gather(long, short)
+        self.assertEqual([row[0] for row in self.engine.calls[1][1]], [9])
+        self.assertFalse(self.scheduler.groups)
+
+    async def test_aged_large_search_gets_a_quantum_ahead_of_fresh_short_searches(self):
+        self.scheduler.batch, self.scheduler.capacity = 2, 16
+        self.scheduler.rerank_fair_wait = 1
+        started, release = asyncio.Event(), threading.Event()
+        loop, original = asyncio.get_running_loop(), self.engine.run
+
+        def run(kind, rows):
+            if not self.engine.calls:
+                loop.call_soon_threadsafe(started.set)
+                if not release.wait(2):
+                    raise RuntimeError("Test batch was not released")
+            return original(kind, rows)
+
+        self.engine.run = run
+        long = asyncio.create_task(self.scheduler.submit("rerank", [[i] * 384 for i in range(1, 7)],
+                                                         time.monotonic() + 2))
+        first = asyncio.create_task(self.scheduler.submit("rerank", [[8] * 384], time.monotonic() + 2))
+        try:
+            await asyncio.wait_for(started.wait(), 1)
+            self.scheduler.rerank_fair_wait = 0
+            fresh = asyncio.create_task(self.scheduler.submit("rerank", [[9] * 384], time.monotonic() + 1))
+            await asyncio.sleep(0)
+        finally:
+            release.set()
+        await asyncio.gather(long, first, fresh)
+        self.assertEqual([row[0] for row in self.engine.calls[0][1]], [8])
+        self.assertEqual([row[0] for row in self.engine.calls[1][1]], [1, 2])
+        self.assertFalse(self.scheduler.groups)
+
     async def test_cancellation_and_expiry_do_not_poison_later_requests(self):
         task = asyncio.create_task(self.scheduler.submit("embed", [[7]], time.monotonic() + 1))
         await asyncio.sleep(0)
@@ -311,6 +415,7 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
         value = await self.scheduler.submit("embed", [[2]], time.monotonic() + 1)
         self.assertEqual(value[0][0], 0.2)
         self.assertFalse(any([7] in rows or [8] in rows for _, rows in self.engine.calls))
+        self.assertFalse(self.scheduler.groups)
 
     async def test_capacity_and_gpu_fault_are_visible(self):
         with self.assertRaises(Busy):
@@ -429,8 +534,8 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
         self.scheduler.batch, self.scheduler.capacity = 16, 16
         rows = [[1] * 128 + [i] * 352 for i in range(2, 12)]
         results = await asyncio.gather(
-            self.scheduler.submit("rerank", rows[:5], time.monotonic() + 1),
-            self.scheduler.submit("rerank", rows[5:], time.monotonic() + 1),
+            self.scheduler.submit("rerank", rows[:5], time.monotonic() + 1, group="shared query"),
+            self.scheduler.submit("rerank", rows[5:], time.monotonic() + 1, group="shared query"),
         )
         self.assertEqual(list(map(len, results)), [5, 5])
         self.assertEqual(len(self.engine.calls), 1)
