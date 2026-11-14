@@ -9,4 +9,5 @@ install -m 0600 -o dbsanfte -g dbsanfte "$identity" /etc/eqarchives-reranker-tun
 install -m 0600 -o dbsanfte -g dbsanfte "$known_hosts" /etc/eqarchives-reranker-tunnel/known_hosts
 install -m 0644 "$source_dir/eqarchives-reranker-tunnel.service" /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now eqarchives-reranker-tunnel.service
+systemctl enable eqarchives-reranker-tunnel.service
+systemctl restart eqarchives-reranker-tunnel.service

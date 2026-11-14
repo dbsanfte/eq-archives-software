@@ -472,6 +472,21 @@ Installation is additive and does not change client URLs, existing llama/Vulkan/
 vision services or active indexing Jobs. Public-client cutover requires successful
 validation against the actual workload; preserve existing endpoints for rollback.
 
+The authorized CUDA rollout uses `cuda-batch-server/deployment.env` to pin the
+validated local runtime image/source and its embedding cache identity. New imports
+and policy slices use the additive `cuda-batch-inference` route, eight inputs per
+request and four inference threads; SQLite/checkpoints, paid enrichment and ES
+writes stay on the caller. Validate every batch, drain siblings on failure and
+retain completed cache waves on yield. Future broad Gemma handoffs keep four
+document workers × eight inputs, with an explicit backend cache pin. Leave active
+Jobs on their legacy endpoint/cache namespace; do not restart them for this rollout.
+Portal/MCP query embeddings stay on Vulkan. Their shared two-search/four-batch
+reranker uses the unchanged private bridge, now forwarding to RTX loopback 8084.
+Preserve public deadlines and bounds. The GPU scheduler yields bulk work for at
+most 500 ms per interactive burst, then permits an embedding batch, retaining
+independent streams and bounded progress. Validate mixed search/embedding load
+before cutover, and keep the previous llama endpoints available for rollback.
+
 ### Archive candidate crawler
 
 The operator tool in `scripts/archive-crawler` uses Python 3.10+ and Ruby 3.0+.

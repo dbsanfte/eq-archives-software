@@ -173,6 +173,7 @@ class ContractTests(unittest.TestCase):
             self.assertIn("127.0.0.1:8084:8080", args)
             self.assertIn("192.168.68.108:8084:8080", args)
             self.assertIn("--read-only", args)
+            self.assertIn("GPU_BATCH_SIZE=32", args)
             self.assertNotIn("--privileged", args)
             for field, value in [
                 ("image", "latest"),
@@ -336,6 +337,7 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.engine.calls, [("rerank", rows)])
 
     async def test_each_model_progresses_while_the_other_worker_is_blocked(self):
+        self.scheduler.interactive_burst = 0.05
         original = self.engine.run
         loop = asyncio.get_running_loop()
         for blocked_kind, other_kind in (("embed", "rerank"), ("rerank", "embed")):
@@ -360,6 +362,43 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
             finally:
                 release.set()
                 await task
+
+    async def test_reranking_gets_priority_without_starving_embeddings(self):
+        self.scheduler.interactive_burst = 0.1
+        started, release = asyncio.Event(), threading.Event()
+        loop, original = asyncio.get_running_loop(), self.engine.run
+
+        def run(kind, rows):
+            if kind == 'rerank':
+                loop.call_soon_threadsafe(started.set)
+                if not release.wait(2):
+                    raise RuntimeError('Test reranker was not released')
+            return original(kind, rows)
+
+        self.engine.run = run
+        rank = asyncio.create_task(self.scheduler.submit('rerank', [[1]], time.monotonic()+2))
+        try:
+            await asyncio.wait_for(started.wait(), 1)
+            embed = asyncio.create_task(self.scheduler.submit('embed', [[2]], time.monotonic()+1))
+            await asyncio.sleep(0.03)
+            self.assertFalse(embed.done())
+            self.assertFalse(any(kind == 'embed' for kind, _ in self.engine.calls))
+            result = await asyncio.wait_for(embed, 0.5)
+            self.assertEqual(result[0][0], 0.2)
+            self.assertFalse(rank.done())
+        finally:
+            release.set()
+            await rank
+
+    async def test_priority_wait_ends_when_reranking_finishes(self):
+        self.scheduler.interactive_burst = 10
+        self.scheduler.running_since['rerank'] = time.monotonic()
+        pending = asyncio.create_task(self.scheduler.submit('embed', [[2]], time.monotonic()+1))
+        await asyncio.sleep(0.02)
+        self.assertFalse(pending.done())
+        self.scheduler.running_since['rerank'] = None
+        self.scheduler.changed.set()
+        self.assertEqual((await asyncio.wait_for(pending, 0.2))[0][0], 0.2)
 
     async def test_one_models_queue_cannot_consume_the_others_capacity(self):
         # Queue both before the workers drain either queue.

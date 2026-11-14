@@ -26,6 +26,7 @@ from indexer.archive_handler import ArchiveHandler
 from indexer.html_extraction import WEBSITE_EXTRACTION_VERSION, website_markdown
 from indexer.source_encoding import decode_source, repaired_title
 from indexer.sqlite_state import SQLiteState
+from indexer.embedding_batches import embed_batches, decode_vectors
 from indexer.vector_json import dumps as vector_json
 from policy_sources import Sources, SourceError, relative
 
@@ -217,25 +218,19 @@ class MaintenanceServices(Services):
 
     def vectors(self,inputs,check):
         def infer(values):
-            check()
             try:response=self.embedder.post(self.embedding_url+'/v1/embeddings',json={
-                'model':self.model,'input':values,'encoding_format':'float'})
+                'model':self.model,'input':values,'encoding_format':'base64'})
             except httpx.HTTPError:raise ServiceError('embedding_unavailable') from None
             if response.status_code!=200:raise ServiceError('embedding_unavailable')
             try:
-                payload=response.json();rows=payload['data']
-                if (payload.get('model')!=gemma.MODEL or len(rows)!=len(values)
-                        or any(type(row.get('index')) is not int for row in rows)
-                        or sorted(row['index'] for row in rows)!=list(range(len(values)))):
-                    raise ValueError()
-                return [gemma.vector(row['embedding']) for row in sorted(rows,key=lambda r:r['index'])]
+                return decode_vectors(response.json(),len(values),gemma.MODEL)
             except (ValueError,KeyError,TypeError):raise ServiceError('vector_validation') from None
-        result=[]
-        for offset in range(0,len(inputs),8):
-            check();batch=inputs[offset:offset+8]
-            result.extend(self.embedding_cache.embed(batch,infer) if self.embedding_cache else infer(batch))
-        if len(result)!=len(inputs):raise ServiceError('vector_validation')
-        return [gemma.vector(v) for v in result]
+        try:
+            return embed_batches(inputs,infer,batch_size=self.embedding_batch_size,
+                                 workers=self.embedding_workers,cache=self.embedding_cache,check=check)
+        except ValueError as error:
+            if isinstance(error,ServiceError):raise
+            raise ServiceError('vector_validation') from None
 
 
 def repair(services,sources,identifier,check):

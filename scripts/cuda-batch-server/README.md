@@ -1,8 +1,10 @@
 # CUDA batch inference
 
-Private experimental text inference for the RTX 3080 Laptop GPU (SM86). This is
-an additive service: it does not replace the embedding, vision or reranking
-containers, change the search API, or restart indexing Jobs.
+Private text inference for the RTX 3080 Laptop GPU (SM86). New curation imports
+and policy slices use this service; portal/MCP reranking reaches it through the
+existing private SSH bridge. Live query embeddings remain on eqvm Vulkan.
+The previous llama.cpp and vision containers remain available, and active
+indexing Jobs finish on their original endpoint without being restarted.
 
 **Production cutover is gated on GPU correctness, resource checks and paired
 HTTP measurements. A successful build alone does not establish a speedup.**
@@ -63,6 +65,50 @@ resources still impose a tradeoff: overlap must be measured, and is not a
 promise of increased combined throughput. A CUDA error marks both workers
 unhealthy because they share a CUDA context. Cancellation removes pending work;
 an already executing batch finishes safely before its buffers are reused.
+
+Interactive reranking gets bursts of up to 500 ms before another embedding GPU
+batch starts. Already running forwards can overlap on independent streams. The
+bounded burst prevents embedding starvation under continuous searches; there is
+no intentional delay when reranking is idle. This protects the public client's
+unchanged three-second deadline from continuous bulk traffic.
+
+## Client batching and rollout
+
+Curation combines a document's body and summary inputs, sends eight inputs per
+HTTP request and keeps at most four requests in flight. Policy maintenance uses
+the same helper. SQLite caches, cursor updates, Luna enrichment and ES writes stay
+on their original owner; failed batches drain siblings before returning, and a
+document is written only after all its vectors validate. Completed cache waves
+survive cooperative yields. Future broad Gemma handoffs keep four document workers
+with eight inputs per request, avoiding nested concurrency.
+
+Portal and MCP share the same reranker client: two concurrent searches, four shared
+HTTP batches of at most 20 passages, complete response validation and the existing
+three-second deadline. They submit batches concurrently, allowing requests to
+share GPU work. Duplicate searches coalesce; cached fallback orders and pagination
+remain stable. Query embeddings continue to use Vulkan as configured previously.
+
+The additive `cuda-batch-inference:8080` Kubernetes route targets the RTX host's
+8084 service. The legacy `nomic-embeddings-rtx3080:8080` route still targets 8081,
+so running Jobs retain both their backend and cache identity. The private rerank
+bridge remains `10.42.0.1:8083`, forwarding to RTX loopback port 8084. Only the API
+has its key and bridge egress. No public model route is added.
+
+`deployment.env` records the validated runtime's exact source SHA and local Docker
+image ID. Its `CUDA_IMAGE` value is a cache identity, not a registry pull reference.
+The installer uses `IMAGE_ID` with `--pull never`; curation includes the same pin
+in its cache namespace. Future broad Gemma handoffs explicitly set
+`EMBEDDING_CACHE_BACKEND_IMAGE` to that identity. Client/deployment commits can
+follow the pinned runtime revision without rebuilding unchanged GPU code.
+
+On the private six-query passage fixture, 128 distinct embedding inputs measured
+about 113 inputs/s at eight inputs × four requests, versus 81 inputs/s for the old
+llama.cpp service with the same client settings. One native request at a time
+measured 104 inputs/s. Larger client batches added little throughput and increased
+latency. These are inference measurements, not end-to-end indexing rates. Native
+two-request reranking gains are small at 20–60 documents; no general reranking
+speedup over llama.cpp is claimed. Numerical drift from Q8 inference remains
+distinct from kernel agreement with the independent FP16 layer reference.
 
 ## HTTP contract
 
@@ -165,6 +211,13 @@ fixture prompts alone and together, and asserts that merging groups cannot
 increase packed dense work. This isolates GPU batching; the HTTP benchmark
 remains the end-to-end concurrency check.
 
+`benchmark_mixed.py --fixtures /private/fixtures.json --output /private/mixed.json`
+runs two concurrent top-60 searches while four embedding requests continuously
+submit eight inputs each. It requires every search to finish within three seconds,
+validates all outputs and requires all embedding workers to progress. This is a
+model-service latency gate; live API verification must also cover retrieval and
+passage preparation within its complete deadline.
+
 ## Additive installation and rollback
 
 After GPU and HTTP gates pass, build the runtime image from the reviewed source
@@ -185,8 +238,12 @@ downloads only hash-pinned tokenizers when absent, and installs dedicated
 capability-free and resource bounded. Readiness failures trigger a restart of
 this service only. Existing endpoint credentials remain unchanged.
 
-Point an opted-in client at the new endpoint only after measuring its actual
-batch/concurrency workload. The installation does not edit any client URL or
-indexing Job. To roll back, restore that client's previous endpoint and stop
+Install the pinned runtime before deploying the new client routes. Load
+`deployment.env` and pass `IMAGE_ID`, `GIT_SHA` and `BIND_ADDRESS` to `install.sh`;
+the existing image must already be present on the RTX host. Reinstall the tunnel
+unit on eqvm to update its remote target. The installer does not edit Jobs.
+
+To roll back, restore new clients to the legacy endpoint **and its cache runtime
+pin**, restore the SSH forward's remote target to 8083, and stop
 `eqarchives-cuda-batch-health.timer` and `eqarchives-cuda-batch.service`. The old
 services, their models, keys and persistent indexing checkpoints remain available.

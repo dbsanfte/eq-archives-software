@@ -622,7 +622,7 @@ containing the batch and may be newer than its original publication commit.
 projected into `eqarchives-curation-secrets`; neither reaches the browser or
 image. Import receives only the paid `luna_api_key` item, never the publication
 key. Indexing and summary embeddings use the CUDA service
-`nomic-embeddings-rtx3080:8080`; Vulkan serves live search and MCP. Imports use
+`cuda-batch-inference:8080`; Vulkan serves live search and MCP query embeddings. Imports use
 the existing Nomic key and a separate ES
 user/role `eqarchives-capture-import`, restricted to `read` and `create_doc` on
 `eq-archive`, from `eqarchives-capture-indexer-secrets`. The trusted deployment
@@ -630,6 +630,16 @@ runner reads the existing elastic password through stdin to provision this
 account and four additive provenance keyword mappings. It does not change
 existing accounts or Jobs. Secret apply uses a private pipe/server-side apply,
 with no secret-bearing files or last-applied annotations.
+
+Imports and policy maintenance send eight embedding inputs per HTTP request with
+four requests in flight (`EMBEDDING_BATCH_SIZE=8`, `EMBEDDING_BATCH_CONCURRENCY=4`).
+The bounds are 1–32 inputs and 1–4 requests. Body and summary inputs are batched
+together, using base64 vectors with exact index/model/finite-value validation.
+Only inference runs concurrently: paid enrichment, SQLite state, checkpoint
+ownership and ES writes retain their existing ordering. A failed request drains
+its siblings before the document can fail; incomplete vectors never reach ES.
+The runtime image pin is part of the shared cache identity. Active old Jobs keep
+their original endpoint; only newly created Jobs use the additive CUDA batch route.
 
 The controller disables automatic service-account mounting and explicitly
 projects its rotating token, CA and namespace into `/run/kubernetes`. This stays
@@ -639,15 +649,15 @@ Import Jobs have no Kubernetes service-account token. CI checks the configured
 token location and starts the built container with both read-only volumes.
 
 Import verifies the entire manifest/file set before any ES requests. It reuses
-the website Markdown extractor and checksum-pinned WordPiece tokenizer, embeds
-complete source serially with `search_document:`, at most 480 tokens including
+the website Markdown extractor and checksum-pinned Gemma tokenizer, embeds
+complete source with Gemma's title/context document prefix, at most 480 tokens including
 prefix/special tokens and roughly 48 tokens overlap, and requires finite,
 nonzero 768-dimensional vectors. IDs are exact `websites/...` paths. Existing
 IDs/concurrent create conflicts are skipped, preserving enrichment, OCR and
 provenance. By default, each new document also receives source-bound Luna
 summary, content flavour, tags and supported date estimates using the existing
 archive text prompts/schema enums. It stores the actual model and enrichment
-signature, and embeds its short summary with Nomic. The complete original body
+signature, and embeds its short summary with Gemma. The complete original body
 is retained separately; model estimates never replace capture dates. Date
 extraction receives no synthetic capture header and requires source evidence.
 Evidence matching allows only whitespace changes (wrapped lines and NBSPs),

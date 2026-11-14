@@ -89,7 +89,7 @@ def test_manifest_indexing_creates_missing_ids_preserves_source_and_skips_existi
             return {'llm_summary':'An EverQuest guild history and guide.', 'llm_content_flavour':'Guild Achievements',
                     'llm_tags':['raid'],'llm_guessed_date':None,'llm_extracted_dates':[],
                     'llm_model_name':'gpt-6-luna','llm_enrichment_signature':'c'*64}
-        def embedding(self,text,**kwargs): self.inputs.append(text); return [0.01]*768
+        def embeddings(self,inputs): self.inputs.extend(inputs); return [[0.01]*768 for _ in inputs]
         def create(self,identifier,document): self.docs[identifier]=document; return True
     services=FakeServices()
     assert index_batch(root,batch,services) == {'created':1,'existing':0,'captures':1}
@@ -108,7 +108,7 @@ def test_manifest_indexing_creates_missing_ids_preserves_source_and_skips_existi
     assert len(doc['llm_summary_vector'])==768
     assert doc['embedding_model'] == MODEL
     assert all('Page URL:' not in text for text in services.enrichments)
-    assert all(len(load_tokenizer().encode(DOCUMENT_PREFIX+text).ids)<=480 for text in services.inputs)
+    assert all(len(load_tokenizer().encode(text).ids)<=480 for text in services.inputs)
     original=json.dumps(doc,sort_keys=True)
     assert index_batch(root,batch,services)['existing'] == 1
     assert json.dumps(services.docs[identifier],sort_keys=True) == original
@@ -138,11 +138,11 @@ def test_duplicate_passage_inputs_share_inference_without_dropping_source_occurr
         def __init__(self):self.inputs=[];self.docs=[]
         def exists(self,*a):return False
         def enrich(self,*a):return {'llm_summary':'A guild raid history.'}
-        def embedding(self,text,**kwargs):self.inputs.append((text,kwargs));return [1.]+[0.]*767
+        def embeddings(self,inputs):self.inputs.extend(inputs);return [[1.]+[0.]*767 for _ in inputs]
         def create(self,key,doc):self.docs.append(doc);return True
     services=FakeServices()
     assert index_batch(root,published(row),services)['created']==1
-    passage_calls=[x for x in services.inputs if x[1]]
+    passage_calls=[x for x in services.inputs if 'Post by ' in x]
     assert len(passage_calls)==2 and len(services.docs[0]['text'])==4
     saved=services.docs[0]['text']
     assert [(p['source_start'],p['source_end']) for p in saved]==[(p.start,p.end) for p in chunks]
@@ -159,7 +159,7 @@ def test_new_capture_uses_same_japanese_decoder_for_reader_enrichment_and_embedd
         def enrich(self,capture,text):
             assert phrase in text
             return {'llm_summary':'An EverQuest guild adventure.'}
-        def embedding(self,text,**k):return [1.]+[0.]*767
+        def embeddings(self,inputs):return [[1.]+[0.]*767 for _ in inputs]
         def create(self,key,document):
             assert phrase in document['text_full']
             assert any(phrase in c['text_chunk'] for c in document['text'])
@@ -179,7 +179,7 @@ def test_archived_error_remains_captured_without_paying_for_enrichment_or_embedd
     class SourcesOnly:
         def exists(self,*args):return False
         def enrich(self,*args):raise AssertionError('No paid enrichment of an archived error')
-        def embedding(self,*args):raise AssertionError('No error embedding')
+        def embeddings(self,*args):raise AssertionError('No error embedding')
         def create(self,*args):raise AssertionError('Do not publish a semantic document')
     assert index_batch(root,published(row),SourcesOnly())=={'created':0,'existing':0,'captures':1,'preserved_files':1}
     assert (root/capture['path']).read_bytes()==raw
@@ -190,7 +190,7 @@ def test_enrichment_failure_leaves_new_document_pending_and_never_writes_fallbac
     class Pending:
         def exists(self,*args):return False
         def enrich(self,*args):raise CrawlError('Enrichment dollar budget reached')
-        def embedding(self,*args):raise AssertionError('No embedding before required enrichment')
+        def embeddings(self,*args):raise AssertionError('No embedding before required enrichment')
         def create(self,*args):raise AssertionError('No unenriched document should be created')
     with pytest.raises(CrawlError,match='Enrichment dollar budget'):
         index_batch(root,published(row),Pending())
@@ -215,7 +215,7 @@ def test_mislabeled_binary_download_does_not_enrich_or_block_later_pages(candida
         def exists(self,key):return key in self.docs
         def enrich(self,capture,source):
             self.paid.append(capture['url']);return {'llm_summary':'An EverQuest guild page.'}
-        def embedding(self,*args,**kwargs):return [1.]+[0.]*767
+        def embeddings(self,inputs):return [[1.]+[0.]*767 for _ in inputs]
         def create(self,key,doc):self.docs[key]=doc;return True
     services=Import()
     result=index_batch(root,batch,services)
@@ -289,7 +289,7 @@ def test_bad_vectors_fail_without_indexing(tmp_path,vector):
     finally: instance.close()
 
 
-def test_embeddings_are_serial_prefixed_and_retry_transient_busy_response(tmp_path):
+def test_embedding_requests_are_prefixed_and_retry_transient_busy_response(tmp_path):
     requests=[]
     def handler(request):
         requests.append(json.loads(request.content))
@@ -299,7 +299,7 @@ def test_embeddings_are_serial_prefixed_and_retry_transient_busy_response(tmp_pa
         with patch('index_captures.time.sleep'):
             assert len(instance.embedding('Complete source.'))==768
         assert len(requests)==2
-        assert all(row['input']=='title: none | text: Complete source.' for row in requests)
+        assert all(row['input']==['title: none | text: Complete source.'] for row in requests)
         assert all(row['model']==MODEL for row in requests)
     finally: instance.close()
 
@@ -315,7 +315,7 @@ def test_default_embedding_requests_use_cuda_and_leave_vulkan_for_live_queries(t
     try:
         assert len(services.embedding('EverQuest cleric guild'))==768
         assert len(seen)==1
-        assert seen[0].url.host=='nomic-embeddings-rtx3080.eqarchives-es.svc.cluster.local'
+        assert seen[0].url.host=='cuda-batch-inference.eqarchives-es.svc.cluster.local'
         assert seen[0].url.path=='/v1/embeddings'
     finally:
         services.close()
@@ -329,6 +329,36 @@ def test_successful_model_requests_have_no_intentional_throttle(tmp_path):
             instance.embedding('A complete guide.')
         sleep.assert_not_called()
     finally:instance.close()
+
+
+def test_import_service_batches_concurrently_and_restores_base64_response_indices(tmp_path):
+    import base64
+    import struct
+    import threading
+    barrier=threading.Barrier(4)
+    seen=[]
+    def handler(request):
+        body=json.loads(request.content)
+        assert body['encoding_format']=='base64' and body['model']==MODEL
+        rows=body['input'];seen.append(rows)
+        if len(rows)==8:barrier.wait(timeout=3)
+        return httpx.Response(200,json={'model':MODEL,'data':[
+            {'index':i,'embedding':base64.b64encode(struct.pack('<768f',int(text)+1.,*([0.]*767))).decode()}
+            for i,text in reversed(list(enumerate(rows)))]})
+    instance=service(tmp_path,handler)
+    try:
+        result=instance.embeddings([str(i) for i in range(35)])
+        assert [v[0] for v in result]==list(range(1,36))
+        assert sorted(map(len,seen))==[3,8,8,8,8]
+    finally:instance.close()
+
+
+@pytest.mark.parametrize('name,value', [('EMBEDDING_BATCH_SIZE','0'),('EMBEDDING_BATCH_SIZE','33'),
+                                     ('EMBEDDING_BATCH_CONCURRENCY','0'),('EMBEDDING_BATCH_CONCURRENCY','5')])
+def test_import_service_rejects_unbounded_inference_configuration(tmp_path,monkeypatch,name,value):
+    monkeypatch.setenv(name,value)
+    with pytest.raises(CrawlError,match='batch configuration'):
+        service(tmp_path,lambda request:pytest.fail('No inference for invalid settings'))
 
 
 def test_model_mismatch_cannot_index_vectors_from_old_backend(tmp_path):
@@ -352,7 +382,7 @@ def test_embedding_cache_is_shared_between_independent_import_instances(tmp_path
         try:
             assert instance.embedding('Guild testimony.',title='Raid history',context='Post by Scholar\n')==[1.]+[0.]*767
         finally:instance.close()
-    assert len(calls)==1 and calls[0]['input']=='title: Raid history | text: Post by Scholar\nGuild testimony.'
+    assert len(calls)==1 and calls[0]['input']==['title: Raid history | text: Post by Scholar\nGuild testimony.']
 
 
 @pytest.mark.parametrize('rows',[
@@ -390,7 +420,7 @@ def test_discussion_feed_evidence_is_learned_before_print_views_without_extra_en
         def __init__(self):self.discussions=Catalog(tmp_path/'catalog.sqlite');self.docs={};self.paid=0
         def exists(self,key):return key in self.docs
         def enrich(self,*args):self.paid+=1;return {'llm_summary':'A historical EverQuest discussion.'}
-        def embedding(self,*args,**kwargs):return [1.]+[0.]*767
+        def embeddings(self,inputs):return [[1.]+[0.]*767 for _ in inputs]
         def create(self,key,doc):self.docs[key]=doc;return True
     services=Import()
     result=index_batch(root,batch,services)

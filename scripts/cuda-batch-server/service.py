@@ -60,7 +60,7 @@ def command(config):
         "--env",
         "CUDA_CACHE_PATH=/tmp/cuda",
         "--env",
-        "GPU_BATCH_SIZE=16",
+        "GPU_BATCH_SIZE=32",
         "--publish",
         "127.0.0.1:8084:8080",
         "--publish",

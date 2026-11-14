@@ -126,6 +126,12 @@ def test_runtime_identity_uses_actual_weight_runtime_and_tokenizer_pins(tmp_path
     first=runtime_identity();assert json.loads(first)['tokenizer']==gemma.TOKENIZER_SHA256
     assert json.loads(first)['runtime']=='cuda@sha256:'+'b'*64
     cuda.write_text('CUDA_IMAGE=cuda@sha256:'+'d'*64+'\n');assert runtime_identity()!=first
+    legacy=runtime_identity()
+    monkeypatch.setenv('EMBEDDING_CACHE_BACKEND_IMAGE','eqarchives-cuda-batch@sha256:'+'e'*64)
+    assert runtime_identity()!=legacy and json.loads(runtime_identity())['runtime'].startswith('eqarchives-cuda-batch@')
+    monkeypatch.setenv('EMBEDDING_CACHE_BACKEND_IMAGE','unversioned')
+    with pytest.raises(ValueError):runtime_identity()
+    monkeypatch.delenv('EMBEDDING_CACHE_BACKEND_IMAGE')
     first=runtime_identity()
     path.write_text(path.read_text().replace('a'*64,'c'*64));assert runtime_identity()!=first
     path.write_text('MODEL_ALIAS=wrong');

@@ -58,7 +58,9 @@ def test_policy_job_has_no_paid_publication_cluster_credentials_or_archive_write
     writable=[m for m in container['volumeMounts'] if not m.get('readOnly')]
     assert {m['mountPath'] for m in writable}=={'/indexing-state','/tmp'}
     assert not any(e['name'].startswith('LUNA_') for e in container['env'])
-    assert next(e['value'] for e in container['env'] if e['name']=='EMBEDDING_URL').startswith('http://nomic-embeddings-rtx3080.')
+    assert next(e['value'] for e in container['env'] if e['name']=='EMBEDDING_URL').startswith('http://cuda-batch-inference.')
+    env={e['name']:e.get('value') for e in container['env']}
+    assert env['EMBEDDING_BATCH_SIZE']=='8' and env['EMBEDDING_BATCH_CONCURRENCY']=='4'
     assert next(e for e in container['env'] if e['name']=='ELASTICSEARCH_INDEX')['valueFrom']['secretKeyRef']['key']=='es_index'
     for name,image in [('invalid',IMAGE),('eqarchives-policy-'+identity()+'-1','latest')]:
         with pytest.raises(CrawlError):job_for(name,image)

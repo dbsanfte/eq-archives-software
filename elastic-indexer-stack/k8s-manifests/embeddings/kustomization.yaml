@@ -7,6 +7,7 @@ resources:
   - device-plugin.yaml
   - deployment.yaml
   - cuda-service.yaml
+  - cuda-batch-service.yaml
   - vision-service.yaml
 configMapGenerator:
   - name: nomic-embedding-config
@@ -19,6 +20,13 @@ configMapGenerator:
       - check-gpu.sh
 # commonLabels adds Service selectors; keep the external laptop endpoint manual.
 patchesJson6902:
+  - target:
+      version: v1
+      kind: Service
+      name: cuda-batch-inference
+    patch: |-
+      - op: remove
+        path: /spec/selector
   - target:
       version: v1
       kind: Service

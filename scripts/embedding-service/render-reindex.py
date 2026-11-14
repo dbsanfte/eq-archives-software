@@ -4,6 +4,7 @@ import copy
 import json
 import re
 import sys
+from pathlib import Path
 
 
 def render(previous, name, image, *, gemma=False, images=False, text_hosts=None):
@@ -40,6 +41,14 @@ def render(previous, name, image, *, gemma=False, images=False, text_hosts=None)
         values.update(OPENAI_EMBEDDING_MODEL_NAME='embeddinggemma-2-768-v1',
                       REINDEX_ENTRYPOINT='reindex_embeddings.pyc', GEMMA_EMBEDDING_PROFILE='cuda',
                       GEMMA_EMBEDDING_BATCH_SIZE='8', REINDEX_PRIORITIZE_UNCONVERTED='true')
+    if (gemma or text_hosts) and not images:
+        pins=dict(line.split('=',1) for line in (Path(__file__).parents[1]/'cuda-batch-server/deployment.env').read_text().splitlines()
+                  if line and not line.startswith('#'))
+        if not re.fullmatch(r'eqarchives-cuda-batch@sha256:[0-9a-f]{64}',pins.get('CUDA_IMAGE','')):
+            raise ValueError('Invalid CUDA batch cache identity')
+        endpoint='http://cuda-batch-inference.eqarchives-es.svc.cluster.local:8080/v1'
+        values.update(OPENAI_ENDPOINT=endpoint,OPENAI_ENDPOINT_EMBEDDINGS=endpoint,
+                      EMBEDDING_CACHE_BACKEND_IMAGE=pins['CUDA_IMAGE'])
     if (gemma or text_hosts) and not images:
         values.update(EMBEDDING_CACHE_PATH='/indexing-state/embeddings.sqlite',
                       DISCUSSION_CATALOG_PATH='/indexing-state/discussions.sqlite',

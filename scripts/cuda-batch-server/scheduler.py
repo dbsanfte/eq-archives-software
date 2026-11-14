@@ -61,8 +61,10 @@ class BatchBudget:
 
 
 class Scheduler:
-    def __init__(self, engine, batch=32, capacity=1024, wait=0.001):
+    def __init__(self, engine, batch=32, capacity=1024, wait=0.001, interactive_burst=0.5):
         self.engine, self.batch, self.capacity, self.wait = engine, batch, capacity, wait
+        self.interactive_burst = interactive_burst
+        self.changed = asyncio.Event()
         self.queues = {"embed": deque(), "rerank": deque()}
         self.wake = {kind: asyncio.Event() for kind in self.queues}
         self.workers = {
@@ -79,6 +81,7 @@ class Scheduler:
 
     async def close(self):
         self.closed = True
+        self.changed.set()
         for wake in self.wake.values():
             wake.set()
         await asyncio.gather(*self.tasks)
@@ -97,6 +100,7 @@ class Scheduler:
         futures = [loop.create_future() for _ in rows]
         self.queues[kind].extend(Item(row, f, deadline) for row, f in zip(rows, futures))
         self.wake[kind].set()
+        self.changed.set()
         joined = asyncio.gather(*futures)
         try:
             return await asyncio.wait_for(joined, max(0, deadline - time.monotonic()))
@@ -105,6 +109,24 @@ class Scheduler:
                 if not f.done():
                     f.cancel()
             await asyncio.gather(joined, return_exceptions=True)
+
+    async def _embedding_turn(self):
+        # Give interactive searches a short GPU burst before another bulk batch.
+        # An in-flight embedding forward still overlaps on its independent stream.
+        # The finite burst also lets embeddings progress during continuous search;
+        # there is no delay at all when reranking is idle.
+        until = time.monotonic() + self.interactive_burst
+        while (self.queues['rerank'] or self.running_since['rerank'] is not None):
+            if self.closed or self.failed:
+                return
+            remaining = until - time.monotonic()
+            if remaining <= 0:
+                return
+            self.changed.clear()
+            try:
+                await asyncio.wait_for(self.changed.wait(), remaining)
+            except asyncio.TimeoutError:
+                return
 
     async def _run(self, kind):
         queue, wake = self.queues[kind], self.wake[kind]
@@ -115,6 +137,10 @@ class Scheduler:
                 if self.closed or self.failed:
                     break
                 await asyncio.sleep(self.wait)
+            if kind == 'embed':
+                await self._embedding_turn()
+                if self.closed or self.failed:
+                    break
             batch = []
             budget = BatchBudget(causal=kind == "rerank")
             examined, available = 0, len(queue)
@@ -160,6 +186,7 @@ class Scheduler:
                 break
             finally:
                 self.running_since[kind] = None
+                self.changed.set()
         while queue:
             item = queue.popleft()
             if not item.future.done():
