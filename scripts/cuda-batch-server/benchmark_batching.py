@@ -46,6 +46,14 @@ def main():
     parser.add_argument("--key", type=Path, default=Path("/run/secrets/rerank_key"))
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--repeats", type=int, default=8)
+    parser.add_argument(
+        "--documents",
+        type=int,
+        nargs="+",
+        choices=(1, 2, 8, 20, 60),
+        default=[20, 60],
+        help="Documents per complete request; include small requests to measure the batching curve",
+    )
     args = parser.parse_args()
     if not 2 <= args.repeats <= 20:
         parser.error("Use 2–20 bounded repetitions")
@@ -81,7 +89,7 @@ def main():
             mapping = dict(zip(unique, values))
             return (time.perf_counter() - start) * 1000, [mapping[d] for d in body["documents"]]
 
-        for count in (20, 60):
+        for count in args.documents:
             measurements, serial, concurrent, differences = [], [], [], []
             for repeat in range(args.repeats + 1):
                 bodies = [

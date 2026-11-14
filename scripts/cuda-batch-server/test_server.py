@@ -27,12 +27,20 @@ class ContractTests(unittest.TestCase):
         for causal in (True, False):
             budget, accepted = BatchBudget(causal, tokens=1024), []
             for row in rows:
-                before = (budget.dense, budget.longest, dict(budget.blocks), set(budget.rows))
+                before = (
+                    budget.dense,
+                    budget.longest,
+                    budget.shortest,
+                    dict(budget.blocks),
+                    set(budget.rows),
+                )
                 if budget.add(row):
                     accepted.append(row)
                     self.assertEqual(budget.dense, len(packed_layout(accepted, share_prefix=causal).ids))
                 else:
-                    self.assertEqual(before, (budget.dense, budget.longest, budget.blocks, budget.rows))
+                    self.assertEqual(
+                        before, (budget.dense, budget.longest, budget.shortest, budget.blocks, budget.rows)
+                    )
             self.assertLess(len(accepted), len(rows))
             self.assertTrue(budget.add(accepted[0]))
             self.assertEqual(len(budget.rows), len(accepted))
@@ -320,6 +328,12 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.scheduler.healthy())
         self.scheduler.running_since["embed"] = None
         self.assertTrue(self.scheduler.healthy())
+
+    async def test_similar_lengths_coalesce_across_old_fixed_bucket_boundary(self):
+        rows = [[1] * 127, [2] * 129, [3] * 193]
+        results = await self.scheduler.submit("rerank", rows, time.monotonic() + 1)
+        self.assertEqual(len(results), 3)
+        self.assertEqual(self.engine.calls, [("rerank", rows)])
 
     async def test_each_model_progresses_while_the_other_worker_is_blocked(self):
         original = self.engine.run

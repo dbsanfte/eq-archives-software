@@ -25,7 +25,7 @@ class BatchBudget:
     def __init__(self, causal, tokens=4096, attention=4 * 1024 * 1024):
         self.causal, self.tokens, self.attention = causal, tokens, attention
         self.rows, self.blocks = set(), {}
-        self.dense, self.longest = 0, 0
+        self.dense, self.longest, self.shortest = 0, 0, 0
 
     def add(self, row):
         key = tuple(row)
@@ -33,6 +33,9 @@ class BatchBudget:
             return True
         padded = (len(row) + 31) // 32 * 32
         longest = max(self.longest, padded)
+        shortest = min(self.shortest or padded, padded)
+        if longest > 2 * shortest:
+            return False
         if (len(self.rows) + 1) * longest * longest > self.attention:
             return False
         pending = {}
@@ -53,6 +56,7 @@ class BatchBudget:
         self.rows.add(key)
         self.blocks.update(pending)
         self.longest, self.dense = longest, self.dense + cost
+        self.shortest = shortest
         return True
 
 
@@ -113,7 +117,7 @@ class Scheduler:
                 await asyncio.sleep(self.wait)
             batch = []
             budget = BatchBudget(causal=kind == "rerank")
-            examined, available, bucket = 0, len(queue), None
+            examined, available = 0, len(queue)
             while queue and examined < available and len(batch) < self.batch:
                 item = queue.popleft()
                 examined += 1
@@ -122,12 +126,6 @@ class Scheduler:
                 if item.deadline <= time.monotonic():
                     item.future.set_exception(asyncio.TimeoutError())
                     self.counters["expired"] += 1
-                    continue
-                size = next(n for n in (32, 64, 128, 256, 512, 768) if len(item.tokens) <= n)
-                if bucket is None:
-                    bucket = size
-                if size != bucket:
-                    queue.append(item)
                     continue
                 if not budget.add(item.tokens):
                     queue.append(item)

@@ -38,6 +38,8 @@ into whole-document work items and recombined with length-compatible queued
 items, up to 32 items per GPU batch. The scheduler budgets 4,096 actual packed
 tokens after exact input/prefix reuse, and separately bounds attention space to
 4,194,304 sequence-position pairs before multiplying by the model's head count.
+Compatible inputs can cross the old fixed length buckets; the longest rounded
+input stays within twice the shortest to avoid padding tiny queries to long pages.
 It can fill leftover space with a later compatible item; deferred items remain
 queued. Exactly identical complete token sequences share inference within one
 batch, with every original response index preserved. This is document-level
@@ -153,7 +155,8 @@ requests finish; individual request latencies and output agreement are retained.
 It alternates execution order and reports paired speedups with a diagnostic
 bootstrap interval. Both HTTP benchmarks retain the live client's 20-document,
 128 KiB batch bounds and four shared batch slots. A small fixture cannot establish
-a universal performance guarantee.
+a universal performance guarantee. Use `--documents 1 2 8 20 60` to report the
+batching curve, including searches that already fill several GPU batches alone.
 
 `verify_batching_gpu.py --fixtures /private/fixtures.json --oracle --output
 /private/batches.json` checks distinct real query groups in a merged forward
