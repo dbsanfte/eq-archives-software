@@ -17,6 +17,15 @@ class Item:
     tokens: list
     future: asyncio.Future
     deadline: float
+    group: "RequestGroup"
+
+
+@dataclass(eq=False)
+class RequestGroup:
+    created: float
+    progressed: float
+    remaining: int = 0
+    requests: int = 0
 
 
 class BatchBudget:
@@ -61,9 +70,12 @@ class BatchBudget:
 
 
 class Scheduler:
-    def __init__(self, engine, batch=32, capacity=1024, wait=0.001, interactive_burst=0.5):
+    def __init__(self, engine, batch=32, capacity=1024, wait=0.001, interactive_burst=0.5,
+                 rerank_fair_wait=1.0):
         self.engine, self.batch, self.capacity, self.wait = engine, batch, capacity, wait
         self.interactive_burst = interactive_burst
+        self.rerank_fair_wait = rerank_fair_wait
+        self.groups = {}
         self.changed = asyncio.Event()
         self.queues = {"embed": deque(), "rerank": deque()}
         self.wake = {kind: asyncio.Event() for kind in self.queues}
@@ -88,7 +100,7 @@ class Scheduler:
         for worker in self.workers.values():
             worker.shutdown(wait=True, cancel_futures=True)
 
-    async def submit(self, kind, rows, deadline):
+    async def submit(self, kind, rows, deadline, group=None):
         if deadline <= time.monotonic():
             raise asyncio.TimeoutError()
         if kind not in self.queues or not rows:
@@ -98,7 +110,12 @@ class Scheduler:
             raise Busy("GPU queue is full or unavailable")
         loop = asyncio.get_running_loop()
         futures = [loop.create_future() for _ in rows]
-        self.queues[kind].extend(Item(row, f, deadline) for row, f in zip(rows, futures))
+        key = (kind, object() if group is None else group)
+        now = time.monotonic()
+        owner = self.groups.setdefault(key, RequestGroup(now, now))
+        owner.requests += 1
+        owner.remaining += sum((len(row) + 31) // 32 * 32 for row in rows)
+        self.queues[kind].extend(Item(row, f, deadline, owner) for row, f in zip(rows, futures))
         self.wake[kind].set()
         self.changed.set()
         joined = asyncio.gather(*futures)
@@ -108,7 +125,52 @@ class Scheduler:
             for f in futures:
                 if not f.done():
                     f.cancel()
+            # Release bookkeeping before the next await: a disconnect followed
+            # by the lifecycle timeout can cancel this drain a second time.
+            owner.requests -= 1
+            if owner.requests == 0:
+                self.groups.pop(key, None)
             await asyncio.gather(joined, return_exceptions=True)
+
+    def _take_batch(self, kind):
+        queue = self.queues[kind]
+        pending, now = [], time.monotonic()
+        while queue:
+            item = queue.popleft()
+            if item.future.done() or item.deadline <= now:
+                item.group.remaining -= (len(item.tokens) + 31) // 32 * 32
+                if not item.future.done():
+                    item.future.set_exception(asyncio.TimeoutError())
+                    self.counters["expired"] += 1
+            else:
+                pending.append(item)
+        primary = None
+        if kind == "rerank" and pending:
+            # Prefer finishing an entire search over partially serving many.
+            # An aged group receives a GPU quantum even under fresh short work.
+            def priority(item):
+                owner = item.group
+                aged = now - owner.progressed >= self.rerank_fair_wait
+                return (0 if aged else 1, owner.progressed if aged else owner.remaining, owner.created)
+
+            pending.sort(key=priority)  # Stable within each group: retain source order.
+            primary = pending[0].group
+        batch, budget = [], BatchBudget(causal=kind == "rerank")
+        limited = False
+        for item in pending:
+            if primary is not None and item.group is not primary and not limited:
+                # Spare capacity is not free latency. Allow only a small amount
+                # of extra work to piggyback on the group we are trying to finish.
+                budget.tokens = min(budget.tokens, max(128, (budget.dense * 11 // 10 + 31) // 32 * 32))
+                budget.attention = min(budget.attention,
+                                       max(128 * 128, len(budget.rows) * budget.longest ** 2 * 11 // 10))
+                limited = True
+            if len(batch) < self.batch and budget.add(item.tokens):
+                batch.append(item)
+                item.group.remaining -= (len(item.tokens) + 31) // 32 * 32
+            else:
+                queue.append(item)
+        return batch
 
     async def _embedding_turn(self):
         # Give interactive searches a short GPU burst before another bulk batch.
@@ -141,22 +203,7 @@ class Scheduler:
                 await self._embedding_turn()
                 if self.closed or self.failed:
                     break
-            batch = []
-            budget = BatchBudget(causal=kind == "rerank")
-            examined, available = 0, len(queue)
-            while queue and examined < available and len(batch) < self.batch:
-                item = queue.popleft()
-                examined += 1
-                if item.future.done():
-                    continue
-                if item.deadline <= time.monotonic():
-                    item.future.set_exception(asyncio.TimeoutError())
-                    self.counters["expired"] += 1
-                    continue
-                if not budget.add(item.tokens):
-                    queue.append(item)
-                    continue
-                batch.append(item)
+            batch = self._take_batch(kind)
             if not batch:
                 continue
             try:
@@ -170,7 +217,9 @@ class Scheduler:
                     raise RuntimeError("Incomplete GPU batch")
                 self.counters["batches"] += 1
                 self.counters["items"] += len(batch)
+                completed = time.monotonic()
                 for item, value in zip(batch, values):
+                    item.group.progressed = completed
                     if not item.future.done():
                         item.future.set_result(value)
             except Exception:

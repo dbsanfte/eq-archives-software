@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 import json
 import math
 from pathlib import Path
+import random
 import statistics
 import threading
 import time
@@ -19,6 +20,28 @@ from backend import EMBED_MODEL, RERANK_MODEL, PINS, PREFIX, SUFFIX, verified
 def percentile(values, p):
     ordered = sorted(values)
     return ordered[min(len(ordered) - 1, math.ceil(len(ordered) * p) - 1)]
+
+
+def paired_completion(observations):
+    """Measure completion of the whole workload, not the fastest search alone."""
+    if len(observations) < 2 or any(
+        type(row[backend]["completion_ms"]) not in (float, int)
+        or not math.isfinite(row[backend]["completion_ms"])
+        or row[backend]["completion_ms"] <= 0
+        for row in observations for backend in ("native", "llama")
+    ):
+        raise ValueError("Require at least two finite positive paired completion times")
+    ratios = [row["llama"]["completion_ms"] / row["native"]["completion_ms"] for row in observations]
+    rng = random.Random(0)
+    bootstrap = [statistics.mean(rng.choices([math.log(v) for v in ratios], k=len(ratios)))
+                 for _ in range(2000)]
+    return {
+        "samples": len(ratios),
+        "p50_ms": {backend: statistics.median(row[backend]["completion_ms"] for row in observations)
+                   for backend in ("native", "llama")},
+        "paired_speedup": math.exp(statistics.mean(map(math.log, ratios))),
+        "paired_speedup_ci95": [math.exp(percentile(bootstrap, p)) for p in (0.025, 0.975)],
+    }
 
 
 def rerank_batches(query, documents):
@@ -192,6 +215,7 @@ def main():
             for count in counts:
                 for concurrency in (1, 2):
                     times = {"native": [], "llama": []}
+                    observations = []
                     errors, cosines, overlaps, worst, unique_counts = [], [], [], [], []
                     for repeat in range(args.repeats + 1):
                         bodies = []
@@ -218,6 +242,7 @@ def main():
                             if kind == "rerank":
                                 unique_counts.append(len(set(bodies[-1]["documents"])))
                         replies = {}
+                        observation = {}
                         # Alternate order to reduce clock/thermal/order bias. Neither
                         # backend runs simultaneously with its comparator.
                         for backend in (("native", "llama") if repeat % 2 == 0 else ("llama", "native")):
@@ -226,11 +251,17 @@ def main():
                                 if backend == "native"
                                 else (args.llama_embed if kind == "embed" else args.llama_rerank)
                             )
+                            started = time.perf_counter()
                             with ThreadPoolExecutor(max_workers=concurrency) as pool:
                                 results = list(pool.map(lambda body: call(kind, url, body), bodies))
+                            completion = (time.perf_counter() - started) * 1000
                             replies[backend] = [result[1] for result in results]
                             if repeat:
                                 times[backend].extend(latency for latency, _ in results)
+                                observation[backend] = {"completion_ms": completion,
+                                                        "request_ms": [latency for latency, _ in results]}
+                        if repeat:
+                            observations.append(observation)
                         for client_index, (native, llama) in enumerate(
                             zip(replies["native"], replies["llama"])
                         ):
@@ -267,6 +298,8 @@ def main():
                             for k, v in times.items()
                         },
                         "speedup_p50": statistics.median(times["llama"]) / statistics.median(times["native"]),
+                        "completion": paired_completion(observations),
+                        "observations": observations,
                     }
                     if cosines:
                         row["min_cosine"] = min(cosines)

@@ -487,6 +487,19 @@ most 500 ms per interactive burst, then permits an embedding batch, retaining
 independent streams and bounded progress. Validate mixed search/embedding load
 before cutover, and keep the previous llama endpoints available for rollback.
 
+Qwen ABI 4 fuses causal attention inside the same complete-layer launch, with
+32-query/64-key tiles, FP32 register accumulators and one owner per shared causal
+block. Capability checks precede omission of quadratic attention workspaces;
+Gemma retains bidirectional attention. Run `verify_attention_gpu.py --oracle`
+for boundary lengths, padding, reordered batches and prefix ownership. Preserve
+all zero-spill gates and separate FP16 regression from existing llama Q8 drift.
+Reranking groups active HTTP batches by exact query, prefers least remaining
+work and limits unrelated batch filling. A group waiting one second receives a
+GPU quantum; an executing forward is not preempted. Release group state after
+completion/cancellation. Preserve embedding independence, public bounds and
+response identity. Validate both individual and paired completion times plus
+short searches arriving during bulk work with `benchmark_queue_latency.py`.
+
 ### Archive candidate crawler
 
 The operator tool in `scripts/archive-crawler` uses Python 3.10+ and Ruby 3.0+.

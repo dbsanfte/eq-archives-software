@@ -462,6 +462,9 @@ __device__ __forceinline__ void softmax(const Layer &p) {
 #ifndef MIN_BLOCKS
 #define MIN_BLOCKS 1
 #endif
+#if FUSED_ATTENTION
+#include "attention.cuh"
+#endif
 __global__ __launch_bounds__(WARPS * 32, MIN_BLOCKS) void layer_forward(Layer p) {
 #if MODEL_KIND == 1
     p.gemma = 0;
@@ -486,6 +489,9 @@ __global__ __launch_bounds__(WARPS * 32, MIN_BLOCKS) void layer_forward(Layer p)
     grid.sync();
     qkv_rope(p);
     grid.sync();
+#if FUSED_ATTENTION
+    causal_attention(p, sm);
+#else
     mm(p.q, p.k, p.scores, p.seq, p.seq, p.dim, p.batch * p.heads, p.seq * p.dim, p.seq * p.dim,
        p.seq * p.seq, sm, p.gemma ? 0 : 1, p.kv_heads, p.heads, p.lengths);
     grid.sync();
@@ -501,6 +507,7 @@ __global__ __launch_bounds__(WARPS * 32, MIN_BLOCKS) void layer_forward(Layer p)
                         ? linear_input(p.attn[((batch * p.heads + head) * p.seq + pos) * p.dim + j])
                         : linear_input(0.f);
     }
+#endif
     grid.sync();
     linear(p, p.proj, p.out, p.result, T, p.width, H, sm);
     grid.sync();
@@ -542,6 +549,11 @@ extern "C" int launch_layer(Layer *params, cudaStream_t stream, int *blocks_out,
 #else
     constexpr int smem = regular_smem;
 #endif
+#if FUSED_ATTENTION
+    constexpr int launch_smem = std::max(smem, ATTENTION_SMEM);
+#else
+    constexpr int launch_smem = smem;
+#endif
     // Device properties are expensive on this driver. Cache the occupancy-safe
     // cooperative grid once; the service deliberately owns one CUDA device.
     static std::once_flag once;
@@ -559,12 +571,12 @@ extern "C" int launch_layer(Layer *params, cudaStream_t stream, int *blocks_out,
             status = cudaErrorNotSupported;
             return;
         }
-        if (smem > 49152) {
-            status = cudaFuncSetAttribute(layer_forward, cudaFuncAttributeMaxDynamicSharedMemorySize, smem);
+        if (launch_smem > 49152) {
+            status = cudaFuncSetAttribute(layer_forward, cudaFuncAttributeMaxDynamicSharedMemorySize, launch_smem);
             if (status != cudaSuccess)
                 return;
         }
-        status = cudaOccupancyMaxActiveBlocksPerMultiprocessor(&blocks, layer_forward, threads, smem);
+        status = cudaOccupancyMaxActiveBlocksPerMultiprocessor(&blocks, layer_forward, threads, launch_smem);
         blocks *= prop.multiProcessorCount;
     });
     if (status != cudaSuccess)
@@ -578,8 +590,15 @@ extern "C" int launch_layer(Layer *params, cudaStream_t stream, int *blocks_out,
     int grid_blocks = block_limit > 0 ? std::min(blocks, block_limit) : blocks;
     *blocks_out = grid_blocks;
     void *args[] = {params};
-    return cudaLaunchCooperativeKernel((void *)layer_forward, dim3(grid_blocks), dim3(threads), args, smem,
+    return cudaLaunchCooperativeKernel((void *)layer_forward, dim3(grid_blocks), dim3(threads), args, launch_smem,
                                        stream);
 }
 extern "C" const char *error_string(int e) { return cudaGetErrorString((cudaError_t)e); }
-extern "C" int layer_abi_version() { return 3; }
+extern "C" int layer_abi_version() { return 4; }
+extern "C" int layer_features() {
+#if FUSED_ATTENTION
+    return 1;
+#else
+    return 0;
+#endif
+}
