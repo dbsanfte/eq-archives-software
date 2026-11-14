@@ -769,7 +769,7 @@ class FrontendBrowserTests(unittest.TestCase):
                     expect(page.get_by_role("heading", name="ChatGPT developer mode", exact=True)).to_be_visible()
                     expect(page.get_by_role("heading", name="Claude", exact=True)).to_be_visible()
                     expect(page.locator("#mcp-endpoint")).to_have_text("https://search.eqarchives.org/mcp")
-                    expect(page.get_by_text("hybrid: true", exact=True)).to_be_visible()
+                    expect(page.get_by_text("hybrid: false", exact=True)).to_be_visible()
                     expect(page.locator(".research li")).to_have_count(6)
                     expect(page.get_by_text("list_sites", exact=True)).to_be_visible()
                     expect(page.get_by_text("list_captures", exact=True)).to_be_visible()

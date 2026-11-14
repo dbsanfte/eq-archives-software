@@ -29,6 +29,7 @@ def check(endpoint, query, host=None):
     assert init["serverInfo"]["name"] == "EQ Archives"
     tools = {tool["name"]: tool for tool in rpc("tools/list")["tools"]}
     assert set(tools) == {"search", "fetch", "search_archive", "list_sources", "list_sites", "list_captures"}
+    assert tools["search_archive"]["inputSchema"]["properties"]["hybrid"]["default"] is True
     for tool in tools.values():
         assert tool["annotations"]["readOnlyHint"] and not tool["annotations"]["destructiveHint"]
         assert tool["_meta"]["securitySchemes"] == [{"type": "noauth"}]
@@ -52,6 +53,7 @@ def check(endpoint, query, host=None):
     assert missing["isError"], "Missing documents must not fabricate source text"
     page = call("search_archive", {"query": query, "limit": 7})
     assert len(page["results"]) == 7 and page["next_offset"] == 7
+    assert "Hybrid keyword/semantic" in page["note"]
     following = call("search_archive", {"query": query, "limit": 7, "offset": page["next_offset"]})
     assert len(following["results"]) == 7
     assert not {r["id"] for r in page["results"]} & {r["id"] for r in following["results"]}
@@ -65,11 +67,15 @@ def check(endpoint, query, host=None):
     assert source != next_sources["sources"][0]["value"]
     filtered = call("search_archive", {"query": query, "filters": {"domains": [source]}, "limit": 2})
     assert filtered["results"] and all(r["metadata"]["domain_name"] == source for r in filtered["results"])
+    assert "Hybrid keyword/semantic" in filtered["note"]
+    keyword = call("search_archive", {"query": query, "filters": {"domains": [source]}, "limit": 2, "hybrid": False})
+    assert keyword["results"] and all(r["metadata"]["domain_name"] == source for r in keyword["results"])
+    assert "Keyword results." in keyword["note"]
     conceptual = call("search_archive", {"query": query, "filters": {"domains": [source]}, "limit": 2, "hybrid": True})
     assert conceptual["results"] and all(r["metadata"]["domain_name"] == source for r in conceptual["results"])
     assert "Hybrid keyword/semantic" in conceptual["note"]
     assert call("search_archive", {"query": query, "filters": {"domains": ["__mcp_missing_source__.invalid"]}})["results"] == []
-    assert call("search_archive", {"query": query, "filters": {"domains": ["__mcp_missing_source__.invalid"]}, "hybrid": True})["results"] == []
+    assert call("search_archive", {"query": query, "filters": {"domains": ["__mcp_missing_source__.invalid"]}, "hybrid": False})["results"] == []
 
     dated = next(r for r in page["results"] if r["metadata"].get("capture_date"))
     timestamp = datetime.fromisoformat(dated["metadata"]["capture_date"].replace("Z", "+00:00"))

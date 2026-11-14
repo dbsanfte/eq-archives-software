@@ -61,12 +61,16 @@ def test_invalid_research_arguments_are_rejected_before_any_upstream_call(name, 
 def research_fixture(request):
     body = json.loads(request.content)
     if "aggs" in body:
+        assert "knn" not in body
         return search_response(aggregations={"sources": {"buckets": [{"key": {"value": "example.org"}, "doc_count": 1}]}})
+    assert len(body["knn"]) == 4
+    for branch in body["knn"]:
+        assert branch["filter"][:-1] == body["query"]["bool"]["filter"]
     return search_response([HIT], 1)
 
 
 def test_both_research_tools_return_matching_json_and_declared_output_schemas():
-    with TestClient(create_app(make_archive(research_fixture, never_embed))) as client:
+    with TestClient(create_app(make_archive(research_fixture))) as client:
         tools = {t["name"]: t for t in rpc(client, "tools/list").json()["result"]["tools"]}
         for name in ("search_archive", "list_sources"):
             result = rpc(client, "tools/call", {"name": name, "arguments": {
@@ -80,7 +84,7 @@ def test_both_research_tools_return_matching_json_and_declared_output_schemas():
 
 def test_official_sdk_client_accepts_nested_filters_and_research_outputs():
     async def exercise():
-        app = create_app(make_archive(research_fixture, never_embed))
+        app = create_app(make_archive(research_fixture))
         async with app.router.lifespan_context(app):
             async with httpx2.AsyncClient(transport=httpx2.ASGITransport(app)) as client:
                 async with streamable_http_client("http://testserver/mcp", http_client=client) as streams:

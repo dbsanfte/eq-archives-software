@@ -83,7 +83,7 @@
       <p>The server offers six read-only tools. No EQ Archives account or API key is needed.</p>
       <ul>
         <li><strong>search</strong> finds up to ten sources using keywords and related concepts.</li>
-        <li><strong>search_archive</strong> searches by keywords, or optionally by meaning with <code>hybrid: true</code>, with source and date filters, chronological ordering and
+        <li><strong>search_archive</strong> searches by keywords and meaning by default; use <code>hybrid: false</code> for keywords only. It supports source and date filters, chronological ordering and
           pages of up to 50 results. It independently filters capture, publication and indexing dates, and can group pages or source-verified discussions.</li>
         <li><strong>list_sources</strong> discovers available domains, mailing lists, file types, MIME types, model-generated themes/tags and collections so your assistant can choose exact filters.</li>
         <li><strong>list_sites</strong> shows newly indexed domains with matching record counts and capture ranges.</li>
@@ -92,7 +92,7 @@
       </ul>
       <p>For example, ask your assistant to find Ancient Cyclops discussions in the <strong>eq_wizards</strong> mailing list,
         filter estimated publication dates to 1999–2001, work through the result pages, and verify the dates against the original text.</p>
-      <p class="note">Filtered research searches keywords without semantic broadening. Each search can page through up to 1,000 results;
+      <p class="note">Hybrid research preserves source and date filters. Quoted phrases, explicit operators and date-sorted searches use keyword matching. Each search can page through up to 1,000 results;
         narrow the topic, source or dates to explore further. New indexing can change the ordering between pages.</p>
       <p>For recent additions, ask for sites indexed this week with captures from 1999–2001. URL scopes can narrow shared-host
         accounts or source-backed Ezboard boards. Availability filters select indexed text, enrichment or OCR fields;
