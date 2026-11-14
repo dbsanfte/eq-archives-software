@@ -92,7 +92,7 @@ def response(kind, values, tokens, body):
 
 
 class App:
-    def __init__(self, engine=None, keys=None, batch=16):
+    def __init__(self, engine=None, keys=None, batch=32):
         self.engine, self.keys, self.batch = engine, keys, batch
         self.scheduler = None
         self.active = 0
@@ -263,7 +263,7 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(
-        App(batch=int(os.environ.get("GPU_BATCH_SIZE", "16"))),
+        App(batch=int(os.environ.get("GPU_BATCH_SIZE", "32"))),
         host="0.0.0.0",
         port=8080,
         workers=1,

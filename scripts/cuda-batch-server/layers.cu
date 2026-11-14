@@ -37,8 +37,8 @@ struct Layer {
     half *attn;
     float *hidden, *result, *qkv_buffer;
     half *prob;
-    const int *lengths, *offsets, *batch_ids;
-    int batch, seq, width, heads, kv_heads, dim, ffn, gemma, tokens, shared_prefix;
+    const int *lengths, *block_offsets, *batch_ids, *positions;
+    int batch, seq, width, heads, kv_heads, dim, ffn, gemma, tokens;
     float theta;
 };
 
@@ -385,7 +385,7 @@ __device__ __forceinline__ void qkv_rope(const Layer &p) {
             }
             continue;
         }
-        int token = pos < p.shared_prefix ? pos : p.offsets[batch] + pos;
+        int token = p.block_offsets[batch * (p.seq / 32) + pos / 32] + pos % 32;
         int base = token * (hd + 2 * kd);
         int qi = base + head * p.dim, ki = base + hd + kv * p.dim, vi = base + hd + kd + kv * p.dim;
         float qs = 0, ks = 0, vs = 0;
@@ -496,7 +496,7 @@ __global__ __launch_bounds__(WARPS * 32, MIN_BLOCKS) void layer_forward(Layer p)
     grid.sync();
     for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < T * H; i += gridDim.x * blockDim.x) {
         int j = i % p.dim, head = (i / p.dim) % p.heads, token = i / H;
-        int batch = p.batch_ids[token], pos = token - p.offsets[batch];
+        int batch = p.batch_ids[token], pos = p.positions[token];
         p.proj[i] = pos < p.lengths[batch]
                         ? linear_input(p.attn[((batch * p.heads + head) * p.seq + pos) * p.dim + j])
                         : linear_input(0.f);
@@ -582,4 +582,4 @@ extern "C" int launch_layer(Layer *params, cudaStream_t stream, int *blocks_out,
                                        stream);
 }
 extern "C" const char *error_string(int e) { return cudaGetErrorString((cudaError_t)e); }
-extern "C" int layer_abi_version() { return 2; }
+extern "C" int layer_abi_version() { return 3; }

@@ -106,7 +106,23 @@ def main():
                     abs(x - y) for a, b in zip(outputs["serial"], outputs["concurrent"]) for x, y in zip(a, b)
                 )
                 if difference > 0.0001:
-                    raise RuntimeError("Batching changed request output beyond the numerical bound")
+                    args.output.write_text(
+                        json.dumps(
+                            {
+                                "failed": "output_agreement",
+                                "documents_per_request": count,
+                                "repeat": repeat,
+                                "case_indices": [repeat % len(cases), (repeat + 1) % len(cases)],
+                                "max_output_difference": difference,
+                                "outputs": outputs,
+                            },
+                            indent=2,
+                        )
+                        + "\n"
+                    )
+                    raise RuntimeError(
+                        f"Batching changed request output beyond the numerical bound: {difference}"
+                    )
                 if repeat:
                     serial.append(observation["serial"]["pair_ms"])
                     concurrent.append(observation["concurrent"]["pair_ms"])

@@ -33,17 +33,27 @@ and retrieval quality must be evaluated independently of token/weight identity.
 
 The asynchronous HTTP server has independent embedding and reranking queues,
 worker threads and CUDA streams. Each model has one owner for GPU submission;
-multiple clients feed that model's bounded dynamic batches. Length buckets and
-a 4,096 padded-token scheduling quantum keep large imports from producing an
-unbounded GPU batch. Exactly identical complete token sequences share inference
-within one batch, with every original response index preserved.
+multiple clients feed that model's bounded dynamic batches. Requests are split
+into whole-document work items and recombined with length-compatible queued
+items, up to 32 items per GPU batch. The scheduler budgets 4,096 actual packed
+tokens after exact input/prefix reuse, and separately bounds attention space to
+4,194,304 sequence-position pairs before multiplying by the model's head count.
+It can fill leftover space with a later compatible item; deferred items remain
+queued. Exactly identical complete token sequences share inference within one
+batch, with every original response index preserved. This is document-level
+chunking, not token-level prefill: each input keeps its complete attention context.
 
-The causal reranker also shares the exact, tile-aligned token prefix within a
-batch. Dense projections and feed-forward work for that prefix execute once;
-every document retains its own positions, attention and final score. This does
-not retain a cache across batches and is disabled for bidirectional Gemma.
+The causal reranker also shares exact 32-token prefix blocks within a batch.
+Block identity includes its entire preceding causal path; separate query groups
+keep their own reusable prefixes when merged. Equal suffixes after different
+contexts never alias. Dense projections and feed-forward work for each shared
+block execute once; every document retains its positions, attention and final
+score. This retains no cache across batches and is disabled for bidirectional
+Gemma. Qwen uses the same CUTLASS arithmetic for short and long batches so a
+short document does not change scoring paths when another request joins it.
 GPU validation compares shared and separate execution, including uneven lengths.
-An explicit library ABI check rejects stale binaries before launching a layer.
+The ABI version check rejects stale binaries before loading weights or launching
+a layer; rebuild all three profiles together after layout changes.
 
 When both models are active, cooperative-grid sizes are bounded to leave room
 for the other stream. The limit is reconsidered at each layer. Shared GPU
@@ -144,6 +154,13 @@ It alternates execution order and reports paired speedups with a diagnostic
 bootstrap interval. Both HTTP benchmarks retain the live client's 20-document,
 128 KiB batch bounds and four shared batch slots. A small fixture cannot establish
 a universal performance guarantee.
+
+`verify_batching_gpu.py --fixtures /private/fixtures.json --oracle --output
+/private/batches.json` checks distinct real query groups in a merged forward
+against separate forwards and the independent layer oracle. It also checks short
+fixture prompts alone and together, and asserts that merging groups cannot
+increase packed dense work. This isolates GPU batching; the HTTP benchmark
+remains the end-to-end concurrency check.
 
 ## Additive installation and rollback
 

@@ -1,7 +1,9 @@
 """Pinned GGUF weights, FP32 residuals, FP16 Tensor Cores, full-layer megakernels."""
 
 import ctypes as C
+from dataclasses import dataclass
 import hashlib
+from itertools import chain
 import math
 from pathlib import Path
 
@@ -39,35 +41,50 @@ def verified(path, expected):
     return path
 
 
-POINTERS = "qkv out gateup down ple_gate ple_out in_norm q_norm k_norm attn_norm ffn_norm ffn_post ple_norm scalar ple x norm proj q k vt scores attn hidden result qkv_buffer prob lengths offsets batch_ids".split()
-INTEGERS = "batch seq width heads kv_heads dim ffn gemma tokens shared_prefix".split()
+POINTERS = "qkv out gateup down ple_gate ple_out in_norm q_norm k_norm attn_norm ffn_norm ffn_post ple_norm scalar ple x norm proj q k vt scores attn hidden result qkv_buffer prob lengths block_offsets batch_ids positions".split()
+INTEGERS = "batch seq width heads kv_heads dim ffn gemma tokens".split()
 
 
-def causal_prefix(rows):
-    """Exact, tile-aligned prefix shared only within a causal inference batch."""
-    if len(rows) < 2:
-        return 0
-    common = 0
-    # Keep at least one suffix token in each row, including identical inputs.
-    for i in range(min(map(len, rows)) - 1):
-        if any(row[i] != rows[0][i] for row in rows[1:]):
-            break
-        common += 1
-    return common // 32 * 32
+@dataclass
+class BatchLayout:
+    padded: list
+    block_offsets: list
+    ids: list
+    batch_ids: list
+    positions: list
+    last_indices: list
+    owners: list
 
 
-def packed_layout(rows, prefix=0):
-    """Store a shared causal prefix once; every original position is recoverable."""
+def packed_layout(rows, share_prefix=False):
+    """Share only complete causal paths, preserving each query group's prefix.
+
+    Keys include the parent block and the unpadded token tuple. Equal suffixes
+    after different contexts cannot alias, nor can padding alias real tokens.
+    All state is local to this forward pass. Bidirectional models disable sharing.
+    """
     padded = [math.ceil(len(row) / 32) * 32 for row in rows]
-    offsets, ids, batches, last = [], [], [], []
-    for i, (row, size) in enumerate(zip(rows, padded)):
-        skip = prefix if i else 0
-        offset = len(ids) - skip
-        offsets.append(offset)
-        ids.extend(row[skip:] + [0] * (size - len(row)))
-        batches.extend([i] * (size - skip))
-        last.append(offset + len(row) - 1)
-    return padded, offsets, ids, batches, last
+    layout = BatchLayout(padded, [[0] * (max(padded) // 32) for _ in rows], [], [], [], [], [])
+    blocks = {}
+    for batch, row in enumerate(rows):
+        parent = -1
+        for position in range(0, len(row), 32):
+            values = row[position : position + 32]
+            key = (parent, tuple(values))
+            offset = blocks.get(key) if share_prefix else None
+            if offset is None:
+                offset = len(layout.ids)
+                layout.ids.extend(values + [0] * (32 - len(values)))
+                layout.batch_ids.extend([batch] * 32)
+                layout.positions.extend(range(position, position + 32))
+                layout.owners.append((batch, position))
+                if share_prefix:
+                    blocks[key] = offset
+            layout.block_offsets[batch][position // 32] = offset
+            parent = offset
+        last = len(row) - 1
+        layout.last_indices.append(layout.block_offsets[batch][last // 32] + last % 32)
+    return layout
 
 
 class Layer(C.Structure):
@@ -80,7 +97,7 @@ class Layer(C.Structure):
 
 def load_library(path):
     lib = C.CDLL(str(path))
-    if not hasattr(lib, "layer_abi_version") or lib.layer_abi_version() != 2:
+    if not hasattr(lib, "layer_abi_version") or lib.layer_abi_version() != 3:
         raise RuntimeError("CUDA layer ABI differs; rebuild all selected profiles")
     lib.launch_layer.argtypes = [C.POINTER(Layer), C.c_void_p, C.POINTER(C.c_int), C.c_int]
     lib.launch_layer.restype = C.c_int
@@ -99,6 +116,8 @@ class Model:
 
         self.torch, self.kind = torch, kind
         self.gemma = kind == "embed"
+        self.lib = load_library(library or f"/app/lib{kind}.so")
+        self.small = load_library("/app/libsmall.so") if library is None else None
         filename, digest, tokenizer, tok_digest = PINS[kind]
         reader = GGUFReader(str(verified(Path(root) / filename, digest)))
         self.tokenizer = Tokenizer.from_file(str(verified(Path(root) / tokenizer, tok_digest)))
@@ -137,8 +156,6 @@ class Model:
             for name in ("attn_q", "attn_k", "attn_v", "ffn_gate", "ffn_up"):
                 del self.weights[f"blk.{i}.{name}.weight"]
 
-        self.lib = load_library(library or f"/app/lib{kind}.so")
-        self.small = load_library("/app/libsmall.so") if library is None else None
         self.blocks = 0
 
     def encode(self, inputs):
@@ -207,24 +224,26 @@ class Model:
         b, s = len(tokens), math.ceil(max(map(len, tokens)) / 32) * 32
         if not 1 <= b <= 32 or not 32 <= s <= (512 if self.gemma else 768):
             raise ValueError("GPU batch shape exceeds its fixed bounds")
-        lib = self.small if self.small is not None and b * s <= 128 else self.lib
-        prefix = causal_prefix(tokens) if not self.gemma and share_prefix else 0
-        padded, offsets, packed_ids, batch_ids_cpu, last_cpu = packed_layout(tokens, prefix)
-        total = len(packed_ids)
+        # Qwen's short-input WMMA path rounds differently from its CUTLASS path.
+        # Keep causal scoring on the same arithmetic when other requests join
+        # the batch; a queue timing change must not change a document's score.
+        lib = self.small if self.gemma and self.small is not None and b * s <= 128 else self.lib
+        layout = packed_layout(tokens, share_prefix=not self.gemma and share_prefix)
+        total = len(layout.ids)
         # Transfer bounded CPU-known metadata together. Separate tiny CUDA casts,
         # repeat_interleave and additions cost more than this packing for queries.
-        metadata = t.tensor(
-            packed_ids + list(map(len, tokens)) + offsets + batch_ids_cpu + last_cpu,
-            device="cuda",
-            dtype=t.int32,
+        parts = [
+            layout.ids,
+            list(map(len, tokens)),
+            list(chain.from_iterable(layout.block_offsets)),
+            layout.batch_ids,
+            layout.positions,
+            layout.last_indices,
+        ]
+        metadata = t.tensor(list(chain.from_iterable(parts)), device="cuda", dtype=t.int32)
+        ids, lengths, block_offsets, batch_ids, positions, last_indices = metadata.split(
+            list(map(len, parts))
         )
-        ids, lengths, offsets_gpu = (
-            metadata[:total],
-            metadata[total : total + b],
-            metadata[total + b : total + 2 * b],
-        )
-        batch_ids = metadata[total + 2 * b : 2 * total + 2 * b]
-        last_indices = metadata[2 * total + 2 * b :]
         x = F.embedding(ids, self.weights["token_embd.weight"]).float()
         ple = None
         if self.gemma:
@@ -249,8 +268,9 @@ class Model:
         work = dict(
             x=x,
             lengths=lengths,
-            offsets=offsets_gpu,
+            block_offsets=block_offsets,
             batch_ids=batch_ids,
+            positions=positions,
             norm=alloc(total * self.width),
             proj=alloc(total * max(H, self.ffn)),
             q=alloc(b * s * H),
@@ -264,6 +284,18 @@ class Model:
             prob=alloc(b * self.heads * s * s),
         )
         comparisons = []
+
+        def sequence(values, batch, length):
+            return t.cat(
+                [
+                    values[
+                        layout.block_offsets[batch][pos // 32] : layout.block_offsets[batch][pos // 32]
+                        + min(32, length - pos)
+                    ]
+                    for pos in range(0, length, 32)
+                ]
+            )
+
         for i, row in enumerate(self.layers):
             dim = (512 if i % 6 == 5 else 256) if self.gemma else 128
             kv = (1 if i % 6 == 5 else 2) if self.gemma else 8
@@ -271,28 +303,19 @@ class Model:
             layer_ple = ple[i] if ple is not None else None
             if reference or compare_layers:
 
-                def sequence(values, j, n):
-                    o = offsets[j]
-                    return (
-                        t.cat([values[:prefix], values[o + prefix : o + n]])
-                        if j and prefix
-                        else values[o : o + n]
-                    )
-
-                expected = t.cat(
-                    [
-                        self.reference_layer(
-                            sequence(x, j, n).clone().unsqueeze(0),
-                            row,
-                            lengths[j : j + 1],
-                            dim,
-                            kv,
-                            theta,
-                            layer_ple[o : o + n].unsqueeze(0) if layer_ple is not None else None,
-                        ).squeeze(0)[prefix if j else 0 :]
-                        for j, (o, n) in enumerate(zip(offsets, padded))
-                    ]
-                )
+                expected_rows = [
+                    self.reference_layer(
+                        sequence(x, j, n).clone().unsqueeze(0),
+                        row,
+                        lengths[j : j + 1],
+                        dim,
+                        kv,
+                        theta,
+                        sequence(layer_ple, j, n).unsqueeze(0) if layer_ple is not None else None,
+                    ).squeeze(0)
+                    for j, n in enumerate(layout.padded)
+                ]
+                expected = t.cat([expected_rows[owner][pos : pos + 32] for owner, pos in layout.owners])
             if reference:
                 x.copy_(expected)
             else:
@@ -311,7 +334,6 @@ class Model:
                     ffn=self.ffn,
                     gemma=int(self.gemma),
                     tokens=total,
-                    shared_prefix=prefix,
                     theta=theta,
                 )
                 blocks = C.c_int()
@@ -339,7 +361,13 @@ class Model:
                     )
         output = F.rms_norm(x, (self.width,), self.weights["output_norm.weight"], 1e-6)
         if self.gemma:
-            pooled = t.stack([output[o : o + len(row)].mean(0) for o, row in zip(offsets, tokens)])
+            # Bidirectional Gemma has contiguous, unshared sequence blocks.
+            pooled = t.stack(
+                [
+                    output[offsets[0] : offsets[0] + len(row)].mean(0)
+                    for offsets, row in zip(layout.block_offsets, tokens)
+                ]
+            )
             output = F.normalize(
                 t.mm(pooled.half(), self.weights["output.weight"].T, out_dtype=t.float32), dim=-1
             )

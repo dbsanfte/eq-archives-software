@@ -19,8 +19,45 @@ class Item:
     deadline: float
 
 
+class BatchBudget:
+    """Bound actual dense work and attention space, including exact causal reuse."""
+
+    def __init__(self, causal, tokens=4096, attention=4 * 1024 * 1024):
+        self.causal, self.tokens, self.attention = causal, tokens, attention
+        self.rows, self.blocks = set(), {}
+        self.dense, self.longest = 0, 0
+
+    def add(self, row):
+        key = tuple(row)
+        if key in self.rows:
+            return True
+        padded = (len(row) + 31) // 32 * 32
+        longest = max(self.longest, padded)
+        if (len(self.rows) + 1) * longest * longest > self.attention:
+            return False
+        pending = {}
+        if self.causal:
+            parent = -1
+            for start in range(0, len(row), 32):
+                block = (parent, tuple(row[start : start + 32]))
+                offset = self.blocks.get(block, pending.get(block))
+                if offset is None:
+                    offset = self.dense + 32 * len(pending)
+                    pending[block] = offset
+                parent = offset
+            cost = 32 * len(pending)
+        else:
+            cost = padded
+        if self.dense + cost > self.tokens:
+            return False
+        self.rows.add(key)
+        self.blocks.update(pending)
+        self.longest, self.dense = longest, self.dense + cost
+        return True
+
+
 class Scheduler:
-    def __init__(self, engine, batch=16, capacity=1024, wait=0.001):
+    def __init__(self, engine, batch=32, capacity=1024, wait=0.001):
         self.engine, self.batch, self.capacity, self.wait = engine, batch, capacity, wait
         self.queues = {"embed": deque(), "rerank": deque()}
         self.wake = {kind: asyncio.Event() for kind in self.queues}
@@ -75,6 +112,7 @@ class Scheduler:
                     break
                 await asyncio.sleep(self.wait)
             batch = []
+            budget = BatchBudget(causal=kind == "rerank")
             examined, available, bucket = 0, len(queue), None
             while queue and examined < available and len(batch) < self.batch:
                 item = queue.popleft()
@@ -91,9 +129,9 @@ class Scheduler:
                 if size != bucket:
                     queue.append(item)
                     continue
-                if batch and bucket * (len(batch) + 1) > 4096:
-                    queue.appendleft(item)
-                    break
+                if not budget.add(item.tokens):
+                    queue.append(item)
+                    continue
                 batch.append(item)
             if not batch:
                 continue

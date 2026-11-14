@@ -9,11 +9,11 @@ import tarfile
 from unittest.mock import patch, Mock
 import unittest
 
-from backend import EMBED_MODEL, RERANK_MODEL, causal_prefix, packed_layout, load_library
+from backend import EMBED_MODEL, RERANK_MODEL, packed_layout, load_library
 from benchmark_http import checked_values, rerank_batches
 from benchmark_batching import paired_summary
 from check_kernels import check
-from scheduler import Busy, Scheduler, unique_batch
+from scheduler import BatchBudget, Busy, Scheduler, unique_batch
 from server import App, response, validate
 from service import command, settings
 import fetch_cutlass
@@ -22,6 +22,27 @@ from pathlib import Path
 
 
 class ContractTests(unittest.TestCase):
+    def test_dynamic_budget_matches_full_causal_plan_without_mutating_on_rejection(self):
+        rows = [[1] * 64 + [i] * (200 + i) for i in range(2, 20)]
+        for causal in (True, False):
+            budget, accepted = BatchBudget(causal, tokens=1024), []
+            for row in rows:
+                before = (budget.dense, budget.longest, dict(budget.blocks), set(budget.rows))
+                if budget.add(row):
+                    accepted.append(row)
+                    self.assertEqual(budget.dense, len(packed_layout(accepted, share_prefix=causal).ids))
+                else:
+                    self.assertEqual(before, (budget.dense, budget.longest, budget.blocks, budget.rows))
+            self.assertLess(len(accepted), len(rows))
+            self.assertTrue(budget.add(accepted[0]))
+            self.assertEqual(len(budget.rows), len(accepted))
+
+    def test_dynamic_budget_bounds_attention_even_when_most_tokens_are_shared(self):
+        budget = BatchBudget(True)
+        rows = [[1] * 767 + [i] for i in range(2, 18)]
+        self.assertEqual([budget.add(row) for row in rows], [True] * 7 + [False] * 9)
+        self.assertLess(budget.dense, 4096)
+
     def test_benchmark_batches_preserve_unicode_inputs_within_live_byte_bound(self):
         documents = [str(i) + "é" * 4000 for i in range(20)]
         batches = rerank_batches("cleric", documents)
@@ -46,28 +67,49 @@ class ContractTests(unittest.TestCase):
                 paired_summary(serial, concurrent)
 
     def test_incompatible_kernel_library_fails_before_a_gpu_launch(self):
-        for old in (Mock(spec=[]), Mock(layer_abi_version=Mock(return_value=1))):
+        for old in (
+            Mock(spec=[]),
+            Mock(layer_abi_version=Mock(return_value=1)),
+            Mock(layer_abi_version=Mock(return_value=2)),
+        ):
             with patch("backend.C.CDLL", return_value=old), self.assertRaisesRegex(RuntimeError, "ABI"):
                 load_library("unused.so")
-        lib = Mock(layer_abi_version=Mock(return_value=2))
+        lib = Mock(layer_abi_version=Mock(return_value=3))
         with patch("backend.C.CDLL", return_value=lib):
             self.assertIs(load_library("unused.so"), lib)
         lib.launch_layer.assert_not_called()
 
-    def test_shared_causal_prefix_preserves_all_sequences_and_last_tokens(self):
-        rows = [list(range(100)) + [101] * 9, list(range(100)) + [102] * 65, list(range(100)) + [103]]
-        prefix = causal_prefix(rows)
-        self.assertEqual(prefix, 96)
-        padded, offsets, ids, batches, last = packed_layout(rows, prefix)
-        self.assertEqual(len(ids), sum(padded) - prefix * 2)
-        self.assertEqual(len(batches), len(ids))
+    def test_shared_blocks_preserve_query_groups_sequences_and_last_tokens(self):
+        common = list(range(64))
+        rows = [
+            common + [100] * 32 + [101] * 9,
+            common + [100] * 32 + [102] * 65,
+            common + [200] * 32 + [201] * 17,
+            common + [200] * 32 + [202] * 7,
+        ]
+        layout = packed_layout(rows, share_prefix=True)
+        self.assertEqual(len(layout.ids), 320)
+        separate = sum(len(packed_layout(group, share_prefix=True).ids) for group in (rows[:2], rows[2:]))
+        self.assertEqual(len(layout.ids), separate - 64)
+        self.assertEqual(len(layout.batch_ids), len(layout.ids))
+        self.assertEqual(len(layout.positions), len(layout.ids))
         for i, row in enumerate(rows):
-            recovered = [ids[j if j < prefix else offsets[i] + j] for j in range(len(row))]
+            recovered = [layout.ids[layout.block_offsets[i][j // 32] + j % 32] for j in range(len(row))]
             self.assertEqual(recovered, row)
-            self.assertEqual(ids[last[i]], row[-1])
-        for rows in ([[1] * 32], [[1] * 31, [1] * 40], [[1] * 64, [2] * 64]):
-            self.assertEqual(causal_prefix(rows), 0)
-        self.assertEqual(causal_prefix([[1] * 64, [1] * 64]), 32)
+            self.assertEqual(layout.ids[layout.last_indices[i]], row[-1])
+        for token, (owner, pos) in enumerate(zip(layout.batch_ids, layout.positions)):
+            self.assertEqual(layout.ids[token], rows[owner][pos] if pos < len(rows[owner]) else 0)
+
+    def test_shared_blocks_never_alias_different_contexts_or_padding(self):
+        rows = [[1] * 32 + [9] * 32, [2] * 32 + [9] * 32]
+        self.assertEqual(len(packed_layout(rows, share_prefix=True).ids), 128)
+        rows = [[3] * 33, [3] * 33 + [0] * 31]
+        self.assertEqual(len(packed_layout(rows, share_prefix=True).ids), 96)
+        rows = [[3] * 33, [3] * 33]
+        shared = packed_layout(rows, share_prefix=True)
+        self.assertEqual(len(shared.ids), 64)
+        self.assertEqual(shared.last_indices, [32, 32])
+        self.assertEqual(len(packed_layout(rows, share_prefix=False).ids), 128)
 
     def test_benchmark_rejects_nonfinite_or_incomplete_model_outputs(self):
         body = {"model": EMBED_MODEL, "data": [{"index": 0, "embedding": [0.25] * 768}]}
@@ -327,8 +369,28 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_long_inputs_have_a_bounded_gpu_scheduling_quantum(self):
         self.scheduler.batch = 16
-        await self.scheduler.submit("rerank", [[1] * 768] * 8, time.monotonic() + 1)
+        await self.scheduler.submit("rerank", [[i] * 768 for i in range(8)], time.monotonic() + 1)
         self.assertEqual([len(rows) for _, rows in self.engine.calls], [5, 3])
+
+    async def test_partial_request_chunks_recombine_and_share_prefix_budget(self):
+        self.scheduler.batch, self.scheduler.capacity = 16, 16
+        rows = [[1] * 128 + [i] * 352 for i in range(2, 12)]
+        results = await asyncio.gather(
+            self.scheduler.submit("rerank", rows[:5], time.monotonic() + 1),
+            self.scheduler.submit("rerank", rows[5:], time.monotonic() + 1),
+        )
+        self.assertEqual(list(map(len, results)), [5, 5])
+        self.assertEqual(len(self.engine.calls), 1)
+        self.assertEqual(self.engine.calls[0][1], rows)
+
+    async def test_unfittable_item_does_not_prevent_filling_batch_or_get_lost(self):
+        self.scheduler.batch, self.scheduler.capacity = 32, 32
+        rows = [[i] * 448 for i in range(2, 9)] + [[9] * 480, [10] * 512, [11] * 257]
+        result = await self.scheduler.submit("embed", rows, time.monotonic() + 1)
+        self.assertEqual([r[0] for r in result], [row[0] / 10 for row in rows])
+        # The 512-token row waits; the later 288-padded-token row fills the gap.
+        self.assertEqual([len(batch) for _, batch in self.engine.calls], [9, 1])
+        self.assertEqual(self.engine.calls[1][1], [rows[8]])
 
 
 class HttpTests(unittest.IsolatedAsyncioTestCase):
