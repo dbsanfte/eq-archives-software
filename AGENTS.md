@@ -30,6 +30,7 @@ digests, dependency versions, or credentials into new files.
 | Indexer dependencies, tests and mappings | [Indexer Dockerfile](elastic-indexer-stack/indexer/Dockerfile), [test requirements](elastic-indexer-stack/indexer/src/indexer/requirements-dev.txt), [tests](elastic-indexer-stack/indexer/src/indexer/test), [Elasticsearch manager](elastic-indexer-stack/indexer/src/indexer/es_manager.py) |
 | Search relevance evaluation and tuning | [Benchmark guide](scripts/search-benchmark/README.md), [query set](scripts/search-benchmark/queries.json), [experiments](scripts/search-benchmark/configs.json) |
 | Private CUDA reranking, model pins, production forward and offline checks | [Reranker pilot](scripts/search-reranker/README.md), [runtime pins](scripts/search-reranker/runtime.env) |
+| Independent CUDA batch server, full-layer kernels and GPU acceptance checks | [CUDA batch guide](scripts/cuda-batch-server/README.md), [profile builder](scripts/cuda-batch-server/build_kernels.py) |
 | Website candidate discovery, Wayback staging and approval | [Crawler guide](scripts/archive-crawler/README.md), [seed sites](scripts/archive-crawler/seeds.json), [pinned downloader](scripts/archive-crawler/vendor/wayback-machine-downloader/UPSTREAM.json) |
 
 ## Branching and delivery
@@ -454,6 +455,37 @@ and reader/OCR fallbacks, exact-ID/model restrictions and fixed source projectio
 The operator-owned `eqarchives-reranker` Secret and host SSH forward persist through
 CI; only the API may access the dedicated key/bridge port. Never expose the raw model
 API, alter live Vulkan embeddings or restart index Jobs for reranker deployment.
+
+The additive CUDA batch service in `scripts/cuda-batch-server` uses independent
+embedding/reranking queues, worker threads and CUDA streams. Preserve complete
+response identity, pinned GGUF/tokenizer hashes, input/deadline/output bounds,
+per-model HTTP admission through response delivery and fail-closed CUDA health.
+Run its CPU unittest suite and compile every selected SM86 profile through the
+ptxas/SASS gate: zero spills, stack frames and local-memory accesses are required.
+Keep Tensor Core arithmetic, aligned vector accesses and one cooperative launch
+per complete transformer layer. CUTLASS headers are build-only, hash-pinned and
+retain their BSD notice. Validate real-token numerics, uneven lengths, sanitizer
+results and actual cross-stream overlap on the isolated RTX host. Report measured
+workload-specific latency and numerical/ranking limits; a diagnostic failure is
+not a passing acceptance gate. Keep generated sources/vectors/reports outside Git.
+Installation is additive and does not change client URLs, existing llama/Vulkan/
+vision services or active indexing Jobs. Public-client cutover requires successful
+validation against the actual workload; preserve existing endpoints for rollback.
+
+The authorized CUDA rollout uses `cuda-batch-server/deployment.env` to pin the
+validated local runtime image/source and its embedding cache identity. New imports
+and policy slices use the additive `cuda-batch-inference` route, eight inputs per
+request and four inference threads; SQLite/checkpoints, paid enrichment and ES
+writes stay on the caller. Validate every batch, drain siblings on failure and
+retain completed cache waves on yield. Future broad Gemma handoffs keep four
+document workers × eight inputs, with an explicit backend cache pin. Leave active
+Jobs on their legacy endpoint/cache namespace; do not restart them for this rollout.
+Portal/MCP query embeddings stay on Vulkan. Their shared two-search/four-batch
+reranker uses the unchanged private bridge, now forwarding to RTX loopback 8084.
+Preserve public deadlines and bounds. The GPU scheduler yields bulk work for at
+most 500 ms per interactive burst, then permits an embedding batch, retaining
+independent streams and bounded progress. Validate mixed search/embedding load
+before cutover, and keep the previous llama endpoints available for rollback.
 
 ### Archive candidate crawler
 

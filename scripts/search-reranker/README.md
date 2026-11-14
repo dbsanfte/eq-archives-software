@@ -1,18 +1,22 @@
 # Private Qwen reranker pilot
 
-The independent Qwen service runs on the RTX 3080 host's loopback
-`127.0.0.1:8083`, with its own API key and systemd unit. Public search and MCP use
-it through the bounded top-60 API described in the
+The production Qwen forward uses the [CUDA batch service](../cuda-batch-server/README.md)
+on the RTX host's loopback `127.0.0.1:8084`, with the existing dedicated API key.
+The previous llama.cpp service remains on `127.0.0.1:8083` for rollback and
+comparison. Public search and MCP use the bounded top-60 API described in the
 [MCP guide](../../elastic-indexer-stack/mcp/README.md). The PN50 test service is
 stopped; live query embeddings retain its Vulkan GPU. The optional Vulkan/CPU
 profiles remain available for isolated experiments.
 
 On eqvm, `eqarchives-reranker-tunnel.service` maintains an SSH forward bound only
-to the CNI bridge `10.42.0.1:8083`. It connects to the GPU host's loopback service,
+to the CNI bridge `10.42.0.1:8083`. It connects to the GPU host's loopback port 8084,
 using verified SSH host keys and an operator-owned identity. Only the search API
 gets the dedicated reranker key; the static frontend receives no credentials.
 The API egress policy adds only this exact host/port. No public model ingress exists.
-The CUDA embedding and vision containers retain their independent configuration.
+Both clients share two search slots and four concurrent 20-passage HTTP batches;
+the GPU scheduler can combine work across searches. The three-second deadline,
+fallback caching, response validation and admission limits remain unchanged.
+The previous CUDA embedding and vision containers retain their configuration.
 
 `runtime.env` pins the existing Vulkan image, source model, converter revision,
 converted Q8_0 file hash and capacity. The 0.6B source is Apache-2.0 licensed:

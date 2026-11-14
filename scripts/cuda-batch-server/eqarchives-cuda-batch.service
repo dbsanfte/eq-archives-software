@@ -1,0 +1,17 @@
+[Unit]
+Description=EQ Archives CUDA full-layer batch inference
+Requires=docker.service
+After=docker.service network-online.target nvidia-persistenced.service
+Wants=network-online.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/eqarchives-cuda-batch-service/service.py start
+Restart=always
+RestartSec=15
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

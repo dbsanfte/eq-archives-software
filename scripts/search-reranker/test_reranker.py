@@ -26,6 +26,15 @@ class CharacterTokenizer:
 
 
 class ServingTests(unittest.TestCase):
+    def test_production_tunnel_retains_private_bridge_and_uses_batch_service(self):
+        unit=(Path(__file__).parent/'eqarchives-reranker-tunnel.service').read_text()
+        command=next(line.removeprefix('ExecStart=') for line in unit.splitlines() if line.startswith('ExecStart='))
+        self.assertIn('-L 10.42.0.1:8083:127.0.0.1:8084 ',command)
+        self.assertIn('StrictHostKeyChecking=yes',command)
+        self.assertNotIn('0.0.0.0',command)
+        installer=(Path(__file__).parent/'install-tunnel.sh').read_text()
+        self.assertIn('systemctl restart eqarchives-reranker-tunnel.service',installer)
+
     def config(self):
         return service.settings(Path(__file__).parent)
 

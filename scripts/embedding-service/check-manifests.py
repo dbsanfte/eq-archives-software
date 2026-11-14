@@ -14,6 +14,17 @@ assert endpoints['subsets'] == [{'addresses': [{'ip': config['BIND_ADDRESS']}],
                                 'ports': [{'name': 'http', 'port': int(config['BIND_PORT']), 'protocol': 'TCP'}]}]
 for item in (service, endpoints):
     assert item['metadata']['labels']['app.kubernetes.io/part-of'] == 'eqarchives-embeddings'
+batch = dict(line.split('=', 1) for line in
+             (Path(__file__).parents[1]/'cuda-batch-server/deployment.env').read_text().splitlines()
+             if line and not line.startswith('#'))
+batch_service = resources['Service', 'cuda-batch-inference']
+batch_endpoints = resources['Endpoints', 'cuda-batch-inference']
+assert not batch_service['spec'].get('selector'), 'CUDA batch service must not select cluster pods'
+assert batch_service['spec']['ports'][0]['targetPort'] == int(batch['BIND_PORT'])
+assert batch_endpoints['subsets'] == [{'addresses': [{'ip': batch['BIND_ADDRESS']}],
+    'ports': [{'name': 'http', 'port': int(batch['BIND_PORT']), 'protocol': 'TCP'}]}]
+assert batch['CUDA_IMAGE'] == 'eqarchives-cuda-batch@' + batch['IMAGE_ID']
+assert batch['IMAGE_ID'] != config['CUDA_IMAGE'].split('@')[-1], 'Retain independent runtime cache identities'
 vision = dict(line.split('=', 1) for line in Path(__file__).with_name('vision.env').read_text().splitlines()
               if line and not line.startswith('#'))
 image_service = resources['Service', 'gemma-image-embeddings']

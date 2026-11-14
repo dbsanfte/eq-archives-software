@@ -1,0 +1,22 @@
+# Additive route: running Jobs retain the original llama.cpp endpoint.
+apiVersion: v1
+kind: Service
+metadata:
+  name: cuda-batch-inference
+spec:
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8084
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: cuda-batch-inference
+subsets:
+  - addresses:
+      - ip: 192.168.68.108
+    ports:
+      - name: http
+        port: 8084
+        protocol: TCP

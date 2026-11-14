@@ -258,7 +258,7 @@ def test_foreground_detection_ignores_budget_waits_and_human_attention_but_obeys
 
 
 def test_partial_embedding_batches_are_cached_before_yield_and_complete_identity_is_validated(tmp_path):
-    calls=[];service=MaintenanceServices.__new__(MaintenanceServices);service.model=gemma.MODEL;service.embedding_url='http://cuda'
+    calls=[];service=MaintenanceServices.__new__(MaintenanceServices);service.embedding_batch_size=8;service.embedding_workers=1;service.model=gemma.MODEL;service.embedding_url='http://cuda'
     service.embedding_cache=EmbeddingCache(tmp_path/'cache.sqlite','fixture')
     def response(request):
         body=json.loads(request.content);calls.append(body['input'])
@@ -279,7 +279,7 @@ def test_partial_embedding_batches_are_cached_before_yield_and_complete_identity
 
 @pytest.mark.parametrize('kind',['model','index','missing','nan','zero','http','transport'])
 def test_malformed_or_incomplete_embedding_responses_fail_before_any_write(kind):
-    service=MaintenanceServices.__new__(MaintenanceServices);service.model=gemma.MODEL;service.embedding_url='http://cuda';service.embedding_cache=None
+    service=MaintenanceServices.__new__(MaintenanceServices);service.embedding_batch_size=8;service.embedding_workers=1;service.model=gemma.MODEL;service.embedding_url='http://cuda';service.embedding_cache=None
     def response(request):
         if kind=='transport':raise httpx.ConnectError('private upstream details')
         if kind=='http':return httpx.Response(503)

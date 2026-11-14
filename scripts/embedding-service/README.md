@@ -1,5 +1,14 @@
 # Standalone CUDA embeddings for indexing
 
+New curation imports and policy slices now use the
+[CUDA batch service](../cuda-batch-server/README.md), through the additive
+`cuda-batch-inference:8080` route to RTX port 8084. They batch eight inputs with
+four HTTP requests in flight. New `--gemma` reindex handoffs use that route and
+its pinned cache identity with four document workers × eight inputs; they do not
+multiply that concurrency by adding an inner worker pool. Existing Jobs retain
+the legacy endpoint described below and finish without interruption. Live query
+embeddings remain on eqvm Vulkan; the image companion remains separate.
+
 The Ubuntu GPU host runs the **same EmbeddingGemma 2 Q8_0 weights,
 768-dimensional normalized vectors, document/query prefixes and model alias** as
 the Vulkan service. All indexers use CUDA; live search and MCP use Vulkan.

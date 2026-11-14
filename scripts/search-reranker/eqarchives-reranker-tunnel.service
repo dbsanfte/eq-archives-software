@@ -6,7 +6,7 @@ StartLimitIntervalSec=0
 
 [Service]
 User=dbsanfte
-ExecStart=/usr/bin/ssh -F /dev/null -N -T -o BatchMode=yes -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/eqarchives-reranker-tunnel/known_hosts -o GlobalKnownHostsFile=/dev/null -o ServerAliveInterval=15 -o ServerAliveCountMax=2 -o ConnectTimeout=10 -o LogLevel=ERROR -i /etc/eqarchives-reranker-tunnel/identity -L 10.42.0.1:8083:127.0.0.1:8083 dbsanfte@192.168.68.108
+ExecStart=/usr/bin/ssh -F /dev/null -N -T -o BatchMode=yes -o ExitOnForwardFailure=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/eqarchives-reranker-tunnel/known_hosts -o GlobalKnownHostsFile=/dev/null -o ServerAliveInterval=15 -o ServerAliveCountMax=2 -o ConnectTimeout=10 -o LogLevel=ERROR -i /etc/eqarchives-reranker-tunnel/identity -L 10.42.0.1:8083:127.0.0.1:8084 dbsanfte@192.168.68.108
 Restart=always
 RestartSec=10
 NoNewPrivileges=true

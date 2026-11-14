@@ -18,6 +18,7 @@ def test_imports_share_only_the_private_embedding_cache_subdirectory():
     job=import_job(batch,IMAGE);pod=job['spec']['template']['spec'];container=pod['containers'][0]
     env={row['name']:row.get('value') for row in container['env']}
     assert env['EMBEDDING_CACHE_PATH']=='/indexing-state/embeddings.sqlite'
+    assert env['EMBEDDING_BATCH_SIZE']=='8' and env['EMBEDDING_BATCH_CONCURRENCY']=='4'
     assert {'name':'staging','mountPath':'/indexing-state','subPath':'indexing-state'} in container['volumeMounts']
     assert container['volumeMounts'][0]['readOnly'] and pod['securityContext']['runAsUser']==10001
 
@@ -158,7 +159,7 @@ def test_import_job_only_mounts_staging_readonly_and_separate_indexing_secrets()
     batch={'id':'a'*32,'manifest_sha256':'b'*64}
     spec=import_job(batch,IMAGE)['spec']['template']['spec']
     assert not spec['automountServiceAccountToken']
-    assert next(row['value'] for row in spec['containers'][0]['env'] if row['name']=='EMBEDDING_URL')=='http://nomic-embeddings-rtx3080.eqarchives-es.svc.cluster.local:8080'
+    assert next(row['value'] for row in spec['containers'][0]['env'] if row['name']=='EMBEDDING_URL')=='http://cuda-batch-inference.eqarchives-es.svc.cluster.local:8080'
     mounts=spec['containers'][0]['volumeMounts']
     assert mounts[0]['readOnly'] and mounts[1]['readOnly']
     assert mounts[2]['subPath']=='enrichment' and mounts[2]['mountPath']=='/enrichment'
