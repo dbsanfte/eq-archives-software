@@ -301,6 +301,7 @@ class Model:
                 ]
             )
 
+        stream = t.cuda.current_stream().cuda_stream
         for i, row in enumerate(self.layers):
             dim = (512 if i % 6 == 5 else 256) if self.gemma else 128
             kv = (1 if i % 6 == 5 else 2) if self.gemma else 8
@@ -344,7 +345,7 @@ class Model:
                 blocks = C.c_int()
                 status = lib.launch_layer(
                     C.byref(args),
-                    t.cuda.current_stream().cuda_stream,
+                    stream,
                     C.byref(blocks),
                     block_limit() if block_limit else 0,
                 )

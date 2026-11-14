@@ -22,7 +22,16 @@ PROFILES = {
         "MIN_BLOCKS": 2,
         "FUSED_ATTENTION": 1,
     },
-    "small": {"TILE_M": 32, "TILE_N": 32, "TILE_K": 64, "THREAD_WARPS": 4},
+    "small": {
+        "TILE_M": 32,
+        "TILE_N": 64,
+        "TILE_K": 32,
+        "THREAD_WARPS": 4,
+        "MODEL_KIND": 2,
+        "USE_CUTLASS": 1,
+        "CUTLASS_K": 64,
+        "CUTLASS_STAGES": 3,
+    },
 }
 
 
