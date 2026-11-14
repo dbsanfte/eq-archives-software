@@ -286,14 +286,14 @@ class Archive(Catalog):
 
     async def search_archive(self, query: str = "", filters: ResearchFilters | None = None,
                              offset: int = 0, limit: int = 20, sort: SortOrder = "relevance", group_by: GroupBy = "documents",
-                             hybrid: bool = False) -> ResearchPage:
+                             hybrid: bool = True) -> ResearchPage:
         if self.requests.locked():
             raise ToolError("Archive research is busy. Please retry shortly.")
         async with self.requests:
             limit = min(limit, MAX_RESEARCH_RESULTS - offset)
             retrieval, retrieval_note = await self.research_retrieval(query, filters or ResearchFilters(), sort, hybrid)
-            # Keyword research retains the already deployed ranking policy. The
-            # calibrated wider/matching-passage policy is opt-in on this tool.
+            # Explicit keyword-only research retains its former ranking policy.
+            # Hybrid research uses the calibrated wider/matching-passage policy.
             rank_window, passage_mode = (RERANK_WINDOW, None) if hybrid else (20, 'legacy')
             if group_by != "documents":
                 return await self.grouped_page(query, filters or ResearchFilters(), offset, limit, sort, group_by,

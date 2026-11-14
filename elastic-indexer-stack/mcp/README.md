@@ -12,7 +12,7 @@ there is no official OpenAI directory submission or publisher account dependency
 | --- | --- | --- |
 | `search` | `query`: 1–1000 characters | `results`: up to ten `{id, title, url}` sources |
 | `fetch` | `id`: exact search result ID, 1–2048 characters | `{id, title, text, url, metadata}` |
-| `search_archive` | `query`, `filters`, `offset`, `limit`, `sort`, `group_by`, `hybrid` | Paged keyword or opt-in hybrid results with provenance, bounded totals and `next_offset` |
+| `search_archive` | `query`, `filters`, `offset`, `limit`, `sort`, `group_by`, `hybrid` | Paged hybrid results by default; `hybrid: false` selects keyword-only research. Includes provenance, bounded totals and `next_offset` |
 | `list_sources` | `source_type`, `query`, `filters`, `after`, `limit` | Exact source values and matching document counts, with `next_after` |
 | `list_sites` | `query`, `filters`, `limit` (1–50) | Newest matching website domains, index/capture dates and exact matching counts |
 | `list_captures` | `id`, `group_by` (`page`/`discussion`), `offset`, `limit` | Exact dated IDs for a page or verified discussion, newest first |
@@ -46,8 +46,8 @@ Use `search_archive` to investigate beyond the first ten results.
 
 Production portal relevance searches and MCP `search` rerank the first **60**
 candidates with the private Qwen3-Reranker-0.6B Q8_0 CUDA service. `search` retrieves
-60 and returns the best ten. `search_archive(hybrid=True)` uses the same window;
-its keyword default retains the previous 20-result window and word-overlap passage
+60 and returns the best ten. `search_archive` defaults to hybrid retrieval and uses
+the same window; explicit `hybrid: false` retains the previous 20-result window and word-overlap passage
 selector. Research results are reranked before slicing pages, after page/discussion
 grouping when requested. Date sorts and empty-query browsing retain their original order.
 Filters, quoted phrases, exclusions, exact IDs and capture representatives remain
@@ -183,9 +183,9 @@ curation imports are deployed.
 
 ## Filtered research and source discovery
 
-`search_archive` defaults to keyword matching, including the same phrase/operator
-rules, without an embedding request. Set `hybrid: true` for conceptual searches
-that can find relevant sources without exact word matches. Every semantic branch
+`search_archive` defaults to hybrid keyword/semantic matching, so conceptual searches
+can find relevant sources without exact word matches. Set `hybrid: false` for
+keyword-only research without an embedding request. Every semantic branch
 receives the same resolved source, URL/board, availability and independent date
 filters as the keyword branch, plus the embedding model restriction. Explicit
 phrases/operators, empty queries and date sorts retain keyword matching even when

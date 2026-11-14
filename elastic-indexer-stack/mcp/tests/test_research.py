@@ -35,7 +35,7 @@ def test_pages_beyond_ten_have_disjoint_ids_and_preserve_provenance():
         archive = make_archive(es, never_embed)
         ids, offset = [], 0
         while offset is not None:
-            page = await archive.search_archive("cyclops", offset=offset, limit=10)
+            page = await archive.search_archive("cyclops", offset=offset, limit=10, hybrid=False)
             ids.extend(result.id for result in page.results)
             assert page.total.value == 25 and page.total.relation == "eq"
             assert page.results[0].metadata["estimated_publication_date"] == "1999-11-05"

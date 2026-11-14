@@ -163,14 +163,14 @@ def test_mcp_search_and_research_pages_share_selected_head_without_duplicates_or
         archive, calls = fixture_archive()
         found = await archive.search('bard')
         assert [r.id for r in found.results] == [str(n) for n in range(RERANK_WINDOW-1,RERANK_WINDOW-11,-1)]
-        pages = [await archive.search_archive('bard', offset=offset, limit=min(10,RERANK_WINDOW+5-offset), hybrid=True)
+        pages = [await archive.search_archive('bard', offset=offset, limit=min(10,RERANK_WINDOW+5-offset))
                  for offset in range(0,RERANK_WINDOW+5,10)]
         assert [r.id for page in pages for r in page.results] == [str(n) for n in range(RERANK_WINDOW-1,-1,-1)]+list(map(str,range(RERANK_WINDOW,RERANK_WINDOW+5)))
         before = len([c for c in calls if c['_source']==['title']])
         date = await archive.search_archive('bard', limit=10, sort='capture_date_desc')
         assert date.results[0].id == '0'
         assert len([c for c in calls if c['_source']==['title']]) == before
-        grouped = await archive.search_archive('bard', limit=10, group_by='discussion', hybrid=True)
+        grouped = await archive.search_archive('bard', limit=10, group_by='discussion')
         assert [r.id for r in grouped.results] == list(map(str,range(RERANK_WINDOW-1,RERANK_WINDOW-11,-1)))
         await archive.close()
     run(scenario())
@@ -395,13 +395,13 @@ def test_failed_batch_cancels_inflight_siblings_before_releasing_capacity():
     run(scenario())
 
 
-def test_default_keyword_research_retains_legacy_top20_and_paging():
+def test_explicit_keyword_research_retains_legacy_top20_and_paging():
     async def scenario():
         archive,calls=fixture_archive()
-        page=await archive.search_archive('bard',limit=25)
+        page=await archive.search_archive('bard',limit=25,hybrid=False)
         assert [r.id for r in page.results]==list(map(str,range(19,-1,-1)))+list(map(str,range(20,25)))
         assert calls[1]['_source']==FIELDS and len(calls[1]['query']['ids']['values'])==20
-        grouped=await archive.search_archive('bard',group_by='discussion',limit=25)
+        grouped=await archive.search_archive('bard',group_by='discussion',limit=25,hybrid=False)
         assert [r.id for r in grouped.results]==[r.id for r in page.results]
         assert 'knn' not in calls[0]
         await archive.close()

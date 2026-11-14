@@ -362,6 +362,9 @@ research questions, not a sample of production traffic.
 Its `current-r1` control explicitly preserves the preceding deployment's top-20
 word-overlap policy and keyword-only filtered research. After this follow-up ships,
 that control is historical; it must not be relabelled as a later live baseline.
+MCP research subsequently enabled this validated hybrid policy by default; callers
+can retain keyword-only research with `hybrid: false`. The experiment's opt-in labels
+below describe its original comparison, not the current tool default.
 
 Collection uses the actual portal request builder and grouping identity, the
 MCP keyword/hybrid builders, one read-only PIT limited to 15 minutes, and the full

@@ -38,7 +38,7 @@ def test_hybrid_prefilters_include_every_independent_scope_and_date_window():
             publication_to="2001-12-31",
             url_scopes=[URLScope(url="http://example.org/guild/", kind="directory")],
         )
-        page = await archive.search_archive("song timing", filters=filters, hybrid=True)
+        page = await archive.search_archive("song timing", filters=filters)
         body = calls[0]
         assert "Hybrid keyword/semantic" in page.note and len(body["knn"]) == 4
         for branch in body["knn"]:
@@ -60,13 +60,13 @@ def test_hybrid_prefilters_include_every_independent_scope_and_date_window():
 @pytest.mark.parametrize(
     "args",
     [
-        {},
-        {"hybrid": True, "query": '"song timing" -cleric'},
-        {"hybrid": True, "query": ""},
-        {"hybrid": True, "sort": "capture_date_desc"},
+        {"hybrid": False},
+        {"query": '"song timing" -cleric'},
+        {"query": ""},
+        {"sort": "capture_date_desc"},
     ],
 )
-def test_default_constraints_empty_queries_and_date_sort_never_embed(args):
+def test_keyword_opt_out_constraints_empty_queries_and_date_sort_never_embed(args):
     def never(request):
         raise AssertionError("Unused embedding")
 
@@ -79,7 +79,7 @@ def test_hybrid_grouping_and_metadata_directories_keep_their_contracts():
     async def scenario():
         archive, calls = research_archive()
         page = await archive.search_archive(
-            "bard songs", hybrid=True, group_by="discussion"
+            "bard songs", group_by="discussion"
         )
         assert page.group_by == "discussion" and page.results[0].id == HIT["_id"]
         assert "knn" in calls[0] and calls[0]["size"] == 1000
@@ -102,14 +102,14 @@ def test_fallback_stays_keyword_across_pages_then_recovers_after_plan_expiry():
             )
 
         archive, calls = research_archive(embed)
-        first = await archive.search_archive("bard songs", hybrid=True)
+        first = await archive.search_archive("bard songs")
         archive.cooldown_until = 0
-        second = await archive.search_archive("bard songs", hybrid=True, offset=1)
+        second = await archive.search_archive("bard songs", offset=1)
         assert "fallback" in first.note and second.note == first.note
         assert len(attempts) == 1 and all("knn" not in c for c in calls)
         key = next(iter(archive.research_plans))
         archive.research_plans[key] = (0, None)
-        recovered = await archive.search_archive("bard songs", hybrid=True)
+        recovered = await archive.search_archive("bard songs")
         assert "Hybrid keyword/semantic" in recovered.note and "knn" in calls[-1]
         assert len(attempts) == 2
         await archive.close()
@@ -156,7 +156,7 @@ def test_plan_cache_is_bounded_and_filters_have_independent_plans():
     run(scenario())
 
 
-def test_hybrid_is_an_additive_strict_boolean_in_the_public_schema():
+def test_public_hybrid_default_is_strict_and_keyword_opt_out_remains_available():
     archive, calls = research_archive()
     with TestClient(create_app(archive)) as client:
         tool = next(
@@ -164,7 +164,7 @@ def test_hybrid_is_an_additive_strict_boolean_in_the_public_schema():
             for t in rpc(client, "tools/list").json()["result"]["tools"]
             if t["name"] == "search_archive"
         )
-        assert tool["inputSchema"]["properties"]["hybrid"]["default"] is False
+        assert tool["inputSchema"]["properties"]["hybrid"]["default"] is True
         for bad in ("yes", 1, {}, []):
             result = rpc(
                 client,
@@ -179,10 +179,18 @@ def test_hybrid_is_an_additive_strict_boolean_in_the_public_schema():
         result = rpc(
             client,
             "tools/call",
-            {"name": "search_archive", "arguments": {"query": "bard", "hybrid": True}},
+            {"name": "search_archive", "arguments": {"query": "bard"}},
         ).json()["result"]
         assert json.loads(result["content"][0]["text"]) == result["structuredContent"]
         assert "knn" in calls[0]
+        assert "Hybrid keyword/semantic" in result["structuredContent"]["note"]
+        keyword = rpc(
+            client,
+            "tools/call",
+            {"name": "search_archive", "arguments": {"query": "bard", "hybrid": False}},
+        ).json()["result"]
+        assert "knn" not in calls[-1]
+        assert "Keyword results." in keyword["structuredContent"]["note"]
 
 
 def test_hybrid_validates_combined_text_budget_before_embedding():

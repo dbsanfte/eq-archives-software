@@ -428,10 +428,11 @@ RRF head (constant 60, k=100/candidates=500), groups before top-60 Qwen, and app
 an ID-deduplicated lexical tail within 1,000 records. Cache both successful and
 fallback heads per query/scope; retain union facets, rapid-typing/stale-response
 handling and bounded sequential requests. MCP `search` keeps four vector branches
-at k=50/candidates=250 with boost 30. Research defaults to keyword retrieval and
-the former top-20 word-overlap selector; strict opt-in `hybrid=true` copies all
-resolved filters into every vector branch and uses the top-60 matching-passage
-policy. Cache successful and fallback research plans for stable paging. The bounded
+at k=50/candidates=250 with boost 30. Research defaults to hybrid retrieval, copying
+all resolved filters into every vector branch and using the top-60 matching-passage
+policy. Explicit strict `hybrid=false` retains keyword retrieval and the former
+top-20 word-overlap selector. Phrases/operators, empty queries and date sorts remain
+lexical. Cache successful and fallback research plans for stable paging. The bounded
 browser grammar permits at most k=100/candidates=500 per branch, with all previous
 vector, filter, admission and response limits intact. Do not copy this ranking
 change into indexing jobs or expose arbitrary fusion/ES DSL to public callers.
