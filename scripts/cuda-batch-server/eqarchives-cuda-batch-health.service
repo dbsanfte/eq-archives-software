@@ -1,0 +1,8 @@
+[Unit]
+Description=Check the independent CUDA batch inference service
+After=eqarchives-cuda-batch.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/eqarchives-cuda-batch-service/service.py watch
+TimeoutStartSec=30

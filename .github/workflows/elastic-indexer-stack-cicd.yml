@@ -37,6 +37,8 @@ jobs:
           python3 scripts/test-curation-operations.py
           python3 -m unittest discover -s scripts/embedding-service -v
           python3 -m unittest discover -s scripts/search-reranker -v
+          python3 -m unittest discover -s scripts/cuda-batch-server -v
+          bash -n scripts/cuda-batch-server/install.sh
           bash -n scripts/search-reranker/install.sh scripts/search-reranker/install-tunnel.sh
           bash -n scripts/embedding-service/install.sh
           python3 -m unittest discover -s scripts/reindex-recovery -v
