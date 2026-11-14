@@ -4,6 +4,8 @@ HYBRID_K = 50
 HYBRID_CANDIDATES = 250
 HYBRID_BOOST = 30
 BROWSER_VECTOR_BOOST = 10
+RERANK_WINDOW = 60
+PASSAGE_MODE = "semantic"
 
 
 def hybrid_branches(vector, model):

@@ -32,7 +32,7 @@ def check(base, mcp_base=None):
     assert call(path+'?scroll=10s',{'size':0})[0]==400,'Scroll contexts remain public'
     assert call(path+'/unexpected',{'size':0})[0]==404,'Search path is not exact'
     model='embeddinggemma-2-768-v1'
-    for payload in ({'query':'x','ids':['a']*21}, {'query':'x','ids':['a','b'],'url':'http://example.org'},
+    for payload in ({'query':'x','ids':['a']*21}, {'query':'x','ids':[str(n) for n in range(61)]}, {'query':'x','ids':['a','b'],'url':'http://example.org'},
                     {'query':'x','ids':['a','b'],'script':'return 1'}, {'query':'x '*101,'ids':['a','b']}):
         assert call('/elasticsearch/eq-archive/_rerank',payload)[0] == 400
     assert call('/openai/v1/embeddings',{'model':model,'input':['task: search result | query: a']*2})[0]==400

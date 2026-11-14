@@ -116,6 +116,13 @@ class Fixture(BaseHTTPRequestHandler):
             assert len(body["knn"]) == 4
             assert any(branch["field"] == "image_vector" for branch in body["knn"])
             assert all(len(item["query_vector"]) == 768 for item in body["knn"])
+            # The hybrid research leg must carry every exact restriction before
+            # nearest-neighbour selection, plus the model guard when present.
+            restrictions = body.get('query', {}).get('bool', {}).get('filter', [])
+            if restrictions:
+                assert all(branch.get('filter') in (restrictions,
+                    restrictions+[{'term':{'embedding_model':'embeddinggemma-2-768-v1'}}]) for branch in body['knn'])
+                hits = [d for d in hits if all(matches(c,d) for c in restrictions)]
         else:
             hits = [d for d in hits if matches(body["query"], d)]
             for sort in body.get("sort", [])[:1]:

@@ -12,7 +12,7 @@ there is no official OpenAI directory submission or publisher account dependency
 | --- | --- | --- |
 | `search` | `query`: 1–1000 characters | `results`: up to ten `{id, title, url}` sources |
 | `fetch` | `id`: exact search result ID, 1–2048 characters | `{id, title, text, url, metadata}` |
-| `search_archive` | `query`, `filters`, `offset`, `limit`, `sort`, `group_by` | Paged keyword results with provenance, bounded totals and `next_offset` |
+| `search_archive` | `query`, `filters`, `offset`, `limit`, `sort`, `group_by`, `hybrid` | Paged keyword or opt-in hybrid results with provenance, bounded totals and `next_offset` |
 | `list_sources` | `source_type`, `query`, `filters`, `after`, `limit` | Exact source values and matching document counts, with `next_after` |
 | `list_sites` | `query`, `filters`, `limit` (1–50) | Newest matching website domains, index/capture dates and exact matching counts |
 | `list_captures` | `id`, `group_by` (`page`/`discussion`), `offset`, `limit` | Exact dated IDs for a page or verified discussion, newest first |
@@ -37,31 +37,45 @@ Natural-language searches can find related material, not only exact words.
 Their vector branches use `k=50`, `num_candidates=250` and `boost=30`, with no
 similarity cutoff. These are the frozen MCP tuning winner from the
 [November 2026 full-index calibration](../../scripts/search-benchmark/README.md#november-2026-calibration).
-The portal uses a separately validated RRF policy; both retain pure Qwen top-20
-reranking. The evaluation uses Luna model judgments, not human validation.
+The portal uses a separately validated RRF policy. The subsequent
+[passage/window calibration](../../scripts/search-benchmark/README.md#passage-and-candidate-window-calibration)
+selects matching passages and a 60-result reranking window for both interfaces.
+The evaluations use Luna model judgments, not human validation.
 The original `search(query)` and `fetch(id)` input/output contracts remain unchanged.
 Use `search_archive` to investigate beyond the first ten results.
 
-Production relevance searches rerank the first **20** candidates with the private
-Qwen3-Reranker-0.6B Q8_0 CUDA service. `search` retrieves 20 and returns the best ten;
-`search_archive` reranks before slicing pages, after page/discussion grouping when
-requested. Date sorts and empty-query browsing retain their original order.
+Production portal relevance searches and MCP `search` rerank the first **60**
+candidates with the private Qwen3-Reranker-0.6B Q8_0 CUDA service. `search` retrieves
+60 and returns the best ten. `search_archive(hybrid=True)` uses the same window;
+its keyword default retains the previous 20-result window and word-overlap passage
+selector. Research results are reranked before slicing pages, after page/discussion
+grouping when requested. Date sorts and empty-query browsing retain their original order.
 Filters, quoted phrases, exclusions, exact IDs and capture representatives remain
 part of retrieval; reranking only permutes its selected candidates.
 
 The browser calls the fixed POST `/elasticsearch/eq-archive/_rerank` operation with
-`{query, ids}` after grouping. It accepts 1–20 unique exact IDs and the same analyzed
+`{query, ids}` after grouping. It accepts 1–60 unique exact IDs and the same analyzed
 query budget as search, and returns only `{ids, status}`. No model URL, source text,
 scoring options or Elasticsearch clauses are accepted. It shares browser/API
 admission, upload/deadline limits and the read-only ES client. Supporting source
-projections are fixed and exclude vectors. One selected passage per candidate is
-scored with the pinned local Qwen tokenizer and a complete 768-token prompt budget.
+projections are fixed and exclude vectors. ID-scoped nested `inner_hits` select
+matching passages, retaining their titles and attribution. Semantic selection
+reuses the query embedding already cached by retrieval; it never starts a new
+embedding request. Lexical matches, then the first passage, supply the fallback.
+Records without passages use extracted reader text or OCR. Each selected
+passage is scored with the pinned local Qwen tokenizer and a complete 768-token prompt budget.
 An 8,192-character preparation bound applies to scoring excerpts; readers retain
 full text. Images without text keep their slots.
 
-Scoring has one process-wide slot, a three-second total deadline, a 15-second
+Scoring permits two concurrent searches and four shared concurrent scoring requests,
+with a three-second total deadline per search, a 15-second
 outage cooldown, 128 KiB request / 32 KiB response bounds and strict model/score/index
-validation. Failures preserve retrieval order. A bounded 128-entry, five-minute
+validation. Production selects one matching passage per candidate. The internal
+evaluation path permits at most two passages per candidate and 120 prompts;
+identical complete prompts share inference. Concurrent batches contain at most 20
+prompts and all must succeed before any result moves. Identical in-flight searches
+share one result; cancelling a waiter does not cancel its owner. Failure or
+cancellation cancels and drains sibling requests before releasing capacity. Failures preserve retrieval order. A bounded 128-entry, five-minute
 cache retains successful **and fallback** orders for the same query/ordered IDs;
 the browser retains that order for its current search. This stabilizes paging
 through outages, but the live index and expired caches are not snapshots.
@@ -169,12 +183,21 @@ curation imports are deployed.
 
 ## Filtered research and source discovery
 
-`search_archive` uses keyword matching, including the same phrase/operator rules,
-without semantic broadening or embedding requests. Empty `query` browses the
-filtered archive. The filter/date/scope contract is described above.
+`search_archive` defaults to keyword matching, including the same phrase/operator
+rules, without an embedding request. Set `hybrid: true` for conceptual searches
+that can find relevant sources without exact word matches. Every semantic branch
+receives the same resolved source, URL/board, availability and independent date
+filters as the keyword branch, plus the embedding model restriction. Explicit
+phrases/operators, empty queries and date sorts retain keyword matching even when
+hybrid is requested. Empty `query` browses the filtered archive.
+
+The returned `note` states the retrieval mode. If embeddings are unavailable, a
+bounded 64-entry cache retains the keyword fallback for that query/filter pair for
+up to five minutes, keeping concurrent and subsequent pages consistent through
+recovery. Source directories and capture histories remain keyword-only.
 
 `limit` defaults to 20 and allows 1–50 results; `offset` defaults to zero.
-Pass `next_offset` with unchanged query/filters/sort/group_by/limit to continue.
+Pass `next_offset` with unchanged query/filters/sort/group_by/limit/hybrid to continue.
 Sorts accept `relevance` and ascending/descending capture, estimated publication
 or indexing dates.
 Unknown dates sort last. Archive IDs break ties; a fixed replica preference and

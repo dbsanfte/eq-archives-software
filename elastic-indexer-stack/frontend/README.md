@@ -284,8 +284,11 @@ rebuild and every value is visible to site visitors.
 Semantic relevance search uses a fixed RRF head from the first 100 keyword hits
 and first 100 source-vector hits (`text.vector`, `k=100`, `num_candidates=500`).
 RRF uses rank constant 60; capture/discussion grouping happens next, followed by
-Qwen reranking of the first 20 representatives. See the
-[full-index calibration](../../scripts/search-benchmark/README.md#november-2026-calibration).
+Qwen reranking of the first 60 representatives, using a matching source passage
+for each. See the [retrieval calibration](../../scripts/search-benchmark/README.md#november-2026-calibration)
+and [passage/window follow-up](../../scripts/search-benchmark/README.md#passage-and-candidate-window-calibration).
+The API submits scoring batches concurrently, under its fixed deadline; fallback
+orders remain cached just like successful rankings.
 `FusedSearch.js` caches the head per search context, then appends later lexical
 results without repeating IDs, within the existing 1,000-record window. A small
 hybrid metadata request retains facets for the keyword/source-vector union.

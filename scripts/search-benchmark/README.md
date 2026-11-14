@@ -350,3 +350,152 @@ constraints/date sorts retain their native paths. The collector now exports the
 portal policy with its frontend contract and resolves `current` per interface;
 future runs must use their own recorded baseline rather than treating this
 historical comparison as their current deployment.
+
+## Passage and candidate-window calibration
+
+`passage_calibration.py` isolates three changes from the deployed retrieval
+weights: matching passage selection, a 20/40/60-result reranking head, and opt-in
+hybrid retrieval for filtered MCP research. `passage-queries.json` contains 200
+fresh, authored queries with a stratified 100/100 tune/validation split, including
+40 date/source scopes, exact phrases and Japanese queries. These are synthetic
+research questions, not a sample of production traffic.
+Its `current-r1` control explicitly preserves the preceding deployment's top-20
+word-overlap policy and keyword-only filtered research. After this follow-up ships,
+that control is historical; it must not be relabelled as a later live baseline.
+
+Collection uses the actual portal request builder and grouping identity, the
+MCP keyword/hybrid builders, one read-only PIT limited to 15 minutes, and the full
+index. It freezes up to 60 candidates per surface plus complete source text and
+ID-scoped semantic/lexical nested evidence. The portal keeps its existing 100-hit
+RRF legs and bounded lexical continuation. MCP's keyword default is the baseline;
+filtered hybrid alternatives copy every restriction into every vector branch.
+The public grammar never accepts nested queries or arbitrary ranking options.
+
+The controls use the former word-overlap passage selector. Alternatives score
+one nearest passage or two complementary semantic/lexical passages; the latter
+use the maximum complete Qwen score. Titles and attribution stay attached.
+Identical complete prompts share inference. All variants are permutations of
+supported slots inside their chosen head, with the tail unchanged. Ranking is
+serial and can resume from exact query/prompt/model score hashes. Raw sources,
+vectors, judgments and generated results remain outside Git.
+
+```bash
+PYTHONPATH=elastic-indexer-stack/mcp:scripts/search-benchmark \
+python scripts/search-benchmark/passage_calibration.py collect \
+  --out /private/calibration/passages \
+  --queries scripts/search-benchmark/passage-queries.json \
+  --credentials /private/read-credentials.json \
+  --es-url https://private-es:9200 --es-ca-file /private/ca.pem \
+  --embedding-url http://private-embeddings:8080/v1 \
+  --embedding-cache /private/calibration/embedding-cache
+
+PYTHONPATH=elastic-indexer-stack/mcp:scripts/search-benchmark \
+python scripts/search-benchmark/passage_calibration.py rank \
+  --run /private/calibration/passages \
+  --tokenizer /private/qwen-tokenizer.json --key /private/reranker-key
+```
+
+Use the existing explicit `calibration_judge.py`, `calibration_report.py freeze`
+and `validate` commands above. All runs in the same calibration must share one
+parent directory: `luna-ledger.sqlite3` is stored there and includes previous
+spend. Moving to a new directory does not authorize a new budget. Luna requests default
+to three workers; `--workers` permits 1–8 with the same atomic reservation cap.
+One format-only retry is allowed for a settled malformed response, with a separate
+charged receipt and constrained slot count. Uncertain transport attempts cannot
+be silently retried, and a resumed run reuses valid receipts without new charges.
+
+For deployment selection, save `latency.jsonl` before freezing: one record for
+each of the nine passage/window variants on the same 20 tuning queries, containing
+`query_id`, `mode`, `window`, `concurrent: 2`, `status` and `seconds`. Probe the real API client with
+two simultaneous searches, cold reranking caches, complete 60-candidate lists and the existing three-second
+deadline. Each alternative requires at least 19/20 applied results and p95 at most
+2.75 seconds. The unchanged baseline remains eligible. Freeze selects the best
+Luna tuning NDCG among eligible variants independently for each interface, then
+hashes the latency receipts alongside the ranking/source evidence. Validation
+judgments are opened only after that selection; they cannot select another winner.
+
+Deploy a frozen alternative only if its held-out comparison also improves on the
+baseline. A failed validation keeps the existing policy for that interface;
+do not pick another variant using the opened validation set. Report absolute
+NDCG/P@10, paired intervals, unjudged exclusions, scope-specific results and actual
+shared-ledger spend. These are model judgments over a pooled candidate set, not
+human validation or corpus-wide recall measurements.
+
+### November 2026 passage/window experiment
+
+The follow-up snapshot contains **4,873,547 records** on Elasticsearch 8.19.24:
+3,791,034 with v10 passages, 703,540 with v12 and 378,973 without a text passage
+marker. The pool contains 20,411 distinct documents. Complete readers are judged;
+sources above the 900 KB judging bound remain explicitly unjudged. Comparisons
+exclude queries whose top ten contain unjudged sources, rather than giving those
+sources a fabricated grade. NDCG comparisons use the same scorable queries for
+each variant; a pool with no graded relevance has no defined NDCG.
+
+Tuning selected **one semantic passage, top 60**, independently for both interfaces.
+The table shows tuning NDCG on the common 92 portal / 99 MCP queries. Filtered MCP
+alternatives opt into hybrid retrieval; the baseline retains keyword research.
+
+| Passage / head | Portal NDCG@10 | MCP NDCG@10 | Concurrent p95 | Applied / 20 | Eligible |
+| --- | ---: | ---: | ---: | ---: | --- |
+| Historical baseline, overlap / 20 | 0.5527 | 0.5487 | — | — | Yes |
+| Overlap / 20 | 0.5527 | 0.5982 | 1.022 s | 20 | Yes |
+| Overlap / 40 | 0.5711 | 0.6424 | 1.955 s | 20 | Yes |
+| Overlap / 60 | 0.5862 | 0.6440 | 2.674 s | 19 | Yes |
+| Semantic / 20 | 0.5822 | 0.6218 | 1.023 s | 20 | Yes |
+| Semantic / 40 | 0.6123 | 0.6747 | 1.873 s | 20 | Yes |
+| **Semantic / 60** | **0.6290** | **0.6793** | **2.676 s** | **19** | **Yes** |
+| Paired / 20 | 0.5891 | 0.6173 | 1.435 s | 20 | Yes |
+| Paired / 40 | 0.6245 | 0.6693 | 2.823 s | 19 | No |
+| Paired / 60 | 0.6414 | 0.6782 | 3.004 s | 12 | No |
+
+Latency probes include passage retrieval and concurrent scoring, with two searches
+in flight and cold ranking caches. They reuse valid query embeddings and therefore
+exclude embedding generation and the initial candidate retrieval. The selected
+policy's median is 1.615 seconds; its one timeout preserved retrieval order. Twenty
+queries provide a small operational sample, not a production traffic percentile.
+The API permits two searches and four shared scoring batches concurrently, with
+at most 20 passages per batch and the unchanged three-second deadline. It does not
+serialize runtime scoring. An isolated eight-slot CUDA experiment showed no
+meaningful throughput gain over the existing two GPU slots, so the serving model,
+weights and GPU configuration remain unchanged.
+
+Runtime verification matched all 360 formatted scoring inputs against frozen
+evidence for six queries. Three built-portal searches against the live archive
+verified exact grouped heads, disjoint pages, back navigation and mobile layout;
+first-page times were 4.91–6.88 seconds including browser startup, query embeddings,
+candidate retrieval, facets and rendering. Three MCP `search` checks returned in
+1.33–1.58 seconds. Date- and domain-filtered hybrid research preserved every scope
+and stable paging. These are functional probes, not latency distributions.
+
+Held-out validation passed the predeclared improvement gate for both interfaces.
+The winner was frozen before judging the 100 validation questions. The following
+metrics compare the same scorable questions within each row; relevance grades are
+**Luna model judgments, not human validation**.
+
+| Interface / validation scope | Paired queries | NDCG@10: baseline → selected | Useful P@10: baseline → selected | Paired NDCG change, bootstrap 95% interval |
+| --- | ---: | --- | --- | --- |
+| Portal, all scopes | 91 | 0.5350 → **0.5803** (+8.5%) | 0.6220 → **0.6923** | +0.0453 [0.0148, 0.0750] |
+| MCP, all scopes including opt-in filtered research | 100 | 0.5632 → **0.6877** (+22.1%) | 0.6110 → **0.7480** | +0.1245 [0.0728, 0.1810] |
+| MCP unfiltered `search` | 80 | 0.5840 → **0.6638** (+13.7%) | 0.6363 → **0.7300** | +0.0798 [0.0262, 0.1341] |
+| MCP filtered `search_archive(hybrid=True)` | 20 | 0.4799 → **0.7831** (+63.2%) | 0.5100 → **0.8200** | +0.3032 [0.1621, 0.4486] |
+
+The overall portal average improved, but the 20 scoped portal questions were
+essentially flat in NDCG (0.5311 → 0.5350) and worse in P@10 (0.605 → 0.575).
+Its ten domain-filtered questions regressed from 0.4722 to 0.4407 NDCG, with a
+wide paired interval [-0.1385, 0.0822]. Across the 91 comparable portal questions,
+58 improved and 25 worsened; across MCP's 100, 63 improved and 36 worsened. The
+remaining questions tied. These subgroup observations do not retune the frozen
+winner or justify a claim that every query improved. Future scoped-search changes
+need fresh validation questions.
+
+Twelve tuning and eleven validation query/source pairs exceeded the complete-source
+judging bound. Nine validation portal comparisons consequently have unjudged
+top-ten sources and are excluded; all 100 MCP comparisons are complete. The
+generated evidence, complete readers, judgments and result receipts remain private.
+The shared ledger totals **$10.892068 estimated**, including the prior $1.252938
+retrieval calibration: $9.639130 for this follow-up. Its 4,020 total requests used
+105,516,857 input and 680,764 output tokens, including two charged format retries;
+no uncertain reservations remain. The original combined $20 cap was retained.
+No indexing Job specification, archive document or mapping was changed by this
+evaluation. Authored questions, model grading, pooled ideals and the mixture of
+passage-policy versions limit generalization to future traffic and corpus updates.

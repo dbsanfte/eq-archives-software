@@ -2,6 +2,7 @@
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
 from datetime import datetime, timezone
 import json
 import math
@@ -99,6 +100,66 @@ class Ledger:
                 if s
             ),
         }
+
+
+def request_judgment(payload, key):
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *a, **k):
+            return None
+
+    request = urllib.request.Request(
+        "https://api.openai.com/v1/responses",
+        data=json.dumps(payload).encode(),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": "Bearer " + key,
+        },
+    )
+    try:
+        with urllib.request.build_opener(NoRedirect).open(request, timeout=120) as r:
+            raw = r.read(2 * 1024 * 1024 + 1)
+            if len(raw) > 2 * 1024 * 1024:
+                raise b.BenchmarkError("Oversized judgment response")
+            response = json.loads(raw)
+    except Exception:
+        raise b.BenchmarkError(
+            "Luna request failed; its reservation is retained, credentials/upstream body omitted"
+        ) from None
+    return response
+
+
+def complete_judgment(ledger, identity, payload, key, size):
+    """One format-only retry; every response is charged and resumable separately."""
+    for attempt in range(2):
+        request_id = (
+            identity
+            if attempt == 0
+            else b.digest([identity, "format-retry-v1", attempt])
+        )
+        current = deepcopy(payload)
+        if attempt:
+            current["instructions"] += (
+                "\nReturn exactly one rating for each supplied slot, from 0 through "
+                + str(size - 1)
+                + ". Do not omit or repeat any slot."
+            )
+            schema = current["text"]["format"]["schema"]["properties"]["ratings"]
+            schema.update(minItems=size, maxItems=size)
+            schema["items"]["properties"]["slot"]["enum"] = list(range(size))
+        response = ledger.reserve(request_id, current)
+        if response is None:
+            response = request_judgment(current, key)
+            ledger.settle(request_id, response)
+        if response.get("model") != MODEL or response.get("service_tier") != "default":
+            raise b.BenchmarkError("Unexpected judging model or service tier")
+        try:
+            return response_ratings(response, size), attempt
+        except (b.BenchmarkError, KeyError, TypeError, ValueError):
+            if attempt:
+                raise b.BenchmarkError(
+                    "Luna grades remain invalid after one accounted format retry"
+                ) from None
+    raise AssertionError("Unreachable judgment state")
 
 
 def reusable_ratings(paths, queries, sources, signature):
@@ -229,37 +290,9 @@ def grade(args):
         identity = b.digest(
             [signature, q, [(id, sources[id]["source_sha256"]) for id, _ in docs]]
         )
-        response = ledger.reserve(identity, payload)
-        if response is None:
-
-            class NoRedirect(urllib.request.HTTPRedirectHandler):
-                def redirect_request(self, *a, **k):
-                    return None
-
-            request = urllib.request.Request(
-                "https://api.openai.com/v1/responses",
-                data=json.dumps(payload).encode(),
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": "Bearer " + key,
-                },
-            )
-            try:
-                with urllib.request.build_opener(NoRedirect).open(
-                    request, timeout=120
-                ) as r:
-                    raw = r.read(2 * 1024 * 1024 + 1)
-                    if len(raw) > 2 * 1024 * 1024:
-                        raise b.BenchmarkError("Oversized judgment response")
-                    response = json.loads(raw)
-            except Exception:
-                raise b.BenchmarkError(
-                    "Luna request failed; its reservation is retained, credentials/upstream body omitted"
-                ) from None
-            ledger.settle(identity, response)
-        if response.get("model") != MODEL or response.get("service_tier") != "default":
-            raise b.BenchmarkError("Unexpected judging model or service tier")
-        ratings = response_ratings(response, len(docs))
+        ratings, format_attempt = complete_judgment(
+            ledger, identity, payload, key, len(docs)
+        )
         result = []
         for row in ratings:
             id = docs[row["slot"]][0]
@@ -271,6 +304,7 @@ def grade(args):
                     "origin": "model",
                     "model": MODEL,
                     "grader_signature": signature,
+                    "format_retry": format_attempt,
                     "source_sha256": sources[id]["source_sha256"],
                     "query_sha256": b.digest(q),
                     "reviewed_at": datetime.now(timezone.utc).isoformat(),
@@ -280,7 +314,9 @@ def grade(args):
 
     output = root / f"ratings-{args.split}.jsonl"
     # Rewrite from durable per-attempt receipts; a resumed run never repeats paid work.
-    with output.open("w") as stream, ThreadPoolExecutor(max_workers=3) as executor:
+    with output.open("w") as stream, ThreadPoolExecutor(
+        max_workers=getattr(args, "workers", 3)
+    ) as executor:
         for (qid, doc), row in reused.items():
             if doc in selected[qid]:
                 stream.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -308,5 +344,6 @@ if __name__ == "__main__":
         p.add_argument("--" + name, required=True)
     p.add_argument("--split", choices=["tune", "validation"], required=True)
     p.add_argument("--max-usd", type=float, default=20)
+    p.add_argument("--workers", type=int, choices=range(1, 9), default=3)
     p.add_argument("--reuse-ratings", type=Path, action="append", default=[])
     grade(p.parse_args())

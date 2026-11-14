@@ -2,7 +2,7 @@
 
 The independent Qwen service runs on the RTX 3080 host's loopback
 `127.0.0.1:8083`, with its own API key and systemd unit. Public search and MCP use
-it through the bounded top-20 API described in the
+it through the bounded top-60 API described in the
 [MCP guide](../../elastic-indexer-stack/mcp/README.md). The PN50 test service is
 stopped; live query embeddings retain its Vulkan GPU. The optional Vulkan/CPU
 profiles remain available for isolated experiments.
