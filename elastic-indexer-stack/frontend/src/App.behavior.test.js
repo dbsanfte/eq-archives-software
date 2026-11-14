@@ -53,7 +53,7 @@ afterEach(() => jest.restoreAllMocks());
 test('exposes search results, date facets, advanced options, syntax help and scroll-to-top', () => {
   render(<App />);
   expect(getSearchConfig.mock.calls[0][0].current).toMatchObject({
-    enableSemanticSearch: true, k: 50, num_candidates: 250, boost: 10
+    enableSemanticSearch: true, k: 100, num_candidates: 500, boost: 10
   });
   expect(screen.getByRole('progressbar')).toBeInTheDocument();
   expect(screen.getByText('Sort results')).toBeInTheDocument();
@@ -61,7 +61,7 @@ test('exposes search results, date facets, advanced options, syntax help and scr
   expect(screen.getByText('domain')).toBeInTheDocument();
   expect(screen.queryByRole('button', { name: /Show (detailed|compact) cards/ })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Advanced...' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Neighbors: 50' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Neighbors: 100' }));
   expect(screen.getByRole('button', { name: 'Neighbors: 25' })).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Disable semantic search' }));
   expect(getSearchConfig.mock.calls[0][0].current.enableSemanticSearch).toBe(false);

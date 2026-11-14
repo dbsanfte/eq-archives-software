@@ -205,3 +205,148 @@ this diagnostic does **not** establish full-index HNSW recall or prove that a
 particular candidate count is sufficient. A larger isolated replica with exact
 reference rankings is the next step if approximate recall remains a concern.
 See [Elastic's kNN documentation](https://www.elastic.co/guide/en/elasticsearch/reference/8.17/knn-search.html).
+
+## Portal and MCP calibration with top-20 reranking
+
+`calibration.py` measures the browser adapter's **normalized** requests and MCP's
+hybrid `search` requests against one full-index PIT. The browser comparison groups
+captures/discussions before reranking; MCP `search` preserves its document results.
+This does not turn the filtered `search_archive` tool into a hybrid search.
+`calibration-queries.json` reserves 24 fresh validation questions separately from
+24 tuning questions; these are authored research needs, not sampled user traffic.
+`calibration-configs.json` fixes thirteen retrieval experiments. Each is evaluated
+with Qwen weights 0, 0.5, 0.75 and 1 in a reciprocal-position blend (constant 10).
+Only the same top-20 window can move; unsupported source positions remain fixed.
+The expanded suite compares independent ANN breadth, cosine floors of 0.50/0.65,
+`minimum_should_match: 2<-25%` on unconstrained lexical queries, and application
+RRF of keyword/source-vector ranks (100-record window, rank constant 60). RRF is
+computed privately and requires no subscription feature. Collection is bounded
+at 1,400 query/configuration/interface cases and 15 minutes for its PIT.
+The baseline is `current-r1`, including the already deployed Qwen reranker.
+
+Use the MCP Python environment and its pinned `tokenizers` dependency. Build the
+Node bridge and prepare read-only credentials as above. Keep all output private:
+
+```bash
+PYTHONPATH=elastic-indexer-stack/mcp python scripts/search-benchmark/calibration.py collect \
+  --out /private/calibration/retrieval \
+  --queries scripts/search-benchmark/calibration-queries.json \
+  --configs scripts/search-benchmark/calibration-configs.json \
+  --credentials /private/benchmark-credentials.json \
+  --es-url https://elasticsearch:9200 --es-ca-file /private/ca-bundle.pem \
+  --embedding-url http://embeddings:8080/v1 --archive-sha '<archive-commit-sha>'
+
+PYTHONPATH=elastic-indexer-stack/mcp python scripts/search-benchmark/calibration.py rank \
+  --run /private/calibration/retrieval --url http://private-reranker:8083 \
+  --tokenizer /private/qwen-tokenizer.json --key /private/reranker-key
+
+# Paid calls: require an explicitly authorized total dollar budget.
+python scripts/search-benchmark/calibration_judge.py \
+  --run /private/calibration/retrieval --split tune \
+  --key /private/openai-key --max-usd 20
+python scripts/search-benchmark/calibration_report.py freeze \
+  --run /private/calibration/retrieval
+python scripts/search-benchmark/calibration_judge.py \
+  --run /private/calibration/retrieval --split validation \
+  --key /private/openai-key --max-usd 20
+python scripts/search-benchmark/calibration_report.py validate \
+  --run /private/calibration/retrieval
+```
+
+The dollar cap is shared across both splits in the parent directory's private
+SQLite ledger. Requests reserve conservative input/output charges before sending;
+unknown outcomes retain their reservations and are not silently retried. Completed
+responses are cached durably, with actual token usage and estimated charges.
+Judging uses `gpt-6-luna`, low reasoning effort, 32,768 output tokens, structured
+results and `store: false`. At most three judging requests run concurrently;
+GPU scoring remains serial. Ranking configurations and scores are hidden from
+the judge. The pooled top-10 sources are graded in full, using OCR only when no
+reader text exists. Sources exceeding 900,000 UTF-8 bytes stay explicitly unjudged.
+
+Freeze chooses each interface's tuning winner once, before validation judgments
+exist. Validation checks that the frozen manifest and tuning evidence are unchanged.
+Report paired NDCG@10 confidence intervals, precision, missing judgments and
+individual regressions. These are **model judgments**, not human validation or
+exhaustive corpus recall. Negative controls with no relevant pooled documents have
+undefined NDCG and remain visible through precision. Full-index snapshots can
+contain mixed passage-policy versions: disclose their recorded distribution.
+Cached partial Qwen timings are not full-query latency; separately time complete
+top-20 requests and verify the actual production paths before deploying a change.
+
+Additional controls follow Elastic's [8.19 kNN documentation](https://www.elastic.co/guide/en/elasticsearch/reference/8.19/knn-search.html),
+[term matching](https://www.elastic.co/guide/en/elasticsearch/reference/8.19/query-dsl-minimum-should-match.html)
+and [RRF](https://www.elastic.co/guide/en/elasticsearch/reference/8.19/rrf.html).
+BM25 `k1`/`b`, analyzers and HNSW construction settings affect index configuration
+and remain outside this read-only experiment. A cosine floor applies to vector
+matches only, not a global relevance cutoff for hybrid lexical matches.
+`--embedding-cache /private/previous/embedding-cache` reuses exact model/query
+inputs. `calibration_judge.py --reuse-ratings /private/previous/ratings-tune.jsonl`
+reuses only exact query/source/judge hashes; changed evidence is judged again.
+Basic MCP `search` retains native score ties; filtered `search_archive` retains
+its deterministic research sort. The collector must not substitute one for the other.
+
+## November 2026 calibration
+
+The 13 November 2026 experiment used a PIT containing **4,860,847 records** on
+Elasticsearch 8.19.24. Thirteen retrieval configurations and four Qwen weights
+produced 52 combinations for each interface. Twenty-four authored queries were
+used for tuning, and 24 fresh queries for held-out validation. Both tuning winners
+were frozen before validation grading. The baseline already included production
+Qwen top-20 reranking; these gains are additional to that deployment.
+
+| Interface | Frozen selection | Validation NDCG@10: baseline → selected | Useful results P@10: baseline → selected | Paired NDCG change, bootstrap 95% interval |
+| --- | --- | --- | --- | --- |
+| Portal, grouped captures/discussions | Keyword/source-vector RRF, window 100, constant 60; source k=100/candidates=500; pure Qwen top-20 | 0.6634 → **0.7142** (+7.7% relative) | 0.7542 → 0.7542 | +0.0508 [0.0080, 0.0895] |
+| MCP `search`, document results | Four-field hybrid, k=50/candidates=250, vector boost 30; pure Qwen top-20 | 0.6081 → **0.6803** (+11.9% relative) | 0.6625 → **0.7583** | +0.0722 [0.0003, 0.1467] |
+
+Tuning NDCG@10 was 0.6978 → 0.7657 for the portal and 0.5716 → 0.6780
+for MCP. The expanded pool contained 3,611 distinct documents; all 1,311 tuning
+and 1,252 validation query/source pairs required for top-10 comparisons were
+judged without missing or oversized sources. Luna judging cost **$1.252938**
+(590 requests, including the initial collection; 11,848,940 input and 136,088
+output tokens), against an explicitly authorized $20 cap. No uncertain charges
+remain. Complete readers, prompts, responses, rankings, source hashes, ledgers
+and frozen selection receipts stay in private operator storage, outside Git.
+
+These are **gpt-6-luna model judgments**, not human validation. NDCG uses graded
+0–3 relevance and a pooled ideal; P@10 counts grades 2–3 as useful. The two negative
+controls had no useful documents, but some tangential grade-1 judgments made their
+NDCG mathematically defined. Excluding those controls, the 22 answer-seeking
+queries still improved: portal 0.7237 → 0.7698 (paired change +0.0461,
+95% interval [0.0011, 0.0900]); MCP 0.6634 → 0.7421 (+0.0788,
+[0.0003, 0.1610]). These additional figures do not select or retune either winner.
+
+Improvements included “Singing Steel Boots” and “SOW indoors” in the portal,
+and “rune spell aggro” and necromancer-to-cleric mana transfer in MCP. Meaningful
+regressions remain: portal “Velious faction armour Kael Thurgadin” (-0.189 NDCG),
+MCP “enchanter charisma lull resist” (-0.119) and “Coldain shawl tailoring skill”
+(-0.414). Do not present the average gain as an improvement for every question.
+
+Sequential retrieval-only timing over the 48 queries was portal median/p95
+361/1,273 ms for the baseline versus 630/1,162 ms for RRF; MCP 148/353 ms versus
+156/344 ms for boost 30. These exclude embeddings, Qwen, browser painting and
+facets. Six complete top-20 production reranker probes, including source retrieval,
+took 441–743 ms without fallback. Three subsequent built-portal probes against
+the real archive took 2.96–4.75 seconds to the first page, including cold-browser
+startup, embeddings, both retrieval legs, union facets, Qwen and rendering.
+These checks covered mobile and desktop, matched the evaluator's fusion and
+grouped top-20 IDs, and verified disjoint next pages and stable back navigation.
+Three MCP runtime probes verified all four branches at k=50/candidates=250/boost=30,
+then successful top-20 reranking and its exact top-ten output in 0.77–1.10 seconds.
+These small probes are functional checks, not production latency percentiles.
+
+The snapshot included 3,841,698 v10 passage records, 649,897 v12 records and
+369,252 without a text passage-policy marker. Policy maintenance continued during
+this work; no indexing Job, archive document or mapping was changed by calibration.
+These authored English text-research queries are not a traffic sample, an image
+retrieval evaluation, or exhaustive corpus recall. Re-evaluate with fresh held-out
+questions as the corpus and passage policies change. The query pool, source hashes
+and frozen paired results support reproducibility, not a claim of universal gains.
+
+The live portal's RRF prefix is followed by a deduplicated lexical browsing tail.
+Every evaluated query supplied at least 20 groups in its fixed fusion prefix, so
+the browsing tail does not alter the measured top-20 candidate set. Explicit
+constraints/date sorts retain their native paths. The collector now exports the
+portal policy with its frontend contract and resolves `current` per interface;
+future runs must use their own recorded baseline rather than treating this
+historical comparison as their current deployment.

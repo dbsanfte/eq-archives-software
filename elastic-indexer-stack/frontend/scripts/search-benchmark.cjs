@@ -25,6 +25,7 @@ const { createConnector } = require(path.join(frontend, 'src/search/Connector.js
 const { createConfig } = require(path.join(frontend, 'src/config/Config.js'));
 const { captureKey } = require(path.join(frontend, 'src/search/CaptureIdentity.js'));
 const { discussionIdentity } = require(path.join(frontend, 'src/search/DiscussionIdentity.js'));
+const { fuseResults } = require(path.join(frontend, 'src/search/FusedSearch.js'));
 const { usesQuerySyntax } = require(path.join(frontend, 'src/search/QueryPolicy.js'));
 const { DEFAULT_KNN_PARAMS } = require(path.join(frontend, 'src/views/search/AdvancedSettings.js'));
 const { embeddingService } = require(path.join(frontend, 'src/search/EmbeddingService.js'));
@@ -32,7 +33,10 @@ const engine = require(path.join(frontend, 'src/config/engine.json'));
 const Connector = require('@elastic/search-ui-elasticsearch-connector').default;
 
 async function handle(input) {
-  if (input.op === 'contract') return { engine, defaults: DEFAULT_KNN_PARAMS };
+  if (input.op === 'contract') return { engine, defaults: DEFAULT_KNN_PARAMS,
+    portal_retrieval: { mode: 'rrf', k: DEFAULT_KNN_PARAMS.k, num_candidates: DEFAULT_KNN_PARAMS.num_candidates,
+      vector_fields: { 'text.vector': 1 }, rank_window_size: 100, rrf_constant: 60 } };
+  if (input.op === 'fusion') return fuseResults(input.lexical, input.semantic);
   if (input.op === 'keys') return input.hits.map(hit => {
     const source = hit._source || {};
     const result = { _meta: { id: hit._id } };
@@ -42,7 +46,8 @@ async function handle(input) {
   if (input.op !== 'build') throw new Error('Unknown bridge operation');
   const query = input.query;
   const state = { searchTerm: query.text, current: 1, resultsPerPage: 50,
-    filters: query.filters || [], sortField: '', sortDirection: '', sortList: [] };
+    filters: query.filters || [], sortField: '', sortDirection: '', sortList: [],
+    ...(input.leg && { _archiveRetrieval: input.leg }) };
   const params = { current: { ...DEFAULT_KNN_PARAMS, ...input.params,
     enableSemanticSearch: Boolean(input.vector), groupCaptures: false } };
   embeddingService.cache.clear();
@@ -51,6 +56,7 @@ async function handle(input) {
   // The constructor assigns this hook as a public instance property.
   const connector = createConnector(params);
   const config = createConfig(connector).searchQuery;
+  if (input.leg === 'semantic') config.facets = {};
   if (input.fields) config.search_fields = Object.fromEntries(
     Object.entries(input.fields).filter(([, weight]) => weight > 0).map(([field, weight]) => [field, { weight }])
   );

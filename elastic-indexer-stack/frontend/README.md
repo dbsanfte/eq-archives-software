@@ -281,13 +281,29 @@ rebuild and every value is visible to site visitors.
 | `vectorFields`, `nestedVectorFields` | Vector fields for semantic search |
 | `embeddingModel` | Model used to embed search queries; must match the indexed vectors |
 
-Semantic search starts enabled with `k=50`, `num_candidates=250` and `boost=10`,
-defined in [`AdvancedSettings.js`](src/views/search/AdvancedSettings.js). These
-match the [`hybrid-boost10` experiment](../../scripts/search-benchmark/configs.json),
-which had the highest average grouped NDCG@10 in the Luna pilot (60 queries,
-62,409 regenerated documents). The pilot used model judgments on a partial corpus;
-repeat the evaluation when the broad reindex finishes. Visitors can still change
-the parameters or disable semantic search in **Advanced...**.
+Semantic relevance search uses a fixed RRF head from the first 100 keyword hits
+and first 100 source-vector hits (`text.vector`, `k=100`, `num_candidates=500`).
+RRF uses rank constant 60; capture/discussion grouping happens next, followed by
+Qwen reranking of the first 20 representatives. See the
+[full-index calibration](../../scripts/search-benchmark/README.md#november-2026-calibration).
+`FusedSearch.js` caches the head per search context, then appends later lexical
+results without repeating IDs, within the existing 1,000-record window. A small
+hybrid metadata request retains facets for the keyword/source-vector union.
+Semantic-leg failures keep a stable lexical fallback for that paging session;
+source/date/parameter changes invalidate it. Explicit phrases/operators, date
+sorts and unavailable/disabled embeddings retain their existing search paths.
+Searches opened from URLs prepare their embeddings before grouping starts, just
+like typed searches. Cancelled preparations cannot replace a newer search, and
+a failed preparation remains a stable keyword fallback while paging.
+
+Semantic search starts enabled with `k=100`, `num_candidates=500` and `boost=10`
+in [`AdvancedSettings.js`](src/views/search/AdvancedSettings.js). The boost of a
+single vector leg does not change its rank or RRF contributions. The API owns its
+fixed boost and bounds; it accepts at most 100 neighbors and 500 candidates per
+branch. Visitors can change bounded k/candidate parameters or disable semantic
+search in **Advanced...**. The benchmark exports the current portal policy and
+uses the same request hook, grouping identities and fusion policy. Real-data
+browser verification compares its fused IDs directly with the offline evaluator.
 
 EmbeddingGemma 2 uses `task: search result | query: ` for queries and
 `title: none | text: ` for documents. The Q8 model serves the canonical

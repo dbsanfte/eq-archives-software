@@ -43,7 +43,8 @@ class FrontendBrowserTests(unittest.TestCase):
                 "took": 1,
                 "timed_out": False,
                 "hits": {"total": {"value": 0, "relation": "eq"}, "hits": []},
-                "aggregations": {"facet_bucket_all": {"doc_count": 0, **facets}},
+                **({"aggregations": {"facet_bucket_all": {"doc_count": 0, **facets}}}
+                   if 'aggs' in route.request.post_data_json else {}),
             })
 
     def test_untrusted_summary_snippet_and_source_url_cannot_execute_script(self):
@@ -434,7 +435,7 @@ class FrontendBrowserTests(unittest.TestCase):
 
                     def check_scope():
                         body = searches[-1]
-                        self.assertIn(domain, domain_values([body.get('query'), body.get('post_filter')]))
+                        self.assertIn(domain, domain_values([body.get('query'), body.get('post_filter'), body.get('knn')]))
                         for branch in body.get('knn', []):
                             self.assertIn(domain, domain_values(branch.get('filter')))
 
@@ -476,13 +477,17 @@ class FrontendBrowserTests(unittest.TestCase):
                     search = page.locator('.sui-search-box__text-input')
                     search.fill('cleric')
                     search.fill('cleric healing')
-                    with page.expect_response(lambda response: response.url.endswith('/_search')):
+                    with page.expect_response(lambda response: response.url.endswith('/_search') and
+                                              response.request.post_data_json.get('size') == 1 and
+                                              'knn' in response.request.post_data_json):
                         search.press('Enter')
+                    page.wait_for_load_state('networkidle')
                     check_scope()
                     self.assertTrue(searches[-1]['knn'])
                     with page.expect_response(lambda response: response.url.endswith('/_search')):
                         search.fill('"paladin spells"')
                         search.press('Enter')
+                    page.wait_for_load_state('networkidle')
                     check_scope()
                     self.assertNotIn('knn', searches[-1])
                     page.get_by_role('button', name='Next', exact=True).click()
@@ -602,8 +607,10 @@ class FrontendBrowserTests(unittest.TestCase):
                         if body.get('query', {}).get('bool', {}).get('should'):
                             self.assertEqual(body['query']['bool']['minimum_should_match'], 1)
 
-                    def response():
-                        return page.expect_response(lambda reply: reply.url.endswith('/_search') and reply.status == 200)
+                    def response(semantic=False):
+                        return page.expect_response(lambda reply: reply.url.endswith('/_search') and reply.status == 200 and
+                            (not semantic or reply.request.post_data_json.get('size') == 1 and
+                             'knn' in reply.request.post_data_json and 'query' in reply.request.post_data_json))
 
                     def apply(index, start=15):
                         with response():
@@ -638,9 +645,10 @@ class FrontendBrowserTests(unittest.TestCase):
                     hide_filters()
 
                     for query in ('"wizard"', 'wizard research', ''):
-                        with response():
+                        with response(semantic=query == 'wizard research'):
                             page.locator('.sui-search-box__text-input').fill(query)
                             page.locator('.sui-search-box__text-input').press('Enter')
+                        page.wait_for_load_state('networkidle')
                         check_request()
                         if query == 'wizard research':
                             self.assertTrue(requests[-1]['knn'])
@@ -825,7 +833,8 @@ class FrontendBrowserTests(unittest.TestCase):
                             "hits": {"total": {"value": 1, "relation": "eq"}, "hits": [{
                                 "_id": doc_id, "_score": 1, "_source": fields,
                                 "highlight": {"text_full": ["A <em>matching</em> archive passage"]}
-                            }]}, "aggregations": {"facet_bucket_all": {"doc_count": 1, **facets}}
+                            }]}, **({"aggregations": {"facet_bucket_all": {"doc_count": 1, **facets}}}
+                                    if 'aggs' in body else {})
                         })
 
                     def embed(route):
@@ -859,21 +868,24 @@ class FrontendBrowserTests(unittest.TestCase):
                         self.assertGreaterEqual(page.get_by_role('button', name='Alternate Link', exact=True).bounding_box()['y'], primary['y'] + primary['height'])
                     self.assertTrue(page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
 
-                    def search(value):
+                    def search(value, semantic=False):
                         with page.expect_response(lambda response: '/_search' in response.url and
-                                                  value in str(response.request.post_data_json) and response.status == 200):
+                                                  value in str(response.request.post_data_json) and response.status == 200 and
+                                                  (not semantic or response.request.post_data_json.get('size') == 1 and
+                                                   'knn' in response.request.post_data_json)):
                             page.locator('.sui-search-box__text-input').fill(value)
                             page.locator('.sui-search-box__text-input').press('Enter')
                         expect(page.locator('.sui-search-box__text-input')).to_have_value(value)
+                        page.wait_for_load_state('networkidle')
 
-                    search('ancient cyclops')
+                    search('ancient cyclops', semantic=True)
                     self.assertEqual(len(embeddings), 1)
                     self.assertEqual(embeddings[0]['input'], ['task: search result | query: ancient cyclops'])
                     self.assertIn('knn', requests[-1])
-                    self.assertEqual(len(requests[-1]['knn']), 4)
-                    self.assertIn('image_vector', [branch['field'] for branch in requests[-1]['knn']])
+                    self.assertEqual(len(requests[-1]['knn']), 1)
+                    self.assertEqual([branch['field'] for branch in requests[-1]['knn']], ['text.vector'])
                     for branch in requests[-1]['knn']:
-                        self.assertEqual((branch['k'], branch['num_candidates'], branch['boost']), (50, 250, 10))
+                        self.assertEqual((branch['k'], branch['num_candidates'], branch['boost']), (100, 500, 10))
                         self.assertIn({'term': {'embedding_model': 'embeddinggemma-2-768-v1'}}, branch['filter'])
                     self.assertNotIn('embedding_model', str(requests[-1]['query']))
                     search('"ancient cyclops"')
@@ -881,7 +893,7 @@ class FrontendBrowserTests(unittest.TestCase):
                     self.assertNotIn('knn', requests[-1])
                     page.get_by_role('button', name='Advanced...', exact=True).click()
                     expect(page.get_by_role('checkbox', name='Enable semantic search')).to_be_checked()
-                    for field, value in (('k', '50'), ('num_candidates', '250'), ('boost', '10')):
+                    for field, value in (('k', '100'), ('num_candidates', '500'), ('boost', '10')):
                         expect(page.get_by_label(field, exact=True)).to_have_value(value)
                     page.get_by_role('checkbox', name='Enable semantic search').uncheck()
                     search('cleric soloing')
@@ -927,6 +939,66 @@ class FrontendBrowserTests(unittest.TestCase):
                     expect(page.locator('.sui-sorting .sui-select__single-value')).to_have_text('Captured date (Descending)')
                     expect(page.get_by_role('dialog')).to_have_count(0)
                     self.assertEqual(len(documents), 2)
+                    self.assertTrue(page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
+                finally:
+                    context.close()
+
+    def test_fusion_groups_candidates_before_reranking_and_keeps_a_unique_tail(self):
+        for width in (390, 1280):
+            with self.subTest(width=width):
+                context = self.browser.new_context(viewport={"width": width, "height": 950})
+                try:
+                    page = context.new_page()
+                    requests, ranks = [], []
+                    def record(identity):
+                        return {"_id": identity, "_score": 1, "_source": {"id": identity,
+                            "title": identity, "url": "https://example.org/" + identity}}
+                    a = record("websites/example.org/20000101000000/topic")
+                    b = record("websites/example.org/20010101000000/topic")
+                    lexical = [a, b] + [record(f"newsgroups/{n:03}.txt") for n in range(130)]
+                    semantic = [record("newsgroups/outside.txt"), b, lexical[-1], lexical[12]]
+                    def archive(route):
+                        if route.request.url.endswith('/_count'):
+                            return route.fulfill(json={"count": 133})
+                        body = route.request.post_data_json
+                        if route.request.url.endswith('/_rerank'):
+                            ranks.append(body)
+                            return route.fulfill(json={"ids": list(reversed(body['ids'])), "status": "applied"})
+                        requests.append(body)
+                        rows = semantic if 'knn' in body and 'query' not in body else lexical
+                        start = body.get('from', 0)
+                        route.fulfill(json={"hits": {"total": {"value": len(rows), "relation": "eq"},
+                            "hits": rows[start:start+body['size']]}, "aggregations": {"facet_bucket_all": {
+                                "doc_count": len(rows), **{name: {"buckets": []} for name in
+                                ("domain_name", "llm_content_flavour", "file_type", "mime_type", "mailing_list_name", "llm_tags")},
+                                "last_indexed": {"buckets": {}}}}})
+                    page.route('**/elasticsearch/**', archive)
+                    page.route('**/openai/**', lambda route: route.fulfill(json={"data": [{"embedding": [0.1]*768}]}))
+                    page.goto(self.base_url+'/?q=bard', wait_until='networkidle')
+                    expect(page.locator('.sui-result')).to_have_count(20)
+                    page.wait_for_load_state('networkidle')
+                    self.assertTrue(any('knn' in body and 'query' not in body for body in requests))
+                    head = ranks[-1]['ids']
+                    self.assertEqual(head[:5], [b['_id'], lexical[12]['_id'], 'newsgroups/outside.txt',
+                                               'newsgroups/000.txt', 'newsgroups/129.txt'])
+                    self.assertNotIn(a['_id'], head)
+                    def visible_ids():
+                        return [parse_qs(urlparse(a.get_attribute('href')).query)['id'][0]
+                                for a in page.locator('.archive-result-reader').all()]
+                    first = visible_ids()
+                    self.assertEqual(first, list(reversed(head)))
+                    rank_count = len(ranks)
+                    all_ids = list(first)
+                    for number in range(2, 8):
+                        page.get_by_role('button', name='Next', exact=True).click()
+                        expect(page.get_by_text(f'Page {number}', exact=True)).to_be_visible()
+                        page.wait_for_function("id => new URL(document.querySelector('.archive-result-reader').href).searchParams.get('id') !== id", arg=all_ids[-len(first)])
+                        page.wait_for_load_state('networkidle')
+                        all_ids.extend(visible_ids())
+                    self.assertEqual(len(all_ids), 132)
+                    self.assertEqual(len(set(all_ids)), 132)
+                    self.assertEqual(all_ids.count('newsgroups/129.txt'), 1)
+                    self.assertEqual(len(ranks), rank_count)
                     self.assertTrue(page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
                 finally:
                     context.close()

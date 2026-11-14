@@ -1,0 +1,386 @@
+[
+  {
+    "id": "q001",
+    "text": "ancient cyclops",
+    "intent": "Discussions of the Ancient Cyclops, including its spawn and the Journeyman's Boots quest.",
+    "category": "names",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q002",
+    "text": "Journeyman Boots",
+    "intent": "Quest, acquisition, or use of Journeyman's Boots; incidental signatures are insufficient.",
+    "category": "names",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q004",
+    "text": "Cazic Thule",
+    "intent": "Discussions of the deity, dungeon, or encounter; a server name alone is insufficient.",
+    "category": "names",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q005",
+    "text": "Fungi Covered Scale Tunic",
+    "intent": "Stats, acquisition, or uses of the Fungi Covered Scale Tunic.",
+    "category": "names",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q007",
+    "text": "how do bards twist several songs at once",
+    "intent": "Instructions or experience about combining bard songs by repeatedly switching them.",
+    "category": "questions",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q008",
+    "text": "how did warriors keep monsters attacking them instead of healers",
+    "intent": "Warrior aggro generation, taunt, weapons, or group tactics.",
+    "category": "questions",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q010",
+    "text": "where can a low level character find a group",
+    "intent": "Concrete grouping areas or approaches for low level characters.",
+    "category": "questions",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q011",
+    "text": "how can I recover my corpse after dying in a dungeon",
+    "intent": "Corpse retrieval techniques or difficulties in dungeon deaths.",
+    "category": "questions",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q013",
+    "text": "bard solo kiting",
+    "intent": "Practical bard solo kiting discussion; bard presence in an unrelated group is insufficient.",
+    "category": "research",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q014",
+    "text": "necromancer mana regeneration",
+    "intent": "Necromancer mana regeneration spells, efficiency, or tradeoffs.",
+    "category": "research",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q016",
+    "text": "enchanter crowd control",
+    "intent": "Mesmerize, charm, lull, or other enchanter crowd control tactics.",
+    "category": "research",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q017",
+    "text": "wizard spell resist rates",
+    "intent": "Wizard spell resists, debuffs, or practical impact on damage.",
+    "category": "research",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q019",
+    "text": "pottery trivial levels",
+    "intent": "Recipe trivial levels or pottery progression advice.",
+    "category": "research",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q020",
+    "text": "monk weight limit",
+    "intent": "Monk weight effects, limits, penalties, or gear tradeoffs.",
+    "category": "research",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q022",
+    "text": "mana song stacking",
+    "intent": "Whether bard mana songs stack with other mana regeneration effects.",
+    "category": "research",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q023",
+    "text": "bard melee damage",
+    "intent": "Bard melee damage, weapons, skills, or relative effectiveness.",
+    "category": "research",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q025",
+    "text": "what changed when Kunark was released",
+    "intent": "Contemporary or retrospective accounts of changes due to Kunark; a casual mention is insufficient.",
+    "category": "history",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q026",
+    "text": "bard song nerf patch",
+    "intent": "A game update that weakened or changed bard songs.",
+    "category": "history",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q028",
+    "text": "planes raid strategy",
+    "intent": "Tactics for raids in the planes, including encounters or coordination.",
+    "category": "history",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q029",
+    "text": "JBoots",
+    "intent": "Quest, acquisition, or use of Journeyman's Boots, commonly called JBoots.",
+    "category": "acronyms",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q031",
+    "text": "AE kiting",
+    "intent": "Area effect kiting mechanics or tactics; unrelated area effect spells are insufficient.",
+    "category": "acronyms",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q032",
+    "text": "SoW versus Selo",
+    "intent": "Comparison of Spirit of Wolf and Selo's movement effects.",
+    "category": "acronyms",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q034",
+    "text": "resist",
+    "intent": "EverQuest spell resistance and resist gear or tactics.",
+    "category": "ambiguous",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "q035",
+    "text": "twisting",
+    "intent": "Bard song twisting in EverQuest.",
+    "category": "ambiguous",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "v001",
+    "text": "Reaper of the Dead",
+    "intent": "Acquisition, charges, or uses of the Reaper of the Dead weapon.",
+    "category": "names",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "v002",
+    "text": "Jaded Electrum Bracelet",
+    "intent": "Acquisition, statistics or use of Jaded Electrum Bracelet.",
+    "category": "names",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "v003",
+    "text": "Singing Steel Boots",
+    "intent": "Bard armour item effects, acquisition, or practical use of Singing Steel Boots.",
+    "category": "names",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "v004",
+    "text": "how does resurrection restore lost experience",
+    "intent": "Mechanics or practical accounts of resurrection experience restoration.",
+    "category": "questions",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "v005",
+    "text": "how can a necromancer give mana to a cleric",
+    "intent": "Necromancer mana transfer to other players and its costs or use.",
+    "category": "questions",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "v006",
+    "text": "what causes a ranger bow to do double damage",
+    "intent": "Conditions or mechanics for ranger archery double damage.",
+    "category": "questions",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "v007",
+    "text": "enchanter charisma lull resist",
+    "intent": "Evidence about charisma and resists or critical failures when using lull spells.",
+    "category": "mechanics",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "v008",
+    "text": "druid quad kiting movement speed",
+    "intent": "Advice on movement speed, snare and safely quad kiting as a druid.",
+    "category": "mechanics",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "v009",
+    "text": "rune spell aggro",
+    "intent": "Discussions of aggression generated by rune or damage absorption spells.",
+    "category": "mechanics",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "v010",
+    "text": "Plane of Sky key corpses",
+    "intent": "How Plane of Sky keys, corpses and island progression work.",
+    "category": "quests",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "v011",
+    "text": "Coldain shawl tailoring skill",
+    "intent": "Coldain prayer shawl tailoring requirements or quest instructions.",
+    "category": "quests",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "v012",
+    "text": "Veeshan Peak key ground spawn",
+    "intent": "Quest steps or locations of ground-spawn pieces for the Veeshan Peak key.",
+    "category": "quests",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "v013",
+    "text": "Luclin bazaar trader prices",
+    "intent": "Contemporary evidence about Bazaar traders, pricing, or its effect on the economy.",
+    "category": "history",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "v014",
+    "text": "Velious faction armour Kael Thurgadin",
+    "intent": "Comparisons or mechanics of Velious faction armour from Kael and Thurgadin.",
+    "category": "history",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "v015",
+    "text": "spell research words necromancer",
+    "intent": "Necromancer spell research ingredients, recipes or guides.",
+    "category": "crafting",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "v016",
+    "text": "baking misty thicket picnic",
+    "intent": "Recipe, ingredients or skill guidance for Misty Thicket Picnics.",
+    "category": "crafting",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "v017",
+    "text": "SOW indoors",
+    "intent": "Whether Spirit of Wolf works indoors and related movement restrictions.",
+    "category": "acronyms",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "v018",
+    "text": "LFG cleric downtime",
+    "intent": "Group finding or downtime experiences specifically involving clerics.",
+    "category": "acronyms",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "v019",
+    "text": "enchater mesmerise",
+    "intent": "Enchanter mesmerization mechanics or advice; spelling errors are intentional.",
+    "category": "typos",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "v020",
+    "text": "how did guilds arrange corpse recovery after a raid wipe",
+    "intent": "Raid corpse recovery logistics, resurrection, or guild experiences.",
+    "category": "questions",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "v021",
+    "text": "\"Divine Aura\" -paladin",
+    "intent": "Substantive discussion of Divine Aura satisfying the explicit exclusion.",
+    "category": "constraints",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "v022",
+    "text": "\"necromancer\" \"lich\"",
+    "intent": "Evidence on necromancer lich spells or mana regeneration, matching both phrases.",
+    "category": "constraints",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "v023",
+    "text": "EverQuest dragon bitcoin mining 1999",
+    "intent": "Evidence of the combined claim that EverQuest dragons mined bitcoin in 1999; generic dragon mentions do not satisfy this request.",
+    "category": "negative",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "v024",
+    "text": "quantum teleportation bard cryptocurrency",
+    "intent": "Evidence about the specified combination in historical EQ sources; unrelated bard posts are not relevant.",
+    "category": "negative",
+    "split": "validation",
+    "known_relevant_ids": []
+  }
+]

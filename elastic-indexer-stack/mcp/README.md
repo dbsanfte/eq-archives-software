@@ -34,10 +34,11 @@ operators use lexical search with AND as the default join so excluded terms cann
 broaden the search and semantic matches do not bypass constraints. Use `|` for
 explicit alternatives.
 Natural-language searches can find related material, not only exact words.
-Their vector branches use `k=50`, `num_candidates=250` and `boost=10`, with no
-similarity cutoff, matching the frontend's `hybrid-boost10` defaults. That
-configuration had the highest average grouped NDCG@10 in the Luna pilot (60
-queries, 62,409 regenerated documents); completed-corpus validation is pending.
+Their vector branches use `k=50`, `num_candidates=250` and `boost=30`, with no
+similarity cutoff. These are the frozen MCP tuning winner from the
+[November 2026 full-index calibration](../../scripts/search-benchmark/README.md#november-2026-calibration).
+The portal uses a separately validated RRF policy; both retain pure Qwen top-20
+reranking. The evaluation uses Luna model judgments, not human validation.
 The original `search(query)` and `fetch(id)` input/output contracts remain unchanged.
 Use `search_archive` to investigate beyond the first ten results.
 
@@ -414,7 +415,7 @@ parameters, duplicate JSON keys and invalid vectors are rejected before I/O.
 Search limits: 96 KiB streamed bodies with a two-second body deadline; 100 results (including the UI’s 60-result option),
 a 1,000-result window, 160 query nodes/eight nesting levels, eight text clauses,
 4,000 text characters/400 terms across the request, 900 facet buckets and four
-768-dimensional normalized finite vector branches (`k <= 50`, candidates <= 250).
+768-dimensional normalized finite vector branches (`k <= 100`, candidates <= 500).
 Every search has an eight-second ES timeout, ten-second total execution deadline,
 fixed result/reader projections and safe highlight encoding/markers. Full reader
 text is available only for one exact ID; vectors cannot be retrieved. Responses
