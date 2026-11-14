@@ -38,7 +38,7 @@ struct Layer {
     float *hidden, *result, *qkv_buffer;
     half *prob;
     const int *lengths, *offsets, *batch_ids;
-    int batch, seq, width, heads, kv_heads, dim, ffn, gemma, tokens;
+    int batch, seq, width, heads, kv_heads, dim, ffn, gemma, tokens, shared_prefix;
     float theta;
 };
 
@@ -385,7 +385,7 @@ __device__ __forceinline__ void qkv_rope(const Layer &p) {
             }
             continue;
         }
-        int token = p.offsets[batch] + pos;
+        int token = pos < p.shared_prefix ? pos : p.offsets[batch] + pos;
         int base = token * (hd + 2 * kd);
         int qi = base + head * p.dim, ki = base + hd + kv * p.dim, vi = base + hd + kd + kv * p.dim;
         float qs = 0, ks = 0, vs = 0;
@@ -582,3 +582,4 @@ extern "C" int launch_layer(Layer *params, cudaStream_t stream, int *blocks_out,
                                        stream);
 }
 extern "C" const char *error_string(int e) { return cudaGetErrorString((cudaError_t)e); }
+extern "C" int layer_abi_version() { return 2; }

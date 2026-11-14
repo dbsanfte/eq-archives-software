@@ -6,10 +6,11 @@ import time
 import threading
 import io
 import tarfile
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 import unittest
 
-from backend import EMBED_MODEL, RERANK_MODEL
+from backend import EMBED_MODEL, RERANK_MODEL, causal_prefix, packed_layout, load_library
+from benchmark_http import checked_values
 from check_kernels import check
 from scheduler import Busy, Scheduler, unique_batch
 from server import App, response, validate
@@ -20,6 +21,46 @@ from pathlib import Path
 
 
 class ContractTests(unittest.TestCase):
+    def test_incompatible_kernel_library_fails_before_a_gpu_launch(self):
+        for old in (Mock(spec=[]), Mock(layer_abi_version=Mock(return_value=1))):
+            with patch("backend.C.CDLL", return_value=old), self.assertRaisesRegex(RuntimeError, "ABI"):
+                load_library("unused.so")
+        lib = Mock(layer_abi_version=Mock(return_value=2))
+        with patch("backend.C.CDLL", return_value=lib):
+            self.assertIs(load_library("unused.so"), lib)
+        lib.launch_layer.assert_not_called()
+
+    def test_shared_causal_prefix_preserves_all_sequences_and_last_tokens(self):
+        rows = [list(range(100)) + [101] * 9, list(range(100)) + [102] * 65, list(range(100)) + [103]]
+        prefix = causal_prefix(rows)
+        self.assertEqual(prefix, 96)
+        padded, offsets, ids, batches, last = packed_layout(rows, prefix)
+        self.assertEqual(len(ids), sum(padded) - prefix * 2)
+        self.assertEqual(len(batches), len(ids))
+        for i, row in enumerate(rows):
+            recovered = [ids[j if j < prefix else offsets[i] + j] for j in range(len(row))]
+            self.assertEqual(recovered, row)
+            self.assertEqual(ids[last[i]], row[-1])
+        for rows in ([[1] * 32], [[1] * 31, [1] * 40], [[1] * 64, [2] * 64]):
+            self.assertEqual(causal_prefix(rows), 0)
+        self.assertEqual(causal_prefix([[1] * 64, [1] * 64]), 32)
+
+    def test_benchmark_rejects_nonfinite_or_incomplete_model_outputs(self):
+        body = {"model": EMBED_MODEL, "data": [{"index": 0, "embedding": [0.25] * 768}]}
+        self.assertEqual(checked_values("embed", body, 1), [[0.25] * 768])
+        for vector in ([float("nan")] * 768, [0.0] * 768, [0.5] * 767, [True] * 768):
+            with self.assertRaises(RuntimeError):
+                checked_values("embed", dict(body, data=[{"index": 0, "embedding": vector}]), 1)
+        for model, rows in (
+            (RERANK_MODEL, [{"index": 0, "relevance_score": float("nan")}]),
+            (RERANK_MODEL, [{"index": False, "relevance_score": 0.5}]),
+            (RERANK_MODEL, [{"index": 1, "relevance_score": 0.5}]),
+            (RERANK_MODEL, []),
+            (EMBED_MODEL, [{"index": 0, "relevance_score": 0.5}]),
+        ):
+            with self.assertRaises(RuntimeError):
+                checked_values("rerank", {"model": model, "results": rows}, 1)
+
     def test_pinned_headers_reject_wrong_hash_before_extracting(self):
         with tempfile.TemporaryDirectory() as tmp:
             destination = Path(tmp) / "headers"

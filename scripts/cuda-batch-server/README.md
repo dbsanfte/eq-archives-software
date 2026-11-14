@@ -38,6 +38,13 @@ a 4,096 padded-token scheduling quantum keep large imports from producing an
 unbounded GPU batch. Exactly identical complete token sequences share inference
 within one batch, with every original response index preserved.
 
+The causal reranker also shares the exact, tile-aligned token prefix within a
+batch. Dense projections and feed-forward work for that prefix execute once;
+every document retains its own positions, attention and final score. This does
+not retain a cache across batches and is disabled for bidirectional Gemma.
+GPU validation compares shared and separate execution, including uneven lengths.
+An explicit library ABI check rejects stale binaries before launching a layer.
+
 When both models are active, cooperative-grid sizes are bounded to leave room
 for the other stream. The limit is reconsidered at each layer. Shared GPU
 resources still impose a tradeoff: overlap must be measured, and is not a
@@ -106,6 +113,19 @@ are available through `--profile`; inspect the kernel timeline to verify both
 the full-layer launch count and cross-stream overlap. Profile counter access,
 if needed, belongs only to the isolated profiling process, never the serving
 container or a global host policy change.
+
+For initialization checks, instrument the complete forward pass, including
+PyTorch's setup and output kernels. Filtering only `layer_forward` excludes the
+producers of its tensors and makes the initialization results invalid. For example:
+
+```bash
+compute-sanitizer --tool initcheck --error-exitcode 70 \
+  python verify_gpu.py --kind rerank --repeats 1 --output /private/initcheck.json
+```
+
+Timing under a sanitizer is diagnostic overhead, not serving performance. The
+synthetic stress inputs use distinct document labels so prefix sharing does not
+turn a large-batch check into repeated copies of one identical input.
 
 `benchmark_http.py` accepts the private source-linked passage evidence fixture
 from the search benchmark. It alternates backend order, uses distinct concurrent

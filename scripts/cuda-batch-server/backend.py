@@ -40,7 +40,34 @@ def verified(path, expected):
 
 
 POINTERS = "qkv out gateup down ple_gate ple_out in_norm q_norm k_norm attn_norm ffn_norm ffn_post ple_norm scalar ple x norm proj q k vt scores attn hidden result qkv_buffer prob lengths offsets batch_ids".split()
-INTEGERS = "batch seq width heads kv_heads dim ffn gemma tokens".split()
+INTEGERS = "batch seq width heads kv_heads dim ffn gemma tokens shared_prefix".split()
+
+
+def causal_prefix(rows):
+    """Exact, tile-aligned prefix shared only within a causal inference batch."""
+    if len(rows) < 2:
+        return 0
+    common = 0
+    # Keep at least one suffix token in each row, including identical inputs.
+    for i in range(min(map(len, rows)) - 1):
+        if any(row[i] != rows[0][i] for row in rows[1:]):
+            break
+        common += 1
+    return common // 32 * 32
+
+
+def packed_layout(rows, prefix=0):
+    """Store a shared causal prefix once; every original position is recoverable."""
+    padded = [math.ceil(len(row) / 32) * 32 for row in rows]
+    offsets, ids, batches, last = [], [], [], []
+    for i, (row, size) in enumerate(zip(rows, padded)):
+        skip = prefix if i else 0
+        offset = len(ids) - skip
+        offsets.append(offset)
+        ids.extend(row[skip:] + [0] * (size - len(row)))
+        batches.extend([i] * (size - skip))
+        last.append(offset + len(row) - 1)
+    return padded, offsets, ids, batches, last
 
 
 class Layer(C.Structure):
@@ -49,6 +76,17 @@ class Layer(C.Structure):
         + [(name, C.c_int) for name in INTEGERS]
         + [("theta", C.c_float)]
     )
+
+
+def load_library(path):
+    lib = C.CDLL(str(path))
+    if not hasattr(lib, "layer_abi_version") or lib.layer_abi_version() != 2:
+        raise RuntimeError("CUDA layer ABI differs; rebuild all selected profiles")
+    lib.launch_layer.argtypes = [C.POINTER(Layer), C.c_void_p, C.POINTER(C.c_int), C.c_int]
+    lib.launch_layer.restype = C.c_int
+    lib.error_string.argtypes = [C.c_int]
+    lib.error_string.restype = C.c_char_p
+    return lib
 
 
 class Model:
@@ -99,16 +137,8 @@ class Model:
             for name in ("attn_q", "attn_k", "attn_v", "ffn_gate", "ffn_up"):
                 del self.weights[f"blk.{i}.{name}.weight"]
 
-        def load(path):
-            lib = C.CDLL(str(path))
-            lib.launch_layer.argtypes = [C.POINTER(Layer), C.c_void_p, C.POINTER(C.c_int), C.c_int]
-            lib.launch_layer.restype = C.c_int
-            lib.error_string.argtypes = [C.c_int]
-            lib.error_string.restype = C.c_char_p
-            return lib
-
-        self.lib = load(library or f"/app/lib{kind}.so")
-        self.small = load("/app/libsmall.so") if library is None else None
+        self.lib = load_library(library or f"/app/lib{kind}.so")
+        self.small = load_library("/app/libsmall.so") if library is None else None
         self.blocks = 0
 
     def encode(self, inputs):
@@ -172,24 +202,19 @@ class Model:
             x = (x + self.norm(out, row["ple_norm"])) * row["scalar"]
         return x
 
-    def run(self, tokens, reference=False, compare_layers=False, block_limit=None):
+    def run(self, tokens, reference=False, compare_layers=False, block_limit=None, share_prefix=True):
         t, F = self.torch, self.torch.nn.functional
         b, s = len(tokens), math.ceil(max(map(len, tokens)) / 32) * 32
         if not 1 <= b <= 32 or not 32 <= s <= (512 if self.gemma else 768):
             raise ValueError("GPU batch shape exceeds its fixed bounds")
         lib = self.small if self.small is not None and b * s <= 128 else self.lib
-        padded = [math.ceil(len(row) / 32) * 32 for row in tokens]
-        offsets = [sum(padded[:i]) for i in range(b)]
-        total = sum(padded)
+        prefix = causal_prefix(tokens) if not self.gemma and share_prefix else 0
+        padded, offsets, packed_ids, batch_ids_cpu, last_cpu = packed_layout(tokens, prefix)
+        total = len(packed_ids)
         # Transfer bounded CPU-known metadata together. Separate tiny CUDA casts,
         # repeat_interleave and additions cost more than this packing for queries.
-        packed_ids = [value for row, size in zip(tokens, padded) for value in row + [0] * (size - len(row))]
         metadata = t.tensor(
-            packed_ids
-            + list(map(len, tokens))
-            + offsets
-            + [i for i, n in enumerate(padded) for _ in range(n)]
-            + [o + len(row) - 1 for o, row in zip(offsets, tokens)],
+            packed_ids + list(map(len, tokens)) + offsets + batch_ids_cpu + last_cpu,
             device="cuda",
             dtype=t.int32,
         )
@@ -245,17 +270,26 @@ class Model:
             theta = 10000.0 if self.gemma and i % 6 != 5 else 1000000.0
             layer_ple = ple[i] if ple is not None else None
             if reference or compare_layers:
+
+                def sequence(values, j, n):
+                    o = offsets[j]
+                    return (
+                        t.cat([values[:prefix], values[o + prefix : o + n]])
+                        if j and prefix
+                        else values[o : o + n]
+                    )
+
                 expected = t.cat(
                     [
                         self.reference_layer(
-                            x[o : o + n].clone().unsqueeze(0),
+                            sequence(x, j, n).clone().unsqueeze(0),
                             row,
                             lengths[j : j + 1],
                             dim,
                             kv,
                             theta,
                             layer_ple[o : o + n].unsqueeze(0) if layer_ple is not None else None,
-                        ).squeeze(0)
+                        ).squeeze(0)[prefix if j else 0 :]
                         for j, (o, n) in enumerate(zip(offsets, padded))
                     ]
                 )
@@ -277,6 +311,7 @@ class Model:
                     ffn=self.ffn,
                     gemma=int(self.gemma),
                     tokens=total,
+                    shared_prefix=prefix,
                     theta=theta,
                 )
                 blocks = C.c_int()
@@ -292,8 +327,8 @@ class Model:
                 if compare_layers:
                     # Padding carries no model semantics and may be skipped by
                     # attention. Compare every real token, never padded rows.
-                    actual_valid = t.cat([x[o : o + len(row)] for o, row in zip(offsets, tokens)])
-                    expected_valid = t.cat([expected[o : o + len(row)] for o, row in zip(offsets, tokens)])
+                    actual_valid = t.cat([sequence(x, j, len(row)) for j, row in enumerate(tokens)])
+                    expected_valid = t.cat([sequence(expected, j, len(row)) for j, row in enumerate(tokens)])
                     delta = actual_valid - expected_valid
                     comparisons.append(
                         {

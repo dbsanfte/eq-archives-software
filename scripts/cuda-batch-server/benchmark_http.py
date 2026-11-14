@@ -21,6 +21,39 @@ def percentile(values, p):
     return ordered[min(len(ordered) - 1, math.ceil(len(ordered) * p) - 1)]
 
 
+def checked_values(kind, data, expected):
+    """Malformed/nonfinite comparator output must never pass a quality gate."""
+    model = EMBED_MODEL if kind == "embed" else RERANK_MODEL
+    if not isinstance(data, dict) or data.get("model") != model:
+        raise RuntimeError("Unexpected benchmark response model")
+    rows = data.get("data" if kind == "embed" else "results")
+    if (
+        not isinstance(rows, list)
+        or len(rows) != expected
+        or any(not isinstance(row, dict) or type(row.get("index")) is not int for row in rows)
+    ):
+        raise RuntimeError("Unexpected benchmark response identity")
+    ordered = sorted(rows, key=lambda row: row["index"])
+    if [row["index"] for row in ordered] != list(range(expected)):
+        raise RuntimeError("Unexpected benchmark response identity")
+    values = []
+    for row in ordered:
+        value = row.get("embedding" if kind == "embed" else "relevance_score")
+        if kind == "embed":
+            valid = (
+                isinstance(value, list)
+                and len(value) == 768
+                and all(type(v) in (float, int) and math.isfinite(v) and abs(v) <= 1 for v in value)
+                and any(value)
+            )
+        else:
+            valid = type(value) in (float, int) and math.isfinite(value) and 0 <= value <= 1
+        if not valid:
+            raise RuntimeError("Invalid benchmark vector or relevance score")
+        values.append(value)
+    return values
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--fixtures", type=Path, required=True)
@@ -102,12 +135,8 @@ def main():
         reply = clients[kind].post(url + ("/v1/embeddings" if kind == "embed" else "/v1/rerank"), json=body)
         reply.raise_for_status()
         data = reply.json()
-        rows = data["data"] if kind == "embed" else data["results"]
-        ordered = sorted(rows, key=lambda row: row["index"])
         expected = len(body["input"] if kind == "embed" else body["documents"])
-        if len(rows) != expected or [r["index"] for r in ordered] != list(range(expected)):
-            raise RuntimeError("Unexpected response identity")
-        return [r["embedding"] if kind == "embed" else r["relevance_score"] for r in ordered]
+        return checked_values(kind, data, expected)
 
     def call(kind, url, body):
         start = time.perf_counter()

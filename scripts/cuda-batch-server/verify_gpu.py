@@ -16,6 +16,7 @@ def main():
     p.add_argument("--library")
     p.add_argument("--output", required=True)
     p.add_argument("--batch", type=int, default=2)
+    p.add_argument("--repeats", type=int, default=5)
     p.add_argument(
         "--length", type=int, help="Approximate token length for bounded synthetic stress/profiling"
     )
@@ -24,6 +25,8 @@ def main():
     p.add_argument("--llama-url")
     p.add_argument("--key-file")
     args = p.parse_args()
+    if not 1 <= args.repeats <= 20:
+        p.error("Use 1–20 bounded timing repetitions")
     import torch
 
     torch.set_num_threads(2)
@@ -49,22 +52,24 @@ def main():
             p.error(f"Stress length must be 128–{limit}")
         prefix = "title: none | text: " if args.kind == "embed" else PREFIX + query + "\n<Document>: "
         suffix = "" if args.kind == "embed" else SUFFIX
-        allowance = args.length - len(
-            model.tokenizer.encode(prefix + suffix, add_special_tokens=model.gemma).ids
-        )
         sample = model.tokenizer.encode(
             "The cleric epic quest requires the Orb of Frozen Water. " * 100, add_special_tokens=False
         ).ids
-        doc = model.tokenizer.decode(sample[:allowance])
-        while (
-            len(model.tokenizer.encode(prefix + doc + suffix, add_special_tokens=model.gemma).ids)
-            > args.length
-        ):
-            allowance -= 1
-            doc = model.tokenizer.decode(sample[:allowance])
-        inputs = [prefix + doc + suffix] * args.batch
-        if args.kind == "rerank":
-            docs = [doc] * args.batch
+        inputs, docs = [], []
+        for i in range(args.batch):
+            label = f"Document {i}: "
+            allowance = args.length - len(
+                model.tokenizer.encode(prefix + label + suffix, add_special_tokens=model.gemma).ids
+            )
+            doc = label + model.tokenizer.decode(sample[:allowance])
+            while (
+                len(model.tokenizer.encode(prefix + doc + suffix, add_special_tokens=model.gemma).ids)
+                > args.length
+            ):
+                allowance -= 1
+                doc = label + model.tokenizer.decode(sample[:allowance])
+            inputs.append(prefix + doc + suffix)
+            docs.append(doc)
     tokens = model.encode(inputs)
     result = {"kind": args.kind, "batch": len(tokens), "tokens": list(map(len, tokens))}
     if args.oracle:
@@ -73,6 +78,11 @@ def main():
         result["max_layer_relative_l2"] = max(r["relative_l2"] for r in layers)
         if result["max_layer_relative_l2"] > 0.005:
             raise RuntimeError("Layer comparison failed")
+        if args.kind == "rerank":
+            separate = model.run(tokens, share_prefix=False)
+            result["prefix_sharing_max_error"] = max(abs(a - b) for a, b in zip(output, separate))
+            if result["prefix_sharing_max_error"] > 0.0001:
+                raise RuntimeError("Shared causal prefix changed an output")
     else:
         output = model.run(tokens)
     if args.llama_url:
@@ -106,7 +116,7 @@ def main():
     times = []
     if args.profile:
         torch.cuda.cudart().cudaProfilerStart()
-    for _ in range(5):
+    for _ in range(args.repeats):
         start = time.perf_counter()
         model.run(tokens)
         times.append((time.perf_counter() - start) * 1000)
