@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from .identity import (VERSION, board_forums, discussion_identity, group_identity,
                        literal, page_identity, scope_query, site_scope_url, id_regex)
 from .limits import TextBudget
+from .ranking_policy import RERANK_WINDOW
 from .research import (MAX_RESEARCH_RESULTS, COLLECTION_PREFIXES, GroupInfo, ResearchFilters,
                        ResearchPage, ResultCount, SourcePage, SourceValue, filtered_query,
                        research_sort)
@@ -106,12 +107,13 @@ class Catalog:
             except (KeyError, TypeError, ValueError):
                 raise ToolError("Archive sites are temporarily unavailable. Please retry.") from None
 
-    async def grouped_page(self, query, filters, offset, limit, sort, group_by):
+    async def grouped_page(self, query, filters, offset, limit, sort, group_by, retrieval=None, retrieval_note='', rank_window=RERANK_WINDOW, passage_mode=None):
         from .archive import PROVENANCE_FIELDS, SEARCH_FIELDS, provenance, result_from_hit
         from .research import ResearchResult
-        data = await self.execute({"size": MAX_RESEARCH_RESULTS, "timeout": "8s", "track_total_hits": MAX_RESEARCH_RESULTS+1,
+        retrieval = retrieval if retrieval is not None else {'query': await self.selection(query, filters)}
+        data = await self.execute({**retrieval, "size": MAX_RESEARCH_RESULTS, "timeout": "8s", "track_total_hits": MAX_RESEARCH_RESULTS+1,
             "_source": SEARCH_FIELDS+PROVENANCE_FIELDS+["discussion"],
-            "query": await self.selection(query, filters), "sort": research_sort(sort)}, stable_order=True)
+            "sort": research_sort(sort)}, stable_order=True)
         try:
             raw_total = ResultCount.model_validate(data["hits"]["total"])
             groups = OrderedDict()
@@ -125,15 +127,15 @@ class Catalog:
             bounded = raw_total.relation == "gte" or scanned < raw_total.value
             ordered = list(groups.values())
             if sort == "relevance" and query.strip() and ordered:
-                ids, _ = await self.rank_ids(query, [r.id for r in ordered[:20]])
-                lookup = {r.id: r for r in ordered[:20]}
-                ordered = [lookup[id] for id in ids] + ordered[20:]
+                ids, _ = await self.rank_ids(query, [r.id for r in ordered[:rank_window]], passage_mode)
+                lookup = {r.id: r for r in ordered[:rank_window]}
+                ordered = [lookup[id] for id in ids] + ordered[rank_window:]
             results = ordered[offset:offset+limit]
             end = offset+len(results)
             more = end < len(groups)
             note = ("Grouped over at most 1,000 matching documents; group counts describe this window only. "
                     "Discussion groups require stored source-verified identity; others fall back to exact pages or individual records. "
-                    "Use list_captures with a representative ID, then fetch an exact dated ID. " + SCOPE_NOTE)
+                    "Use list_captures with a representative ID, then fetch an exact dated ID. " + SCOPE_NOTE + ' ' + retrieval_note)
             if bounded:
                 note += " Scan limit reached; additional groups/captures may exist. Narrow the filters."
             return ResearchPage(results=results, total=ResultCount(value=len(groups), relation="gte" if bounded else "eq"),

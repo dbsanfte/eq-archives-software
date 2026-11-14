@@ -65,7 +65,11 @@ def check(endpoint, query, host=None):
     assert source != next_sources["sources"][0]["value"]
     filtered = call("search_archive", {"query": query, "filters": {"domains": [source]}, "limit": 2})
     assert filtered["results"] and all(r["metadata"]["domain_name"] == source for r in filtered["results"])
+    conceptual = call("search_archive", {"query": query, "filters": {"domains": [source]}, "limit": 2, "hybrid": True})
+    assert conceptual["results"] and all(r["metadata"]["domain_name"] == source for r in conceptual["results"])
+    assert "Hybrid keyword/semantic" in conceptual["note"]
     assert call("search_archive", {"query": query, "filters": {"domains": ["__mcp_missing_source__.invalid"]}})["results"] == []
+    assert call("search_archive", {"query": query, "filters": {"domains": ["__mcp_missing_source__.invalid"]}, "hybrid": True})["results"] == []
 
     dated = next(r for r in page["results"] if r["metadata"].get("capture_date"))
     timestamp = datetime.fromisoformat(dated["metadata"]["capture_date"].replace("Z", "+00:00"))

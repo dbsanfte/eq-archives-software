@@ -1,4 +1,4 @@
-import { relevanceSearch } from './Reranking';
+import { relevanceSearch, RERANK_WINDOW } from './Reranking';
 import { captureKey } from './CaptureIdentity';
 import { discussionIdentity, discussionMatchKey } from './DiscussionIdentity';
 
@@ -29,7 +29,7 @@ export function createGroupedSearch(search, getContext, rank) {
     }
     const cache = active;
     const end = current * resultsPerPage;
-    while (active === cache && !cache.done && cache.groups.size <= Math.max(end, ranked ? 20 : 0)) {
+    while (active === cache && !cache.done && cache.groups.size <= Math.max(end, ranked ? RERANK_WINDOW : 0)) {
       if (!cache.flight) {
         cache.flight = (async () => {
           const response = await search({ ...state, current: cache.scanned / BATCH_SIZE + 1, resultsPerPage: BATCH_SIZE }, queryConfig);
@@ -63,13 +63,13 @@ export function createGroupedSearch(search, getContext, rank) {
     let ordered = Array.from(cache.groups.values());
     if (ranked && ordered.length) {
       if (!cache.ranking) {
-        const head = ordered.slice(0, 20);
+        const head = ordered.slice(0, RERANK_WINDOW);
         cache.ranking = rank(searchTerm, head.map(group => group.result)).then(results => {
           const groups = new Map(head.map(group => [group.result, group]));
           return results.map(result => groups.get(result));
         });
       }
-      ordered = [...await cache.ranking, ...ordered.slice(20)];
+      ordered = [...await cache.ranking, ...ordered.slice(RERANK_WINDOW)];
     }
     if (context.enabled === false) {
       const totalPages = Math.max(1, Math.ceil(Math.min(CAPTURE_WINDOW, cache.response.totalResults) / resultsPerPage));

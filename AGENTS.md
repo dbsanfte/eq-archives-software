@@ -418,26 +418,38 @@ report corpus and pooling limits, and validate against the completed corpus
 before changing production defaults. Collection cannot write archive documents
 or mappings; paid Luna grading is a separate explicit command.
 
-The November 2026 calibration uses 24 tuning and 24 fresh held-out queries, with
-source-bound Luna judgments and a durable shared dollar ledger. Keep the frozen
+The November 2026 retrieval calibration uses 24 tuning and 24 fresh held-out queries;
+the passage/window follow-up uses 100/100 fresh authored queries and a concurrent
+latency gate. Both use source-bound Luna judgments and a durable shared dollar
+ledger. Keep the frozen
 selection before validation, complete-source judging, explicit model-judgment
 labels and paired metrics. The browser uses a fixed 100-hit keyword/source-vector
-RRF head (constant 60, k=100/candidates=500), groups before top-20 Qwen, and appends
+RRF head (constant 60, k=100/candidates=500), groups before top-60 Qwen, and appends
 an ID-deduplicated lexical tail within 1,000 records. Cache both successful and
 fallback heads per query/scope; retain union facets, rapid-typing/stale-response
 handling and bounded sequential requests. MCP `search` keeps four vector branches
-at k=50/candidates=250 with boost 30; filtered research remains lexical. The bounded
+at k=50/candidates=250 with boost 30. Research defaults to keyword retrieval and
+the former top-20 word-overlap selector; strict opt-in `hybrid=true` copies all
+resolved filters into every vector branch and uses the top-60 matching-passage
+policy. Cache successful and fallback research plans for stable paging. The bounded
 browser grammar permits at most k=100/candidates=500 per branch, with all previous
 vector, filter, admission and response limits intact. Do not copy this ranking
 change into indexing jobs or expose arbitrary fusion/ES DSL to public callers.
 
-Production top-20 reranking uses the shared MCP `rerank.py` client and the private
+Production top-60 reranking uses the shared MCP `rerank.py` client and the private
 Qwen CUDA service. Preserve post-grouping representatives, exact retrieval filters,
 date-sort bypass, head-only permutation and before-pagination ordering. Cache fallback
 orders as well as successes; never move results between pages after a transient outage.
 Keep the fixed ID/query-only browser contract, shared admission, local pinned tokenizer,
-768-token prompts, bounded source preparation, three-second deadline, single scoring
-slot, streamed response bound and complete finite model/score/index validation.
+768-token prompts, bounded source preparation, three-second deadline and complete
+finite model/score/index validation. Runtime scoring permits two concurrent searches
+and four shared concurrent batches of at most 20 passages, with the existing
+128 KiB request / 32 KiB response bounds. Coalesce identical in-flight searches,
+shield owners from waiter cancellation, and cancel/drain sibling batches before
+releasing capacity on failure. Offline local-model evaluation remains serial.
+Select semantic nested evidence using the already-cached retrieval vector; never
+start another embedding request for passage selection. Retain lexical/first-passage
+and reader/OCR fallbacks, exact-ID/model restrictions and fixed source projections.
 The operator-owned `eqarchives-reranker` Secret and host SSH forward persist through
 CI; only the API may access the dedicated key/bridge port. Never expose the raw model
 API, alter live Vulkan embeddings or restart index Jobs for reranker deployment.
@@ -935,7 +947,12 @@ new imports record conservative forward provenance without updating old records.
 `list_captures` returns exact dated IDs, and optional search grouping uses exact
 page or source-verified discussion identity; disclose the 1,000-record scan bound.
 Availability filters mean indexed field presence; fetch reports nonempty text/OCR.
-These research tools share retrieval limits and must not call the embedding service. Cover filtering, invalid
+Research tools share retrieval limits. `search_archive` may call embeddings only
+with explicit `hybrid=true`, a nonempty unconstrained query and relevance sort.
+Every vector branch must retain all resolved source/board, availability and date
+filters plus the current model restriction. Cache the selected hybrid or keyword
+fallback plan across pages; defaults, directories and capture history remain
+keyword-only. Cover filtering, invalid
 dates, pagination boundaries and old search/fetch compatibility with regressions.
 The user chose direct public MCP access with a top-right MCP icon and a connection
 screen for ChatGPT developer mode and Claude. Do not prepare or submit an official

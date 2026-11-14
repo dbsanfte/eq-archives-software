@@ -14,7 +14,8 @@ import httpx
 from mcp.server.mcpserver.exceptions import ToolError
 
 from .rerank import Reranker
-from .ranking_policy import hybrid_branches
+from .ranking_policy import hybrid_branches, RERANK_WINDOW
+from .passages import MAX_CANDIDATES
 from .limits import TextBudget
 from .catalog import Catalog, SCOPE_NOTE
 from .models import Document, SearchResult, SearchResults
@@ -109,6 +110,7 @@ class Archive(Catalog):
         self.embedding_lock = asyncio.Lock()
         self.requests = asyncio.Semaphore(4)
         self.cache: OrderedDict[str, tuple[float, list[float]]] = OrderedDict()
+        self.research_plans = OrderedDict()
         self.cooldown_until = 0.0
 
     @classmethod
@@ -132,9 +134,9 @@ class Archive(Catalog):
         if self.reranker:
             await self.reranker.close()
 
-    async def rank_ids(self, query, ids):
+    async def rank_ids(self, query, ids, mode=None):
         TextBudget().accept(query)
-        if (not isinstance(ids, list) or not 1 <= len(ids) <= 20 or
+        if (not isinstance(ids, list) or not 1 <= len(ids) <= MAX_CANDIDATES or
                 any(not isinstance(id, str) or not 0 < len(id) <= 2048 or
                     any(ord(c) < 32 for c in id) for id in ids) or len(set(ids)) != len(ids)):
             raise ValueError("Invalid candidate IDs")
@@ -142,15 +144,15 @@ class Archive(Catalog):
             id.encode("utf-8")
         if not self.reranker or len(ids) < 2:
             return list(ids), "disabled" if not self.reranker else "too_few"
-        return await self.reranker.order(self, query, ids)
+        return await self.reranker.order(self, query, ids, mode)
 
-    async def rank_hits(self, query, hits):
+    async def rank_hits(self, query, hits, window=RERANK_WINDOW, mode=None):
         if not query.strip() or not hits or not self.reranker:
             return hits
-        head = hits[:20]
-        ids, _ = await self.rank_ids(query, [hit["_id"] for hit in head])
+        head = hits[:window]
+        ids, _ = await self.rank_ids(query, [hit["_id"] for hit in head], mode)
         lookup = {hit["_id"]: hit for hit in head}
-        return [lookup[id] for id in ids] + hits[20:]
+        return [lookup[id] for id in ids] + hits[window:]
 
     async def embedding(self, query: str) -> list[float] | None:
         # Invalid caller text must not be mistaken for a shared model outage.
@@ -232,7 +234,7 @@ class Archive(Catalog):
         async with self.requests:
             constrained = has_constraints(query)
             body = {
-                "size": 20 if self.reranker else 10, "timeout": "8s", "track_total_hits": False,
+                "size": RERANK_WINDOW if self.reranker else 10, "timeout": "8s", "track_total_hits": False,
                 "_source": SEARCH_FIELDS,
                 "query": keyword_query(query),
             }
@@ -244,24 +246,68 @@ class Archive(Catalog):
             hits = await self.rank_hits(query, await self.query(body))
             return SearchResults(results=[result_from_hit(hit) for hit in hits[:10]])
 
+    async def research_retrieval(self, query, filters, sort, hybrid):
+        # Validate the complete text/filter budget and resolve source-backed board
+        # scopes before any embedding call, including on a cached plan.
+        selection = await self.selection(query, filters)
+        body = {'query': selection}
+        note = 'Keyword results.'
+        if not hybrid or not query.strip() or has_constraints(query) or sort != 'relevance':
+            if hybrid:
+                note += ' Empty, phrase/operator and date-sorted searches retain keyword matching.'
+            return body, note
+        key = json.dumps([self.settings.model, query, filters.model_dump(mode='json')], sort_keys=True)
+        now = time.monotonic()
+        plan = self.research_plans.get(key)
+        if not plan or plan[0] <= now:
+            vector = await self.embedding(query)
+            # Concurrent callers must adopt the first chosen success/fallback plan.
+            prior = self.research_plans.get(key)
+            plan = prior if prior and prior[0] > time.monotonic() else (time.monotonic()+300, vector)
+            self.research_plans[key] = plan
+        self.research_plans.move_to_end(key)
+        while len(self.research_plans) > 64:
+            self.research_plans.popitem(last=False)
+        vector = plan[1]
+        if vector is None:
+            return body, 'Semantic retrieval unavailable; keyword fallback retained for this query/filter combination for up to five minutes.'
+        # A scope's plan can outlive the original embedding cache entry. Keep
+        # that exact vector available to passage selection without new inference.
+        cache_key = (self.settings.model, query)
+        self.cache[cache_key] = (plan[0], vector)
+        self.cache.move_to_end(cache_key)
+        while len(self.cache) > 128:
+            self.cache.popitem(last=False)
+        branches = hybrid_branches(vector, self.settings.model)
+        for branch in branches:
+            branch['filter'] = [*selection['bool']['filter'], *([branch['filter']] if 'filter' in branch else [])]
+        body['knn'] = branches
+        return body, 'Hybrid keyword/semantic results; every vector candidate uses the same source, availability and date filters.'
+
     async def search_archive(self, query: str = "", filters: ResearchFilters | None = None,
-                             offset: int = 0, limit: int = 20, sort: SortOrder = "relevance", group_by: GroupBy = "documents") -> ResearchPage:
+                             offset: int = 0, limit: int = 20, sort: SortOrder = "relevance", group_by: GroupBy = "documents",
+                             hybrid: bool = False) -> ResearchPage:
         if self.requests.locked():
             raise ToolError("Archive research is busy. Please retry shortly.")
         async with self.requests:
             limit = min(limit, MAX_RESEARCH_RESULTS - offset)
+            retrieval, retrieval_note = await self.research_retrieval(query, filters or ResearchFilters(), sort, hybrid)
+            # Keyword research retains the already deployed ranking policy. The
+            # calibrated wider/matching-passage policy is opt-in on this tool.
+            rank_window, passage_mode = (RERANK_WINDOW, None) if hybrid else (20, 'legacy')
             if group_by != "documents":
-                return await self.grouped_page(query, filters or ResearchFilters(), offset, limit, sort, group_by)
-            rank = bool(self.reranker and query.strip() and sort == "relevance" and offset < 20)
+                return await self.grouped_page(query, filters or ResearchFilters(), offset, limit, sort, group_by,
+                                               retrieval, retrieval_note, rank_window, passage_mode)
+            rank = bool(self.reranker and query.strip() and sort == "relevance" and offset < rank_window)
             data = await self.execute({
-                "from": 0 if rank else offset, "size": max(20, offset + limit) if rank else limit, "timeout": "8s",
+                **retrieval,
+                "from": 0 if rank else offset, "size": max(rank_window, offset + limit) if rank else limit, "timeout": "8s",
                 "track_total_hits": MAX_RESEARCH_RESULTS + 1,
                 "_source": SEARCH_FIELDS + PROVENANCE_FIELDS,
-                "query": await self.selection(query, filters or ResearchFilters()),
                 "sort": research_sort(sort),
             }, stable_order=True)
             if rank:
-                data["hits"]["hits"] = (await self.rank_hits(query, data["hits"]["hits"]))[offset:offset+limit]
+                data["hits"]["hits"] = (await self.rank_hits(query, data["hits"]["hits"], rank_window, passage_mode))[offset:offset+limit]
             try:
                 total = ResultCount.model_validate(data["hits"]["total"])
                 results = [ResearchResult(**result_from_hit(hit).model_dump(), metadata=provenance(hit["_source"]))
@@ -272,7 +318,7 @@ class Archive(Catalog):
             has_more = bool(results) and (total.relation == "gte" or end < total.value)
             next_offset = end if has_more and end < MAX_RESEARCH_RESULTS else None
             limit_reached = has_more and next_offset is None
-            note = SCOPE_NOTE + " Keyword results from a live index; indexing changes can shift pages. Keep query, filters and sort unchanged when paging."
+            note = SCOPE_NOTE + ' ' + retrieval_note + " The live index can change between pages. Keep query, filters, sort and hybrid unchanged when paging."
             if limit_reached:
                 note += " The 1,000-result research window is exhausted; narrow the query or filters to continue."
             return ResearchPage(results=results, total=total, offset=offset, limit=limit,

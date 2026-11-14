@@ -1,0 +1,2062 @@
+[
+  {
+    "id": "p001",
+    "text": "How was complete heal chaining timed during raids?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How was complete heal chaining timed during raids?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "cleric",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p002",
+    "text": "Why did clerics use Divine Aura when pulling?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Why did clerics use Divine Aura when pulling?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "cleric",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p003",
+    "text": "What did Yaulp do for a melee cleric?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What did Yaulp do for a melee cleric?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "cleric",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p004",
+    "text": "How did cleric resurrection experience percentages differ by spell?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did cleric resurrection experience percentages differ by spell?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "cleric",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p005",
+    "text": "Where did clerics obtain the Water Sprinkler of Nem Ankh?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Where did clerics obtain the Water Sprinkler of Nem Ankh?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "cleric",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p006",
+    "text": "How was symbol different from the cleric hit point buff?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How was symbol different from the cleric hit point buff?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "cleric",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p007",
+    "text": "When was a fast heal preferable to a complete heal?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: When was a fast heal preferable to a complete heal?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "cleric",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p008",
+    "text": "What made plate armor useful for a cleric?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What made plate armor useful for a cleric?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "cleric",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p009",
+    "text": "How did clerics manage mana on long encounters?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did clerics manage mana on long encounters?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "cleric",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p010",
+    "text": "Could clerics solo undead in Lower Guk?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Could clerics solo undead in Lower Guk?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "cleric",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p011",
+    "text": "How did druids quad kite four enemies at once?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did druids quad kite four enemies at once?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "druid",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p012",
+    "text": "Where could a druid charm animals in Velious?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Where could a druid charm animals in Velious?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "druid",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p013",
+    "text": "What were the differences between druid and wizard evacuation?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What were the differences between druid and wizard evacuation?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "druid",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p014",
+    "text": "How did the druid tracking skill compare with ranger tracking?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did the druid tracking skill compare with ranger tracking?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "druid",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p015",
+    "text": "What ingredients were needed for the druid epic?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What ingredients were needed for the druid epic?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "druid",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p016",
+    "text": "Could a druid heal a group fighting in Karnor's Castle?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Could a druid heal a group fighting in Karnor's Castle?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "druid",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p017",
+    "text": "How did damage shields interact with experience credit?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did damage shields interact with experience credit?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "druid",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p018",
+    "text": "What was the mana efficiency of druid regeneration?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What was the mana efficiency of druid regeneration?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "druid",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p019",
+    "text": "Which zones were good for druid root rotting?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Which zones were good for druid root rotting?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "druid",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p020",
+    "text": "How did druids travel to the Plane of Growth?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did druids travel to the Plane of Growth?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "druid",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p021",
+    "text": "How did shaman cannibalize recover mana efficiently?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did shaman cannibalize recover mana efficiently?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "shaman",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p022",
+    "text": "Why was Torpor useful for a shaman?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Why was Torpor useful for a shaman?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "shaman",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p023",
+    "text": "How did shaman slow affect enemy attack speed?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did shaman slow affect enemy attack speed?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "shaman",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p024",
+    "text": "What was the purpose of the shaman epic tear?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What was the purpose of the shaman epic tear?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "shaman",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p025",
+    "text": "How did shaman disease and poison damage stack?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did shaman disease and poison damage stack?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "shaman",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p026",
+    "text": "Were shaman pets useful against raid targets?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Were shaman pets useful against raid targets?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "shaman",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p027",
+    "text": "Why did shamans cast Malo before slowing an enemy?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Why did shamans cast Malo before slowing an enemy?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "shaman",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p028",
+    "text": "How did alchemy potion requirements change with skill?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did alchemy potion requirements change with skill?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "shaman",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p029",
+    "text": "What were the risks of using canni dancing in groups?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What were the risks of using canni dancing in groups?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "shaman",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p030",
+    "text": "Which shaman buffs increased a tank's survivability?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Which shaman buffs increased a tank's survivability?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "shaman",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p031",
+    "text": "How did enchanters break a dangerous charm safely?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did enchanters break a dangerous charm safely?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "enchanter",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p032",
+    "text": "Why did mesmerize fail on some creatures?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Why did mesmerize fail on some creatures?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "enchanter",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p033",
+    "text": "How did Tashan affect an enchanter's crowd control?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did Tashan affect an enchanter's crowd control?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "enchanter",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p034",
+    "text": "Could enchanters stun interrupt an enemy caster?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Could enchanters stun interrupt an enemy caster?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "enchanter",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p035",
+    "text": "How did the Clarity and Breeze mana buffs differ?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did the Clarity and Breeze mana buffs differ?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "enchanter",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p036",
+    "text": "Where was the enchanter epic Wraith of a Shissar found?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Where was the enchanter epic Wraith of a Shissar found?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "enchanter",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p037",
+    "text": "What happened when an enchanter charmed a pet with weapons?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What happened when an enchanter charmed a pet with weapons?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "enchanter",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p038",
+    "text": "How did memory blur reset a monster's aggression?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did memory blur reset a monster's aggression?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "enchanter",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p039",
+    "text": "What was the use of illusion faction modifiers?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What was the use of illusion faction modifiers?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "enchanter",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p040",
+    "text": "How were enchanter area stuns chained in groups?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How were enchanter area stuns chained in groups?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "enchanter",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p041",
+    "text": "How did necromancers use twitch spells to help clerics?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did necromancers use twitch spells to help clerics?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "necromancer",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p042",
+    "text": "What were the benefits and risks of Lich?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What were the benefits and risks of Lich?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "necromancer",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p043",
+    "text": "How did necromancer fear kiting work in outdoor zones?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did necromancer fear kiting work in outdoor zones?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "necromancer",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p044",
+    "text": "Could undead charm replace a summoned necromancer pet?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Could undead charm replace a summoned necromancer pet?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "necromancer",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p045",
+    "text": "What was involved in the necromancer epic slime blood step?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What was involved in the necromancer epic slime blood step?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "necromancer",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p046",
+    "text": "How did necromancers retrieve corpses from dangerous areas?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did necromancers retrieve corpses from dangerous areas?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "necromancer",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p047",
+    "text": "Which necromancer damage over time spells stacked?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Which necromancer damage over time spells stacked?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "necromancer",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p048",
+    "text": "When was feign death useful for a necromancer soloing?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: When was feign death useful for a necromancer soloing?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "necromancer",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p049",
+    "text": "How did lifetaps help a necromancer survive?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did lifetaps help a necromancer survive?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "necromancer",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p050",
+    "text": "Did a necromancer pet take part of its owner's experience?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Did a necromancer pet take part of its owner's experience?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "necromancer",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p051",
+    "text": "What was the difference between earth and air elemental pets?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What was the difference between earth and air elemental pets?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "magician",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p052",
+    "text": "How did the magician epic pet compare with ordinary pets?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did the magician epic pet compare with ordinary pets?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "magician",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p053",
+    "text": "Where could magicians find the Pegasus Feather Cloak?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Where could magicians find the Pegasus Feather Cloak?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "magician",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p054",
+    "text": "How was Call of the Hero used to move raid members?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How was Call of the Hero used to move raid members?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "magician",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p055",
+    "text": "What effects did summoned pet weapons have?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What effects did summoned pet weapons have?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "magician",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p056",
+    "text": "How did magicians determine the level of their summoned pet?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did magicians determine the level of their summoned pet?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "magician",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p057",
+    "text": "Could magicians summon food and drink for other players?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Could magicians summon food and drink for other players?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "magician",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p058",
+    "text": "What made a water pet useful when fighting behind an enemy?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What made a water pet useful when fighting behind an enemy?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "magician",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p059",
+    "text": "How did the Rod of Mystical Transvergence work?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did the Rod of Mystical Transvergence work?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "magician",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p060",
+    "text": "Why did magician pets sometimes refuse to attack?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Why did magician pets sometimes refuse to attack?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "magician",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p061",
+    "text": "How did wizards use harvest during extended fights?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did wizards use harvest during extended fights?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "wizard",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p062",
+    "text": "What determined the efficiency of wizard direct damage spells?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What determined the efficiency of wizard direct damage spells?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "wizard",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p063",
+    "text": "Where was the wizard epic broken golem encountered?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Where was the wizard epic broken golem encountered?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "wizard",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p064",
+    "text": "How did wizard translocate differ from a group portal?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did wizard translocate differ from a group portal?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "wizard",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p065",
+    "text": "Why did wizards wait before casting large nukes on raids?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Why did wizards wait before casting large nukes on raids?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "wizard",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p066",
+    "text": "How did wizard area effect groups work?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did wizard area effect groups work?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "wizard",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p067",
+    "text": "Could wizard familiars affect mana regeneration?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Could wizard familiars affect mana regeneration?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "wizard",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p068",
+    "text": "What were the risks of wizard quad kiting?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What were the risks of wizard quad kiting?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "wizard",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p069",
+    "text": "How did spell resist rates affect wizard damage?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did spell resist rates affect wizard damage?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "wizard",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p070",
+    "text": "What did Manaburn do and how was it used?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What did Manaburn do and how was it used?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "wizard",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p071",
+    "text": "How did weapon procs help warriors hold aggro?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did weapon procs help warriors hold aggro?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "warrior",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p072",
+    "text": "What did defensive discipline change for warriors?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What did defensive discipline change for warriors?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "warrior",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p073",
+    "text": "How did dual wield and double attack interact?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did dual wield and double attack interact?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "warrior",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p074",
+    "text": "Why did warriors use a shield against certain enemies?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Why did warriors use a shield against certain enemies?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "warrior",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p075",
+    "text": "How was a warrior epic red scabbard obtained?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How was a warrior epic red scabbard obtained?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "warrior",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p076",
+    "text": "What was the difference between AC and hit points for tanking?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What was the difference between AC and hit points for tanking?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "warrior",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p077",
+    "text": "Did dexterity affect warrior weapon proc rates?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Did dexterity affect warrior weapon proc rates?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "warrior",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p078",
+    "text": "How did warrior berserk damage work at low health?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did warrior berserk damage work at low health?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "warrior",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p079",
+    "text": "What was the role of an assist tank on raids?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What was the role of an assist tank on raids?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "warrior",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p080",
+    "text": "How did taunt behave when a warrior already held aggro?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did taunt behave when a warrior already held aggro?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "warrior",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p081",
+    "text": "How did monks split camps using feign death?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did monks split camps using feign death?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "melee",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p082",
+    "text": "Why did monk weight limits matter for armor class?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Why did monk weight limits matter for armor class?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "melee",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p083",
+    "text": "How did rogues position themselves for backstab?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did rogues position themselves for backstab?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "melee",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p084",
+    "text": "What did rogue hide and sneak allow players to bypass?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What did rogue hide and sneak allow players to bypass?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "melee",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p085",
+    "text": "How did ranger snare help a group control fleeing enemies?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did ranger snare help a group control fleeing enemies?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "melee",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p086",
+    "text": "What was the ranger weapon Woodsman's Staff used for?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What was the ranger weapon Woodsman's Staff used for?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "melee",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p087",
+    "text": "How did paladin stun spells help maintain aggro?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did paladin stun spells help maintain aggro?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "melee",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p088",
+    "text": "What made the paladin SoulFire quest desirable?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What made the paladin SoulFire quest desirable?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "melee",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p089",
+    "text": "How did shadowknight harm touch change with level?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did shadowknight harm touch change with level?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "melee",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p090",
+    "text": "What was the role of disease cloud in shadowknight tanking?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What was the role of disease cloud in shadowknight tanking?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "melee",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p091",
+    "text": "How did bard instrument modifiers affect song strength?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did bard instrument modifiers affect song strength?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "bard",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p092",
+    "text": "Could bard songs stack with enchanter haste spells?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Could bard songs stack with enchanter haste spells?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "bard",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p093",
+    "text": "What happened when a bard song missed a note?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What happened when a bard song missed a note?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "bard",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p094",
+    "text": "How did bards use charm to solo enemies?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did bards use charm to solo enemies?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "bard",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p095",
+    "text": "What were the limits of bard mana regeneration songs?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What were the limits of bard mana regeneration songs?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "bard",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p096",
+    "text": "How did bard swarm kiting work before later changes?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did bard swarm kiting work before later changes?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "bard",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p097",
+    "text": "Where did bards obtain the Singing Steel armor pieces?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Where did bards obtain the Singing Steel armor pieces?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "bard",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p098",
+    "text": "How did Selo's travel song interact with snare?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did Selo's travel song interact with snare?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "bard",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p099",
+    "text": "Could a bard track while playing a song?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Could a bard track while playing a song?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "bard",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p100",
+    "text": "How did bard resist songs help during dragon fights?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did bard resist songs help during dragon fights?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "bard",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p101",
+    "text": "What was the recipe for Misty Thicket Picnic?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What was the recipe for Misty Thicket Picnic?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "tradeskills",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p102",
+    "text": "How did brewing improve from skill 100 to 200?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did brewing improve from skill 100 to 200?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "tradeskills",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p103",
+    "text": "Where could players obtain high quality pelts for tailoring?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Where could players obtain high quality pelts for tailoring?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "tradeskills",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p104",
+    "text": "What were the ingredients for a Wu's Fighting armor piece?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What were the ingredients for a Wu's Fighting armor piece?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "tradeskills",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p105",
+    "text": "How did cultural smithing differ between player races?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did cultural smithing differ between player races?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "tradeskills",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p106",
+    "text": "Which pottery recipes were useful for raising skill cheaply?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Which pottery recipes were useful for raising skill cheaply?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "tradeskills",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p107",
+    "text": "How did jewelcraft enchantments change jewelry statistics?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did jewelcraft enchantments change jewelry statistics?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "tradeskills",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p108",
+    "text": "What did the fletching trivial value mean?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What did the fletching trivial value mean?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "tradeskills",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p109",
+    "text": "How were fishing bait and fishing poles used?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How were fishing bait and fishing poles used?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "tradeskills",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p110",
+    "text": "Which tradeskill containers could be carried in inventory?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Which tradeskill containers could be carried in inventory?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "tradeskills",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p111",
+    "text": "How was the Stein of Moggok quest completed?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How was the Stein of Moggok quest completed?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "quests",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p112",
+    "text": "Where could players obtain the Testament of Vanear?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Where could players obtain the Testament of Vanear?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "quests",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p113",
+    "text": "What was needed for the Paw of Opolla quest?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What was needed for the Paw of Opolla quest?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "quests",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p114",
+    "text": "How did the Ghoulbane quest work?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did the Ghoulbane quest work?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "quests",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p115",
+    "text": "Where did the Shiny Brass Halberd drop?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Where did the Shiny Brass Halberd drop?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "quests",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p116",
+    "text": "How did players obtain the Glowing Black Stone?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did players obtain the Glowing Black Stone?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "quests",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p117",
+    "text": "What was involved in the Hero Bracer quest?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What was involved in the Hero Bracer quest?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "quests",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p118",
+    "text": "How was the Jaded Chokidai Prod used in a quest?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How was the Jaded Chokidai Prod used in a quest?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "quests",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p119",
+    "text": "Where did the Tattered Note for the monk sash quests come from?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Where did the Tattered Note for the monk sash quests come from?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "quests",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p120",
+    "text": "How did players obtain the Guise of the Deceiver?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did players obtain the Guise of the Deceiver?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "quests",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p121",
+    "text": "What keys were needed to enter Veeshan's Peak?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What keys were needed to enter Veeshan's Peak?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "kunark",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p122",
+    "text": "How did players navigate the Howling Stones dungeon?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did players navigate the Howling Stones dungeon?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "kunark",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p123",
+    "text": "Where was the Sebilis key obtained?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Where was the Sebilis key obtained?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "kunark",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p124",
+    "text": "What made Chardok faction useful to players?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What made Chardok faction useful to players?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "kunark",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p125",
+    "text": "How was the Crypt camp reached in Old Sebilis?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How was the Crypt camp reached in Old Sebilis?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "kunark",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p126",
+    "text": "What dangers did players encounter in Charasis east wing?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What dangers did players encounter in Charasis east wing?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "kunark",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p127",
+    "text": "How did the Lake of Ill Omen windmill groups work?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did the Lake of Ill Omen windmill groups work?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "kunark",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p128",
+    "text": "Where did the Jade Chokidai camp spawn in the Overthere?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Where did the Jade Chokidai camp spawn in the Overthere?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "kunark",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p129",
+    "text": "What was the strategy for fighting Venril Sathir?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What was the strategy for fighting Venril Sathir?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "kunark",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p130",
+    "text": "How did Trakanon's poison affect a raid?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did Trakanon's poison affect a raid?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "kunark",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p131",
+    "text": "How did players get access to Sleeper's Tomb?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did players get access to Sleeper's Tomb?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "velious",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p132",
+    "text": "What was needed for the Ring of Dain Frostreaver IV?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What was needed for the Ring of Dain Frostreaver IV?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "velious",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p133",
+    "text": "How did the Plane of Mischief card armor quests work?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did the Plane of Mischief card armor quests work?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "velious",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p134",
+    "text": "What was the strategy for fighting Lord Yelinak?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What was the strategy for fighting Lord Yelinak?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "velious",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p135",
+    "text": "How did faction affect entry into Skyshrine?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did faction affect entry into Skyshrine?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "velious",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p136",
+    "text": "Where could players hunt geonids in Velious?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Where could players hunt geonids in Velious?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "velious",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p137",
+    "text": "What were the dangers of Siren's Grotto travel?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What were the dangers of Siren's Grotto travel?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "velious",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p138",
+    "text": "How did a raid handle the Statue of Rallos Zek?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did a raid handle the Statue of Rallos Zek?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "velious",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p139",
+    "text": "What happened when the Sleeper was awakened?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What happened when the Sleeper was awakened?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "velious",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p140",
+    "text": "How did the Lodizal encounter work?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did the Lodizal encounter work?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "velious",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p141",
+    "text": "What was the bane weapon requirement for Emperor Ssraeshza?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What was the bane weapon requirement for Emperor Ssraeshza?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "luclin_planes",
+    "split": "tune",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "capture_date",
+        "type": "range",
+        "values": [
+          {
+            "from": "2002-01-01T00:00:00.000Z",
+            "to": "2006-12-31T23:59:59.999Z",
+            "name": "2002–2006",
+            "isDateField": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p142",
+    "text": "How did players obtain the Vex Thal key shards?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did players obtain the Vex Thal key shards?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "luclin_planes",
+    "split": "validation",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "capture_date",
+        "type": "range",
+        "values": [
+          {
+            "from": "2002-01-01T00:00:00.000Z",
+            "to": "2006-12-31T23:59:59.999Z",
+            "name": "2002–2006",
+            "isDateField": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p143",
+    "text": "What were the advantages of the Nexus transportation system?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What were the advantages of the Nexus transportation system?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "luclin_planes",
+    "split": "tune",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "capture_date",
+        "type": "range",
+        "values": [
+          {
+            "from": "2002-01-01T00:00:00.000Z",
+            "to": "2006-12-31T23:59:59.999Z",
+            "name": "2002–2006",
+            "isDateField": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p144",
+    "text": "How did the Bazaar change player trading?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did the Bazaar change player trading?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "luclin_planes",
+    "split": "validation",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "capture_date",
+        "type": "range",
+        "values": [
+          {
+            "from": "2002-01-01T00:00:00.000Z",
+            "to": "2006-12-31T23:59:59.999Z",
+            "name": "2002–2006",
+            "isDateField": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p145",
+    "text": "What did a beastlord warder do in a group?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What did a beastlord warder do in a group?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "luclin_planes",
+    "split": "tune",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "capture_date",
+        "type": "range",
+        "values": [
+          {
+            "from": "2002-01-01T00:00:00.000Z",
+            "to": "2006-12-31T23:59:59.999Z",
+            "name": "2002–2006",
+            "isDateField": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p146",
+    "text": "How did alternate advancement experience allocation work?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did alternate advancement experience allocation work?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "luclin_planes",
+    "split": "validation",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "capture_date",
+        "type": "range",
+        "values": [
+          {
+            "from": "2002-01-01T00:00:00.000Z",
+            "to": "2006-12-31T23:59:59.999Z",
+            "name": "2002–2006",
+            "isDateField": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p147",
+    "text": "What were the steps to enter the Plane of Time?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What were the steps to enter the Plane of Time?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "luclin_planes",
+    "split": "tune",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "capture_date",
+        "type": "range",
+        "values": [
+          {
+            "from": "2002-01-01T00:00:00.000Z",
+            "to": "2006-12-31T23:59:59.999Z",
+            "name": "2002–2006",
+            "isDateField": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p148",
+    "text": "How did Plane of Knowledge books change travel?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did Plane of Knowledge books change travel?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "luclin_planes",
+    "split": "validation",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "capture_date",
+        "type": "range",
+        "values": [
+          {
+            "from": "2002-01-01T00:00:00.000Z",
+            "to": "2006-12-31T23:59:59.999Z",
+            "name": "2002–2006",
+            "isDateField": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p149",
+    "text": "What did planar progression flags represent?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What did planar progression flags represent?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "luclin_planes",
+    "split": "tune",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "capture_date",
+        "type": "range",
+        "values": [
+          {
+            "from": "2002-01-01T00:00:00.000Z",
+            "to": "2006-12-31T23:59:59.999Z",
+            "name": "2002–2006",
+            "isDateField": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p150",
+    "text": "How did players reach the Bastion of Thunder?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did players reach the Bastion of Thunder?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "luclin_planes",
+    "split": "validation",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "capture_date",
+        "type": "range",
+        "values": [
+          {
+            "from": "2002-01-01T00:00:00.000Z",
+            "to": "2006-12-31T23:59:59.999Z",
+            "name": "2002–2006",
+            "isDateField": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p151",
+    "text": "Why was the play nice policy controversial on busy servers?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Why was the play nice policy controversial on busy servers?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "history_rules",
+    "split": "tune",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "capture_date",
+        "type": "range",
+        "values": [
+          {
+            "from": "1999-01-01T00:00:00.000Z",
+            "to": "2001-12-31T23:59:59.999Z",
+            "name": "1999–2001",
+            "isDateField": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p152",
+    "text": "How did corpse runs affect recovery after a failed raid?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did corpse runs affect recovery after a failed raid?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "history_rules",
+    "split": "validation",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "capture_date",
+        "type": "range",
+        "values": [
+          {
+            "from": "1999-01-01T00:00:00.000Z",
+            "to": "2001-12-31T23:59:59.999Z",
+            "name": "1999–2001",
+            "isDateField": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p153",
+    "text": "What were players' reactions to the introduction of shared banks?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What were players' reactions to the introduction of shared banks?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "history_rules",
+    "split": "tune",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "capture_date",
+        "type": "range",
+        "values": [
+          {
+            "from": "1999-01-01T00:00:00.000Z",
+            "to": "2001-12-31T23:59:59.999Z",
+            "name": "1999–2001",
+            "isDateField": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p154",
+    "text": "How did experience loss on death affect high level players?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did experience loss on death affect high level players?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "history_rules",
+    "split": "validation",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "capture_date",
+        "type": "range",
+        "values": [
+          {
+            "from": "1999-01-01T00:00:00.000Z",
+            "to": "2001-12-31T23:59:59.999Z",
+            "name": "1999–2001",
+            "isDateField": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p155",
+    "text": "Why did players petition guides about kill stealing?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Why did players petition guides about kill stealing?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "history_rules",
+    "split": "tune",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "capture_date",
+        "type": "range",
+        "values": [
+          {
+            "from": "1999-01-01T00:00:00.000Z",
+            "to": "2001-12-31T23:59:59.999Z",
+            "name": "1999–2001",
+            "isDateField": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p156",
+    "text": "How were guild raid rotations negotiated on contested servers?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How were guild raid rotations negotiated on contested servers?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "history_rules",
+    "split": "validation",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "capture_date",
+        "type": "range",
+        "values": [
+          {
+            "from": "1999-01-01T00:00:00.000Z",
+            "to": "2001-12-31T23:59:59.999Z",
+            "name": "1999–2001",
+            "isDateField": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p157",
+    "text": "What changes did players notice in the original client interface?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What changes did players notice in the original client interface?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "history_rules",
+    "split": "tune",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "capture_date",
+        "type": "range",
+        "values": [
+          {
+            "from": "1999-01-01T00:00:00.000Z",
+            "to": "2001-12-31T23:59:59.999Z",
+            "name": "1999–2001",
+            "isDateField": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p158",
+    "text": "How did roleplaying server rules affect character names?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did roleplaying server rules affect character names?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "history_rules",
+    "split": "validation",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "capture_date",
+        "type": "range",
+        "values": [
+          {
+            "from": "1999-01-01T00:00:00.000Z",
+            "to": "2001-12-31T23:59:59.999Z",
+            "name": "1999–2001",
+            "isDateField": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p159",
+    "text": "How did players buy and sell items in the East Commonlands tunnel?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did players buy and sell items in the East Commonlands tunnel?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "history_rules",
+    "split": "tune",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "capture_date",
+        "type": "range",
+        "values": [
+          {
+            "from": "1999-01-01T00:00:00.000Z",
+            "to": "2001-12-31T23:59:59.999Z",
+            "name": "1999–2001",
+            "isDateField": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p160",
+    "text": "What problems did players report with boat travel?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What problems did players report with boat travel?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "history_rules",
+    "split": "validation",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "capture_date",
+        "type": "range",
+        "values": [
+          {
+            "from": "1999-01-01T00:00:00.000Z",
+            "to": "2001-12-31T23:59:59.999Z",
+            "name": "1999–2001",
+            "isDateField": true
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p161",
+    "text": "What equipment improved a rogue's backstab damage?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What equipment improved a rogue's backstab damage?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "scoped_guides",
+    "split": "tune",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "domain_name",
+        "type": "any",
+        "values": [
+          "pub6.ezboard.com"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p162",
+    "text": "Which cleric healing spells were efficient at level 50?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Which cleric healing spells were efficient at level 50?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "scoped_guides",
+    "split": "validation",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "domain_name",
+        "type": "any",
+        "values": [
+          "www.eqcleric.com"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p163",
+    "text": "What ingredients did cultural human smithing require?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What ingredients did cultural human smithing require?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "scoped_guides",
+    "split": "tune",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "domain_name",
+        "type": "any",
+        "values": [
+          "www.eqtraders.com"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p164",
+    "text": "Where could a necromancer find research spell components?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Where could a necromancer find research spell components?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "scoped_guides",
+    "split": "validation",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "domain_name",
+        "type": "any",
+        "values": [
+          "necro.eqclasses.com"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p165",
+    "text": "Which magician pets could root or stun an enemy?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Which magician pets could root or stun an enemy?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "scoped_guides",
+    "split": "tune",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "domain_name",
+        "type": "any",
+        "values": [
+          "eq.castersrealm.com"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p166",
+    "text": "How did an enchanter manage several mesmerized monsters?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did an enchanter manage several mesmerized monsters?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "scoped_guides",
+    "split": "validation",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "domain_name",
+        "type": "any",
+        "values": [
+          "www.therunes.net"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p167",
+    "text": "What was involved in crafting a Coldain prayer shawl?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What was involved in crafting a Coldain prayer shawl?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "scoped_guides",
+    "split": "tune",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "domain_name",
+        "type": "any",
+        "values": [
+          "www.eqtraders.com"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p168",
+    "text": "Where could players find useful druid equipment?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Where could players find useful druid equipment?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "scoped_guides",
+    "split": "validation",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "domain_name",
+        "type": "any",
+        "values": [
+          "everquest.allakhazam.com"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p169",
+    "text": "What were the stats and source of the Cloak of Flames?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What were the stats and source of the Cloak of Flames?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "scoped_guides",
+    "split": "tune",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "domain_name",
+        "type": "any",
+        "values": [
+          "everquest.allakhazam.com"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p170",
+    "text": "What strategies were used against Lord Nagafen?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What strategies were used against Lord Nagafen?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "scoped_guides",
+    "split": "validation",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "domain_name",
+        "type": "any",
+        "values": [
+          "www.everlore.com"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p171",
+    "text": "How did rogues compare different piercing weapon ratios?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did rogues compare different piercing weapon ratios?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "scoped_forums",
+    "split": "tune",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "domain_name",
+        "type": "any",
+        "values": [
+          "eqforums.station.sony.com"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p172",
+    "text": "How did clerics organize healing rotations?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did clerics organize healing rotations?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "scoped_forums",
+    "split": "validation",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "domain_name",
+        "type": "any",
+        "values": [
+          "eqforums.station.sony.com"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p173",
+    "text": "What did players report about pet damage and experience?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What did players report about pet damage and experience?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "scoped_forums",
+    "split": "tune",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "domain_name",
+        "type": "any",
+        "values": [
+          "eqforums.station.sony.com"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p174",
+    "text": "How did monks describe successful camp splitting?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did monks describe successful camp splitting?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "scoped_forums",
+    "split": "validation",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "domain_name",
+        "type": "any",
+        "values": [
+          "eqforums.station.sony.com"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p175",
+    "text": "Why did warriors complain about losing aggro?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: Why did warriors complain about losing aggro?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "scoped_forums",
+    "split": "tune",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "domain_name",
+        "type": "any",
+        "values": [
+          "eqforums.station.sony.com"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p176",
+    "text": "How did players react to changes in charm spells?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did players react to changes in charm spells?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "scoped_forums",
+    "split": "validation",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "domain_name",
+        "type": "any",
+        "values": [
+          "eqforums.station.sony.com"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p177",
+    "text": "What did guilds do after a raid wiped?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What did guilds do after a raid wiped?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "scoped_forums",
+    "split": "tune",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "domain_name",
+        "type": "any",
+        "values": [
+          "eqforums.station.sony.com"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p178",
+    "text": "What advice did players give new enchanters?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What advice did players give new enchanters?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "scoped_forums",
+    "split": "validation",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "domain_name",
+        "type": "any",
+        "values": [
+          "eqforums.station.sony.com"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p179",
+    "text": "What did players report about tradeskill failure rates?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: What did players report about tradeskill failure rates?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "scoped_forums",
+    "split": "tune",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "domain_name",
+        "type": "any",
+        "values": [
+          "eqforums.station.sony.com"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p180",
+    "text": "How did groups handle accidental trains in dungeons?",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: How did groups handle accidental trains in dungeons?. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "scoped_forums",
+    "split": "validation",
+    "known_relevant_ids": [],
+    "filters": [
+      {
+        "field": "domain_name",
+        "type": "any",
+        "values": [
+          "eqforums.station.sony.com"
+        ]
+      }
+    ]
+  },
+  {
+    "id": "p181",
+    "text": "\"Runed Bolster Belt\" haste",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: \"Runed Bolster Belt\" haste. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "precise",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p182",
+    "text": "\"Staff of the Observers\" statistics",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: \"Staff of the Observers\" statistics. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "precise",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p183",
+    "text": "\"Journeyman's Walking Stick\" proc",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: \"Journeyman's Walking Stick\" proc. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "precise",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p184",
+    "text": "\"Bone Clasped Girdle\" intelligence",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: \"Bone Clasped Girdle\" intelligence. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "precise",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p185",
+    "text": "\"Polished Granite Tomahawk\" berserker strength",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: \"Polished Granite Tomahawk\" berserker strength. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "precise",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p186",
+    "text": "\"Golden Efreeti Boots\" mana",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: \"Golden Efreeti Boots\" mana. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "precise",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p187",
+    "text": "\"Sarnak Battle Shield\" armor",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: \"Sarnak Battle Shield\" armor. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "precise",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p188",
+    "text": "\"Sebilite Croaking Dirk\" rogue",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: \"Sebilite Croaking Dirk\" rogue. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "precise",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p189",
+    "text": "\"Luminescent Staff\" druid",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: \"Luminescent Staff\" druid. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "precise",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p190",
+    "text": "\"Tolan's Darkwood Bracer\" arrows",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: \"Tolan's Darkwood Bracer\" arrows. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "precise",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p191",
+    "text": "クレリック ヒール マナ 回復",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: クレリック ヒール マナ 回復. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "multilingual",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p192",
+    "text": "エンチャンター チャーム ペット",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: エンチャンター チャーム ペット. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "multilingual",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p193",
+    "text": "ネクロマンサー ソロ 狩り",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: ネクロマンサー ソロ 狩り. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "multilingual",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p194",
+    "text": "ドルイド カイト 魔法",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: ドルイド カイト 魔法. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "multilingual",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p195",
+    "text": "ウォーリアー ヘイト 武器",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: ウォーリアー ヘイト 武器. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "multilingual",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p196",
+    "text": "バード 楽器 歌 効果",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: バード 楽器 歌 効果. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "multilingual",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p197",
+    "text": "ローグ バックスタブ 武器",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: ローグ バックスタブ 武器. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "multilingual",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p198",
+    "text": "シャーマン スロウ レジスト",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: シャーマン スロウ レジスト. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "multilingual",
+    "split": "validation",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p199",
+    "text": "メイジ ペット 召喚",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: メイジ ペット 召喚. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "multilingual",
+    "split": "tune",
+    "known_relevant_ids": []
+  },
+  {
+    "id": "p200",
+    "text": "レンジャー トラッキング 弓",
+    "intent": "Find substantive historical EverQuest source material answering or explaining: レンジャー トラッキング 弓. Incidental navigation, signatures and unrelated name matches are insufficient.",
+    "category": "multilingual",
+    "split": "validation",
+    "known_relevant_ids": []
+  }
+]

@@ -768,7 +768,8 @@ class FrontendBrowserTests(unittest.TestCase):
                     expect(page.get_by_role("heading", level=1)).to_have_text("Bring EverQuest history into your conversations.")
                     expect(page.get_by_role("heading", name="ChatGPT developer mode", exact=True)).to_be_visible()
                     expect(page.get_by_role("heading", name="Claude", exact=True)).to_be_visible()
-                    expect(page.locator("code")).to_have_text("https://search.eqarchives.org/mcp")
+                    expect(page.locator("#mcp-endpoint")).to_have_text("https://search.eqarchives.org/mcp")
+                    expect(page.get_by_text("hybrid: true", exact=True)).to_be_visible()
                     expect(page.locator(".research li")).to_have_count(6)
                     expect(page.get_by_text("list_sites", exact=True)).to_be_visible()
                     expect(page.get_by_text("list_captures", exact=True)).to_be_visible()
@@ -986,7 +987,8 @@ class FrontendBrowserTests(unittest.TestCase):
                         return [parse_qs(urlparse(a.get_attribute('href')).query)['id'][0]
                                 for a in page.locator('.archive-result-reader').all()]
                     first = visible_ids()
-                    self.assertEqual(first, list(reversed(head)))
+                    self.assertEqual(first, list(reversed(head))[:20])
+                    self.assertEqual(len(head), 60)
                     rank_count = len(ranks)
                     all_ids = list(first)
                     for number in range(2, 8):
@@ -1012,10 +1014,10 @@ class FrontendBrowserTests(unittest.TestCase):
                     ranks = []
                     records = [{"_id": f"newsgroups/{n}.txt", "_score": 100-n, "_source": {
                         "id": f"newsgroups/{n}.txt", "title": f"Bard source {n}",
-                        "url": f"https://example.org/{n}", "text_full": "Bard evidence"}} for n in range(25)]
+                        "url": f"https://example.org/{n}", "text_full": "Bard evidence"}} for n in range(65)]
                     def archive(route):
                         if route.request.url.endswith('/_count'):
-                            return route.fulfill(json={"count":25})
+                            return route.fulfill(json={"count":65})
                         body = route.request.post_data_json
                         if route.request.url.endswith('/_rerank'):
                             ranks.append(body)
@@ -1023,22 +1025,24 @@ class FrontendBrowserTests(unittest.TestCase):
                                 return route.fulfill(status=503, json={"error":"unavailable"})
                             return route.fulfill(json={"ids":list(reversed(body['ids'])), "status":"applied"})
                         start=body.get('from',0)
-                        route.fulfill(json={"hits":{"total":{"value":25,"relation":"eq"},
+                        route.fulfill(json={"hits":{"total":{"value":65,"relation":"eq"},
                             "hits":records[start:start+body['size']]}, "aggregations": {"facet_bucket_all": {
-                                "doc_count":25, **{name:{"buckets":[]} for name in ("domain_name","llm_content_flavour","file_type","mime_type","mailing_list_name","llm_tags")},
+                                "doc_count":65, **{name:{"buckets":[]} for name in ("domain_name","llm_content_flavour","file_type","mime_type","mailing_list_name","llm_tags")},
                                 "last_indexed":{"buckets":{}}}}})
                     page.route('**/elasticsearch/**', archive)
                     page.route('**/openai/**', lambda route: route.fulfill(status=503,json={"error":"fixture"}))
                     page.goto(self.base_url+'/?q=bard', wait_until='networkidle')
                     expect(page.locator('.sui-result')).to_have_count(20)
-                    expect(page.locator('.sui-result').first).to_contain_text('Bard source 19')
+                    expect(page.locator('.sui-result').first).to_contain_text('Bard source 59')
                     self.assertEqual(len(ranks),1)
-                    self.assertEqual(len(ranks[0]['ids']),20)
-                    page.get_by_role('button',name='Next',exact=True).click()
-                    expect(page.locator('.sui-result')).to_have_count(5)
-                    expect(page.locator('.sui-result').first).to_contain_text('Bard source 20')
-                    page.get_by_role('button',name='Previous',exact=True).click()
-                    expect(page.locator('.sui-result').first).to_contain_text('Bard source 19')
+                    self.assertEqual(len(ranks[0]['ids']),60)
+                    for title,count in ((39,20),(19,20),(60,5)):
+                        page.get_by_role('button',name='Next',exact=True).click()
+                        expect(page.locator('.sui-result')).to_have_count(count)
+                        expect(page.locator('.sui-result').first).to_contain_text(f'Bard source {title}')
+                    for _ in range(3):
+                        page.get_by_role('button',name='Previous',exact=True).click()
+                    expect(page.locator('.sui-result').first).to_contain_text('Bard source 59')
                     self.assertEqual(len(ranks),1)
                     page.goto(self.base_url+'/?q=offline', wait_until='networkidle')
                     expect(page.locator('.sui-result').first).to_contain_text('Bard source 0')

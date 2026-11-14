@@ -1,3 +1,6 @@
+// Frozen calibration selects the deployed head; the API permits at most 60.
+export const RERANK_WINDOW = 60;
+
 // Only exact IDs leave the result list. Text and credentials stay in the API.
 export function relevanceSearch(state) {
   const sort = state.sortList?.[0];

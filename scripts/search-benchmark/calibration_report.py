@@ -3,6 +3,7 @@
 import argparse
 from collections import defaultdict
 import hashlib
+import math
 from pathlib import Path
 import statistics
 
@@ -14,13 +15,59 @@ BASELINE = "current-r1"
 
 def evidence_hashes(root):
     result = {}
-    for name in ("ranked.jsonl", "pool.json", "sources.json"):
+    names = ["ranked.jsonl", "pool.json", "sources.json"]
+    if (root / "latency.jsonl").exists():
+        names.append("latency.jsonl")
+    for name in names:
         h = hashlib.sha256()
         with (root / name).open("rb") as stream:
             for chunk in iter(lambda: stream.read(1024 * 1024), b""):
                 h.update(chunk)
         result[name] = h.hexdigest()
     return result
+
+
+def eligible_configs(root):
+    """Optional passage pilot gate, fixed before opening held-out judgments."""
+    if not (root / "latency.jsonl").exists():
+        return None
+    tune = {
+        q["id"]
+        for q in b.load(root / "manifest.json")["queries"]
+        if q["split"] == "tune"
+    }
+    grouped = defaultdict(dict)
+    for row in b.jsonlines(root / "latency.jsonl"):
+        if (
+            row["query_id"] not in tune
+            or row["mode"] not in ("legacy", "semantic", "paired")
+            or row["window"] not in (20, 40, 60)
+            or row.get("concurrent") != 2
+            or type(row["seconds"]) not in (int, float)
+            or not math.isfinite(row["seconds"])
+            or row["seconds"] < 0
+        ):
+            raise b.BenchmarkError("Invalid runtime eligibility evidence")
+        key = f"{row['mode']}-{row['window']}"
+        if row["query_id"] in grouped[key]:
+            raise b.BenchmarkError("Duplicate runtime query")
+        grouped[key][row["query_id"]] = row
+    if len(grouped) != 9 or any(len(rows) != 20 for rows in grouped.values()):
+        raise b.BenchmarkError("Require all nine variants on 20 tuning queries")
+    if any(set(rows) != set(next(iter(grouped.values()))) for rows in grouped.values()):
+        raise b.BenchmarkError("Runtime variants must use the same queries")
+    allowed = {BASELINE}
+    for config, rows in grouped.items():
+        # At least 95% applied and p95 <=2.75 seconds leaves room inside the
+        # unchanged three-second production deadline. The live baseline remains
+        # available as a no-change outcome, even if no alternative qualifies.
+        durations = sorted(row["seconds"] for row in rows.values())
+        if (
+            sum(row["status"] == "applied" for row in rows.values()) >= 19
+            and durations[18] <= 2.75
+        ):
+            allowed.add(config)
+    return allowed
 
 
 def measure(root, split):
@@ -98,6 +145,7 @@ def freeze(root):
     if (root / "ratings-validation.jsonl").exists():
         raise b.BenchmarkError("Validation already opened")
     measured, queries = measure(root, "tune")
+    eligible = eligible_configs(root)
     selected = {}
     if set(measured) != {"portal_grouped", "mcp_raw"}:
         raise b.BenchmarkError("Both search surfaces are required")
@@ -106,7 +154,11 @@ def freeze(root):
         if not common or BASELINE not in configs:
             raise b.BenchmarkError("No comparable judged queries or baseline")
         selected[surface] = {
-            "winner": table[0]["config_id"],
+            "winner": next(
+                row["config_id"]
+                for row in table
+                if eligible is None or row["config_id"] in eligible
+            ),
             "baseline": BASELINE,
             "leaderboard": table,
             "common_query_ids": common,
@@ -119,6 +171,8 @@ def freeze(root):
         "tune_ratings_sha256": b.digest(b.jsonlines(root / "ratings-tune.jsonl")),
         "evidence_sha256": evidence_hashes(root),
     }
+    if eligible is not None:
+        result["runtime_eligible"] = sorted(eligible)
     b.save(root / "selection.json", result)
     print(__import__("json").dumps(result, indent=2))
 

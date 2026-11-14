@@ -1,4 +1,4 @@
-"""Shared bounded top-20 scoring. Source text and model credentials stay server-side."""
+"""Shared bounded candidate scoring. Source text and model credentials stay server-side."""
 import asyncio
 from collections import OrderedDict
 import hashlib
@@ -12,6 +12,8 @@ import time
 
 import httpx
 from mcp.server.mcpserver.exceptions import ToolError
+from .passages import evidence_query, evidence_rows, select_evidence, FALLBACK_FIELDS, fallback_query
+from .ranking_policy import PASSAGE_MODE
 
 MODEL = "qwen3-reranker-0.6b-q8-v1"
 TOKENIZER_SHA = "aeb13307a71acd8fe81861d94ad54ab689df773318809eed3cbe794b4492dae4"
@@ -74,10 +76,13 @@ def scores(data, count):
 class Reranker:
     def __init__(self, client, tokenizer):
         self.client, self.tokenizer = client, tokenizer
-        self.lock = asyncio.Lock()
+        self.lock = asyncio.Semaphore(2)
+        self.batch_slots = asyncio.Semaphore(4)
+        self.pending = {}
         self.cache = OrderedDict()
         self.cooldown = 0.0
         self.deadline = 3.0
+        self.passage_mode = PASSAGE_MODE
 
     @classmethod
     def connect(cls):
@@ -93,59 +98,151 @@ class Reranker:
         if not key:
             raise ValueError("Reranker credential is empty")
         return cls(httpx.AsyncClient(base_url=url.rstrip("/") + "/", headers={"Authorization": "Bearer " + key},
-                   trust_env=False, follow_redirects=False, timeout=2.5, limits=httpx.Limits(max_connections=1)),
+                   trust_env=False, follow_redirects=False, timeout=2.5, limits=httpx.Limits(max_connections=4)),
                    Tokenizer.from_file(str(tokenizer_path)))
 
     async def close(self):
         await self.client.aclose()
 
-    async def order(self, archive, query, ids):
-        key = hashlib.sha256(json.dumps([MODEL, query, ids], ensure_ascii=False).encode()).hexdigest()
+    async def prepare(self, archive, query, ids, mode=None):
+        mode = mode or self.passage_mode
+        if mode == 'legacy':
+            data = await archive.execute({'size': len(ids), 'timeout': '1s', 'track_total_hits': False,
+                '_source': FIELDS, 'query': {'ids': {'values': ids}}})
+            sources = {h['_id']: h['_source'] for h in data['hits']['hits']}
+            if len(sources) != len(data['hits']['hits']) or not set(sources).issubset(ids):
+                raise ValueError('Unexpected passage document')
+            return [(n, document) for n, id in enumerate(ids) if id in sources
+                    and (document := passage(query, sources[id], self.tokenizer))]
+        cached = archive.cache.get((archive.settings.model, query))
+        vector = cached[1] if cached and cached[0] > time.monotonic() else None
+        # Query embeddings were already obtained for hybrid retrieval. Keyword-only
+        # research never starts an embedding request just to select a passage.
+        data = await archive.execute(evidence_query(query, ids, archive.settings.model, vector))
+        evidence = {}
+        for hit in data['hits']['hits']:
+            identity = hit['_id']
+            if identity not in ids or identity in evidence:
+                raise ValueError('Unexpected passage document')
+            evidence[identity] = evidence_rows(hit)
+        missing = [id for id in ids if id in evidence and not evidence[id]['passages']]
+        fallback = {}
+        if missing:
+            data = await archive.execute(fallback_query(missing))
+            for hit in data['hits']['hits']:
+                identity = hit['_id']
+                if identity not in missing or identity in fallback:
+                    raise ValueError('Unexpected fallback document')
+                fallback[identity] = hit['_source']
+                evidence[identity] = evidence_rows(hit)
+        inputs = []
+        for n, id in enumerate(ids):
+            source = evidence.get(id, {})
+            rows = select_evidence(source, mode)
+            documents = [passage(query, {'title': source.get('title'), 'text': [r]}, self.tokenizer) for r in rows]
+            if not rows and id in fallback:
+                documents = [passage(query, fallback[id], self.tokenizer)]
+            inputs.extend((n, d) for d in dict.fromkeys(documents) if d)
+        return inputs
+
+    async def score(self, query, inputs):
+        # Identical complete prompts share inference, but each original slot keeps
+        # its own score and identity. Batch bytes and total prompts stay bounded.
+        unique = list(dict.fromkeys(document for _, document in inputs))
+        if len(unique) > 120:
+            raise ValueError('Scoring input bound')
+        batches = []
+        position = 0
+        while position < len(unique):
+            batch = unique[position:position+20]
+            while True:
+                raw = json.dumps({'model': MODEL, 'query': query, 'documents': batch}, ensure_ascii=False).encode()
+                if len(raw) <= 128 * 1024:
+                    break
+                if len(batch) < 2:
+                    raise ValueError('Request too large')
+                batch = batch[:len(batch)//2]
+            batches.append((batch, raw))
+            position += len(batch)
+
+        async def submit(batch, raw):
+            async with self.batch_slots:
+                async with self.client.stream('POST', 'v1/rerank', content=raw,
+                                              headers={'Content-Type': 'application/json'}) as response:
+                    response.raise_for_status()
+                    body = bytearray()
+                    async for chunk in response.aiter_bytes():
+                        body.extend(chunk)
+                        if len(body) > 32768:
+                            raise ValueError('Response too large')
+                return dict(zip(batch, scores(json.loads(body), len(batch))))
+
+        # The GPU schedules individual passages across its slots. Submit bounded
+        # batches concurrently, shared across searches; never hold a serial
+        # scoring lock or leave sibling requests running after failure/cancellation.
+        tasks = [asyncio.create_task(submit(batch, raw)) for batch, raw in batches]
+        try:
+            parts = await asyncio.gather(*tasks)
+        finally:
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+        values = {document: value for part in parts for document, value in part.items()}
+        by_slot = {}
+        for slot, document in inputs:
+            by_slot[slot] = max(by_slot.get(slot, 0), values[document])
+        return by_slot
+
+    def remember(self, key, order, status):
+        prior = self.cache.get(key)
+        if prior and prior[0] > time.monotonic():
+            return list(prior[1]), prior[2]
+        self.cache[key] = (time.monotonic() + 300, list(order), status)
+        self.cache.move_to_end(key)
+        while len(self.cache) > 128:
+            self.cache.popitem(last=False)
+        return list(order), status
+
+    async def order(self, archive, query, ids, mode=None):
+        mode = mode or self.passage_mode
+        key = hashlib.sha256(json.dumps(['matched-passages-v1', mode, MODEL, query, ids], ensure_ascii=False).encode()).hexdigest()
         now = time.monotonic()
         cached = self.cache.get(key)
         if cached and cached[0] > now:
             self.cache.move_to_end(key)
             return list(cached[1]), cached[2]
-        order, status = list(ids), "fallback"
-        if not self.lock.locked() and now >= self.cooldown:
+        if key in self.pending:
+            order, status = await asyncio.shield(self.pending[key])
+            return list(order), status
+        if self.lock.locked() or now < self.cooldown:
+            return self.remember(key, ids, 'fallback')
+        pending = asyncio.get_running_loop().create_future()
+        self.pending[key] = pending
+        order, status = list(ids), 'fallback'
+        try:
             async with self.lock:
                 try:
                     async with asyncio.timeout(self.deadline):
-                        data = await archive.execute({"size": len(ids), "timeout": "2s", "track_total_hits": False,
-                            "_source": FIELDS, "query": {"ids": {"values": ids}}})
-                        sources = {h["_id"]: h["_source"] for h in data["hits"]["hits"]}
-                        inputs = [(n, passage(query, sources.get(id, {}), self.tokenizer)) for n, id in enumerate(ids)]
-                        inputs = [(n, document) for n, document in inputs if document]
+                        inputs = await self.prepare(archive, query, ids, mode)
                         if inputs:
-                            payload = {"model": MODEL, "query": query, "documents": [d for _, d in inputs]}
-                            raw = json.dumps(payload).encode()
-                            if len(raw) > 128 * 1024:
-                                raise ValueError("Request too large")
-                            async with self.client.stream("POST", "v1/rerank", content=raw,
-                                                          headers={"Content-Type": "application/json"}) as response:
-                                response.raise_for_status()
-                                body = bytearray()
-                                async for chunk in response.aiter_bytes():
-                                    body.extend(chunk)
-                                    if len(body) > 32768:
-                                        raise ValueError("Response too large")
-                            values = scores(json.loads(body), len(inputs))
-                            ranked = sorted(zip(inputs, values), key=lambda item: (-item[1], item[0][0]))
-                            for (slot, _), ((original, _), _) in zip(inputs, ranked):
+                            values = await self.score(query, inputs)
+                            ranked = sorted(values, key=lambda n: (-values[n], n))
+                            for slot, original in zip(sorted(values), ranked):
                                 order[slot] = ids[original]
-                            status = "applied"
+                            status = 'applied'
                         else:
-                            status = "no_text"
+                            status = 'no_text'
                 except (httpx.HTTPError, TimeoutError, ValueError, KeyError, TypeError, ToolError):
                     self.cooldown = time.monotonic() + 15
-                    logger.warning("Reranking unavailable; preserving retrieval order")
-        # Cache fallback too: paging must not swap halves of a top-20 window
-        # when inference recovers halfway through the user's search.
-        prior = self.cache.get(key)
-        if prior and prior[0] > time.monotonic():
-            return list(prior[1]), prior[2]
-        self.cache[key] = (time.monotonic() + 300, order, status)
-        self.cache.move_to_end(key)
-        while len(self.cache) > 128:
-            self.cache.popitem(last=False)
-        return list(order), status
+                    logger.warning('Reranking unavailable; preserving retrieval order')
+            result = self.remember(key, order, status)
+            pending.set_result((tuple(result[0]), result[1]))
+            return result
+        finally:
+            self.pending.pop(key, None)
+            if not pending.done():
+                # A cancelled owner must not cancel another client's coalesced
+                # search. Retain its fallback for consistent subsequent pages.
+                result = self.remember(key, ids, 'fallback')
+                pending.set_result((tuple(result[0]), result[1]))
