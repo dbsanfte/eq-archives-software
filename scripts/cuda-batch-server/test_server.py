@@ -10,7 +10,8 @@ from unittest.mock import patch, Mock
 import unittest
 
 from backend import EMBED_MODEL, RERANK_MODEL, causal_prefix, packed_layout, load_library
-from benchmark_http import checked_values
+from benchmark_http import checked_values, rerank_batches
+from benchmark_batching import paired_summary
 from check_kernels import check
 from scheduler import Busy, Scheduler, unique_batch
 from server import App, response, validate
@@ -21,6 +22,29 @@ from pathlib import Path
 
 
 class ContractTests(unittest.TestCase):
+    def test_benchmark_batches_preserve_unicode_inputs_within_live_byte_bound(self):
+        documents = [str(i) + "é" * 4000 for i in range(20)]
+        batches = rerank_batches("cleric", documents)
+        self.assertGreater(len(batches), 1)
+        self.assertEqual([doc for batch in batches for doc in batch], documents)
+        for batch in batches:
+            body = {"model": RERANK_MODEL, "query": "cleric", "documents": batch}
+            self.assertLessEqual(len(json.dumps(body, ensure_ascii=False).encode()), 128 * 1024)
+            self.assertLessEqual(len(batch), 20)
+        with self.assertRaises(ValueError):
+            rerank_batches("cleric", ["x" * (128 * 1024)])
+
+    def test_concurrency_comparison_uses_paired_completion_times(self):
+        fast = paired_summary([200, 400, 800], [100, 200, 400])
+        self.assertEqual(fast["paired_speedup_median"], 2)
+        self.assertTrue(fast["concurrent_faster"])
+        slow = paired_summary([200, 400, 800], [220, 440, 880])
+        self.assertFalse(slow["concurrent_faster"])
+        self.assertFalse(paired_summary([100, 100], [100, 100])["concurrent_faster"])
+        for serial, concurrent in (([1], [1, 2]), ([1, 2], [1, float("nan")]), ([1, 0], [1, 2])):
+            with self.assertRaises(ValueError):
+                paired_summary(serial, concurrent)
+
     def test_incompatible_kernel_library_fails_before_a_gpu_launch(self):
         for old in (Mock(spec=[]), Mock(layer_abi_version=Mock(return_value=1))):
             with patch("backend.C.CDLL", return_value=old), self.assertRaisesRegex(RuntimeError, "ABI"):

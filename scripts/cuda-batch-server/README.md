@@ -137,6 +137,14 @@ passes. Generated passages, vectors, raw model data and credentials stay
 outside Git. Reusing existing model judgments requires no new paid API calls;
 such judgments are not human validation.
 
+`benchmark_batching.py` compares the **same two complete reranking requests**
+run serially and concurrently. Its primary metric is elapsed time until both
+requests finish; individual request latencies and output agreement are retained.
+It alternates execution order and reports paired speedups with a diagnostic
+bootstrap interval. Both HTTP benchmarks retain the live client's 20-document,
+128 KiB batch bounds and four shared batch slots. A small fixture cannot establish
+a universal performance guarantee.
+
 ## Additive installation and rollback
 
 After GPU and HTTP gates pass, build the runtime image from the reviewed source

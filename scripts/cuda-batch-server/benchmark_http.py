@@ -21,6 +21,26 @@ def percentile(values, p):
     return ordered[min(len(ordered) - 1, math.ceil(len(ordered) * p) - 1)]
 
 
+def rerank_batches(query, documents):
+    batches, position = [], 0
+    while position < len(documents):
+        batch = documents[position : position + 20]
+        while (
+            len(
+                json.dumps(
+                    {"model": RERANK_MODEL, "query": query, "documents": batch}, ensure_ascii=False
+                ).encode()
+            )
+            > 128 * 1024
+        ):
+            if len(batch) == 1:
+                raise ValueError("Benchmark prompt exceeds the live client's byte bound")
+            batch = batch[: len(batch) // 2]
+        batches.append(batch)
+        position += len(batch)
+    return batches
+
+
 def checked_values(kind, data, expected):
     """Malformed/nonfinite comparator output must never pass a quality gate."""
     model = EMBED_MODEL if kind == "embed" else RERANK_MODEL
@@ -54,36 +74,16 @@ def checked_values(kind, data, expected):
     return values
 
 
-def main():
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--fixtures", type=Path, required=True)
-    p.add_argument("--root", type=Path, default=Path("/models"))
-    p.add_argument("--native", default="http://127.0.0.1:8084")
-    p.add_argument("--llama-embed", default="http://192.168.68.108:8081")
-    p.add_argument("--llama-rerank", default="http://127.0.0.1:8083")
-    p.add_argument("--embed-key", type=Path, default=Path("/run/secrets/embed_key"))
-    p.add_argument("--rerank-key", type=Path, default=Path("/run/secrets/rerank_key"))
-    p.add_argument("--output", type=Path, required=True)
-    p.add_argument("--repeats", type=int, default=5)
-    p.add_argument("--kinds", nargs="+", choices=("embed", "rerank"), default=["embed", "rerank"])
-    p.add_argument(
-        "--diagnostic",
-        action="store_true",
-        help="Retain failed compatibility receipts and continue; never marks them passing",
-    )
-    args = p.parse_args()
-    if not 2 <= args.repeats <= 20:
-        p.error("Use 2–20 bounded repetitions")
+def load_cases(path, root):
     from tokenizers import Tokenizer
-    import httpx
 
     tokenizers = {
-        kind: Tokenizer.from_file(str(verified(args.root / pin[2], pin[3]))) for kind, pin in PINS.items()
+        kind: Tokenizer.from_file(str(verified(root / pin[2], pin[3]))) for kind, pin in PINS.items()
     }
     for tokenizer in tokenizers.values():
         tokenizer.no_padding()
         tokenizer.no_truncation()
-    fixture = json.loads(args.fixtures.read_text())
+    fixture = json.loads(path.read_text())
     cases = []
     for item in fixture[:6]:
         documents, embeddings = [], []
@@ -124,6 +124,32 @@ def main():
             embeddings.append(inp)
         if documents:
             cases.append({"query": item["query"], "documents": documents, "embeddings": embeddings})
+    return cases
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument("--fixtures", type=Path, required=True)
+    p.add_argument("--root", type=Path, default=Path("/models"))
+    p.add_argument("--native", default="http://127.0.0.1:8084")
+    p.add_argument("--llama-embed", default="http://192.168.68.108:8081")
+    p.add_argument("--llama-rerank", default="http://127.0.0.1:8083")
+    p.add_argument("--embed-key", type=Path, default=Path("/run/secrets/embed_key"))
+    p.add_argument("--rerank-key", type=Path, default=Path("/run/secrets/rerank_key"))
+    p.add_argument("--output", type=Path, required=True)
+    p.add_argument("--repeats", type=int, default=5)
+    p.add_argument("--kinds", nargs="+", choices=("embed", "rerank"), default=["embed", "rerank"])
+    p.add_argument(
+        "--diagnostic",
+        action="store_true",
+        help="Retain failed compatibility receipts and continue; never marks them passing",
+    )
+    args = p.parse_args()
+    if not 2 <= args.repeats <= 20:
+        p.error("Use 2–20 bounded repetitions")
+    import httpx
+
+    cases = load_cases(args.fixtures, args.root)
     keys = {"embed": args.embed_key.read_text().strip(), "rerank": args.rerank_key.read_text().strip()}
     clients = {
         kind: httpx.Client(timeout=30, trust_env=False, headers={"Authorization": "Bearer " + key})
@@ -146,7 +172,7 @@ def main():
             # Match the live adapter: complete-prompt deduplication, <=20
             # documents per request and four shared in-flight HTTP batches.
             unique = list(dict.fromkeys(body["documents"]))
-            batches = [unique[i : i + 20] for i in range(0, len(unique), 20)]
+            batches = rerank_batches(body["query"], unique)
 
             def submit(documents):
                 with rerank_slots:
