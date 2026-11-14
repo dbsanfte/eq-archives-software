@@ -110,12 +110,21 @@ def test_filters_facets_recent_sites_reader_and_capture_history_remain_available
 
 
 @pytest.mark.parametrize('change',[
- {'field':'arbitrary'}, {'k':51}, {'num_candidates':251}, {'query_vector':[0]*768},
+ {'field':'arbitrary'}, {'k':101}, {'num_candidates':501}, {'query_vector':[0]*768},
  {'query_vector':[float('nan')]*768},{'query_vector':[1]*767},{'query_vector':[True]*768},
 ])
 def test_vector_work_is_bounded_and_finite(change):
     branch={'field':'text.vector','k':50,'num_candidates':250,'query_vector':VECTOR,**change}
     with pytest.raises(ValueError):Builder().search({'knn':[branch]},'model')
+
+
+def test_calibrated_source_leg_accepts_100_neighbors_without_relaying_caller_boost():
+    branch={'field':'text.vector','k':100,'num_candidates':500,'query_vector':VECTOR,
+            'boost':1000000,'filter':{'term':{'domain_name':'example.org'}}}
+    compiled=Builder().search({'knn':[branch]},'gemma')['knn'][0]
+    assert compiled['k']==100 and compiled['num_candidates']==500 and compiled['boost']==10
+    assert compiled['filter']==[{'term':{'domain_name':'example.org'}},{'term':{'embedding_model':'gemma'}}]
+    with pytest.raises(ValueError):Builder().search({'knn':[{**branch,'num_candidates':99}]},'gemma')
 
 
 def test_vector_only_search_never_adds_match_all_and_supported_page_sizes_fit_window():

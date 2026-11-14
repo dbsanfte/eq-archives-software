@@ -65,7 +65,7 @@ def test_hybrid_search_preserves_query_limits_fields_and_citations():
     assert all(item["filter"] == {"term": {"embedding_model": Settings.model}} for item in body["knn"])
     assert "embedding_model" not in str(body["query"])
     for item in body["knn"]:
-        assert (item["k"], item["num_candidates"], item.get("boost")) == (50, 250, 10)
+        assert (item["k"], item["num_candidates"], item.get("boost")) == (50, 250, 30)
         assert "similarity" not in item
     assert "text_full" not in body["_source"]
 

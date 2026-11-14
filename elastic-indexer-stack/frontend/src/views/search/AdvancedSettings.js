@@ -2,11 +2,11 @@ import React, { useState, useEffect } from "react";
 import PropTypes from "prop-types";
 import { Box, Typography, TextField } from "@mui/material";
 
-// Best observed average in the Luna pilot: hybrid-boost10.
+// Validated RRF source-vector leg; the keyword leg is fused separately.
 export const DEFAULT_KNN_PARAMS = {
   enableSemanticSearch: true,
-  k: 50,
-  num_candidates: 250,
+  k: 100,
+  num_candidates: 500,
   boost: 10,
 };
 

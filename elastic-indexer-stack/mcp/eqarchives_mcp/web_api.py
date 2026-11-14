@@ -16,6 +16,7 @@ from starlette.responses import JSONResponse
 
 from .limits import TextBudget
 from .http_limits import send_body
+from .ranking_policy import BROWSER_VECTOR_BOOST
 
 FACETS = {"domain_name", "llm_content_flavour", "file_type", "mime_type", "mailing_list_name", "llm_tags"}
 DATES = {"capture_date", "llm_guessed_date", "last_indexed", "llm_extracted_dates.date"}
@@ -267,14 +268,14 @@ class Builder:
                 vector = items(branch.get("query_vector"), 768)
                 check(len(vector) == 768 and all(type(x) in (float, int) and abs(x) <= 1 and math.isfinite(x) for x in vector))
                 check(0.9 < sum(x*x for x in vector) < 1.1)
-                k = integer(branch.get("k"), 1, 50)
-                candidates = integer(branch.get("num_candidates"), k, 250)
+                k = integer(branch.get("k"), 1, 100)
+                candidates = integer(branch.get("num_candidates"), k, 500)
                 filters = branch.get("filter", [])
                 filters = filters if isinstance(filters, list) else [filters]
                 compiled = [self.query(f) for f in items(filters)]
                 compiled.append({"term": {"embedding_model": model}})
                 result["knn"].append({"field": field, "query_vector": vector, "k": k,
-                    "num_candidates": candidates, "boost": 10, "filter": compiled})
+                    "num_candidates": candidates, "boost": BROWSER_VECTOR_BOOST, "filter": compiled})
             if result["knn"] and "query" not in value:
                 # A default match_all would OR unembedded records into a
                 # vector-only request and hide an empty model frontier.

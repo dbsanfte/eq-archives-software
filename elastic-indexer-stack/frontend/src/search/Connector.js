@@ -8,6 +8,7 @@ import { resolveQuery } from "./Query";
 import filterRegistry from './FilterRegistry';
 import { rerankResults } from './Reranking';
 import { createGroupedSearch } from './GroupedSearch';
+import { createFusedSearch, createPreparedSearch } from './FusedSearch';
 import { embeddingService } from './EmbeddingService';
 
 // Debug: Log filter count at module load time
@@ -71,6 +72,18 @@ export const createConnector = (paramsRef) => {
     // Apply any registered filters from our FilterRegistry service
     requestBody = filterRegistry.applyFilters(requestBody);
 
+    if (requestState._archiveRetrieval === 'lexical') delete requestBody.knn;
+    if (['semantic', 'metadata'].includes(requestState._archiveRetrieval)) {
+      requestBody.knn = requestBody.knn.filter(branch => branch.field === 'text.vector');
+      if (!requestBody.knn.length) throw new Error('Source embeddings unavailable');
+      if (requestState._archiveRetrieval === 'semantic') {
+        delete requestBody.query;
+        delete requestBody.aggs;
+      } else {
+        requestBody.size = 1;
+      }
+    }
+
     return requestBody;
   };
 
@@ -83,12 +96,16 @@ export const createConnector = (paramsRef) => {
   );
 
   if (connector.onSearch) {
-    connector.onSearch = createGroupedSearch(connector.onSearch.bind(connector), state => ({
+    const context = state => ({
       enabled: paramsRef.current.groupCaptures !== false,
       params: paramsRef.current,
       dateFilters: filterRegistry.applyFilters({}),
       embedding: embeddingService.getEmbedding(state.searchTerm, embeddingModel)
-    }), (query, results) => rerankResults(query, results, indexName));
+    });
+    const grouped = createGroupedSearch(createFusedSearch(connector.onSearch.bind(connector), context), context,
+      (query, results) => rerankResults(query, results, indexName));
+    connector.onSearch = createPreparedSearch(grouped, context,
+      (query, options) => embeddingService.fetchEmbedding(query, embeddingModel, options));
   }
   return connector;
 };

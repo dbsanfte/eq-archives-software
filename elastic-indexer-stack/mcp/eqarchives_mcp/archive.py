@@ -14,6 +14,7 @@ import httpx
 from mcp.server.mcpserver.exceptions import ToolError
 
 from .rerank import Reranker
+from .ranking_policy import hybrid_branches
 from .limits import TextBudget
 from .catalog import Catalog, SCOPE_NOTE
 from .models import Document, SearchResult, SearchResults
@@ -239,13 +240,7 @@ class Archive(Catalog):
             if not constrained:
                 vector = await self.embedding(query)
                 if vector is not None:
-                    # Match the frontend's Luna pilot winner, hybrid-boost10.
-                    body["knn"] = [{
-                        "field": field, "query_vector": vector, "k": 50,
-                        "num_candidates": 250, "boost": 10,
-                        **({"filter": {"term": {"embedding_model": self.settings.model}}}
-                           if self.settings.model == "embeddinggemma-2-768-v1" else {}),
-                    } for field in ("text.vector", "llm_summary_vector", "llm_image_text_vector", "image_vector")]
+                    body["knn"] = hybrid_branches(vector, self.settings.model)
             hits = await self.rank_hits(query, await self.query(body))
             return SearchResults(results=[result_from_hit(hit) for hit in hits[:10]])
 

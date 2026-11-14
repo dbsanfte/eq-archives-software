@@ -36,7 +36,7 @@ test('exports the real lexical builder, constrained policy and semantic prefilte
   expect(hybrid.body.knn).toHaveLength(4);
   expect(hybrid.body.knn.map(branch => branch.field)).toContain('image_vector');
   for (const branch of hybrid.body.knn) {
-    expect(branch).toMatchObject({ k: 50, num_candidates: 250, boost: 10, query_vector: vector });
+    expect(branch).toMatchObject({ k: 100, num_candidates: 500, boost: 10, query_vector: vector });
     expect(branch.filter).toContainEqual(hybrid.body.post_filter);
     expect(branch.filter).toContainEqual({ term: { embedding_model: 'embeddinggemma-2-768-v1' } });
   }
@@ -57,6 +57,25 @@ test('uses production grouping identity while preserving distinct sources and at
   expect(new Set(keys).size).toBe(6);
   expect(keys[5]).toBe('record:mailing-lists/list/message.txt');
   expect(keys[6]).toBe('record:websites/example.org/20020101000000/attachment');
+});
+
+test('fusion legs retain exact prefilters and request metadata without source bodies', () => {
+  const vector = Array(768).fill(0.01);
+  const query = { text: 'bard twisting', filters: [{ field: 'domain_name', values: ['example.org'], type: 'all' }] };
+  const [lexical, semantic, metadata] = exportRequests(['lexical', 'semantic', 'metadata'].map(leg => ({ op: 'build', query, vector, leg })));
+  expect(lexical.body.knn).toBeUndefined();
+  expect(lexical.body.query).toBeDefined();
+  expect(semantic.body.query).toBeUndefined();
+  expect(semantic.body.knn).toHaveLength(1);
+  expect(semantic.body.knn[0]).toMatchObject({ field: 'text.vector', k: 100, num_candidates: 500 });
+  expect(semantic.body.knn[0].filter).toContainEqual({ bool: { filter: [{ term: { domain_name: 'example.org' } }] } });
+  expect(semantic.body.knn[0].filter).toContainEqual({ term: { embedding_model: 'embeddinggemma-2-768-v1' } });
+  expect(metadata.body.size).toBe(1);
+  expect(metadata.body.query).toEqual(lexical.body.query);
+  expect(metadata.body.knn).toHaveLength(1);
+  expect(metadata.body.knn[0]).toMatchObject({ field: 'text.vector', k: 100, num_candidates: 500, query_vector: vector });
+  expect(metadata.body.post_filter).toEqual(lexical.body.post_filter);
+  expect(metadata.body.knn[0].filter).toContainEqual(metadata.body.post_filter);
 });
 
 test('exports the date picker range contract instead of treating a range as a term', () => {

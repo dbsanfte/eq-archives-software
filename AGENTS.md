@@ -418,6 +418,19 @@ report corpus and pooling limits, and validate against the completed corpus
 before changing production defaults. Collection cannot write archive documents
 or mappings; paid Luna grading is a separate explicit command.
 
+The November 2026 calibration uses 24 tuning and 24 fresh held-out queries, with
+source-bound Luna judgments and a durable shared dollar ledger. Keep the frozen
+selection before validation, complete-source judging, explicit model-judgment
+labels and paired metrics. The browser uses a fixed 100-hit keyword/source-vector
+RRF head (constant 60, k=100/candidates=500), groups before top-20 Qwen, and appends
+an ID-deduplicated lexical tail within 1,000 records. Cache both successful and
+fallback heads per query/scope; retain union facets, rapid-typing/stale-response
+handling and bounded sequential requests. MCP `search` keeps four vector branches
+at k=50/candidates=250 with boost 30; filtered research remains lexical. The bounded
+browser grammar permits at most k=100/candidates=500 per branch, with all previous
+vector, filter, admission and response limits intact. Do not copy this ranking
+change into indexing jobs or expose arbitrary fusion/ES DSL to public callers.
+
 Production top-20 reranking uses the shared MCP `rerank.py` client and the private
 Qwen CUDA service. Preserve post-grouping representatives, exact retrieval filters,
 date-sort bypass, head-only permutation and before-pagination ordering. Cache fallback
