@@ -500,6 +500,14 @@ completion/cancellation. Preserve embedding independence, public bounds and
 response identity. Validate both individual and paired completion times plus
 short searches arriving during bulk work with `benchmark_queue_latency.py`.
 
+Small Gemma batches retain the 128-padded-token dispatch boundary and use a
+Gemma-specialized CUTLASS main loop inside the same complete-layer kernel.
+Idle embedding workers collect ready work without a timer; retain rerank
+batch collection and bounded interactive priority. Run `verify_embedding_gpu.py`
+with its independent oracle, padding/batch-order checks and prior-library
+comparison, plus paired single-input HTTP latency and bulk throughput checks.
+All selected profiles must still pass the compiler/disassembly no-spill gate.
+
 ### Archive candidate crawler
 
 The operator tool in `scripts/archive-crawler` uses Python 3.10+ and Ruby 3.0+.

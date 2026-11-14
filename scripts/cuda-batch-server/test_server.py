@@ -318,6 +318,14 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(two[0][0], 0.3)
         self.assertEqual(len(self.engine.calls), 1)
 
+    async def test_idle_embedding_does_not_wait_for_the_rerank_batch_window(self):
+        # An embedding can finish before the optional rerank batching window.
+        # A timer on the idle embedding queue would make this valid request expire.
+        self.scheduler.wait = 1
+        value = await self.scheduler.submit("embed", [[2]], time.monotonic() + 0.5)
+        self.assertEqual(value[0][0], 0.2)
+        self.assertEqual(self.engine.calls, [("embed", [[2]])])
+
     async def test_short_rerank_finishes_before_an_older_large_request(self):
         self.scheduler.capacity = 16
         long_rows = [[i] * 384 for i in range(1, 7)]

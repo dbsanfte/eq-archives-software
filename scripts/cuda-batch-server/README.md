@@ -25,13 +25,18 @@ for the configured text bounds; no KV cache or cross-request prefix cache is
 retained. The service loads the existing pinned Q8_0 GGUF files and validates
 their hashes and tokenizer hashes in `backend.py`.
 
-The reranker uses NVIDIA CUTLASS's device-side matrix-multiply main loop inside
-the layer kernel. Its [pinned source](https://github.com/NVIDIA/cutlass/tree/ad7b2f5e84fcfa124cb02b91d5bd26d238c0459e)
+The reranker and small embedding profile use NVIDIA CUTLASS's device-side
+matrix-multiply main loop inside the layer kernel. Its [pinned source](https://github.com/NVIDIA/cutlass/tree/ad7b2f5e84fcfa124cb02b91d5bd26d238c0459e)
 is fetched and hash-checked only during the build. The [BSD notice](third_party/CUTLASS-LICENSE.txt)
-is retained in the source and runtime image. Gemma uses the local WMMA path.
+is retained in the source and runtime image. Bulk Gemma uses the local WMMA path.
 Both paths dequantize the pinned Q8_0 weights to FP16 and use FP32 accumulators
 and residuals. Arithmetic differs from llama.cpp's Q8 execution; score agreement
 and retrieval quality must be evaluated independently of token/weight identity.
+
+Gemma batches with at most 128 padded tokens use 32×64 matrix tiles, a 64-wide
+reduction tile and three asynchronous copy stages. This specializes the existing
+complete-layer kernel for short embeddings without changing model arithmetic or
+adding layer launches. The bulk profile and input bounds remain unchanged.
 
 Qwen's fused causal attention streams 64 keys past 32 queries per CTA. Its
 FP32 output accumulators remain in registers, using SM86 `ldmatrix`/`mma.sync`
@@ -51,6 +56,10 @@ tokens after exact input/prefix reuse, and separately bounds attention space to
 4,194,304 sequence-position pairs before multiplying by the model's head count.
 Compatible inputs can cross the old fixed length buckets; the longest rounded
 input stays within twice the shortest to avoid padding tiny queries to long pages.
+An idle embedding worker yields one event-loop turn to collect ready requests,
+without a timed batching delay. Reranking retains its one-millisecond collection
+window for related HTTP batches. Work arriving during inference still batches
+on the next GPU turn.
 It can fill leftover space with a later compatible item; deferred items remain
 queued. Exactly identical complete token sequences share inference within one
 batch, with every original response index preserved. This is document-level
@@ -115,6 +124,15 @@ about 113 inputs/s at eight inputs × four requests, versus 81 inputs/s for the 
 llama.cpp service with the same client settings. One native request at a time
 measured 104 inputs/s. Larger client batches added little throughput and increased
 latency. These are inference measurements, not end-to-end indexing rates.
+
+The short-embedding profile measured 5.1 ms median base64 HTTP latency versus 9.9 ms on
+the prior native runtime and 6.8 ms on llama.cpp, with an eight-document warmup
+before each measured query (18 samples/backend across six queries). Without that
+per-query warmup, the respective medians were 11.0, 15.8 and 17.9 ms (36 samples).
+GPU clock state matters at this scale; do not mix these protocols or treat the
+small fixture as a universal latency guarantee. Both protocols retained identical
+vectors to the prior native runtime. Bulk throughput remained 113 inputs/s versus
+81 inputs/s on llama.cpp at eight inputs × four requests.
 
 The fused-attention and completion-priority profile measured the following HTTP
 times on that six-query fixture (12 alternating paired repetitions). Each search
@@ -196,6 +214,7 @@ python verify_gpu.py --kind rerank --batch 8 --length 768 --oracle \
   --output /private/rerank-check.json
 python verify_concurrency.py --output /private/concurrency.json
 python verify_attention_gpu.py --oracle --output /private/attention.json
+python verify_embedding_gpu.py --oracle --output /private/embedding.json
 ```
 
 Also check uneven lengths, multiple requests, cancellation, maximum input
@@ -212,6 +231,12 @@ batch reversal and shared versus separate forwards. `--case 2` selects the
 bounded mixed-length ownership case for sanitizer runs. Race/synchronization
 checks may instrument representative `layer_forward` launches; initialization
 checks must retain all producer kernels as described below.
+
+`verify_embedding_gpu.py` covers the small/bulk dispatch boundary, 1–512-token
+inputs, irregular padding, duplicate rows and batch reversal. Its independent
+per-layer oracle and optional `--baseline-library /private/previous-libsmall.so`
+compare every complete output. `--case 0` is the bounded mixed-length small-profile
+sanitizer case; `--profile` records serving forwards without the oracle kernels.
 
 For initialization checks, instrument the complete forward pass, including
 PyTorch's setup and output kernels. Filtering only `layer_forward` excludes the
@@ -236,6 +261,10 @@ differences. `--diagnostic` records failed gates; it does not turn them into
 passes. Generated passages, vectors, raw model data and credentials stay
 outside Git. Reusing existing model judgments requires no new paid API calls;
 such judgments are not human validation.
+`--warm-single-embedding` explicitly adds an untimed eight-document warmup before
+each backend's single-input measurement and records that protocol in the report.
+Retain ordinary measurements too; warm-GPU latency alone does not describe sparse
+requests arriving at an idle GPU.
 
 `benchmark_batching.py` compares the **same two complete reranking requests**
 run serially and concurrently. Its primary metric is elapsed time until both

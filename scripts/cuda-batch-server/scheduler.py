@@ -198,7 +198,10 @@ class Scheduler:
                 await wake.wait()
                 if self.closed or self.failed:
                     break
-                await asyncio.sleep(self.wait)
+                # Embeddings batch work already queued on this event-loop turn,
+                # without imposing a timer on an otherwise idle single query.
+                # Reranking retains its short window for related HTTP batches.
+                await asyncio.sleep(0 if kind == "embed" else self.wait)
             if kind == 'embed':
                 await self._embedding_turn()
                 if self.closed or self.failed:

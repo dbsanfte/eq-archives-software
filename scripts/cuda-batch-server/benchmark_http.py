@@ -163,6 +163,10 @@ def main():
     p.add_argument("--repeats", type=int, default=5)
     p.add_argument("--kinds", nargs="+", choices=("embed", "rerank"), default=["embed", "rerank"])
     p.add_argument(
+        "--warm-single-embedding", action="store_true",
+        help="Before each single-input measurement, warm that backend with eight document inputs",
+    )
+    p.add_argument(
         "--diagnostic",
         action="store_true",
         help="Retain failed compatibility receipts and continue; never marks them passing",
@@ -251,6 +255,11 @@ def main():
                                 if backend == "native"
                                 else (args.llama_embed if kind == "embed" else args.llama_rerank)
                             )
+                            if args.warm_single_embedding and kind == "embed" and count == 1:
+                                # Explicitly reported warm-GPU measurement; never include
+                                # this workload in query latency or compatibility samples.
+                                request(kind, url, {"model": EMBED_MODEL,
+                                                   "input": cases[repeat % len(cases)]["embeddings"][:8]})
                             started = time.perf_counter()
                             with ThreadPoolExecutor(max_workers=concurrency) as pool:
                                 results = list(pool.map(lambda body: call(kind, url, body), bodies))
@@ -293,6 +302,7 @@ def main():
                         "kind": kind,
                         "count": count,
                         "concurrency": concurrency,
+                        "single_embedding_warmup": bool(args.warm_single_embedding and kind == "embed" and count == 1),
                         "latency_ms": {
                             k: {"p50": statistics.median(v), "p95": percentile(v, 0.95), "samples": len(v)}
                             for k, v in times.items()
