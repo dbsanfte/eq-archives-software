@@ -805,6 +805,25 @@ external work. Preflight and import reconciliation locks remain retryable rather
 than becoming content failures. Retries respect shutdown and retain checkpoints
 and the process lease. Other database errors remain visible; warnings identify
 storage waits without including SQL, credentials or upstream responses.
+Discovery continues partial archive-coverage checks from their saved Git-tree
+cursor, including cached checks on large shared hosts such as GeoCities. Each
+pass keeps the existing metadata bounds and the campaign's original hour/spend
+limit. A check that cannot advance is skipped without a paid call; Pipeline
+activity reports continuation and unresolved-site counts and the latest reason.
+The shared graph retains these URLs for later campaigns rather than marking
+them as archived or exhausting the frontier.
+
+When saved automatic mode is enabled, a stale automatic approval returns to
+Candidates for fresh source-bound grading, one site per recovery turn. Its old
+approval and judgment remain in history. Current extraction must verify the
+original staged bytes before regrading; changed or missing files remain visible
+integrity failures. Manual approvals, explicit pauses and capture continuations
+are not reapproved by this recovery. Existing evidence-check retries retain
+their original operation, paid cache and allowance; daily/monthly caps and
+enrichment priority still apply. A failed refreshed check waits for review while
+other sites continue. Capture approval is possible only after the new source
+judgment passes validation and the saved automatic selection policy accepts it.
+
 Health requires all three threads and the shared transport; shutdown retains the
 lease while any worker has an in-flight request. Restart retains payloads,
 approvals and progress. Interrupted manual operations require explicit resume; enabled

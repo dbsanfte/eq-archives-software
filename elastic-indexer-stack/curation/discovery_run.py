@@ -5,7 +5,7 @@ import time
 
 from acquisition import Downloader, sample
 from common import CrawlError, capture_scope, now, site_identity
-from coverage_check import require_new
+from coverage_check import CoveragePending, require_new
 from crawler import parser
 from discovery import discover
 from archive_frontier import advance as scan_archive
@@ -140,6 +140,8 @@ def fill(root, operation, store):
                     'skipped': len(checkpoint['skipped']), 'started_at': checkpoint['started_at'],
                     'deadline': checkpoint['deadline'], 'remaining_seconds': max(0, checkpoint['deadline'] - time.time()),
                     **spending, 'max_usd': payload['max_usd']}
+        snapshot.update({key: checkpoint.get(key, default) for key, default in
+                         (('coverage_retries', 0), ('coverage_blocked', 0), ('last_coverage_issue', None))})
         if checkpoint.get('archive_scan'):
             snapshot['archive_scan'] = checkpoint['archive_scan']
         store.set('fill_checkpoint', checkpoint)
@@ -212,6 +214,17 @@ def fill(root, operation, store):
             progress('checking_coverage')
             try:
                 ownership = owned_or_new(root, operation, row)
+            except CoveragePending as error:
+                result = error.result
+                previous = checkpoint.get('coverage_pending')
+                checkpoint['last_coverage_issue'] = {'url': row['url'], **result}
+                checkpoint['coverage_pending'] = {'id': row['id'], 'progress': result.get('progress')}
+                if result.get('retryable') and checkpoint['coverage_pending'] != previous:
+                    checkpoint['coverage_retries'] = checkpoint.get('coverage_retries', 0) + 1
+                    progress('checking_coverage')
+                    continue  # Resume its cursor under this run's original deadline.
+                checkpoint['coverage_blocked'] = checkpoint.get('coverage_blocked', 0) + 1
+                ownership = 'duplicate'  # No paid call for an unresolved site.
             except CrawlError:
                 # Unknown coverage must never reach a paid call. Discovery can
                 # continue with other independently verified new websites.

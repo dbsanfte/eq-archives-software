@@ -13,6 +13,13 @@ EDITABLE = {'approval_pending', 'approved_waiting_batch', 'deferred', 'rejected'
             'already_archived', 'duplicate_candidate', 'coverage_unverified', 'grade_error'}
 
 
+class CoveragePending(CrawlError):
+    """A bounded coverage pass stopped before proving absence or presence."""
+    def __init__(self, result):
+        super().__init__(result.get('message') or 'Archive coverage is still being checked')
+        self.result = result
+
+
 def published_sites(store, rows=None):
     if rows is None:
         rows=store.db.execute("SELECT id,url,state FROM candidates WHERE state IN ('published','indexed')")
@@ -108,12 +115,14 @@ def refresh(root, candidate_id=None, force=False):
         store.db.commit()
 
 
-def require_new(store, url, force=False):
+def require_new(store, url, force=True):
     if site_identity(url, store) in published_sites(store):
         raise CrawlError('Website/account was already published by another batch')
     repository = os.environ.get('ARCHIVE_REPO')
     if not repository:
         return
     result = SiteInventory(Archive(repository, store)).check(url, force=force)
+    if result['status'] == 'inventory_partial':
+        raise CoveragePending(result)
     if result['status'] != 'new_site':
         raise CrawlError('Website/account is already archived or its coverage is unverified; refresh the queue')

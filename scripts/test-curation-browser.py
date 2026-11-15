@@ -2250,12 +2250,15 @@ async def pipeline_activity_flow(browser,base,width):
     assert await page.locator('#pipeline-activity').evaluate('(el)=>!el.closest("fieldset")')
     discovery['result']['progress'].update(phase='finding_links',archive_scan={
         'pages_scanned':138,'hosts_visited':24,'hosts_total':1753,'sources_unavailable':660,
-        'metadata_unavailable':2,'current_host':'www.fohguild.org'})
+        'metadata_unavailable':2,'current_host':'www.fohguild.org'},coverage_retries=3,coverage_blocked=1,
+        last_coverage_issue={'url':'http://shared.example/guild/','message':'Local archive metadata is unavailable.'})
     await page.evaluate('refresh()');await settled(page)
     await expect(page.locator('#activity-candidates > summary')).to_contain_text('Finding linked sites')
     await expect(page.locator('#activity-candidates')).to_contain_text('138 pages read · 24 of 1,753 hosts visited')
     await expect(page.locator('#activity-candidates')).to_contain_text('Scanning www.fohguild.org')
     await expect(page.locator('#activity-candidates')).to_contain_text('660 sources unavailable or too large')
+    await expect(page.locator('#activity-candidates')).to_contain_text('3 continuations · 1 unresolved sites skipped')
+    await expect(page.locator('#activity-candidates')).to_contain_text('http://shared.example/guild/: Local archive metadata is unavailable.')
     await page.locator('#automation-settings > summary').click()
     await page.locator('#automation-daily').fill('5.50')
     await page.locator('#automation-monthly').fill('150.00')

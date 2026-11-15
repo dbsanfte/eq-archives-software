@@ -12,7 +12,7 @@ from ezboard import address as ezboard_address, shard as ezboard_shard
 from grading import criteria, grade, sources, current_rating
 from selection_policy import VERSION as SELECTION_VERSION
 from portal import Stage, decorate
-from review import record
+from review import StaleJudgment, checked_sources, record
 from state import Lane, active_operation, connect, enqueue, unpack
 
 ELIGIBLE = {'approval_pending', 'discovered', 'sampled', 'sample_error', 'unavailable',
@@ -55,18 +55,29 @@ def require_finished(store, row):
         raise CrawlError('Wait for this site’s evidence and grading check before approving capture.')
 
 
+def verified_rating(store, row, focus):
+    if not current_rating(row['rating']) or not row['captures'] or row['rating'].get('grading_criteria', '') != focus:
+        return False
+    try:
+        checked_sources(store, row)
+    except StaleJudgment:
+        return False
+    return True
+
+
 def start(store, payload):
     store.db.execute('BEGIN IMMEDIATE')
     _, row = current(store, payload)
     previous = store.db.execute("SELECT * FROM operations WHERE kind='candidate_check' AND json_extract(payload,'$.id')=? ORDER BY created DESC,rowid DESC LIMIT 1", (row['id'],)).fetchone()
     previous = unpack(previous) if previous else None
     focus = criteria(payload.get('grading_criteria', previous['payload'].get('grading_criteria', '') if previous else (row['rating'] or {}).get('grading_criteria', '')))
-    payload = {**payload, 'grading_criteria': focus, 'selection_policy': SELECTION_VERSION}
+    payload = {**payload, 'grading_criteria': focus, 'selection_policy': SELECTION_VERSION,
+               'grading_refresh': row['coverage'].get('grading_refresh_required')}
     if previous and previous['state'] in ('queued', 'running'):
         if focus != previous['payload'].get('grading_criteria', ''):
             raise CrawlError('This check is already running with saved grading criteria. Wait for it to finish before changing them.')
         return {'operation': previous['id'], 'max_usd': previous['payload']['max_usd'], 'existing': True}
-    if current_rating(row['rating']) and row['captures'] and focus == row['rating'].get('grading_criteria', ''):
+    if verified_rating(store, row, focus):
         raise CrawlError('This candidate already has a source grade for these criteria. Review its capture scope or change the criteria.')
     if previous:
         if (previous['payload']['manifest_sha256'] != row['manifest_sha256']
@@ -76,7 +87,8 @@ def start(store, payload):
             raise CrawlError('Another discovery or evidence check is queued or running. Retry when it finishes.')
         # A changed capture scope can reuse the same samples, cached grade and
         # budget. Bind the next merge to the newly reviewed scope, never an old one.
-        resumed = {**previous['payload'], 'manifest_sha256': row['manifest_sha256'], 'grading_criteria': focus, 'selection_policy': SELECTION_VERSION}
+        resumed = {**previous['payload'], 'manifest_sha256': row['manifest_sha256'], 'grading_criteria': focus,
+                   'selection_policy': SELECTION_VERSION, 'grading_refresh': payload['grading_refresh']}
         store.db.execute('INSERT INTO events(candidate,action,detail,created) VALUES (?,?,?,?)',
                          (row['id'], 'grading_requested', json.dumps({'operation': previous['id'], 'grading_criteria': focus}), now()))
         store.db.execute("UPDATE operations SET state='queued',payload=?,error=NULL,updated=? WHERE id=?",
@@ -99,7 +111,7 @@ def run(root, operation):
     refresh(root, candidate_id=payload['id'], force=True)
     with connect(root) as main:
         raw, row = current(main, payload)
-        if current_rating(row['rating']) and row['captures'] and row['rating'].get('grading_criteria', '') == payload.get('grading_criteria', ''):
+        if verified_rating(main, row, payload.get('grading_criteria', '')):
             return {'candidate_id': row['id'], 'phase': 'complete'}
         if not os.environ.get('ARCHIVE_REPO'):
             raise CrawlError('Archive metadata is not configured; evidence recovery cannot continue.')
@@ -153,9 +165,14 @@ def run(root, operation):
         with connect(root) as main:
             main.db.execute('BEGIN IMMEDIATE')
             current(main, payload)
+            coverage = dict(row['coverage'])
+            if checked['rating']:
+                checked_sources(run_store, checked)
+                coverage.pop('grading_refresh_required', None)
             main.db.execute('UPDATE candidates SET captures=?,rating=?,state=?,error=? WHERE id=?',
                             (json.dumps(captures), json.dumps(checked['rating']) if checked['rating'] else None,
                              checked['state'], checked['error'], row['id']))
+            main.db.execute('UPDATE candidates SET coverage=? WHERE id=?', (json.dumps(coverage), row['id']))
             updated = record(main, main.db.execute('SELECT * FROM candidates WHERE id=?', (row['id'],)).fetchone())
             updated_payload = {**payload, 'manifest_sha256': updated['manifest_sha256'], 'source_sha256': source_identity(updated)}
             main.db.execute('UPDATE operations SET payload=? WHERE id=?', (json.dumps(updated_payload), operation['id']))
