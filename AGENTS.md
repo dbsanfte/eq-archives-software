@@ -47,6 +47,8 @@ digests, dependency versions, or credentials into new files.
    use a temporary file with `gh pr create --body-file`.
 4. Keep the PR up to date with `master` and wait for the exact required check,
    **`Test and build frontend`**, to pass for the current revision before merging.
+   README-only PRs use the explicit workflow exemption described below; draft PRs
+   run validation when marked ready for review.
    Normal changes must use this protected PR path; never fabricate check results.
 5. When deployment is part of the task, follow the subsequent `master` workflow
    through deployment and verify the live behavior before reporting completion.
@@ -1140,17 +1142,32 @@ ChatGPT/Claude or Deep Research validation after actually performing it.
 
 The active delivery workflow is
 [elastic-indexer-stack-cicd.yml](.github/workflows/elastic-indexer-stack-cicd.yml).
-It runs for PRs targeting `master`, pushes to `master`, and manual dispatches.
+It receives PR events targeting `master`, pushes to `master`, and manual dispatches.
+Draft PRs skip all runner jobs; `ready_for_review` starts validation without another
+commit. A lightweight scope job examines the complete Git diff (three-dot for PRs,
+two-dot for pushes). Changes confined to exact `README.md` filenames at any depth
+skip builds/publication/deployment, while a lightweight required status gate records the
+explicit exemption rather than remaining pending. Mixed changes, other documentation/assets, empty
+diffs and manual dispatches run full validation. Missing history or scope failures
+must fail the required check, never grant an exemption. The short status gate
+uses always() to inspect failed/cancelled dependencies; long build jobs retain
+normal cancellation. Deployment requires both the build and status gate. Renames inspect both paths;
+do not replace this with a truncated changed-file list or workflow-level PR filter.
+Deployment may proceed across subsequent README-only commits so documentation
+cannot suppress a pending tested code rollout. Require ancestry and the complete
+diff; newer non-README paths supersede the old build, and lookup failures stop it.
+Run `python3 scripts/test-ci-scope.py` for changes to these rules. Keep the branch
+protection unchanged; this exemption is explicit operator policy, not fabricated tests.
 There is no release-please workflow or release/tag prerequisite.
 
-The required build job runs on GitHub-hosted `ubuntu-24.04`. It validates scripts
+The build job and its required status gate run on GitHub-hosted `ubuntu-24.04`. It validates scripts
 and Kustomize, builds the frontend with Jest/coverage, runs container and browser
 checks, builds/tests MCP with coverage, and exercises both containers with the real
 Nomic service on CPU. It also builds/tests the Python 3.13 curation/import image,
 runs its real browser and TCP peer/spoofing checks, and validates its separate
 Kustomization. PRs get no production secrets
-or self-hosted execution. Keep this required check present on every normal PR;
-path-based workflow skipping can leave required checks pending.
+or self-hosted execution. Keep the required check present even when README-only
+validation is intentionally skipped; workflow-level path filtering can leave it pending.
 
 Only `master` publishes `dbsanfte/frontend:<full-git-sha>` and the MCP artifact
 `dbsanfte/frontend:mcp-<full-git-sha>` plus the curation/import artifact

@@ -3,6 +3,7 @@ name: Frontend CI/CD
 on:
   pull_request:
     branches: [master]
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [master]
   workflow_dispatch:
@@ -11,8 +12,26 @@ permissions:
   contents: read
 
 jobs:
+  scope:
+    name: Detect CI scope
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      required: ${{ steps.scope.outputs.required }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Check all changed paths
+        id: scope
+        run: python3 scripts/ci-scope.py
+
   build:
-    name: Test and build frontend
+    name: Build and test archive services
+    needs: scope
+    if: needs.scope.outputs.required != 'false'
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     outputs:
@@ -25,6 +44,7 @@ jobs:
           persist-credentials: false
       - name: Validate deployment scripts
         run: |
+          python3 scripts/test-ci-scope.py
           bash -n scripts/deploy-frontend.sh scripts/deploy-curation.sh scripts/smoke-frontend.sh scripts/smoke-embeddings.sh scripts/smoke-curation.sh scripts/wait-http.sh
           sh -n elastic-indexer-stack/k8s-manifests/embeddings/download-model.sh
           sh -n elastic-indexer-stack/k8s-manifests/embeddings/start-server.sh
@@ -199,9 +219,37 @@ jobs:
           image=$(docker image inspect --format '{{index .RepoDigests 0}}' "$IMAGE_TAG")
           echo "digest=${image#*@}" >> "$GITHUB_OUTPUT"
 
+  validation:
+    name: Test and build frontend
+    needs: [scope, build]
+    # The short required gate always examines failures/cancellation. Long build
+    # jobs retain normal cancellation, and an explicit README exemption passes.
+    if: always() && (github.event_name != 'pull_request' || github.event.pull_request.draft != true)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require validation or an explicit README exemption
+        env:
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          BUILD_RESULT: ${{ needs.build.result }}
+          REQUIRED: ${{ needs.scope.outputs.required }}
+        run: |
+          if [[ "$SCOPE_RESULT" != success ]]; then
+            echo 'CI scope detection did not succeed.' >&2
+            exit 1
+          fi
+          if [[ "$REQUIRED" == false && "$BUILD_RESULT" == skipped ]]; then
+            echo 'README-only changes: build and deployment intentionally skipped.'
+          elif [[ "$REQUIRED" == true && "$BUILD_RESULT" == success ]]; then
+            echo 'All required build and test steps passed.'
+          else
+            echo 'Required validation failed, was cancelled, or did not run.' >&2
+            exit 1
+          fi
+
   deploy:
     name: Deploy archive services to eqvm
-    needs: build
+    needs: [build, validation]
     if: github.ref == 'refs/heads/master' && github.event_name != 'pull_request'
     runs-on: [self-hosted, Linux, X64, eqvm]
     timeout-minutes: 25
@@ -212,17 +260,18 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-      - name: Check this is still the current master commit
+          fetch-depth: 0
+      - name: Check the tested revision still matches master
         id: current
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           head=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/master" --jq '.object.sha')
-          if [[ "$head" == "$GITHUB_SHA" ]]; then
-            echo 'deploy=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'Skipping deployment: a newer commit is already on master.'
-          fi
+          [[ "$head" =~ ^[0-9a-f]{40}$ ]]
+          # README-only merges do not build an image. They must not suppress
+          # deployment of the preceding tested code revision.
+          git fetch --no-tags origin "$head"
+          python3 scripts/ci-scope.py --deployment "$GITHUB_SHA" "$head"
       - name: Apply manifests and verify the rollout
         if: steps.current.outputs.deploy == 'true'
         env:
