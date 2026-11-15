@@ -91,6 +91,8 @@ def connect(directory):
                 decision TEXT NOT NULL, error TEXT NOT NULL, created TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS capture_retries(operation TEXT PRIMARY KEY,
                 attempts INTEGER NOT NULL, retry_at TEXT, paused INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS capture_legacy_recovery(operation TEXT PRIMARY KEY,
+                recovered_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS publication_retries(operation TEXT PRIMARY KEY,
                 attempts INTEGER NOT NULL, retry_at TEXT, paused INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS operation_storage_retries(operation TEXT PRIMARY KEY,

@@ -234,3 +234,40 @@ def test_old_storage_retry_receipt_cannot_block_a_later_recoverable_operation(ca
     with connect(root) as store:
         states=dict(store.db.execute('SELECT id,state FROM operations'))
         assert states[first]=='interrupted' and states[second]=='queued'
+
+
+def test_legacy_recovery_handles_an_existing_empty_retry_row_exactly_once(candidate,monkeypatch):
+    import capture_recovery
+    from state import connect,unpack
+    from capture_queue import claim_resume
+    from test_capture_resume import interrupted
+    from server import create_app
+    root,row=candidate;operation,_,_=interrupted(root,create_app(root,start_worker=False),row)
+    error='Operation failed (OperationalError); staged evidence retained'
+    with connect(root) as store:
+        store.db.execute('UPDATE operations SET error=? WHERE id=?',(error,operation))
+        store.db.execute('INSERT INTO capture_retries VALUES (?,4,NULL,0)',(operation,));store.db.commit()
+    monkeypatch.setattr(capture_recovery,'now',lambda:'2026-11-15T00:00:00+00:00')
+    capture_recovery.schedule(root)
+    with connect(root) as store:
+        retry=store.db.execute('SELECT * FROM capture_retries WHERE operation=?',(operation,)).fetchone()
+        assert retry['retry_at'] is not None and retry['attempts']==4
+        store.db.execute("UPDATE capture_retries SET retry_at='2000-01-01'");store.db.commit()
+    capture_recovery.schedule(root)
+    with connect(root) as store:
+        claim_resume(store,operation)
+        store.db.execute("UPDATE operations SET state='interrupted',error=? WHERE id=?",(error,operation));store.db.commit()
+    capture_recovery.schedule(root)
+    with connect(root) as store:
+        saved=store.db.execute('SELECT state FROM operations WHERE id=?',(operation,)).fetchone()
+        assert saved['state']=='interrupted'
+        assert store.db.execute('SELECT retry_at FROM capture_retries WHERE operation=?',(operation,)).fetchone()[0] is None
+
+    # A later worker shutdown is a new transient failure, even after the legacy
+    # migration allowance was consumed. It must still recover automatically.
+    with connect(root) as store:
+        from capture_failures import WORKER_INTERRUPTED
+        store.db.execute('UPDATE operations SET error=? WHERE id=?',(WORKER_INTERRUPTED,operation));store.db.commit()
+    capture_recovery.schedule(root)
+    with connect(root) as store:
+        assert store.db.execute('SELECT retry_at FROM capture_retries WHERE operation=?',(operation,)).fetchone()[0]
