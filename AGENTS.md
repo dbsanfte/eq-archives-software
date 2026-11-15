@@ -1146,10 +1146,12 @@ It receives PR events targeting `master`, pushes to `master`, and manual dispatc
 Draft PRs skip all runner jobs; `ready_for_review` starts validation without another
 commit. A lightweight scope job examines the complete Git diff (three-dot for PRs,
 two-dot for pushes). Changes confined to exact `README.md` filenames at any depth
-skip builds/publication/deployment, while the named required check reports skipped
-rather than remaining pending. Mixed changes, other documentation/assets, empty
+skip builds/publication/deployment, while a lightweight required status gate records the
+explicit exemption rather than remaining pending. Mixed changes, other documentation/assets, empty
 diffs and manual dispatches run full validation. Missing history or scope failures
-must fail the required check, never grant an exemption. Renames inspect both paths;
+must fail the required check, never grant an exemption. The short status gate
+uses always() to inspect failed/cancelled dependencies; long build jobs retain
+normal cancellation. Deployment requires both the build and status gate. Renames inspect both paths;
 do not replace this with a truncated changed-file list or workflow-level PR filter.
 Deployment may proceed across subsequent README-only commits so documentation
 cannot suppress a pending tested code rollout. Require ancestry and the complete
@@ -1158,7 +1160,7 @@ Run `python3 scripts/test-ci-scope.py` for changes to these rules. Keep the bran
 protection unchanged; this exemption is explicit operator policy, not fabricated tests.
 There is no release-please workflow or release/tag prerequisite.
 
-The required build job runs on GitHub-hosted `ubuntu-24.04`. It validates scripts
+The build job and its required status gate run on GitHub-hosted `ubuntu-24.04`. It validates scripts
 and Kustomize, builds the frontend with Jest/coverage, runs container and browser
 checks, builds/tests MCP with coverage, and exercises both containers with the real
 Nomic service on CPU. It also builds/tests the Python 3.13 curation/import image,

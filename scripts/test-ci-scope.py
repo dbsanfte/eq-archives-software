@@ -167,5 +167,32 @@ class ScopeTests(unittest.TestCase):
             scope.deployment_current(self.base, 'a'*40, repo=self.root)
 
 
+class RequiredGateTests(unittest.TestCase):
+    def test_actual_workflow_gate_blocks_failures_and_accepts_only_proven_exemptions(self):
+        workflow = SCRIPT.parent.parent/'.github/workflows/elastic-indexer-stack-cicd.yml'
+        # Execute the actual shell gate, avoiding a second implementation of
+        # GitHub's status logic in the test. All input comes from fixed fixtures.
+        gate = workflow.read_text().split('  validation:\n', 1)[1].split('  deploy:\n', 1)[0]
+        shell = gate.split('        run: |\n', 1)[1]
+        shell = '\n'.join(line[10:] for line in shell.splitlines())
+        for scope_result, build_result, required, success in [
+            ('success', 'success', 'true', True),
+            ('success', 'skipped', 'false', True),
+            ('failure', 'skipped', 'false', False),
+            ('cancelled', 'skipped', '', False),
+            ('skipped', 'skipped', '', False),
+            ('success', 'failure', 'true', False),
+            ('success', 'cancelled', 'true', False),
+            ('success', 'skipped', 'true', False),
+            ('success', 'success', '', False),
+            ('success', 'success', 'false', False),
+        ]:
+            with self.subTest(scope=scope_result, build=build_result, required=required):
+                result = subprocess.run(['bash', '-e', '-c', shell], capture_output=True,
+                    env={**os.environ, 'SCOPE_RESULT': scope_result,
+                         'BUILD_RESULT': build_result, 'REQUIRED': required})
+                self.assertEqual(result.returncode == 0, success)
+
+
 if __name__ == '__main__':
     unittest.main()
