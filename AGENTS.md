@@ -17,7 +17,8 @@ digests, dependency versions, or credentials into new files.
 
 | Subject | Authoritative files |
 | --- | --- |
-| Architecture, backend setup and environment variables | [README.md](README.md) |
+| Project architecture and service overview | [README.md](README.md) |
+| Backend setup and environment variables | [Indexer guide](elastic-indexer-stack/indexer/README.md) |
 | Frontend development, container configuration and browser tests | [Frontend guide](elastic-indexer-stack/frontend/README.md) |
 | Public MCP contract, tests, limits and connection instructions | [MCP guide](elastic-indexer-stack/mcp/README.md), [public connection screen](elastic-indexer-stack/frontend/public/mcp.html) |
 | Deployment, prerequisites, credentials and rollback | [Deployment guide](elastic-indexer-stack/k8s-manifests/README.md) |

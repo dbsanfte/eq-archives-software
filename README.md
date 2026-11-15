@@ -1,323 +1,267 @@
-# EQ Archives Search
+# EQ Archives Software
 
-The frontend and indexing backend for **[search.eqarchives.org](https://search.eqarchives.org)**,
-a search portal for historical EverQuest websites, mailing lists, and newsgroup
-discussions preserved by EQ Archives.
+Search, explore and preserve the early EverQuest web: guild sites, class guides,
+item databases, forums, personal pages, mailing lists and newsgroups. This
+repository contains the public search portal, a read-only MCP server for AI
+assistants, an intranet curation pipeline, and the indexing and GPU inference
+services behind them.
 
-This repository contains the search application, the workers that turn archived
-files into searchable documents, and the frontend and embedding deployment configuration. The
-archive itself lives in the separate
-[eq-archives repository](https://github.com/dbsanfte/eq-archives).
+**[Search the archive](https://search.eqarchives.org)** ·
+**[Connect an AI assistant](https://search.eqarchives.org/mcp.html)** ·
+**[Browse the archived content on GitHub](https://github.com/dbsanfte/eq-archives)**
 
-## Features
+The preserved files live in **[dbsanfte/eq-archives](https://github.com/dbsanfte/eq-archives)**.
+This software repository turns those files into searchable, source-linked records
+and helps discover and preserve additional sites.
 
-- Keyword search with query syntax and optional semantic search using embeddings.
-- Filters for source, content type, tags, mailing list, and dates.
-- A document reader with text highlighting, citations, downloads and stable links.
-- Grouped website captures with dated history and text comparisons between versions.
-- Full-text previews, archive links and separately labelled OCR transcription.
-- A public, read-only MCP server for researching the archive in ChatGPT, Claude and other compatible assistants, with source/date filters, paged results and source discovery.
-- An archive status bar showing document count, indexing activity, and the
-  frontend build's Git revision.
-- Python workers for extracting text and metadata, generating embeddings, and
-  optionally adding model-generated summaries, tags, and dates.
+## Search portal
 
-## How it works
+The mobile-friendly [search portal](https://search.eqarchives.org) combines
+keyword retrieval with **EmbeddingGemma semantic search**, then uses
+**Qwen3-Reranker** to order the most relevant candidates. Hybrid retrieval is the
+default for ordinary relevance searches; quoted phrases, query operators and
+date sorting retain their lexical constraints.
 
-```mermaid
-flowchart LR
-    Archive[Archive Git repository] --> Finder[Python file finder]
-    Finder --> Queue[RabbitMQ]
-    Queue --> Worker[Python indexer]
-    Archive -. shared checkout .-> Worker
-    Worker --> ES[Elasticsearch]
-    Worker --> Models[Embedding and language models]
-    Browser[React search UI] --> Proxy[NGINX]
-    Proxy --> ES
-    Proxy --> Embeddings[Local EmbeddingGemma embeddings]
-    Assistants[ChatGPT / Claude / MCP clients] --> MCP[Read-only MCP search / fetch]
-    MCP --> ES
-    MCP --> Embeddings
-```
+- **Find historical sources:** filter by site, date, file type,
+  mailing list, themes and tags. Search text, OCR and indexed images.
+- **Read and cite:** open extracted documents, follow original/archive links,
+  download sources and share stable reader URLs. Generated summaries and OCR are
+  labelled separately from source text.
+- **Follow a discussion through time:** related forum captures group into
+  expandable results when their discussion identity is supported by source
+  evidence. Choose a dated capture or compare page versions.
+- **Browse recent additions:** [Recently indexed](https://search.eqarchives.org/sites)
+  lists domains with recent indexing activity; tapping one scopes search to it.
+- **Explore the collection:** [Explore](https://search.eqarchives.org/explore)
+  links timelines, themes, distinctive phrases and site charts to focused searches.
+  Charts disclose their sampling and counting limits.
 
-The file finder updates a local archive checkout and queues files for processing.
-Indexer workers read that shared checkout, extract content and metadata, and
-write documents and vectors to Elasticsearch. Model endpoints use an
-OpenAI-compatible API, including support for locally hosted models.
+The frontend is React with Elastic Search UI and Material UI. A bounded, read-only
+API serves both browser search and MCP over Elasticsearch. The browser and NGINX
+receive no database or model credentials, and callers cannot submit arbitrary
+Elasticsearch queries. Query embeddings run locally on Vulkan; reranking uses the
+private CUDA service below. Public searches make no paid Luna calls.
 
-The React application uses Elastic Search UI and Material UI. Its search and
-embedding requests go through NGINX on the same origin. NGINX supplies the
-upstream credentials from runtime secret files; credentials do not belong in the
-browser configuration or JavaScript bundle.
+## MCP: the archive as a research tool
 
-## Repository layout
+Connect a compatible assistant to **`https://search.eqarchives.org/mcp`** using
+Streamable HTTP, with **no authentication**. See the
+[connection guide](https://search.eqarchives.org/mcp.html) for ChatGPT and Claude
+setup. No OpenAI API key is needed to query this server.
 
-| Path | Purpose |
+| Tool | Purpose |
 | --- | --- |
-| [`elastic-indexer-stack/frontend/`](elastic-indexer-stack/frontend/) | React application, Jest tests, and NGINX container |
-| [`elastic-indexer-stack/mcp/`](elastic-indexer-stack/mcp/) | Public MCP search/fetch service, protocol tests and coverage |
-| [`elastic-indexer-stack/indexer/`](elastic-indexer-stack/indexer/) | Python file finder, indexing workers, extraction handlers, and tests |
-| [`elastic-indexer-stack/indexer/src/indexer/resources/`](elastic-indexer-stack/indexer/src/indexer/resources/) | Enrichment prompts and response schemas |
-| [`elastic-indexer-stack/k8s-manifests/`](elastic-indexer-stack/k8s-manifests/) | Production frontend and embedding manifests, plus backend reference configuration |
-| [`elastic-indexer-stack/docker-compose.yml`](elastic-indexer-stack/docker-compose.yml) | Reference Compose configuration for the services |
-| [`scripts/`](scripts/) | Deployment, runtime secrets, smoke checks and search relevance evaluation |
-| [`.github/workflows/elastic-indexer-stack-cicd.yml`](.github/workflows/elastic-indexer-stack-cicd.yml) | Frontend pull-request checks and deployment from `master` |
+| `search` | Find the best matching sources for a research question |
+| `fetch` | Retrieve an exact record's extracted text, metadata and citation link |
+| `search_archive` | Page through results with filters, sorting, grouping and optional keyword-only retrieval |
+| `list_sources` | Discover available domains, lists, collections, file types, themes and tags |
+| `list_sites` | Find recently indexed domains and their capture/indexing dates |
+| `list_captures` | Browse dated versions of a page or verified discussion |
 
-## Connect through MCP
+Research queries can combine capture, publication and indexing date windows;
+scope a host, directory, exact page or Ezboard; and filter for text, OCR or
+enrichment. Capture dates and indexing dates are distinct. Discussion grouping
+falls back to pages when evidence is insufficient. Full-text retrieval preserves
+source text and fails explicitly if it exceeds the response bound.
 
-Connect a custom MCP integration to **https://search.eqarchives.org/mcp**, using
-no authentication. The connector searches public archive sources and retrieves
-their full extracted text, source links and provenance. Read the
-[connection guide](https://search.eqarchives.org/mcp.html) for ChatGPT developer
-mode, Claude setup and a sample research question. The MCP icon at the top right
-of the search site opens this screen. Custom-connection availability depends on
-your assistant account/workspace. Users connect directly to the public server.
+The [MCP guide](elastic-indexer-stack/mcp/README.md) documents the exact contracts,
+filters, grouping limits, transport bounds and development tests.
 
-The [MCP service guide](elastic-indexer-stack/mcp/README.md) covers the contract,
-development, tests, resource limits and data handling. No OpenAI API key or paid
-OpenAI API call is needed to operate this connector; it uses the existing archive
-index and local Nomic service.
+## Curation: from a discovered link to a searchable site
 
-## Frontend development
+The curation portal is an **intranet-only**, mobile-friendly workspace. It accepts
+actual LAN clients in `192.168.0.0/16`, needs no authentication, and has no public
+ingress. Discovery, capture and indexing have independent workers, with persistent
+SQLite state and budget ledgers on a host-backed Kubernetes volume.
 
-Use **Node.js 22** and **Yarn Classic 1.22.22**.
+![End-to-end curation and indexing: discover and grade sites, approve a scope, queue and capture Wayback files, publish to the archive, extract and enrich content, embed and index it, then serve search and MCP.](docs/curation-indexing-pipeline.svg)
+
+[Open the full-size pipeline diagram](docs/curation-indexing-pipeline.svg).
+
+1. **Discover and assess.** Spider links from known archive captures or submit a
+   site/Wayback URL manually. Verify archive coverage and deduplicate site,
+   shared-account and board identities, including common `www` and default-port
+   aliases. Sample source evidence and ask Luna to grade EQ relevance and archival
+   substance, optionally against operator-defined criteria.
+2. **Approve a scope.** Review a site and choose its page, directory, account,
+   whole-site or supported board scope. Approved sites enter an uncapped FIFO
+   queue; Undo remains available until they are claimed. Discovery prioritizes
+   1999–2001 evidence, followed by later captures.
+3. **Capture the site.** Download all available dated versions within the approved
+   scope from **1999 through 2006**, including pages, images, stylesheets and other
+   files. Ezboard and SitePowerUp have board-aware acquisition. The persistent
+   Wayback connection uses bounded backoff and saves resumable progress.
+4. **Preserve and publish.** Stage exact sources and manifests privately, then
+   publish compatible files to the archive using its existing
+   `websites/<host>/<timestamp>/<decoded path>` convention. Publication and indexing
+   follow the original capture approval automatically, without a second review gate.
+5. **Index and retire.** Kubernetes import Jobs verify source identity, extract and
+   chunk content, enrich text with Luna, generate local embeddings and write new
+   records to Elasticsearch. Completed sites leave the active portal for History,
+   where remaining file gaps can be retried.
+
+**Full auto mode** continuously discovers, grades and promotes qualifying sites
+under a saved minimum score and daily/monthly Luna limits. Lower-scored sites stay
+in Saved for later. Enrichment has priority over discovery; paid work resumes when
+budget is available. Budgets, source decisions and paid caches survive retries.
+Automatic mode requires explicit opt-in and is never enabled by deployment.
+
+Failures are isolated: temporary transport/database contention retries with
+backoff while other sites advance. A bad supporting URL or conflicting filename
+becomes a visible gap, with downloaded bytes retained privately. Changed approvals,
+stale grading evidence and integrity failures remain visible for correction.
+Discovery reads local Git objects with bounded cursors, avoiding repeated archive
+clones and full filesystem walks; publication groups files by site.
+
+See the [curation guide](elastic-indexer-stack/curation/README.md) for operations,
+budgets and recovery, or the [crawler guide](scripts/archive-crawler/README.md)
+for standalone discovery and staging.
+
+## Indexing and content-aware passages
+
+The indexer preserves original files and full reader text while creating a
+separate, source-bound search representation. Shared policies recognize forum
+posts, quotations, feeds, articles and data tables. Major structured collections
+such as Allakhazam, Everlore, EQ Traders and Magelo have dedicated adapters;
+unknown layouts retain content conservatively. Japanese and mixed legacy
+encodings share the same decoder across discovery and ingestion.
+
+Text passages use a pinned tokenizer, a **480-token request budget** including
+title/context, and roughly **48 tokens of overlap**. Author, date, section and
+table context travel with the relevant passage. Proven navigation, advertising
+and generated error layouts are excluded from semantic text without deleting
+their archived sources. EmbeddingGemma produces **768-dimensional vectors**;
+a separate vision companion embeds supported raster images in the same space.
+
+New text imports add Luna summaries, tags and other enrichment by default, under
+the site's cumulative allowance and shared spending limits. Images and routine
+chunking/model backfills make no paid Luna calls. A bounded embedding cache keeps
+frequently reused inputs longer and expires idle entries; its identity includes
+the full input, model/runtime and tokenizer.
+
+**Policy maintenance runs in bounded, resumable curation slices**, yielding to
+new imports. It upgrades older records and reuses vectors only when the exact
+source, passage plan and model request match. Existing enrichment, provenance,
+dates and checkpoints are preserved. Broad model migrations and source-repair
+Jobs remain explicit operator workflows with their own recovery procedures.
+
+The [indexer guide](elastic-indexer-stack/indexer/README.md) covers backend setup
+and the legacy RabbitMQ finder/consumer path. The
+[Jobs guide](elastic-indexer-stack/indexer/k8s/README.md) and
+[embedding runbook](scripts/embedding-service/README.md) cover current imports,
+migrations, passage policies, images and recovery.
+
+## CUDA batch inference
+
+[`scripts/cuda-batch-server`](scripts/cuda-batch-server/README.md) is the project's
+specialized HTTP inference server for **EmbeddingGemma 2** and
+**Qwen3-Reranker 0.6B**, tuned for the **RTX 3080 Laptop GPU (SM86)**. It serves new
+curation imports and policy maintenance, plus portal/MCP reranking. Live query
+embeddings remain on eqvm's Vulkan service.
+
+### Architecture
+
+- **One complete layer per kernel launch.** Cooperative CUDA megakernels fuse
+  normalization, Q/K/V projections, RoPE, attention, residuals and the feed-forward
+  network: 24 layer launches for Gemma, 28 for Qwen. Input preparation and final
+  pooling/classification use PyTorch; a full request includes that additional work.
+- **Tensor Cores and register locality.** CUTLASS/WMMA paths use vectorized memory
+  access, shared-memory tiles and FP32 accumulators. Pinned Q8_0 GGUF weights are
+  dequantized to FP16 for compute. Compiler and disassembly checks reject spills,
+  stack frames and local-memory accesses in the selected custom kernel profiles.
+- **Fused causal attention.** Qwen streams attention tiles with online softmax,
+  avoiding quadratic score/probability workspaces. Exact causal prefix blocks can
+  share work within a batch; bidirectional Gemma retains its full attention context.
+- **Continuous batching.** Independent model queues, worker threads and CUDA
+  streams combine compatible inputs from concurrent HTTP requests. Whole inputs
+  retain their attention context and response indexes. Short reranks receive
+  scheduling priority with bounded fairness for bulk embeddings.
+- **Clients submit useful batches.** Imports and maintenance send eight embedding
+  inputs per request with up to four requests in flight. Portal/MCP share four
+  concurrent reranking batch slots, with up to 20 passages per request.
+
+The private API offers OpenAI-compatible **`POST /v1/embeddings`**, a
+Qwen/llama.cpp-compatible **`POST /v1/rerank`**, and **`GET /health`**. Reranking is
+an extension, not an OpenAI-standard endpoint. Bearer keys, bounded inputs,
+per-model admission limits, deadlines and complete output validation protect the
+service; it has no public ingress.
+
+### Measured improvements over llama.cpp
+
+The following measurements use the same RTX host and a small, source-linked
+six-query archive fixture. Latencies are HTTP medians; bulk throughput uses
+128 distinct embedding inputs at eight inputs × four concurrent requests.
+
+| Workload | llama.cpp | CUDA batch server | Improvement |
+| --- | ---: | ---: | ---: |
+| Single embedding, per-query GPU warmup | 6.8 ms | 5.1 ms | 25% lower latency |
+| Single embedding, without per-query warmup | 17.9 ms | 11.0 ms | 39% lower latency |
+| Bulk text embeddings | 81 inputs/s | 113 inputs/s | 40% higher throughput |
+| One top-20 reranking | 331 ms | 270 ms | 18% lower latency |
+| Two concurrent top-20 rerankings, both complete | 750 ms | 616 ms | 18% lower latency |
+| One top-60 reranking | 1,028 ms | 830 ms | 19% lower latency |
+| Two concurrent top-60 rerankings, both complete | 2,151 ms | 1,714 ms | 20% lower latency |
+
+These are model-service measurements, not full search-response or indexing rates.
+Single-input results use 18 samples per backend with warmup and 36 without;
+reranking uses 12 alternating paired repetitions. GPU clocks, lengths and traffic
+mix matter. The FP16 compute path is **not numerically equivalent** to llama.cpp's
+Q8 arithmetic: the strict absolute-score diagnostic still fails at about 0.048
+maximum difference, although top-10 set overlap was 100% on this top-60 fixture.
+That small comparison does not establish corpus-wide relevance equivalence.
+
+The [CUDA guide](scripts/cuda-batch-server/README.md) details the benchmarks,
+independent numerical checks, zero-spill gates, Nsight/compute-sanitizer workflow,
+mixed-load tests and rollback. Exact runtime pins live in
+[`deployment.env`](scripts/cuda-batch-server/deployment.env).
+
+## Development and deployment
+
+Clone this software repository to work on the application; the much larger
+content repository is a separate dependency for ingestion.
 
 ```bash
 git clone https://github.com/dbsanfte/eq-archives-software.git
 cd eq-archives-software/elastic-indexer-stack/frontend
-npm install --global yarn@1.22.22
-yarn install --frozen-lockfile
+# Use Node.js 22 and Yarn Classic 1.22.22.
+yarn install --frozen-lockfile --non-interactive
 yarn start
 ```
 
-The development server serves the UI at `http://localhost:3000`. Search needs an
-Elasticsearch index and the same-origin proxy routes described in the
-[frontend guide](elastic-indexer-stack/frontend/README.md). The development
-server does not configure those upstream services automatically. That guide also
-shows how to build and run the NGINX container with runtime credentials.
+The frontend development server runs on `localhost:3000`; working search also
+needs the API/proxy and index described in the frontend guide.
 
-Run the frontend tests and build with:
-
-```bash
-yarn test:ci --runInBand
-yarn build
-```
-
-Jest and React Testing Library cover search behaviour, asynchronous input updates,
-filters, results, configuration, and service handling. The test configuration
-requires at least **90% coverage** for statements, branches, functions, and lines.
-
-## Indexing backend
-
-The backend has two process modes: `--file-finder` discovers work, and `--indexer`
-consumes it. Running them requires:
-
-- Python 3.13, Git, and the system `libmagic` library, as used by the
-  [indexer Dockerfile](elastic-indexer-stack/indexer/Dockerfile).
-- Elasticsearch 8.x with an indexing account allowed to create the index
-  template and index, and read and write documents.
-- RabbitMQ reachable by both processes.
-- A shared, writable archive checkout, with the same `LOCAL_REPO_PATH` for both
-  processes.
-- An OpenAI-compatible embedding endpoint and, for enrichment, text or vision
-  models. The current Elasticsearch mappings use **768-dimensional vectors**.
-
-For a Linux development environment, install the system dependencies above, then
-install the Python dependencies and run the tests:
-
-```bash
-cd elastic-indexer-stack/indexer  # from the repository root
-python3.13 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r src/indexer/requirements-dev.txt
-PYTHONPATH=src python -m indexer.chunking --download-tokenizer /tmp/nomic-tokenizer.json
-PYTHONPATH=src python -m indexer.gemma --download-tokenizer /tmp/gemma-tokenizer.json
-GEMMA_TOKENIZER_PATH=/tmp/gemma-tokenizer.json NOMIC_TOKENIZER_PATH=/tmp/nomic-tokenizer.json PYTHONPATH=src python -m pytest src/indexer/test
-```
-
-The Docker build downloads the pinned tokenizer automatically.
-
-The dependency set includes document conversion, OCR, and machine-learning
-libraries, so installation is substantially larger than the frontend setup.
-Backend tests are separate from the required frontend GitHub Actions check.
-
-Configure the processes using environment variables:
-
-| Variable | Purpose |
+| Component | Guide |
 | --- | --- |
-| `GIT_REPO_URL` | Archive repository to clone or update; defaults to `dbsanfte/eq-archives` on GitHub |
-| `LOCAL_REPO_PATH` | Shared checkout directory; defaults to `/data/eq-archives` |
-| `SPARSE_CHECKOUT_PATHS` | Optional comma-separated archive subdirectories to fetch |
-| `SLEEP_INTERVAL` | Seconds between file-finder scans; defaults to `3600` |
-| `RABBITMQ_HOST`, `RABBITMQ_PORT`, `RABBITMQ_QUEUE` | Queue connection; defaults to `rabbitmq`, `5672`, and `file_paths` |
-| `ELASTICSEARCH_HOST`, `ELASTICSEARCH_PORT` | Elasticsearch URL without port, and separate port; defaults to `http://elasticsearch` and `9200` |
-| `ELASTICSEARCH_INDEX` | Destination index; defaults to `eq-archive` |
-| `OPENAI_ENDPOINT` | Model API base URL, including `/v1` |
-| `OPENAI_ENDPOINT_COMPLETIONS`, `OPENAI_ENDPOINT_EMBEDDINGS` | Optional separate API base URLs overriding `OPENAI_ENDPOINT` |
-| `OPENAI_EMBEDDING_MODEL_NAME` | Embedding model; use the same model for indexing and frontend queries |
-| `OPENAI_TEXT_MODEL_NAME`, `OPENAI_IMAGE_MODEL_NAME` | Models used for text and image enrichment |
-| `SKIP_LLM_ENRICHMENT` | Set to `true` to skip summaries, tags, and other enrichment; text indexing still generates embeddings |
-| `NOMIC_TOKENIZER_PATH` | Optional path to the checksum-pinned Nomic tokenizer; the image contains it at `/opt/eqarchives/nomic-tokenizer.json` |
-| `NOMIC_EMBEDDING_BATCH_SIZE` | Nomic inputs per serial request: `1` (default) or `2`; the full reindex Job opts into `2` with the tested cluster server configuration |
-| `SKIP_TEXT_FILES`, `SKIP_IMAGE_FILES`, `SKIP_OTHER_FILES` | Set individual flags to `true` to omit file types |
-| `REINDEXING_ENABLED`, `REINDEXING_INTERVAL` | Enable periodic reindexing and set the interval in seconds |
-| `LOG_LEVEL` | Logging level; defaults to `INFO` |
+| React portal, tests and browser regressions | [Frontend](elastic-indexer-stack/frontend/README.md) |
+| Public read-only API and MCP | [MCP service](elastic-indexer-stack/mcp/README.md) |
+| Intranet curation, publication and import Jobs | [Curation](elastic-indexer-stack/curation/README.md) |
+| Extraction, legacy workers and environment variables | [Indexer](elastic-indexer-stack/indexer/README.md) |
+| Reindexing, maintenance and recovery Jobs | [Kubernetes Jobs](elastic-indexer-stack/indexer/k8s/README.md) |
+| Model serving, passage policies, images and cache | [Embedding service](scripts/embedding-service/README.md) |
+| CUDA kernels, batching and performance checks | [CUDA batch server](scripts/cuda-batch-server/README.md) |
+| Retrieval calibration and model-judged evaluations | [Search benchmarks](scripts/search-benchmark/README.md) |
+| Production prerequisites, secrets and rollback | [Deployment](elastic-indexer-stack/k8s-manifests/README.md) |
 
-Mount indexing credentials at `/run/secrets/es_username`,
-`/run/secrets/es_password`, and `/run/secrets/openai_api_key`. For local processes,
-`ELASTICSEARCH_USERNAME`, `ELASTICSEARCH_PASSWORD`, and `OPENAI_API_KEY` can instead
-be supplied through the environment. Keep their values out of Git and shell
-history. Both modes initialize the model clients, so configure the API base URLs
-and key for the file finder as well as the indexer.
+The [CI/CD workflow](.github/workflows/elastic-indexer-stack-cicd.yml) runs unit,
+coverage, container, security and real-browser checks. Protected pull requests
+require **Test and build frontend** to pass. Merges to `master` publish immutable
+images and deploy the portal, API, curation and live embedding configuration to
+**k3s**. The CUDA runtime has its own validated installation and pinned image.
+Elasticsearch data and existing indexing Jobs retain their separate lifecycles.
 
-With dependencies and configuration in place, run each mode in a separate
-terminal from `elastic-indexer-stack/indexer`:
+## Contributing and license
 
-```bash
-python src/main.py --file-finder
-```
+Open an [issue](https://github.com/dbsanfte/eq-archives-software/issues) or a pull
+request against `master`. Follow [AGENTS.md](AGENTS.md) for the repository's
+development, testing and delivery conventions. Keep credentials, captured private
+fixtures and generated model data out of Git.
 
-```bash
-python src/main.py --indexer
-```
-
-Index mappings are defined in
-[`es_manager.py`](elastic-indexer-stack/indexer/src/indexer/es_manager.py).
-The template matches `eq-archive*`; use a matching index name or adapt the
-template. Keep the frontend's `indexName`, the NGINX `ELASTICSEARCH_INDEX`, and
-the index or alias containing the indexed documents consistent.
-
-The existing Compose file is a deployment reference with environment-specific
-addresses and zero replicas for the backend services. Adapt the addresses,
-secrets, index names, and replica counts before using it for your own stack.
-Elasticsearch and enrichment model servers must be provisioned separately.
-The production frontend deployment below provisions its own Nomic embedding service.
-
-For the one-off BlueWorld newsgroup recovery, the
-[Kubernetes indexing Job](elastic-indexer-stack/indexer/k8s/README.md) validates
-the recovered source manifest and indexes only those articles from the existing
-eqvm archive checkout. It uses the deployed Nomic service and skips LLM
-enrichment; it does not require RabbitMQ or the file-finder loop.
-
-Website extraction preserves paragraphs and image URLs, flattens presentation
-tables, and retains data tables. Nomic document chunks use its pinned WordPiece
-tokenizer, prefer paragraph/line/sentence boundaries, and preserve every source
-character, including whitespace and line endings. Each request has at most 480
-tokens including `search_document:` and special tokens, with up to roughly 48
-tokens of overlap. This fits the deployed 512-token server without embedding
-sentences just to choose boundaries. Gemma uses the content-aware passage policy
-described below. The [search relevance benchmark](scripts/search-benchmark/README.md)
-compares lexical, semantic and hybrid settings against a reserved archive query
-set, with source-based judgments, raw/grouped metrics and recorded versions.
-
-The [candidate crawler](scripts/archive-crawler/README.md) discovers outward
-links from selected local archive captures, checks cached website coverage,
-stages bounded Wayback samples, and optionally grades them with Luna. Its offline
-approval queue binds review decisions to exact source hashes. State stays outside
-both repositories; discovery does not clone, fetch, or walk archive content.
-The production [intranet curation service](elastic-indexer-stack/curation/README.md)
-serves the persistent queue at **http://192.168.68.53:8090/**, restricted to actual
-LAN clients in `192.168.0.0/16`, without authentication or public ingress.
-Deep-link directory scopes and whole-site/account alternatives are explicit.
-Approved sites capture all available files and dated versions in 1999–2006
-within their chosen scope, preserving the existing `websites/` layout. Completed
-captures publish and index automatically under that original approval, with
-create-only imports, default Luna enrichment and a $2 total cap per site.
-Capture and indexing have independent workers. Import Jobs wait for existing
-ingestion Jobs to finish; completed sites retire to portal History.
-Paid discovery is manual, up to 50 new candidates and $2 per explicit run;
-deployment never starts paid discovery.
-
-The [broad text reindex Job](elastic-indexer-stack/indexer/k8s/README.md#broad-text-reindex)
-repairs existing extracted text and rebuilds Nomic chunks in place. It preserves
-summaries, tags, dates, OCR and source metadata with atomic partial updates,
-skips completed extraction/chunking versions on restart, and uses a separate
-archive checkout. Missing source files retain their indexed text and are
-reported separately; rechunking that text cannot recover missing paragraphs.
-
-The current embedding migration uses **EmbeddingGemma 2 Q8_0** on eqvm (live
-search/MCP, Vulkan) and the RTX 3080 (full reindex and curation, CUDA). It rewrites
-all searched vectors in place and atomically marks each document
-`embedding_model=embeddinggemma-2-768-v1`. Lexical search covers the full archive;
-semantic branches only use completed Gemma documents. Existing enrichment, OCR,
-provenance and dates remain intact, with **no paid Luna calls** during backfill.
-See the [model migration runbook](scripts/embedding-service/README.md#embeddinggemma-migration).
-
-Gemma's `eq-passages-480-v10` policy embeds real titles, section and table context,
-forum posts and attributed quotations. It removes identifiable navigation and
-supporting scripts from a separate hashed search view, retaining full reader
-text and source files. Unknown site layouts use conservative fallbacks. The
-same policy applies to new imports and the resumable backfill. Direct raster
-embeddings run on a separate CUDA vision companion and share Gemma's text query
-space. Both search and MCP can retrieve images. Image indexing has no Luna cost;
-normal text import enrichment retains its existing approval/budget policy. See
-the [passage and image runbook](scripts/embedding-service/README.md#content-aware-passages-and-images)
-for input bounds, provenance, model pins and checkpoint-preserving rollout.
-
-Shared forum adapters retain message authors, dates and bodies across legacy,
-archive and printer layouts; Snitz composers preserve both the quote and topic
-review. Everlore comments retain their database entity context. Exact repeated
-embedding inputs share inference within a document while every original source
-occurrence remains indexed. Generated error pages retain their reader/source
-without contributing semantic vectors.
-
-Text workers and approved imports share a bounded, persistent embedding cache.
-Recent and frequent inputs retain decaying heat; idle entries expire after seven
-days. A separate reindex ledger retains rejected source IDs/hashes and tracks
-retries and verified resolutions. See the [cache and diagnostic runbook](scripts/embedding-service/README.md#bounded-shared-text-embedding-cache-and-rejection-ledger).
-
-Japanese source decoding is shared across discovery, imports and reindexing.
-CP932 Windows extensions and bounded truncated sequences retain readable Japanese
-and explicit damage provenance. The decoding repair checkpoint reuses unchanged
-embeddings and preserves archive bytes, dates and existing enrichment.
-
-## Deployment
-
-The frontend, read-only MCP connector, intranet curation service and local **llama.cpp / EmbeddingGemma 2 Q8_0** service deploy
-automatically from `master` to the production **k3s** cluster. The embedding service uses eqvm's
-Radeon iGPU through Vulkan and returns normalized 768-dimensional vectors.
-The model is pinned to a Hugging Face revision and SHA-256, downloaded into a
-persistent cache, and served only inside the cluster. NGINX forwards the public
-`/openai/v1/embeddings` route with its runtime API key. The frontend adds Gemma's
-`task: search result | query: ` prefix; this instance accepts up to 512 tokens per input.
-
-Pull requests run tests, enforce frontend/MCP coverage, build frontend, MCP and curation/import containers,
-and exercise the real Gemma server on CPU through both services on a GitHub-hosted
-runner. Only `master` publishes images and deploys through the VM's self-hosted runner.
-
-Deployments use immutable image digests and rolling readiness checks. Reapplying
-the same image, configuration, and secrets does not restart the pods. The
-workflow verifies GPU offload and embeddings before updating the frontend, then
-checks a vector-only search through the public proxy. Archive ingestion,
-Elasticsearch, and enrichment model services have separate lifecycles.
-
-See the [deployment guide](elastic-indexer-stack/k8s-manifests/README.md) for
-prerequisites, Actions secrets, manifests, verification, and rollback.
-
-## Contributing
-
-Open an [issue](https://github.com/dbsanfte/eq-archives-software/issues) for bugs
-or proposed changes, and submit pull requests against `master`. Include a
-regression test for every bug fix, using browser tests for layout and stacking
-issues, and update the relevant documentation. The protected branch requires
-an up-to-date PR and the passing `Test and build frontend` check.
-
-Use placeholders in examples. Keep credentials in local ignored files, runtime
-secret mounts, or GitHub Actions secrets. Browser configuration is public and
-must contain only non-secret settings.
-
-## License
-
-The EQ Archives Search software is licensed under the **GNU Affero General
-Public License, version 3 only** (`AGPL-3.0-only`). See [LICENSE](LICENSE) for the
-full terms.
-
-The frontend includes code adapted from Elastic's App Search Reference UI.
-Its original Apache-2.0 license and copyright notice are preserved in the
-[third-party notices](elastic-indexer-stack/frontend/NOTICE.txt) and
+The software is **AGPL-3.0-only**; see [LICENSE](LICENSE). Elastic's original
+Apache-2.0 notices are preserved in the frontend's
+[NOTICE](elastic-indexer-stack/frontend/NOTICE.txt) and
 [upstream license](elastic-indexer-stack/frontend/licenses/Elastic-Apache-2.0.txt).
-Third-party dependencies retain their own licenses.
-
-This software license does not grant rights to the archived content, EverQuest
-names, logos, or other third-party artwork; those remain subject to their
-respective rights and terms.
+Third-party dependencies retain their own licenses, including
+[CUTLASS](scripts/cuda-batch-server/third_party/CUTLASS-LICENSE.txt).
+The software license does not grant rights to archived content, EverQuest names,
+logos or other third-party artwork.
