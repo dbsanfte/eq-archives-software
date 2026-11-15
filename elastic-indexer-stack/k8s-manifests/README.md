@@ -92,9 +92,13 @@ single-input default. Larger contexts or batches need separate capacity testing.
 ## GitHub Actions
 
 [Frontend CI/CD](../../../.github/workflows/elastic-indexer-stack-cicd.yml) runs on
-every push to `master`, every pull request targeting `master`, and manual dispatches. Pull
-requests build and smoke-test on a GitHub-hosted runner, without production
-credentials or access to the VM. Only `master` publishes and deploys.
+pushes to `master`, pull requests targeting `master`, and manual dispatches.
+Draft PRs skip runner jobs; marking one ready for review starts validation. Changes
+confined to `README.md` files at any depth run only a lightweight Git-diff scope
+check, skipping image builds, publication and deployment. Mixed changes and other
+documentation (including SVGs and AGENTS.md) retain full CI. Manual dispatch always
+runs validation. Ready PRs build and smoke-test on a GitHub-hosted runner, without
+production credentials or access to the VM. Only `master` publishes and deploys.
 
 The build uses the frozen Yarn lockfile and pinned base images, runs the
 frontend tests with the configured 90% coverage thresholds, and smoke-tests the
@@ -126,8 +130,10 @@ builds without that argument display `Build: development`.
 configured 90% minimum coverage for statements, branches, functions, and lines.
 The rule applies to administrators as well; direct pushes, force pushes, and
 branch deletion are blocked. No additional reviewer approval is required.
-Keep this check enabled for every pull request: path filters could otherwise
-leave required checks pending indefinitely.
+Keep this check present for every pull request. The README exemption skips its
+job explicitly so GitHub can satisfy branch protection; skipping the whole PR
+workflow with path filters would leave the required check pending. Scope-detection
+failures fail the required check instead of silently bypassing validation.
 
 Deployment runs on the existing self-hosted runner with labels
 `self-hosted`, `Linux`, `X64`, `eqvm`. It requires Docker for the runner's existing

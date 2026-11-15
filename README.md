@@ -245,9 +245,12 @@ needs the API/proxy and index described in the frontend guide.
 
 The [CI/CD workflow](.github/workflows/elastic-indexer-stack-cicd.yml) runs unit,
 coverage, container, security and real-browser checks. Protected pull requests
-require **Test and build frontend** to pass. Merges to `master` publish immutable
-images and deploy the portal, API, curation and live embedding configuration to
-**k3s**. The CUDA runtime has its own validated installation and pinned image.
+retain the **Test and build frontend** check. README-only changes (any
+`README.md` path) skip builds and deployment after a lightweight scope check;
+draft PRs skip runner jobs and start validation when marked ready for review.
+Other merges to `master` publish immutable images and deploy the portal, API,
+curation and live embedding configuration to **k3s**. The CUDA runtime has its own
+validated installation and pinned image.
 Elasticsearch data and existing indexing Jobs retain their separate lifecycles.
 
 ## Contributing and license
