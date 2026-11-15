@@ -237,12 +237,26 @@ class BoundedDownloader < WaybackMachineDownloader
     end
   end
 
+  def original_parts(value)
+    # Ruby URI rejects literal brackets in historic paths/queries. Parse the
+    # authority strictly, and keep the printable source suffix byte-for-byte.
+    # No decoded/escaped aliases are introduced and requests still go only to
+    # the fixed Wayback transport. Whitespace, controls and fragments fail.
+    match = value.match(%r{\A(https?://[^/?#]+)([^#]*)\z}i)
+    raise URI::InvalidURIError unless match && match[2].ascii_only? && !match[2].match?(/[\x00-\x20\x7f\\]/)
+    uri = URI(match[1])
+    suffix = match[2]
+    suffix = '/' + suffix if suffix.empty? || suffix.start_with?('?')
+    [uri, suffix]
+  end
+
   def same_original?(left, right)
     # Historic CDX records frequently spell out :80 or :443. Preserve their
     # original spelling in manifests while comparing only default-port aliases.
-    a, b = URI(left), URI(right)
+    a, path_a = original_parts(left)
+    b, path_b = original_parts(right)
     !a.userinfo && !b.userinfo && a.scheme == b.scheme && a.host&.downcase == b.host&.downcase && a.port == b.port &&
-      (a.path.empty? ? '/' : a.path) == (b.path.empty? ? '/' : b.path) && a.query == b.query
+      path_a == path_b
   rescue URI::InvalidURIError
     false
   end
@@ -293,9 +307,9 @@ class BoundedDownloader < WaybackMachineDownloader
   end
 
   def scope_catalog
-    uri = URI(@base_url)
+    uri = @job['match'] == 'exact' ? original_parts(@base_url)[0] : URI(@base_url)
     unless ['http', 'https'].include?(uri.scheme) && uri.host && !uri.userinfo && !uri.fragment &&
-           !@base_url.include?('*') && ['exact', 'prefix'].include?(@job['match'])
+           (!@base_url.include?('*') || @job['match'] == 'exact') && ['exact', 'prefix'].include?(@job['match'])
       raise CaptureFailure, 'Invalid approved capture inventory scope'
     end
     paginated_catalog(@job['match'], html_only: false)

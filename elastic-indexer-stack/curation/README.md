@@ -1144,6 +1144,8 @@ file/directory, is retained in private staging with its exact URL/date/hash and 
 source-linked gap note. Compatible files continue through publication and indexing.
 No public filename is invented and no earlier bytes are overwritten. History's
 failed-file retry retains these gaps and the original paid-budget lineage.
-Malformed external supporting-file inventories become explicit gaps; a failed
+Exact supporting URLs can contain literal brackets or asterisks; the downloader
+retains their exact spelling without permitting wildcard prefix scans or identity
+substitution. Malformed external supporting-file inventories become explicit gaps; a failed
 primary site inventory still requires successful listing before completion.
 An individual site's Wayback HTTP 403 is recorded while discovery continues.

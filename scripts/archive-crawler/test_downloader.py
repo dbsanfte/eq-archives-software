@@ -125,6 +125,40 @@ class DownloaderTests(unittest.TestCase):
         return {"op": operation, "url": self.url, "from": "19990101000000", "to": "20011231235959",
                 "timestamp": "20000101000000", "destination": str(self.destination)}
 
+    def test_exact_supporting_urls_keep_literal_brackets_and_wildcards(self):
+        for original in ('http://assets.example/goat[1].jpg',
+                         'http://groups.example/_Secure/token*part!/guild.jpg?value=a*b'):
+            with self.subTest(original=original):
+                self.server.catalog=[['timestamp','original','mimetype','statuscode','digest','length'],
+                                     ['20000101000000',original,'image/jpeg','200','D','20']]
+                job={**self.job('scope_list'),'url':original,'match':'exact'}
+                listed=self.call(job)
+                self.assertTrue(listed['ok'],listed)
+                self.assertEqual(listed['result']['captures'][0]['url'],original)
+                params=parse_qs(urlsplit(self.server.requests[-1][0]).query)
+                self.assertEqual(params['url'],[original])
+                result=self.call({**self.job('capture_file'),'url':original})
+                self.assertTrue(result['ok'],result)
+                self.assertEqual(result['result']['url'],original)
+                self.assertEqual(self.destination.read_bytes(),self.server.body)
+        forbidden=self.call({**self.job('scope_list'),'url':'http://assets.example/a*','match':'prefix'})
+        self.assertFalse(forbidden['ok'])
+        requests=len(self.server.requests)
+        for unsafe in ('http://user@assets.example/a', 'http://assets.example/a#fragment',
+                       'http://assets.example/a b', 'http://assets.example/a\\b'):
+            rejected=self.call({**self.job('scope_list'),'url':unsafe,'match':'exact'})
+            self.assertFalse(rejected['ok'],rejected)
+        self.assertEqual(len(self.server.requests),requests)
+        original='http://assets.example/goat[1].jpg'
+        encoded='http://assets.example/goat%5B1%5D.jpg'
+        self.server.replays={'/web/20000101000000id_/'+original:
+            {'status':302,'location':'/web/20000101000000id_/'+encoded,'body':b'Redirect'}}
+        self.destination.unlink(missing_ok=True)
+        changed=self.call({**self.job('capture_file'),'url':original})
+        self.assertFalse(changed['ok'],changed)
+        self.assertIn('different original URL',changed['error'])
+        self.assertFalse(self.destination.exists())
+
     def test_persistent_connection_throttle_identity_and_real_capture(self):
         listing = self.call(self.job("list"))
         self.assertTrue(listing["ok"], listing)
