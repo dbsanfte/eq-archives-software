@@ -133,6 +133,39 @@ class ScopeTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(output.exists())
 
+    def test_readme_merge_does_not_suppress_pending_code_deployment(self):
+        built = self.save({'app.py': 'tested code'})
+        head = self.save({'README.md': 'new overview', 'docs/README.md': 'new guide'})
+        self.assertTrue(scope.deployment_current(built, built, repo=self.root))
+        self.assertTrue(scope.deployment_current(built, head, repo=self.root))
+
+    def test_deployment_cli_preserves_tested_revision_across_readme_merge(self):
+        head = self.save({'README.md': 'new overview'})
+        output = self.root/'output'
+        subprocess.run(['python3', str(SCRIPT.resolve()), '--deployment', self.base, head],
+            cwd=self.root, check=True, env={**os.environ, 'GITHUB_OUTPUT': str(output)},
+            capture_output=True)
+        self.assertEqual(output.read_text(), 'deploy=true\n')
+
+    def test_newer_code_or_configuration_supersedes_deployment(self):
+        built = self.save({'app.py': 'tested code'})
+        head = self.save({'README.md': 'new overview', '.github/workflows/ci.yml': 'new workflow'})
+        self.assertFalse(scope.deployment_current(built, head, repo=self.root))
+
+    def test_readme_rename_does_not_hide_code_from_deployment_guard(self):
+        head = self.save({'app.py': None, 'new/README.md': 'code'})
+        self.assertFalse(scope.deployment_current(self.base, head, repo=self.root))
+
+    def test_unrelated_revision_cannot_deploy(self):
+        built = self.save({'app.py': 'tested code'})
+        self.git('checkout', '-qb', 'other', self.base)
+        head = self.save({'README.md': 'other branch'})
+        self.assertFalse(scope.deployment_current(built, head, repo=self.root))
+
+    def test_missing_deployment_history_fails_closed(self):
+        with self.assertRaises(subprocess.CalledProcessError):
+            scope.deployment_current(self.base, 'a'*40, repo=self.root)
+
 
 if __name__ == '__main__':
     unittest.main()

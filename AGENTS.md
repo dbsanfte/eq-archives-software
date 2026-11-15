@@ -1151,6 +1151,9 @@ rather than remaining pending. Mixed changes, other documentation/assets, empty
 diffs and manual dispatches run full validation. Missing history or scope failures
 must fail the required check, never grant an exemption. Renames inspect both paths;
 do not replace this with a truncated changed-file list or workflow-level PR filter.
+Deployment may proceed across subsequent README-only commits so documentation
+cannot suppress a pending tested code rollout. Require ancestry and the complete
+diff; newer non-README paths supersede the old build, and lookup failures stop it.
 Run `python3 scripts/test-ci-scope.py` for changes to these rules. Keep the branch
 protection unchanged; this exemption is explicit operator policy, not fabricated tests.
 There is no release-please workflow or release/tag prerequisite.

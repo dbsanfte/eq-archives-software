@@ -99,6 +99,9 @@ check, skipping image builds, publication and deployment. Mixed changes and othe
 documentation (including SVGs and AGENTS.md) retain full CI. Manual dispatch always
 runs validation. Ready PRs build and smoke-test on a GitHub-hosted runner, without
 production credentials or access to the VM. Only `master` publishes and deploys.
+A later README-only merge does not suppress a pending deployment of tested code.
+The freshness guard requires ancestry and a complete diff; any newer non-README
+change supersedes the older build, and unavailable history fails closed.
 
 The build uses the frozen Yarn lockfile and pinned base images, runs the
 frontend tests with the configured 90% coverage thresholds, and smoke-tests the
@@ -142,8 +145,9 @@ operations, Python 3, curl, gh, and passwordless `sudo -n kubectl` using
 stored in GitHub. This runner is a trusted administrator of this VM; keep write
 access to `master` restricted to trusted maintainers.
 
-Runs share one deployment concurrency group. A queued run checks that its commit
-is still the tip of `master` before applying anything. Deployment renders the
+Runs share one deployment concurrency group. A queued run checks that its tested
+commit is still current, allowing only README changes since that revision, before
+applying anything. Deployment renders the
 image digest, validates the resources against the API, reconciles runtime
 secrets, then reconciles the device plugin and embedding service. It confirms
 readiness, GPU allocation/compute counters in the running server, and an authenticated embedding before applying the

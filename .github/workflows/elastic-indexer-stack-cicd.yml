@@ -242,17 +242,18 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           persist-credentials: false
-      - name: Check this is still the current master commit
+          fetch-depth: 0
+      - name: Check the tested revision still matches master
         id: current
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           head=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/master" --jq '.object.sha')
-          if [[ "$head" == "$GITHUB_SHA" ]]; then
-            echo 'deploy=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'Skipping deployment: a newer commit is already on master.'
-          fi
+          [[ "$head" =~ ^[0-9a-f]{40}$ ]]
+          # README-only merges do not build an image. They must not suppress
+          # deployment of the preceding tested code revision.
+          git fetch --no-tags origin "$head"
+          python3 scripts/ci-scope.py --deployment "$GITHUB_SHA" "$head"
       - name: Apply manifests and verify the rollout
         if: steps.current.outputs.deploy == 'true'
         env:
