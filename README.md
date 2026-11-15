@@ -252,6 +252,8 @@ Other merges to `master` publish immutable images and deploy the portal, API,
 curation and live embedding configuration to **k3s**. The CUDA runtime has its own
 validated installation and pinned image.
 Elasticsearch data and existing indexing Jobs retain their separate lifecycles.
+README-only changes publish no image or new live build SHA. A pending tested
+code deployment can still finish; manual dispatch requests fresh validation.
 
 ## Contributing and license
 

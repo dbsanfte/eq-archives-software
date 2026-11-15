@@ -113,7 +113,7 @@ to Docker Hub as `dbsanfte/frontend:<git-sha>`. Deployment uses its immutable
 `sha256` digest, not `latest`. Re-running a commit reuses and smoke-tests its
 already published image instead of rebuilding or overwriting the tag.
 
-The same required job builds the MCP image, enforces its 90% coverage gate,
+The build job also builds the MCP image, enforces its 90% coverage gate,
 tests the protocol and runs the actual container against CPU Nomic and a fake
 Elasticsearch service. Master publishes this second artifact under
 `dbsanfte/frontend:mcp-<git-sha>` in the existing Docker Hub repository, avoiding
