@@ -114,6 +114,39 @@ def response():
                 'evidence': [{'slot': 0, 'excerpt': 'EverQuest guild history.'}]})}]}]}
 
 
+def test_same_policy_extraction_upgrade_can_regrade_under_original_check_budget(tmp_path, monkeypatch):
+    import grading
+    import review
+    root, app, row, payload = setup(tmp_path, monkeypatch)
+    worker = Worker(root)
+    try:
+        with patch('grading.Luna') as client:
+            client.return_value.request.return_value = response()
+            operation = call(app, 'POST', '/api/check-candidate', payload).json()['operation']
+            worker.operation(Lane.CANDIDATES)
+            current = call(app, 'GET', '/api/candidate?id=' + row['id']).json()['candidate']
+            original = grading.sources
+            def changed_extraction(*args):
+                return [{**d, 'complete_extracted_text': d['complete_extracted_text'] + '\nRecovered source text.'}
+                        for d in original(*args)]
+            monkeypatch.setattr(grading, 'sources', changed_extraction)
+            monkeypatch.setattr(review, 'sources', changed_extraction)
+            reply = call(app, 'POST', '/api/check-candidate', {**payload, 'manifest_sha256': current['manifest_sha256'], 'max_usd': 2})
+            assert reply.status_code == 202
+            assert reply.json()['operation'] == operation and reply.json()['max_usd'] == .25
+            worker.operation(Lane.CANDIDATES)
+            refreshed = call(app, 'GET', '/api/candidate?id=' + row['id']).json()['candidate']
+            assert refreshed['candidate_check']['state'] == 'completed'
+            assert refreshed['rating']['signature'] != current['rating']['signature']
+            assert client.return_value.request.call_count == 2
+            with connect(root / 'runs' / operation) as store:
+                assert store.db.execute('SELECT count(*) FROM attempts').fetchone()[0] == 2
+            with connect(root) as store:
+                checked_sources(store, refreshed)
+    finally:
+        worker.close()
+
+
 def setup(tmp_path, monkeypatch, samples=True, grade=None):
     root = tmp_path / 'state'
     row = add_candidate(root, grade=grade)

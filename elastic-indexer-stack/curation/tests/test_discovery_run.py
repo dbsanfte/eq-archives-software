@@ -39,6 +39,54 @@ def test_new_site_and_published_alias_checks_use_metadata_without_full_candidate
             require_new(store,'https://www.guild.example/')
 
 
+def test_partial_coverage_resumes_before_any_sampling_or_paid_call(run_fixture, monkeypatch):
+    from coverage_check import CoveragePending
+    root, clock, client, downloader, settings, operation, observed, discovered = run_fixture
+    probes = []
+    def require_new(store, url):
+        probes.append(url)
+        if len(probes) <= 2:
+            client.request.assert_not_called()
+            assert not observed
+            raise CoveragePending({'status': 'inventory_partial', 'retryable': True, 'reason': 'tree_limit',
+                                   'progress': {'checked': len(probes) * 4096, 'total': 10000}})
+    monkeypatch.setattr('discovery_run.require_new', require_new)
+    result = campaign(root, operation(target=1))['progress']
+    assert result['accepted'] == 1 and result['checked'] == 1 and result['skipped'] == 0
+    assert result['coverage_retries'] == 2 and result['coverage_blocked'] == 0
+    assert client.request.call_count == 1
+
+
+@pytest.mark.parametrize('retryable', [True, False])
+def test_stuck_coverage_is_visible_and_other_sites_continue(run_fixture, monkeypatch, retryable):
+    from coverage_check import CoveragePending
+    root, clock, client, downloader, settings, operation, observed, discovered = run_fixture
+    def require_new(store, url):
+        if 'guild-0.' in url:
+            raise CoveragePending({'status': 'inventory_partial', 'retryable': retryable,
+                                   'reason': 'metadata_unavailable', 'progress': {'checked': 0}})
+    monkeypatch.setattr('discovery_run.require_new', require_new)
+    result = campaign(root, operation(target=1))['progress']
+    assert result['accepted'] == 1 and result['skipped'] == 1
+    assert result['coverage_blocked'] == 1
+    assert result['last_coverage_issue']['url'] == 'http://guild-0.example/'
+    assert client.request.call_count == 1
+
+
+def test_coverage_continuations_keep_original_hour_deadline(run_fixture, monkeypatch):
+    from coverage_check import CoveragePending
+    root, clock, client, downloader, settings, operation, observed, discovered = run_fixture
+    def require_new(store, url):
+        clock[0] += 1801
+        raise CoveragePending({'status': 'inventory_partial', 'retryable': True,
+                               'progress': {'checked': clock[0]}})
+    monkeypatch.setattr('discovery_run.require_new', require_new)
+    result = campaign(root, operation(target=1))['progress']
+    assert result['stop_reason'] == 'time_limit' and result['checked'] == 0
+    assert result['deadline'] == 13600
+    client.request.assert_not_called()
+
+
 @pytest.fixture
 def run_fixture(tmp_path, monkeypatch):
     root = tmp_path / 'state'

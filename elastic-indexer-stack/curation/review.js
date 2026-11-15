@@ -1112,6 +1112,8 @@ function renderPipelineActivity() {
       } else {status='Ready for manual discovery';body.append(node('p','Use Discover & grade or Add a site in Candidates. Approved capture and indexing work continues.'));}
       if (progress) {
         body.append(node('p',`${discovery ? 'This run' : 'Last run'}: ${progress.accepted}/${progress.target} Grade ${progress.min_grade ?? auto?.settings.min_grade ?? 2}+ sites · ${progress.checked} checked · ${progress.skipped || 0} skipped.`,'activity-counts'));
+        if (progress.coverage_retries || progress.coverage_blocked) body.append(node('p',`Coverage checks: ${progress.coverage_retries || 0} continuations · ${progress.coverage_blocked || 0} unresolved sites skipped. Unverified sites are never sent for paid grading.`,'activity-counts'));
+        if (progress.coverage_blocked && progress.last_coverage_issue) body.append(node('p',`${progress.last_coverage_issue.url}: ${progress.last_coverage_issue.message || progress.last_coverage_issue.reason || 'Archive coverage could not advance.'}`,'activity-warning'));
         const scan=progress.archive_scan;
         if (scan) {
           body.append(node('p',`Archive scan: ${Number(scan.pages_scanned || 0).toLocaleString()} pages read · ${Number(scan.hosts_visited || 0).toLocaleString()} of ${Number(scan.hosts_total || 0).toLocaleString()} hosts visited. Positions are saved between runs.`,'activity-counts'));

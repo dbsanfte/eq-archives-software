@@ -13,6 +13,33 @@ from conftest import add_candidate, manifest_for
 from test_server import call
 
 
+def test_require_new_continues_saved_coverage_cursor(tmp_path, monkeypatch):
+    from coverage_check import CoveragePending, require_new
+    from site_inventory import SiteInventory
+    root = tmp_path / 'state'
+    url = 'http://www.geocities.com/newguild/'
+    # Several dated trees on a shared host exceed one small metadata slice.
+    repo = archive(tmp_path, [f'www.geocities.com/2000010{i}000000/another{i}/index.html' for i in range(1, 8)])
+    monkeypatch.setenv('ARCHIVE_REPO', str(repo))
+    original = SiteInventory.__init__
+    def bounded(self, archive):
+        original(self, archive, max_trees=3)
+    monkeypatch.setattr(SiteInventory, '__init__', bounded)
+    with connect(root) as store:
+        pending = []
+        for _ in range(10):
+            try:
+                require_new(store, url)
+                break
+            except CoveragePending as error:
+                pending.append(error.result['progress']['checked'])
+        else:
+            pytest.fail('Coverage never advanced beyond its cached partial result')
+        assert len(pending) > 1 and pending == sorted(set(pending))
+        # Complete results remain cached even with continuation enabled.
+        require_new(store, url)
+
+
 def archive(tmp_path, files):
     repo=tmp_path/'archive'
     repo.mkdir()

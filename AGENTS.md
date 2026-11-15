@@ -519,7 +519,13 @@ Run `python3 -m unittest discover -s scripts/archive-crawler -v` and its
 runs both. Keep state, captured sources, judgments, decisions and keys outside
 both repositories. Discovery uses a remote-free Git reader and bounded cached
 tree inventories; do not enable implicit promisor fetches on older Git or walk
-the archive checkout. Production source discovery keeps per-host Git-tree cursors
+the archive checkout. Resume partial site-coverage caches rather than treating
+unverified coverage as a duplicate. Keep each metadata slice and the campaign's
+original deadline/budget bounded; show unresolved checks and keep other sites
+moving. Stale automatic approvals return for source-verified grading under saved
+automatic opt-in, retaining the old approval/judgment in history. Never waive
+source proof, reset paid ledgers or reapprove manual/integrity failures.
+Production source discovery keeps per-host Git-tree cursors
 in the main SQLite database, independently of capped pilot file inventories and
 campaign snapshots. Rotate across known hosts, prefer curated seeds/early pages,
 and advance past cached or unavailable sources. Empty slices must continue while

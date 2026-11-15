@@ -110,7 +110,7 @@ def promote(root, account):
         rows = candidate_filter(decorate(store, [record(store, row) for row in store.db.execute('''SELECT * FROM candidates
             WHERE state='approval_pending' AND rating IS NOT NULL ORDER BY
             json_extract(rating,'$.grade') DESC,priority DESC,rowid''')]))
-        row = next((row for row in rows if eligible(store, row) and current_rating(row['rating']) and
+        row = next((row for row in rows if eligible(store, row) and not row['coverage'].get('grading_refresh_required') and current_rating(row['rating']) and
                     row['rating'].get('grading_criteria', '') == config['grading_criteria']), None)
         if not row:
             return
@@ -166,6 +166,10 @@ def schedule(root, account):
     config = snapshot['settings']
     if not config['enabled']:
         return
+    # Recovery cannot wait for a long capture to release its worker. This only
+    # returns metadata for regrading; paid work still yields to enrichment below.
+    from capture_recovery import refresh_grading
+    refresh_grading(root)
     with connect(root) as store:
         if active := active_operation(store, Lane.CANDIDATES):
             if json.loads(active['payload']).get('automatic'):
@@ -198,11 +202,13 @@ def schedule(root, account):
         rows = decorate(store, [record(store, row) for row in store.db.execute("""SELECT * FROM candidates
             WHERE state IN ('discovered','sampled','approval_pending') ORDER BY priority DESC,rowid""")])
         for row in rows:
-            if current_rating(row['rating']) or not eligible(store, row):
+            refreshing = row['coverage'].get('grading_refresh_required')
+            if (current_rating(row['rating']) and not refreshing) or not eligible(store, row):
                 continue
             previous = store.db.execute("SELECT state,payload FROM operations WHERE kind='candidate_check' AND json_extract(payload,'$.id')=? ORDER BY created DESC,rowid DESC LIMIT 1", (row['id'],)).fetchone()
             if previous and (not row['rating'] or previous['state'] != 'completed'
-                    or json.loads(previous['payload']).get('selection_policy') == SELECTION_VERSION):
+                    or (json.loads(previous['payload']).get('selection_policy') == SELECTION_VERSION
+                        and (not refreshing or json.loads(previous['payload']).get('grading_refresh') == refreshing))):
                 continue  # A policy upgrade never replenishes failed/unknown attempts.
             try:
                 start_check(store, {'id': row['id'], 'manifest_sha256': row['manifest_sha256'],

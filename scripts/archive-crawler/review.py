@@ -10,6 +10,10 @@ from common import CrawlError, digest, now, save, original_url, within_capture_s
 from grading import judgment_signature, sources, current_rating
 
 
+class StaleJudgment(CrawlError):
+    """Verified source bytes now produce a different grading request."""
+
+
 def checked_sources(store, row):
     documents = sources(store, row, 10000000)
     rating = row["rating"]
@@ -17,7 +21,7 @@ def checked_sources(store, row):
     if rating and not current_rating(rating):
         allowed.add(judgment_signature(documents, rating.get('grading_criteria', ''), legacy=True))
     if rating and rating.get('signature') not in allowed:
-        raise CrawlError("Source judgment is stale; grade and review again")
+        raise StaleJudgment("Source judgment is stale; grade and review again")
     return documents
 
 

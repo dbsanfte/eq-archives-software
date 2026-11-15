@@ -16,6 +16,72 @@ from test_server import call
 from worker import Worker
 
 
+@pytest.mark.parametrize('manual,enabled,damaged', [(False, True, False), (True, True, False),
+                                                   (False, False, False), (False, True, True)])
+def test_stale_automatic_approval_returns_for_grading_without_waiving_source_checks(candidate, monkeypatch, manual, enabled, damaged):
+    import automation
+    from test_automation import enable
+    from review import record
+    root, row = candidate
+    account = enable(root)
+    automation.promote(root, account)
+    if not enabled:
+        from test_daily_budget import settings
+        account.configure(settings(account, enabled=False))
+    with connect(root) as store:
+        rating = {**row['rating'], 'signature': 'old-extracted-text'}
+        store.db.execute('UPDATE candidates SET rating=? WHERE id=?', (json.dumps(rating), row['id']))
+        changed = record(store, store.candidates()[0])
+        decision = {**changed['decision'], 'manifest_sha256': changed['manifest_sha256']}
+        if manual:
+            decision.pop('origin')
+        store.db.execute('UPDATE candidates SET decision=? WHERE id=?', (json.dumps(decision), row['id']))
+        store.db.execute('INSERT INTO capture_queue_failures VALUES (?,?,?,?)',
+                         (row['id'], json.dumps(decision), 'Source judgment is stale; grade and review again', 'now'))
+        store.db.commit()
+    if damaged:
+        (root / row['captures'][0]['path']).write_bytes(b'corrupted')
+    capture_recovery.refresh_grading(root)
+    with connect(root) as store:
+        saved = record(store, store.candidates()[0])
+        if manual or not enabled or damaged:
+            assert saved['state'] == 'approved_waiting_batch' and saved['decision'] == decision
+            assert store.db.execute('SELECT 1 FROM capture_queue_failures').fetchone()
+            return
+        assert saved['state'] == 'approval_pending' and saved['decision'] is None
+        assert saved['rating'] == rating and saved['coverage']['grading_refresh_required']
+        event = json.loads(store.db.execute("SELECT detail FROM events WHERE action='stale_approval_returned'").fetchone()[0])
+        assert event['approval'] == decision and event['rating'] == rating
+        assert not store.db.execute('SELECT 1 FROM capture_queue_failures').fetchone()
+    assert automation.promote(root, account) is None  # Cannot promote an unrefreshed grade.
+    automation.schedule(root, account)
+    with connect(root) as store:
+        operation = unpack(store.db.execute("SELECT * FROM operations WHERE kind='candidate_check'").fetchone())
+        assert operation['payload']['grading_refresh'] == saved['coverage']['grading_refresh_required']
+    # Run the evidence worker using a source-bound simulated response, no API.
+    import candidate_checks
+    from grading import save_rating, judgment_signature, sources
+    def regrade(args, store):
+        candidate = store.candidates()[0]
+        save_rating(store, candidate, {**row['rating'], 'signature': judgment_signature(sources(store, candidate, 120000))})
+    monkeypatch.setenv('ARCHIVE_REPO', '/unused-by-this-fixture')
+    monkeypatch.setattr(candidate_checks, 'refresh', lambda *a, **k: None)
+    monkeypatch.setattr(candidate_checks, 'require_new', lambda *a, **k: None)
+    monkeypatch.setattr(candidate_checks, 'grade', regrade)
+    candidate_checks.run(root, operation)
+    with connect(root) as store:
+        refreshed = record(store, store.candidates()[0])
+        assert 'grading_refresh_required' not in refreshed['coverage']
+        assert refreshed['rating']['signature'] != rating['signature']
+        store.db.execute("UPDATE operations SET state='completed' WHERE id=?", (operation['id'],))
+        store.db.commit()
+    monkeypatch.delenv('ARCHIVE_REPO')
+    assert automation.promote(root, account)['id'] == row['id']
+    capture_recovery.refresh_grading(root)  # Recovery is idempotent.
+    with connect(root) as store:
+        assert store.db.execute("SELECT count(*) FROM events WHERE action='stale_approval_returned'").fetchone()[0] == 1
+
+
 @pytest.mark.parametrize('failure', ['Wayback connection failed after bounded retries',
                                     'Wayback HTTP 503 after bounded retries'])
 def test_bad_file_retries_are_bounded_and_other_files_finish(candidate, failure):
