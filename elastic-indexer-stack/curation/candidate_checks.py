@@ -164,8 +164,8 @@ def run(root, operation):
         # artifacts in this run, without overwriting a later human decision.
         with connect(root) as main:
             main.db.execute('BEGIN IMMEDIATE')
-            current(main, payload)
-            coverage = dict(row['coverage'])
+            _, latest = current(main, payload)
+            coverage = dict(latest['coverage'])
             if checked['rating']:
                 checked_sources(run_store, checked)
                 coverage.pop('grading_refresh_required', None)

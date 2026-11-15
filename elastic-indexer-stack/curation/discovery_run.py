@@ -217,13 +217,13 @@ def fill(root, operation, store):
             except CoveragePending as error:
                 result = error.result
                 previous = checkpoint.get('coverage_pending')
-                checkpoint['last_coverage_issue'] = {'url': row['url'], **result}
                 checkpoint['coverage_pending'] = {'id': row['id'], 'progress': result.get('progress')}
                 if result.get('retryable') and checkpoint['coverage_pending'] != previous:
                     checkpoint['coverage_retries'] = checkpoint.get('coverage_retries', 0) + 1
                     progress('checking_coverage')
                     continue  # Resume its cursor under this run's original deadline.
                 checkpoint['coverage_blocked'] = checkpoint.get('coverage_blocked', 0) + 1
+                checkpoint['last_coverage_issue'] = {'url': row['url'], **result}
                 ownership = 'duplicate'  # No paid call for an unresolved site.
             except CrawlError:
                 # Unknown coverage must never reach a paid call. Discovery can
