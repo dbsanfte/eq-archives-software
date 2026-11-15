@@ -1,0 +1,146 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1680" viewBox="0 0 1000 1680" role="img" aria-labelledby="title desc">
+<title id="title">EQ Archives — from discovery to search</title>
+<desc id="desc">Known archive links or a submitted URL become deduplicated, source-graded candidates. Manual or automatic policy approval chooses a scope; lower grades are saved for later. An unlimited queue feeds Wayback capture of pages and assets from 1999 through 2006. Sources are staged privately and compatible files published to the EQ Archives Git repository. Kubernetes imports extract and chunk, enrich text with Luna, embed with local Gemma, and write Elasticsearch. Search and MCP use the read-only API with local query embeddings and Qwen reranking. Policy maintenance upgrades existing records; completed sites retire to History. Durable state and bounded retries preserve progress.</desc>
+<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#64748b"/></marker></defs>
+<style>
+text { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; fill: #14283f; }
+.heading { font-size: 32px; font-weight: 750; }
+.subtitle { font-size: 18px; fill: #526479; }
+.section { font-size: 16px; font-weight: 750; letter-spacing: 1.2px; }
+.title { font-size: 22px; font-weight: 700; }
+.body { font-size: 18px; fill: #354b63; }
+.side-title { font-size: 19px; font-weight: 700; }
+.side-body { font-size: 17px; fill: #354b63; }
+.arrow { fill: none; stroke: #64748b; stroke-width: 2; marker-end: url(#arrow); }
+</style>
+<rect width="1000" height="1680" rx="20" fill="#f5f7fb"/>
+<text x="44" y="54" class="heading">From discovery to search</text>
+<text x="44" y="85" class="subtitle">EQ Archives · preserve the source, build the index, keep the pipeline moving</text>
+
+<text x="44" y="125" class="section">01  DISCOVER &amp; CURATE · INTRANET</text>
+<g data-card="Discover candidate sites"><rect x="44" y="144" width="560" height="102" rx="12" fill="#ecf7f5" stroke="#a3cfc5"/>
+<text x="64" y="175" class="title">Discover candidate sites</text>
+<text x="64" y="203" class="body">Spider known captures or submit a site / Wayback URL.</text>
+<text x="64" y="227" class="body">Prefer 1999–2001 evidence; then later captures.</text>
+</g>
+<g data-card="Existing archive"><rect x="668" y="144" width="288" height="102" rx="12" fill="#ffffff" stroke="#ccd6e3"/>
+<text x="688" y="175" class="side-title">Existing archive</text>
+<text x="688" y="203" class="side-body">Read local Git objects</text>
+<text x="688" y="227" class="side-body">with bounded source cursors.</text>
+</g>
+<path d="M 668 195 H 606" class="arrow"/>
+<path d="M 324 246 V 274" class="arrow"/>
+<g data-card="Verify coverage &amp; grade"><rect x="44" y="274" width="560" height="102" rx="12" fill="#ecf7f5" stroke="#a3cfc5"/>
+<text x="64" y="305" class="title">Verify coverage &amp; grade</text>
+<text x="64" y="333" class="body">Deduplicate site, account and board identities.</text>
+<text x="64" y="357" class="body">Sample sources; Luna grades relevance and substance.</text>
+</g>
+<g data-card="Saved for later"><rect x="668" y="274" width="288" height="102" rx="12" fill="#ffffff" stroke="#ccd6e3"/>
+<text x="688" y="305" class="side-title">Saved for later</text>
+<text x="688" y="333" class="side-body">Lower grades retain evidence.</text>
+<text x="688" y="357" class="side-body">Restore for manual review.</text>
+</g>
+<path d="M 604 325 H 666" class="arrow"/>
+<path d="M 324 376 V 404" class="arrow"/>
+<g data-card="Approve the capture scope"><rect x="44" y="404" width="560" height="102" rx="12" fill="#ecf7f5" stroke="#a3cfc5"/>
+<text x="64" y="435" class="title">Approve the capture scope</text>
+<text x="64" y="463" class="body">Human approval or an enabled automatic policy.</text>
+<text x="64" y="487" class="body">Choose page, directory, account, site or board.</text>
+</g>
+<g data-card="Automatic mode"><rect x="668" y="404" width="288" height="102" rx="12" fill="#ffffff" stroke="#ccd6e3"/>
+<text x="688" y="435" class="side-title">Automatic mode</text>
+<text x="688" y="463" class="side-body">Score threshold + Luna caps.</text>
+<text x="688" y="487" class="side-body">Enrichment takes priority.</text>
+</g>
+<path d="M 668 455 H 606" class="arrow"/>
+<path d="M 324 506 V 520 H 634 V 554 H 324 V 564" class="arrow"/>
+<text x="44" y="549" class="section">02  CAPTURE &amp; PRESERVE · INDEPENDENT WORKER</text>
+<g data-card="Join the capture queue"><rect x="44" y="564" width="560" height="102" rx="12" fill="#fff6e9" stroke="#e4c99f"/>
+<text x="64" y="595" class="title">Join the capture queue</text>
+<text x="64" y="623" class="body">Uncapped FIFO; Undo until the worker claims a site.</text>
+<text x="64" y="647" class="body">Capture and indexing can advance independently.</text>
+</g>
+<g data-card="Persistent state"><rect x="668" y="564" width="288" height="102" rx="12" fill="#ffffff" stroke="#ccd6e3"/>
+<text x="688" y="595" class="side-title">Persistent state</text>
+<text x="688" y="623" class="side-body">SQLite on a host-backed PVC.</text>
+<text x="688" y="647" class="side-body">Decisions, budgets, cursors.</text>
+</g>
+<path d="M 324 666 V 694" class="arrow"/>
+<g data-card="Capture Wayback files · 1999–2006"><rect x="44" y="694" width="560" height="102" rx="12" fill="#fff6e9" stroke="#e4c99f"/>
+<text x="64" y="725" class="title">Capture Wayback files · 1999–2006</text>
+<text x="64" y="753" class="body">All available versions in scope: pages + assets.</text>
+<text x="64" y="777" class="body">Board adapters, progress, remaining files and ETA.</text>
+</g>
+<g data-card="Failures stay local"><rect x="668" y="694" width="288" height="102" rx="12" fill="#ffffff" stroke="#ccd6e3"/>
+<text x="688" y="725" class="side-title">Failures stay local</text>
+<text x="688" y="753" class="side-body">Backoff + saved checkpoints.</text>
+<text x="688" y="777" class="side-body">File gaps can be retried later.</text>
+</g>
+<path d="M 604 745 H 666" class="arrow"/>
+<path d="M 324 796 V 824" class="arrow"/>
+<g data-card="Stage, verify &amp; publish"><rect x="44" y="824" width="560" height="102" rx="12" fill="#fff6e9" stroke="#e4c99f"/>
+<text x="64" y="855" class="title">Stage, verify &amp; publish</text>
+<text x="64" y="883" class="body">Retain raw bytes and source-bound manifests.</text>
+<text x="64" y="907" class="body">Publish compatible files in the existing archive layout.</text>
+</g>
+<g data-card="EQ Archives · Git"><rect x="668" y="824" width="288" height="102" rx="12" fill="#ffffff" stroke="#ccd6e3"/>
+<text x="688" y="855" class="side-title">EQ Archives · Git</text>
+<text x="688" y="883" class="side-body">dbsanfte/eq-archives</text>
+<text x="688" y="907" class="side-body">websites / host / date / path</text>
+</g>
+<path d="M 604 875 H 666" class="arrow"/>
+<path d="M 324 926 V 942 H 634 V 992 H 324 V 1004" class="arrow"/>
+<text x="44" y="977" class="section">03  INDEX &amp; SERVE · KUBERNETES JOBS + PUBLIC API</text>
+<g data-card="Verify sources, extract &amp; chunk"><rect x="44" y="1004" width="560" height="102" rx="12" fill="#eef1fe" stroke="#b9c6ec"/>
+<text x="64" y="1035" class="title">Verify sources, extract &amp; chunk</text>
+<text x="64" y="1063" class="body">Create-only imports from approved publications.</text>
+<text x="64" y="1087" class="body">Preserve readers; build attributed search passages.</text>
+</g>
+<g data-card="Policy maintenance"><rect x="668" y="1004" width="288" height="102" rx="12" fill="#ffffff" stroke="#ccd6e3"/>
+<text x="688" y="1035" class="side-title">Policy maintenance</text>
+<text x="688" y="1063" class="side-body">Resumable upgrades of</text>
+<text x="688" y="1087" class="side-body">records; yield to new imports.</text>
+</g>
+<path d="M 668 1055 H 606" class="arrow"/>
+<path d="M 324 1106 V 1134" class="arrow"/>
+<g data-card="Enrich text &amp; embed content"><rect x="44" y="1134" width="560" height="102" rx="12" fill="#eef1fe" stroke="#b9c6ec"/>
+<text x="64" y="1165" class="title">Enrich text &amp; embed content</text>
+<text x="64" y="1193" class="body">Luna enrichment under the original site allowance.</text>
+<text x="64" y="1217" class="body">Local Gemma vectors with validated cache reuse.</text>
+</g>
+<g data-card="Model services"><rect x="668" y="1134" width="288" height="102" rx="12" fill="#ffffff" stroke="#ccd6e3"/>
+<text x="688" y="1165" class="side-title">Model services</text>
+<text x="688" y="1193" class="side-body">Text → CUDA batch server</text>
+<text x="688" y="1217" class="side-body">Images → vision companion</text>
+</g>
+<path d="M 604 1185 H 666" class="arrow"/>
+<path d="M 324 1236 V 1264" class="arrow"/>
+<g data-card="Write Elasticsearch records"><rect x="44" y="1264" width="560" height="102" rx="12" fill="#eef1fe" stroke="#b9c6ec"/>
+<text x="64" y="1295" class="title">Write Elasticsearch records</text>
+<text x="64" y="1323" class="body">Text, metadata, passage vectors and provenance.</text>
+<text x="64" y="1347" class="body">Only complete, validated document writes advance.</text>
+</g>
+<g data-card="Retire to History"><rect x="668" y="1264" width="288" height="102" rx="12" fill="#ffffff" stroke="#ccd6e3"/>
+<text x="688" y="1295" class="side-title">Retire to History</text>
+<text x="688" y="1323" class="side-body">Completed sites leave the queue.</text>
+<text x="688" y="1347" class="side-body">Retain gaps and retry actions.</text>
+</g>
+<path d="M 604 1315 H 666" class="arrow"/>
+<path d="M 324 1366 V 1394 H 264 V 1422" class="arrow"/>
+<path d="M 324 1394 H 736 V 1422" class="arrow"/>
+<g data-card="Search portal"><rect x="44" y="1424" width="440" height="102" rx="12" fill="#14283f" stroke="#14283f"/>
+<text style="fill:#ffffff" x="64" y="1455" class="title">Search portal</text>
+<text style="fill:#e0e9f4" x="64" y="1483" class="body">Search, dated readers and discussions.</text>
+<text style="fill:#e0e9f4" x="64" y="1507" class="body">Recently indexed sites + Explore.</text>
+</g>
+<g data-card="Read-only MCP"><rect x="516" y="1424" width="440" height="102" rx="12" fill="#14283f" stroke="#14283f"/>
+<text style="fill:#ffffff" x="536" y="1455" class="title">Read-only MCP</text>
+<text style="fill:#e0e9f4" x="536" y="1483" class="body">Search, fetch and research filters.</text>
+<text style="fill:#e0e9f4" x="536" y="1507" class="body">Source discovery + capture history.</text>
+</g>
+<g data-card="Shared retrieval path"><rect x="44" y="1550" width="912" height="84" rx="12" fill="#e7edf5" stroke="#d0dae7"/>
+<text x="64" y="1581" class="title">Shared retrieval path</text>
+<text x="64" y="1609" class="body">Bounded API: local query embeddings → hybrid retrieval → CUDA Qwen reranking.</text>
+</g>
+<text x="44" y="1660" class="side-body">Solid arrows show the main flow. Source files, approvals and recovery receipts remain preserved.</text>
+</svg>
