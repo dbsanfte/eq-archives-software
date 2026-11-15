@@ -159,6 +159,18 @@ class DownloaderTests(unittest.TestCase):
         self.assertIn('different original URL',changed['error'])
         self.assertFalse(self.destination.exists())
 
+    def test_malformed_redirect_does_not_kill_the_shared_downloader(self):
+        self.server.redirect='http://[invalid'
+        failed=self.call(self.job('capture_file'))
+        self.assertFalse(failed['ok'])
+        self.assertIn('invalid URL',failed['error'])
+        self.assertIsNone(self.process.poll())
+        self.assertFalse(Path(str(self.destination)+'.part').exists())
+        self.server.redirect=None
+        good=self.call(self.job('capture_file'))
+        self.assertTrue(good['ok'],good)
+        self.assertEqual(self.destination.read_bytes(),self.server.body)
+
     def test_persistent_connection_throttle_identity_and_real_capture(self):
         listing = self.call(self.job("list"))
         self.assertTrue(listing["ok"], listing)

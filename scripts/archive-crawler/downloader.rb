@@ -153,12 +153,24 @@ class PersistentWayback
         next
       end
       if [301, 302, 303, 307, 308].include?(status)
-        destination = URI.join(@origin.to_s + path, response['location'].to_s)
-        unless destination.host == @origin.host && destination.port == @origin.port && destination.scheme == @origin.scheme
-          raise CaptureFailure, 'Replay attempted to redirect outside Wayback'
+        location = response['location'].to_s
+        if location.start_with?('/') && !location.start_with?('//')
+          # An absolute path already belongs to this fixed Wayback origin.
+          # Keep literal historical source brackets instead of URI.join trying
+          # to parse the entire embedded original URL as an RFC3986 path.
+          unless location.match?(/\A\/[\x21-\x7e]*\z/) && !location.include?('#') && !location.include?('\\')
+            raise CaptureFailure, 'Wayback response contained an invalid URL; source remains unavailable'
+          end
+          next_path = location
+        else
+          destination = location.match?(%r{\Ahttps?://}i) ? URI(location) : URI.join(@origin.to_s + path, location)
+          unless destination.host == @origin.host && destination.port == @origin.port && destination.scheme == @origin.scheme && !destination.userinfo
+            raise CaptureFailure, 'Replay attempted to redirect outside Wayback'
+          end
+          next_path = destination.request_uri
         end
-        result = get(destination.request_uri, redirects + 1, destination: sink&.path, max_bytes: max_bytes)
-        result['redirects'] = [{ 'from' => path, 'to' => destination.request_uri, 'status' => status }] + result.fetch('redirects', [])
+        result = get(next_path, redirects + 1, destination: sink&.path, max_bytes: max_bytes)
+        result['redirects'] = [{ 'from' => path, 'to' => next_path, 'status' => status }] + result.fetch('redirects', [])
         return result
       end
       raise CaptureFailure, "Wayback HTTP #{status}" unless status == 200
@@ -473,6 +485,8 @@ if $PROGRAM_NAME == __FILE__
       puts JSON.generate({ 'ok' => true, 'result' => result, 'transport' => transport.stats })
     rescue Errno::ENOSPC
       puts JSON.generate({ 'ok' => false, 'error' => 'Staging disk is full; source remains pending', 'transport' => transport&.stats })
+    rescue URI::Error
+      puts JSON.generate({ 'ok' => false, 'error' => 'Wayback response contained an invalid URL; source remains unavailable', 'transport' => transport&.stats })
     rescue CaptureFailure, JSON::ParserError, KeyError, ArgumentError, Zlib::Error => error
       puts JSON.generate({ 'ok' => false, 'error' => error.message, 'transport' => transport&.stats })
     end

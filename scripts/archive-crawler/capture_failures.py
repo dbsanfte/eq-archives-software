@@ -39,6 +39,7 @@ def unavailable(error):
                 or str(error).startswith(('Replay returned a different original URL',
                                          'Replay returned a different dated version',
                                          'Wayback returned a capture outside the requested tier',
+                                         'Wayback response contained an invalid URL',
                                          'Too many replay redirects', 'Empty source body')))
 
 
