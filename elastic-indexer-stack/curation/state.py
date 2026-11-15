@@ -8,6 +8,8 @@ from pathlib import Path
 import re
 import sqlite3
 import uuid
+import time
+from functools import wraps
 
 from common import CrawlError, Store, now
 
@@ -31,6 +33,20 @@ def database_busy(error):
     return isinstance(error,sqlite3.OperationalError) and (
         code is not None and (code & 255) in (sqlite3.SQLITE_BUSY,sqlite3.SQLITE_LOCKED)
         or code is None and str(error) in ('database is locked','database table is locked','database schema is locked'))
+
+
+def retry_metadata(action):
+    """Retry a closed metadata transaction, never a download or paid request."""
+    @wraps(action)
+    def run(*args, **kwargs):
+        for attempt in range(4):
+            try:
+                return action(*args, **kwargs)
+            except sqlite3.OperationalError as error:
+                if not database_busy(error) or attempt == 3:
+                    raise
+                time.sleep(0.05 * 2 ** attempt)
+    return run
 
 
 def operation_lane(kind):
@@ -77,6 +93,8 @@ def connect(directory):
                 attempts INTEGER NOT NULL, retry_at TEXT, paused INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS publication_retries(operation TEXT PRIMARY KEY,
                 attempts INTEGER NOT NULL, retry_at TEXT, paused INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS operation_storage_retries(operation TEXT PRIMARY KEY,
+                attempts INTEGER NOT NULL, retry_at TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS operation_publication_batch ON operations(kind,json_extract(payload,'$.batch_id'));
             CREATE INDEX IF NOT EXISTS operation_activity ON operations(updated DESC);
             CREATE INDEX IF NOT EXISTS batch_activity ON batches(updated DESC);

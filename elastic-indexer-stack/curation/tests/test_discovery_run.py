@@ -420,3 +420,20 @@ def test_daily_budget_pause_retains_sample_and_resume_merges_grade_without_repay
     with connect(root) as main:
         assert main.candidates()[0]['state'] == 'approved_waiting_batch'
         assert json.loads(main.candidates()[0]['rating'])['grade'] == 3
+
+
+def test_one_forbidden_site_does_not_stop_discovery_of_other_sites(run_fixture,monkeypatch):
+    import discovery_run
+    root,clock,client,downloader,settings,operation,observed,discovered=run_fixture
+    original=discovery_run.sample;calls=[]
+    def sample(args,store,**kwargs):
+        row=kwargs['candidates'][0];calls.append(row['id'])
+        if len(calls)==1:
+            store.db.execute("UPDATE candidates SET state='unavailable',error='Wayback HTTP 403' WHERE id=?",(row['id'],))
+            store.db.commit()
+        else:original(args,store,**kwargs)
+    monkeypatch.setattr(discovery_run,'sample',sample)
+    result=campaign(root,operation(target=1))['progress']
+    assert result['stop_reason']=='target_reached' and result['accepted']==1
+    assert len(calls)==2
+    assert client.request.call_count==1

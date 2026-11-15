@@ -225,13 +225,22 @@ class Worker:
         automation.finished(self.root,operation,result)
 
     def operation_interrupted(self, operation, error):
-        detail=str(error) if isinstance(error,CrawlError) else f'Operation failed ({type(error).__name__}); staged evidence retained'
+        from storage_recovery import diagnostic, message, register as register_storage
+        failure = diagnostic(error)
+        detail = message(failure) if failure else str(error) if isinstance(error,CrawlError) else f'Operation failed ({type(error).__name__}); staged evidence retained'
+        LOG.error('Curation operation %s failed: %s', operation['id'],
+                  json.dumps(failure or {'category': type(error).__name__}))
         if operation['kind']=='capture' and detail=='Worker stopped; resume explicitly':
             from capture_failures import WORKER_INTERRUPTED
             detail=WORKER_INTERRUPTED
         with connect(self.root) as store:
             previous=store.db.execute('SELECT result FROM operations WHERE id=?',(operation['id'],)).fetchone()
             result=json.loads(previous['result'] or '{}');result.pop('automatic_pause',None)
+            if failure:
+                result['failure'] = failure
+                register_storage(store, operation, failure)
+            else:
+                result.pop('failure', None)
             if pause:=automation.pause_detail(error,operation):result['automatic_pause']=pause
             store.db.execute("UPDATE operations SET state='interrupted',error=?,result=?,updated=? WHERE id=?",
                              (detail,json.dumps(result),now(),operation['id']))
@@ -517,6 +526,8 @@ class Worker:
                 store.db.commit()
 
     def run_turn(self, lane):
+        from storage_recovery import schedule as retry_storage
+        retry_storage(self.root, lane)
         if lane==Lane.CANDIDATES:
             from policy_scheduler import import_pending,write_control
             self.daily_budget.prioritize('portal',import_pending(self.root,budget_wait=True))

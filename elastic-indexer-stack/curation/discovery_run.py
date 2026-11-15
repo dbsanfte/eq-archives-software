@@ -11,7 +11,7 @@ from discovery import discover
 from archive_frontier import advance as scan_archive
 from grading import Luna, grade
 from graph import staged_links
-from state import connect
+from state import connect, retry_metadata
 from review import checked_sources, record
 from daily_budget import (DailyBudgetPause, AutomaticStopped, EnrichmentPriorityPause,
                           attempt_remaining_units, attempt_spending, require_automatic)
@@ -19,6 +19,15 @@ from daily_budget import (DailyBudgetPause, AutomaticStopped, EnrichmentPriority
 SECONDS = 3600
 
 
+@retry_metadata
+def save_progress(root, operation, snapshot):
+    with connect(root) as main:
+        main.db.execute('UPDATE operations SET result=?,updated=? WHERE id=?',
+                        (json.dumps({'progress': snapshot}), now(), operation))
+        main.db.commit()
+
+
+@retry_metadata
 def merge_site(root, operation, row, minimum):
     """Insert once, with an atomic receipt; never replace a human decision."""
     with connect(root) as main:
@@ -58,6 +67,7 @@ def merge_site(root, operation, row, minimum):
         return accepted
 
 
+@retry_metadata
 def owned_or_new(root, operation, row):
     with connect(root) as main:
         owned = main.db.execute("SELECT detail FROM events WHERE candidate=? AND action='discovery_result' AND json_extract(detail,'$.operation')=?",
@@ -78,6 +88,7 @@ def owned_or_new(root, operation, row):
         return 'new'
 
 
+@retry_metadata
 def retain_graph(root, store):
     # Metadata only, once per invocation. Reuse local seed/staging scans in later
     # runs without copying source trees or replacing a newer archive snapshot.
@@ -132,10 +143,7 @@ def fill(root, operation, store):
         if checkpoint.get('archive_scan'):
             snapshot['archive_scan'] = checkpoint['archive_scan']
         store.set('fill_checkpoint', checkpoint)
-        with connect(root) as main:
-            main.db.execute('UPDATE operations SET result=?,updated=? WHERE id=?',
-                            (json.dumps({'progress': snapshot}), now(), operation['id']))
-            main.db.commit()
+        save_progress(root, operation['id'], snapshot)
         return {'progress': snapshot, 'candidates': len(checkpoint['done']) - len(checkpoint['skipped'])}
 
     def finish(reason):
@@ -263,7 +271,7 @@ def fill(root, operation, store):
                 return finish('time_limit')
             if 'Luna dollar budget' in error:
                 return finish('spend_limit')
-            if any(part in error for part in ('budget', '422 after', '429 after', 'HTTP 401', 'HTTP 403')):
+            if any(part in error for part in ('budget', '422 after', '429 after', 'HTTP 401')):
                 raise CrawlError(error)
     except (DailyBudgetPause, AutomaticStopped, EnrichmentPriorityPause):
         # Carry the sampled site into durable Suggestions before sleeping. A

@@ -45,6 +45,11 @@ class DiscoveryTests(unittest.TestCase):
         return parser().parse_args(["--work-dir", str(self.store.root), "discover", "--archive-repo", str(self.repo),
                                    "--seeds", str(seeds), "--max-candidates", str(maximum)])
 
+    def test_malformed_unicode_is_rejected_before_url_or_storage_work(self):
+        from common import original_url
+        self.assertIsNone(original_url('http://guild.example/bad\ud800.png'))
+        self.assertIsNotNone(original_url('http://guild.example/caf%C3%A9.png'))
+
     def test_url_identity_and_capture_unwrapping(self):
         url = "https://EQ.example/Guide%2FOne?b=2&a=1#section"
         self.assertEqual(original_url(url), "https://eq.example/Guide%2FOne?b=2&a=1")

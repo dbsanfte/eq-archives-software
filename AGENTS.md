@@ -614,6 +614,17 @@ Approved captures independently retry recognized Wayback failures and worker
 interruptions after 5 minutes, 15 minutes, then hourly, preserving checkpoints and
 cumulative usage. Unknown errors and approval/scope/integrity failures require a
 correction. Preserve explicit pauses and cancelled resumes while other sites advance.
+Metadata-only discovery transactions retry SQLite BUSY/LOCKED after closing their
+transaction; a remaining busy failure resumes the same operation with its original
+campaign deadline and paid ledger. Persist safe storage categories and SQLite codes;
+full/read-only/I/O/corrupt databases require correction, not blind retries. Legacy
+capture failures from suppressed database codes and corrected filename/scope defects
+get one approval-preserving recovery, respecting cancelled resumes and later work.
+Unrepresentable or conflicting capture filenames retain exact raw bytes privately,
+with source-linked gap receipts; publish compatible captures and keep History retry.
+Never overwrite a conflicting source or relax archive paths/approval checks. A
+supporting-file inventory failure is isolated; primary scope inventory failures stay
+visible. An individual site's Wayback 403 cannot stop discovery of other sites.
 Never let one failed site hold a worker queue, in either manual or automatic mode.
 Each explicit Discover run targets
 50 new sites meeting its saved minimum grade (default 2), continuing past low grades and unavailable samples, until the target,

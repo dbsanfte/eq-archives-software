@@ -57,6 +57,10 @@ def original_url(value, base=None):
     if not isinstance(value, str):
         return None
     value = value.strip()
+    try:
+        value.encode('utf-8')
+    except UnicodeError:
+        return None
     if base:
         value = urljoin(base, value)
     replay = re.match(r"^https?://web\.archive\.org/web/\d{1,14}(?:[a-z]+_)?/(.+)$", value, re.I)
@@ -302,7 +306,7 @@ class Store:
             raise CrawlError("Keep crawl state outside the software repository")
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.root.chmod(0o700)
-        self.db = sqlite3.connect(self.root / "crawl.sqlite3")
+        self.db = sqlite3.connect(self.root / "crawl.sqlite3", timeout=10)
         self.db.row_factory = sqlite3.Row
         self.db.executescript("""
             PRAGMA journal_mode=WAL;

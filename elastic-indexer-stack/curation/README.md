@@ -1124,3 +1124,26 @@ website host/www/default-port scopes. A resumed import reuses an established dat
 legacy or partially known history remains unknown. Optional provenance failures
 are logged without blocking capture imports. This metadata is exposed by the MCP
 `list_sites` tool and is distinct from Wayback capture dates and Git publication.
+
+
+## Recovery of capture and discovery failures
+
+Discovery retries metadata-only SQLite contention with a fresh transaction. If a
+lock remains busy, the same operation rejoins the worker queue with bounded
+backoff, retaining its original campaign deadline, evidence, reservations and paid
+results. Storage-full, read-only, I/O and database-integrity failures show specific
+messages and a safe SQLite diagnostic code; they are not blindly retried.
+
+Older capture interruptions whose database codes were suppressed receive one
+recovery attempt under their original approval. Corrected filename and supporting
+URL defects use the same recovery path. Explicitly cancelled resumes stay paused;
+newer operations and changed approvals cannot be replaced by an older retry.
+
+A file whose name cannot fit the archive convention, or collides with another
+file/directory, is retained in private staging with its exact URL/date/hash and a
+source-linked gap note. Compatible files continue through publication and indexing.
+No public filename is invented and no earlier bytes are overwritten. History's
+failed-file retry retains these gaps and the original paid-budget lineage.
+Malformed external supporting-file inventories become explicit gaps; a failed
+primary site inventory still requires successful listing before completion.
+An individual site's Wayback HTTP 403 is recorded while discovery continues.

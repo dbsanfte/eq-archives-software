@@ -4,13 +4,26 @@ import re
 from common import CrawlError
 
 WORKER_INTERRUPTED = 'Capture worker stopped; saved progress will retry automatically'
+STORAGE_BUSY = 'Curation database is busy; saved progress will retry automatically'
+
+# Old workers suppressed the SQLite code and stopped permanently. Permit one
+# migration retry under the existing approval; new errors use typed diagnostics.
+LEGACY_RECOVERABLE = (
+    'Operation failed (OperationalError); staged evidence retained',
+    'Operation failed (ValueError); staged evidence retained',
+    'Operation failed (UnicodeError); staged evidence retained',
+    'Invalid approved capture inventory scope',
+    'URL has an invalid encoded archive filename',
+    'URL cannot be safely represented in the existing archive layout',
+    'Exact sources collide in the archive filename convention; capture paused without overwriting files',
+)
 
 
 def temporary(error):
     text = str(error)
     return bool(re.fullmatch(r'Wayback HTTP (?:408|422|425|429|5\d\d)(?: after bounded retries)?', text)
                 or text.startswith(('Wayback connection failed', 'Shared Wayback transport stopped',
-                                    'Downloader stopped', 'Worker stopped; resume explicitly', WORKER_INTERRUPTED,
+                                    'Downloader stopped', 'Worker stopped; resume explicitly', WORKER_INTERRUPTED, STORAGE_BUSY,
                                     'CDX returned invalid JSON', 'Unexpected CDX schema',
                                     'Wayback repeated its catalog continuation', 'CDX repeated its continuation',
                                     'Wayback inventory returned a version outside 1999–2006',

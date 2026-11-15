@@ -2,7 +2,7 @@
 from datetime import datetime, timedelta
 import json
 
-from capture_failures import temporary, unavailable
+from capture_failures import temporary, unavailable, LEGACY_RECOVERABLE
 from common import CrawlError, now
 from state import connect, unpack
 
@@ -10,7 +10,8 @@ DELAYS = (300, 900, 3600)
 
 
 def register(store, operation, error, *, initial=False):
-    if not temporary(error) and not (str(error).startswith('Wayback HTTP ') and unavailable(error)):
+    legacy = initial and str(error) in LEGACY_RECOVERABLE
+    if not legacy and not temporary(error) and not (str(error).startswith('Wayback HTTP ') and unavailable(error)):
         return
     previous = store.db.execute('SELECT * FROM capture_retries WHERE operation=?', (operation['id'],)).fetchone()
     if previous and previous['paused']:
