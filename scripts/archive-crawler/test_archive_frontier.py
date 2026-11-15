@@ -1,6 +1,7 @@
 """Progressive source discovery against disposable archives, with no network."""
 import json
 import os
+import sqlite3
 from pathlib import Path
 import subprocess
 import tempfile
@@ -60,6 +61,19 @@ class FrontierTests(unittest.TestCase):
         self.assertEqual(result['hosts_complete'], 1)
         self.assertEqual(result['pages_scanned'], 4)  # Cached page was not reread.
         self.assertEqual(self.store.db.execute('SELECT COUNT(*) FROM files').fetchone()[0], 1)
+
+    def test_database_failure_does_not_advance_past_an_unsaved_source(self):
+        from discovery import record_source
+        self.page('seed.example','a.html','first.example')
+        self.page('seed.example','b.html','second.example')
+        self.commit()
+        with patch('archive_frontier.record_source',side_effect=sqlite3.OperationalError('database is locked')):
+            with self.assertRaises(sqlite3.OperationalError):self.scan()
+        self.assertEqual(self.store.db.execute('SELECT pages FROM discovery_frontier').fetchone()[0],0)
+        result=self.scan()
+        links={r[0] for r in self.store.db.execute('SELECT url FROM links')}
+        self.assertEqual(links,{'http://first.example/','http://second.example/'})
+        self.assertEqual(result['pages_scanned'],2)
 
     def test_rotates_to_nonseed_hosts_and_prefers_early_link_pages(self):
         self.page('seed.example', 'links.html', 'first.example')

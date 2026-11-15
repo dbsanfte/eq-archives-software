@@ -6,6 +6,10 @@ from pathlib import PurePosixPath
 from common import CrawlError, original_url, tier
 
 
+class ArchiveLayoutError(CrawlError):
+    """A source may be preserved privately but cannot own an archive filename."""
+
+
 def archive_path(capture):
     # Linux's downloader writes through the filesystem: repeated separators
     # inside a decoded query (e.g. next=http://...) are one path separator.
@@ -24,10 +28,10 @@ def legacy_archive_path(capture):
     try:
         path = unquote_plus(url.split("/", 3)[3] if len(url.split("/", 3)) == 4 else "", errors="strict")
     except UnicodeError:
-        raise CrawlError("URL has an invalid encoded archive filename") from None
+        raise ArchiveLayoutError("URL has an invalid encoded archive filename") from None
     if (any(ord(c) < 32 or ord(c) == 127 for c in path) or "\\" in path or path.startswith("/")
             or any(piece in (".", "..") or len(piece.encode()) > 255 for piece in path.split("/"))):
-        raise CrawlError("URL cannot be safely represented in the existing archive layout")
+        raise ArchiveLayoutError("URL cannot be safely represented in the existing archive layout")
     if not path or url.endswith("/") or "." not in path.rstrip("/").split("/")[-1]:
         path = path.rstrip("/") + ("/" if path else "") + "index.html"
     return f"websites/{urlsplit(canonical).netloc}/{capture['timestamp']}/{path}"

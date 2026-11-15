@@ -5,13 +5,13 @@ HTML-only spider, digest collapse, file-count ceiling or growing JSON rewrite.
 Runtime limits pause acquisition; only an exhausted inventory reaches Indexing.
 """
 import json
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import shutil
 import sqlite3
 from types import SimpleNamespace
 from urllib.parse import urlsplit
 
-from archive_layout import archive_path
+from archive_layout import archive_path, ArchiveLayoutError
 from capture_failures import FileRetries
 from common import CAPTURE_WINDOW, CrawlError, Store, capture_exclusion, digest, in_capture_window, now, original_url, save, within_capture_scope
 from indexer.capture_enrichment import policy_for_sites
@@ -205,10 +205,29 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
             return digest([site, original_url(url), stamp])
         def commit_capture(capture, record_id):
             verified_path(root, capture)
-            path = archive_path(capture)
-            old = db.execute('SELECT capture FROM full_records WHERE archive_path=? AND id!=?', (path, record_id)).fetchone()
-            if old:
-                raise CrawlError('Exact sources collide in the archive filename convention; capture paused without overwriting files')
+            kind = 'archive_path_unavailable'
+            try:
+                path = archive_path(capture)
+                old = db.execute('SELECT capture FROM full_records WHERE archive_path=? AND id!=?', (path, record_id)).fetchone()
+                parents = [str(p) for p in PurePosixPath(path).parents if str(p) != '.']
+                if not old:
+                    old = db.execute(f"SELECT capture FROM full_records WHERE archive_path IN ({','.join('?' for _ in parents)}) LIMIT 1", parents).fetchone()
+                if not old:
+                    old = db.execute('SELECT capture FROM full_records WHERE archive_path>=? AND archive_path<? LIMIT 1',
+                                     (path + '/', path + '0')).fetchone()
+                if old:
+                    kind = 'archive_path_collision'
+                    raise ArchiveLayoutError('Exact sources collide in the archive filename convention; conflicting source retained privately')
+            except ArchiveLayoutError as error:
+                # The downloaded bytes and exact URL/date receipt remain private.
+                # Never overwrite the first source, invent a public filename or
+                # let one unrepresentable asset strand the rest of its site.
+                record = json.loads(db.execute('SELECT record FROM full_records WHERE id=?', (record_id,)).fetchone()[0])
+                record['archive_gap'] = kind
+                db.execute("UPDATE full_records SET state='unavailable',record=?,capture=?,note=? WHERE id=?",
+                           (json.dumps(record), json.dumps(capture), str(error), record_id))
+                db.commit()
+                return
             capture = {**capture, 'archive_path': path, **describe_source(root, capture)}
             db.execute("UPDATE full_records SET state='captured',capture=?,archive_path=?,note=NULL WHERE id=?",
                        (json.dumps(capture), path, record_id))
@@ -302,7 +321,9 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
                         # supporting-file gap, never grounds to abandon the site.
                         # The primary scope inventory and service failures still
                         # pause: they cannot establish complete site coverage.
-                        state = retries.failed(query['id'], error) if query['match'] == 'exact' and (query['url'], query['site']) in dependencies else None
+                        supporting = query['match'] == 'exact' and (query['url'], query['site']) in dependencies
+                        state = ('unavailable' if supporting and str(error) == 'Invalid approved capture inventory scope'
+                                 else retries.failed(query['id'], error) if supporting else None)
                         if not state:
                             raise
                         db.execute('UPDATE full_queries SET done=?,note=? WHERE id=?', (-1 if state == 'retry' else 1, str(error), query['id']))
@@ -395,8 +416,10 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
         notes = [note for note in (board_manifest or {}).get('notes', [])
                  if note.get('state') != 'unavailable' and not note.get('board_file') and 'candidate_id' not in note]
         notes += [{'candidate_id': row['site'], 'url': row['url'], 'timestamp': row['timestamp'], 'note': row['note'],
+                   **({'kind': json.loads(row['record'])['archive_gap'], 'retained_source': json.loads(row['capture'])}
+                      if json.loads(row['record']).get('archive_gap') and row['capture'] else {}),
                    **({'board_file': True} if json.loads(row['record']).get('board_gap') else {})}
-                 for row in db.execute("SELECT site,url,timestamp,record,note FROM full_records WHERE state='unavailable' ORDER BY rowid")]
+                 for row in db.execute("SELECT site,url,timestamp,record,note,capture FROM full_records WHERE state='unavailable' ORDER BY rowid")]
         notes += [{'candidate_id': row['site'], 'url': row['url'], 'timestamp': row['timestamp'],
                    'kind': 'outside_date_window', 'note': row['note']}
                   for row in db.execute("SELECT site,url,timestamp,note FROM full_records WHERE state='excluded' AND note='Outside the approved 1999–2006 capture window'")]

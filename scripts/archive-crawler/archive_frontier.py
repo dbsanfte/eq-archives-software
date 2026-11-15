@@ -9,6 +9,7 @@ cursor too; only a completed pass with missing sources is revisited after a day.
 from contextlib import closing
 import json
 import re
+import sqlite3
 import time
 from pathlib import Path
 
@@ -129,12 +130,14 @@ def scan(archive, args, *, deadline=None, notify=None, max_hosts=32, max_seconds
             count = misses = host_probes = 0
             retry_at, error = 0, None
             slice_done = False
+            source_cursor = None
             before = allowance[0]
             if notify:
                 notify(status(store, host['host']))
             try:
                 while (count < args.max_per_seed and host_probes < 32 and reads < args.max_seed_captures
                        and probes < args.max_seed_probes and size + args.max_page_bytes <= args.max_seed_bytes):
+                    source_cursor = [dict(frame) for frame in cursor]
                     page = next_page(inventory, cursor, allowance, deadline)
                     if page is None:
                         break
@@ -150,10 +153,18 @@ def scan(archive, args, *, deadline=None, notify=None, max_hosts=32, max_seconds
                         misses += 1
                         continue
                     reads += 1
-                    count += 1
                     size += len(data)
                     timestamp, _, relative = path.partition('/')
                     record_source(store, host['host'], timestamp, relative, blob, host['category'], data, archive.sha)
+                    count += 1
+                    source_cursor = None
+            except sqlite3.Error:
+                # A source read is not a committed graph write. Retain the
+                # previously acknowledged cursor so retry sees this page again.
+                db.rollback()
+                if source_cursor is not None:
+                    cursor[:] = source_cursor
+                raise
             except InventoryPause as pause:
                 if not pause.retryable:
                     retry_at, error = time.time() + RETRY_SECONDS, pause.reason
