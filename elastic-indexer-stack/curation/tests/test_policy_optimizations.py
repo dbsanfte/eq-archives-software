@@ -137,6 +137,39 @@ def test_changed_request_compiler_cannot_reuse_historical_vectors(tmp_path,monke
     sources.close()
 
 
+def test_renderer_fingerprint_includes_the_reader_header_builder(monkeypatch):
+    expected=preparation.renderer_identity()
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(preparation,'website_reader',lambda raw,identifier:raw)
+            preparation.renderer_identity.cache_clear()
+            assert preparation.renderer_identity()!=expected
+    finally:preparation.renderer_identity.cache_clear()
+    assert preparation.renderer_identity()==expected
+
+
+def test_request_fingerprint_includes_title_normalization(monkeypatch):
+    expected=preparation.request_identity()
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(passages,'_plain',lambda value:value)
+            preparation.request_identity.cache_clear()
+            assert preparation.request_identity()!=expected
+    finally:preparation.request_identity.cache_clear()
+    assert preparation.request_identity()==expected
+
+
+def test_renderer_fingerprint_includes_archive_header_configuration(monkeypatch):
+    expected=preparation.renderer_identity()
+    try:
+        with monkeypatch.context() as patch:
+            patch.setenv('WEBSITES_PATH','different-archive-root/')
+            preparation.renderer_identity.cache_clear()
+            assert preparation.renderer_identity()!=expected
+    finally:preparation.renderer_identity.cache_clear()
+    assert preparation.renderer_identity()==expected
+
+
 def test_optional_vector_read_is_same_revision_bounded_and_fail_closed(tmp_path):
     hit,_=many(tmp_path);service=MaintenanceServices.__new__(MaintenanceServices)
     service.es_url='https://archive';service.index=hit['_index']

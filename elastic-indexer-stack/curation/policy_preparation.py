@@ -6,7 +6,9 @@ import html
 import importlib.metadata
 import inspect
 import json
+import os
 import re
+import sys
 
 from bs4 import BeautifulSoup
 
@@ -20,8 +22,8 @@ FIELDS=('text_chunk','title','context','kind','source_start','source_end')
 # These extraction checkpoints used this exact reader renderer. Source bytes,
 # decoded HTML, reader and decoder provenance must also match. A renderer or
 # dependency change automatically disables this migration compatibility path.
-LEGACY_RENDERER='a2f9e3461a3f550693a3b4226c82c92c540d413c05edf9e46fbc288f831c937c'
-LEGACY_REQUEST='a5d1fa645c9b49ae12be429b281d116e32d6b9b45eeb22d8756a06f8e0e590b5'
+LEGACY_RENDERER='f7f14f134c636a06058e872f252ae1640aba99b8d59ca0ef81cda768e99e6693'
+LEGACY_REQUEST='bc3b052359bb7cf79b8b4a40d8ea96dac78ff5d9b5a97cf54517adb892640bab'
 READER_CHECKPOINTS={'html-2026-11-05-regional-decoding','html-2026-11-05-script-evidence',
                     'html-2026-11-12-jis-extensions'}
 
@@ -30,16 +32,28 @@ READER_CHECKPOINTS={'html-2026-11-05-regional-decoding','html-2026-11-05-script-
 def renderer_identity():
     parts=[inspect.getsource(value) for value in (html_extraction.is_layout_table,
         html_extraction.website_markdown,html_extraction.SourceMarkdownConverter,
-        ArchiveHandler._convert_to_archive_url,ArchiveHandler._strip_index_html_from_url)]
+        ArchiveHandler.__init__,ArchiveHandler._convert_to_archive_url,ArchiveHandler._strip_index_html_from_url,
+        website_reader,html.escape)]
     versions={name:importlib.metadata.version(name) for name in ('beautifulsoup4','markdownify')}
-    return hashlib.sha256(json.dumps([parts,versions],sort_keys=True).encode()).hexdigest()
+    handler=ArchiveHandler()
+    roots=[handler._websites_path,handler._mailing_lists_path,handler._newsgroups_path]
+    return hashlib.sha256(json.dumps([parts,versions,list(sys.version_info[:3]),os.name,roots],sort_keys=True).encode()).hexdigest()
 
 
 @lru_cache(maxsize=1)
 def request_identity():
-    parts=[inspect.getsource(value) for value in (passages._short,passages._short_cached,
+    parts=[inspect.getsource(value) for value in (passages._plain,passages._short,passages._short_cached,
         passages.document_prefix,passages.Passage.request.fget)]
-    return hashlib.sha256(json.dumps([parts,gemma.MODEL,gemma.TOKENIZER_SHA256,passages.MAX_TOKENS],sort_keys=True).encode()).hexdigest()
+    return hashlib.sha256(json.dumps([parts,gemma.MODEL,gemma.TOKENIZER_SHA256,passages.MAX_TOKENS,
+        importlib.metadata.version('tokenizers'),list(sys.version_info[:3])],sort_keys=True).encode()).hexdigest()
+
+
+def website_reader(raw,identifier):
+    archive=ArchiveHandler();url=archive._convert_to_archive_url(identifier)
+    alternate=archive._strip_index_html_from_url(url)
+    header='<b>Page URL:</b> '+html.escape(url)+'<br/>'
+    if alternate and alternate!=url:header+='<b>Alternate Page URL:</b> '+html.escape(alternate)+'<br/>'
+    return html_extraction.website_markdown(header+'<hr/>'+raw)
 
 
 def newer(version):
@@ -172,11 +186,7 @@ def _prepare(source,identifier,reader,sources):
             if corrected!=source.get('title'):patch['title']=corrected
         if legacy_reader or source.get('text_extraction_version')!=html_extraction.WEBSITE_EXTRACTION_VERSION:
             if legacy_reader or not reader_reusable(source,reader,raw,decoding):
-                archive=ArchiveHandler();url=archive._convert_to_archive_url(identifier)
-                alternate=archive._strip_index_html_from_url(url)
-                header='<b>Page URL:</b> '+html.escape(url)+'<br/>'
-                if alternate and alternate!=url:header+='<b>Alternate Page URL:</b> '+html.escape(alternate)+'<br/>'
-                reader=html_extraction.website_markdown(header+'<hr/>'+raw)
+                reader=website_reader(raw,identifier)
                 if not reader.strip():raise SourceError('reader_integrity')
                 if reader!=source['text_full']:patch['text_full']=reader
             patch['text_extraction_version']=html_extraction.WEBSITE_EXTRACTION_VERSION

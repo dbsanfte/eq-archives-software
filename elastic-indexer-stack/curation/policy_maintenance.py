@@ -25,7 +25,8 @@ from indexer.sqlite_state import SQLiteState
 from indexer.embedding_batches import embed_batches, decode_vectors
 from indexer.vector_json import dumps as vector_json
 from policy_sources import Sources, SourceError
-from policy_preparation import LEGACY_POLICY, FIELDS as PASSAGE_FIELDS, newer, prepare, verify_prepared
+from policy_preparation import (LEGACY_POLICY, FIELDS as PASSAGE_FIELDS, newer, prepare,
+                                verify_prepared,renderer_identity,request_identity)
 from policy_pool import PreparationPool, WorkerLost
 
 APP='eqarchives-policy-maintenance'
@@ -413,6 +414,7 @@ def main():
         if not 0<=workers<=4:raise ValueError('Invalid preparation worker count')
         if workers:
             gemma.load_tokenizer()
+            renderer_identity();request_identity()
             pool=PreparationPool(sources.roots,sources.publication,workers)
         result=run(args.root,state,services,sources,os.environ['POLICY_JOB_NAME'],**({'pool':pool} if pool else {}))
         print(json.dumps(result),flush=True)
