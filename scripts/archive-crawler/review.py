@@ -7,7 +7,7 @@ from pathlib import Path
 
 from capture_flow import Action, transition
 from common import CrawlError, digest, now, save, original_url, within_capture_scope
-from grading import judgment_signature, sources, current_rating
+from grading import judgment_signature, compatible_signatures, sources, current_rating
 
 
 class StaleJudgment(CrawlError):
@@ -17,7 +17,7 @@ class StaleJudgment(CrawlError):
 def checked_sources(store, row):
     documents = sources(store, row, 10000000)
     rating = row["rating"]
-    allowed = {judgment_signature(documents, (rating or {}).get('grading_criteria', ''))}
+    allowed = compatible_signatures(documents, (rating or {}).get('grading_criteria', ''))
     if rating and not current_rating(rating):
         allowed.add(judgment_signature(documents, rating.get('grading_criteria', ''), legacy=True))
     if rating and rating.get('signature') not in allowed:

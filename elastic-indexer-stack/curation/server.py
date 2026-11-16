@@ -34,6 +34,7 @@ from grading import criteria
 import automation
 import activity
 import capture_recovery
+import compact_queue
 from review_actions import (preview as review_preview, decide_all as decide_all_reviews,
                             apply_decision as apply_site_decision, validate_decision as validate_site_decision,
                             undo_dismissal as undo_review_dismissal)
@@ -150,53 +151,58 @@ def create_app(root=None, origin=None, start_worker=True):
             # A worker may claim a site while this request is being assembled.
             # WAL readers neither block that claim nor mix two queue revisions.
             store.db.execute('BEGIN')
-            all_rows = listing_rows(store) if compact else attach_checks(store, decorate(store, queue(store)))
-            selected = request.query_params.get("filter", "recommended")
-            if selected not in ("recommended", "pending", "approved", "captured", "review", "all", *Stage):
-                raise CrawlError("Invalid queue filter")
-            search = request.query_params.get('search', '').strip()
-            if len(search) > 200:
-                raise CrawlError('Site search exceeds 200 characters')
-            rows = [row for row in all_rows if selected == row['stage'] or selected == "all" or
-                    selected == "recommended" and row["state"] in ("approval_pending", "deferred")
-                    and (row["rating"] or {}).get("grade", -1) >= 2 or
-                    selected == "pending" and row["state"] in ("approval_pending", "deferred") or
-                    selected == "approved" and row['stage'] == Stage.QUEUED or
-                    selected == "review" and row.get('review_state') == 'awaiting_review' or
-                    selected == "captured" and row['state'] in CAPTURED_STATES]
-            if selected == 'candidates':
-                if request.query_params.get('needs_grade', '0') not in ('0', '1'):
-                    raise CrawlError('Invalid needs-grading filter')
-                rows = candidate_filter(rows, request.query_params.get('min_grade'), request.query_params.get('needs_grade') == '1')
-            if selected in ('approved', 'queued'):
-                positions = {candidate: index for index, candidate in enumerate(queue_order(store))}
-                rows.sort(key=lambda row: positions[row['id']])
-            elif selected in ('captured', 'review', 'indexing', 'history'):
-                rows.sort(key=lambda row: ((row['coverage'] or {}).get('capture') or {}).get('completed_at', ''), reverse=True)
-            if search:
-                rows = [row for row in rows if search_matches(row, search)]
+            selected=request.query_params.get('filter','recommended')
+            fast=compact and selected!='review' and request.query_params.get('action_tokens')!='1'
+            if fast:
+                summary=compact_queue.listing(store,request,CAPTURED_STATES)
+                page_rows=attach_checks(store,decorate(store,[record(store,store.db.execute('SELECT * FROM candidates WHERE id=?',(identifier,)).fetchone()) for identifier in summary.pop('ids')]))
+            else:
+                all_rows = listing_rows(store) if compact else attach_checks(store, decorate(store, queue(store)))
+                selected = request.query_params.get("filter", "recommended")
+                if selected not in ("recommended", "pending", "approved", "captured", "review", "all", *Stage):
+                    raise CrawlError("Invalid queue filter")
+                search = request.query_params.get('search', '').strip()
+                if len(search) > 200:
+                    raise CrawlError('Site search exceeds 200 characters')
+                rows = [row for row in all_rows if selected == row['stage'] or selected == "all" or
+                        selected == "recommended" and row["state"] in ("approval_pending", "deferred")
+                        and (row["rating"] or {}).get("grade", -1) >= 2 or
+                        selected == "pending" and row["state"] in ("approval_pending", "deferred") or
+                        selected == "approved" and row['stage'] == Stage.QUEUED or
+                        selected == "review" and row.get('review_state') == 'awaiting_review' or
+                        selected == "captured" and row['state'] in CAPTURED_STATES]
+                if selected == 'candidates':
+                    if request.query_params.get('needs_grade', '0') not in ('0', '1'):
+                        raise CrawlError('Invalid needs-grading filter')
+                    rows = candidate_filter(rows, request.query_params.get('min_grade'), request.query_params.get('needs_grade') == '1')
+                if selected in ('approved', 'queued'):
+                    positions = {candidate: index for index, candidate in enumerate(queue_order(store))}
+                    rows.sort(key=lambda row: positions[row['id']])
+                elif selected in ('captured', 'review', 'indexing', 'history'):
+                    rows.sort(key=lambda row: ((row['coverage'] or {}).get('capture') or {}).get('completed_at', ''), reverse=True)
+                if search:
+                    rows = [row for row in rows if search_matches(row, search)]
             operations = [unpack(row) for row in store.db.execute("SELECT * FROM operations ORDER BY CASE state WHEN 'running' THEN 0 WHEN 'queued' THEN 1 WHEN 'interrupted' THEN 2 ELSE 3 END,created DESC LIMIT 20")]
             workers = {lane.value: unpack(active) if (active := active_operation(store, lane)) else None for lane in Lane}
             fields = 'id,state,manifest_sha256,publication,job,error,created,updated' if compact else '*'
             batch_table='batches INDEXED BY batch_metadata' if compact else 'batches'
             batches = [unpack(row) for row in store.db.execute(f"SELECT {fields} FROM {batch_table} WHERE state!='capture_group' ORDER BY created DESC LIMIT 100")]
-            page_rows = rows[offset:offset + 50]
-            if compact:
-                page_rows = attach_checks(store, decorate(store, [record(store, store.db.execute(
-                    'SELECT * FROM candidates WHERE id=?', (row['id'],)).fetchone()) for row in page_rows]))
-            return JSONResponse({"candidates": page_rows, "total": len(rows), "offset": offset,
-                                 "stage_counts": counts(all_rows),
-                                 "candidate_grades": {str(grade): sum(row['stage'] == Stage.CANDIDATES and grade_value(row) == grade for row in all_rows) for grade in range(-1, 4)},
-                                 "dismissal": dismissal_preview(all_rows),
-                                 "review_actions": review_preview(store, all_rows) if selected == 'review' else None,
+            if not fast:
+                page_rows = rows[offset:offset + 50]
+                if compact:
+                    page_rows = attach_checks(store, decorate(store, [record(store, store.db.execute(
+                        'SELECT * FROM candidates WHERE id=?', (row['id'],)).fetchone()) for row in page_rows]))
+                summary={'total':len(rows),'offset':offset,'stage_counts':counts(all_rows),
+                         'candidate_grades':{str(g):sum(row['stage']==Stage.CANDIDATES and grade_value(row)==g for row in all_rows) for g in range(-1,4)},
+                         'dismissal':dismissal_preview(all_rows),'review_actions':review_preview(store,all_rows) if selected=='review' else None,
+                         'all_count':len(all_rows),'approved':sum(row['stage']==Stage.QUEUED for row in all_rows),
+                         'recommended':sum(row['state'] in ('approval_pending','deferred') and (row['rating'] or {}).get('grade',-1)>=2 for row in all_rows),
+                         'capturing':sum(row['state']=='capturing' for row in all_rows),'captured':sum(row['state'] in CAPTURED_STATES for row in all_rows)}
+            return JSONResponse({**summary,'candidates':page_rows,
                                  "luna_spend": spending.snapshot(),
                                  "automation": automation.status(root, daily_budget),
-                                 "all_count": len(all_rows), "approved": sum(row['stage'] == Stage.QUEUED for row in all_rows),
-                                 "recommended": sum(row['state'] in ('approval_pending','deferred') and (row['rating'] or {}).get('grade',-1)>=2 for row in all_rows),
                                  "operations": operations, "workers": workers, "batches": batches, "limits": LIMITS, "undo_seconds": UNDO_SECONDS,
                                  "activity": activity.snapshot(store, getattr(app.state, 'worker', None)),
-                                 "capturing": sum(row['state']=='capturing' for row in all_rows),
-                                 "captured": sum(row['state'] in CAPTURED_STATES for row in all_rows),
                                  "awaiting_site_review": store.db.execute("SELECT COUNT(*) FROM batches WHERE state='awaiting_review'").fetchone()[0],
                                  "capture_queue_error": store.get('capture_queue_error'),
                                  "capture_attention": capture_attention(store),

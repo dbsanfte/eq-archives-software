@@ -18,6 +18,35 @@ V=[1.0]+[0.0]*767
 IMAGE='dbsanfte/frontend@sha256:'+'1'*64
 
 
+def test_policy_upgrade_prioritizes_unfinished_frontier_and_retains_old_state(tmp_path,monkeypatch):
+    current=passages.VERSION
+    monkeypatch.setattr(passages,'VERSION','eq-passages-480-v12')
+    old=State(tmp_path/'state');old_key=identity()
+    cursor='websites/eqforums.station.sony.com/20060628000000/topic.html'
+    old.advance(cursor,'updated');old.reject(cursor,'source_validation',None,'old-job');old.close()
+    monkeypatch.setattr(passages,'VERSION',current)
+    new=State(tmp_path/'state')
+    try:
+        assert identity()!=old_key and new.snapshot()['cursor']==cursor
+        assert new.snapshot()['scanned']==0
+        assert new.due()==[cursor]
+        assert new.db.connection().execute('SELECT scanned FROM policy_cursors WHERE key=?',(old_key,)).fetchone()[0]==1
+    finally:new.close()
+
+
+def test_passage_failures_retain_a_safe_reason_and_source_hash(tmp_path,monkeypatch):
+    hit,sources=fixture(tmp_path);services=Services([hit])
+    def fail(*a,**k):raise passages.PlanError('passage_order','Private source text must not enter diagnostics')
+    monkeypatch.setattr(passages,'prepare',fail)
+    try:
+        with pytest.raises(SourceError) as raised:repair(services,sources,hit['_id'],lambda:None)
+        assert raised.value.reason=='passage_order'
+        assert raised.value.source_sha256==hit['_source']['archive_source_sha256']
+        assert 'Private' not in str(raised.value)
+        assert not services.inputs and not services.updates
+    finally:sources.close()
+
+
 def fixture(tmp_path,raw='<title>Guild news</title><p>Our guild defeated Nagafen.</p>',*,changed=False,identifier=None):
     identifier=identifier or 'websites/guild.example/20000101000000/index.html'
     reader='Complete archival reader with all original text.'

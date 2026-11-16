@@ -99,6 +99,9 @@ SCHEMA['properties'].update({
     'scope_evidence': copy.deepcopy(LEGACY_SCHEMA['properties']['evidence']),
 })
 SCHEMA['required'] = list(SCHEMA['properties'])
+PRE_BOUNDS_SIGNATURE = digest({"model": MODEL, "prompt": PROMPT, "schema": SCHEMA})
+SCHEMA['properties']['evidence'].update(minItems=1,maxItems=2)
+SCHEMA['properties']['scope_evidence'].update(minItems=0,maxItems=2)
 SIGNATURE = digest({"model": MODEL, "prompt": PROMPT, "schema": SCHEMA})
 CRITERIA_PROMPT = """
 The operator supplied additional selection criteria in grading_criteria. Apply
@@ -121,19 +124,24 @@ def criteria(value=''):
     return value.replace('\r\n', '\n').replace('\r', '\n').strip()
 
 
-def grader_signature(value='', *, legacy=False):
+def grader_signature(value='', *, legacy=False, before_bounds=False):
     value = criteria(value)
-    base = LEGACY_SIGNATURE if legacy else SIGNATURE
+    base = LEGACY_SIGNATURE if legacy else PRE_BOUNDS_SIGNATURE if before_bounds else SIGNATURE
     return digest({'base': base, 'prompt': CRITERIA_PROMPT, 'grading_criteria': value}) if value else base
 
 
-def judgment_signature(documents, value='', *, legacy=False):
-    return digest({'grader': grader_signature(value, legacy=legacy), 'documents': documents})
+def judgment_signature(documents, value='', *, legacy=False, before_bounds=False):
+    return digest({'grader': grader_signature(value, legacy=legacy,before_bounds=before_bounds), 'documents': documents})
+
+
+def compatible_signatures(documents, value=''):
+    return {judgment_signature(documents,value),judgment_signature(documents,value,before_bounds=True)}
 
 
 def current_rating(rating):
     return (isinstance(rating, dict) and rating.get('selection_policy') == SELECTION_VERSION
-            and rating.get('grader_signature') == grader_signature(rating.get('grading_criteria', ''))
+            and rating.get('grader_signature') in {grader_signature(rating.get('grading_criteria', '')),
+                                                   grader_signature(rating.get('grading_criteria', ''),before_bounds=True)}
             and all(type(rating.get(k)) is int and 0 <= rating[k] <= 3 for k in ('relevance_grade','quality_grade','grade'))
             and rating['grade'] <= min(rating['relevance_grade'], rating['quality_grade'])
             and rating.get('content_kind') in CONTENT_KINDS and rating.get('site_type') in SITE_TYPES
@@ -168,7 +176,7 @@ def sources(store, candidate, maximum):
     return result
 
 
-def validate(response, documents):
+def validate(response, documents, *, repair_legacy_bounds=False):
     if response.get("status") != "completed":
         raise CrawlError("Luna response incomplete; no judgment saved")
     try:
@@ -183,8 +191,10 @@ def validate(response, documents):
         raise CrawlError("Luna judgment has an invalid category or confidence")
     if not isinstance(rating["reason"], str) or not rating["reason"].strip() or len(rating["reason"]) > 3000:
         raise CrawlError("Luna judgment needs a bounded explanation")
-    if not isinstance(rating["evidence"], list) or not 1 <= len(rating["evidence"]) <= 2:
+    if not isinstance(rating["evidence"], list) or not rating['evidence']:
         raise CrawlError("Luna judgment needs source evidence")
+    if len(rating['evidence']) > (8 if repair_legacy_bounds else 2):
+        raise CrawlError('Luna judgment contains too many source excerpts; expected one or two')
     for key in ('relevance_grade','quality_grade'):
         if type(rating[key]) is not int or rating[key] not in range(4):
             raise CrawlError('Luna selection scores must be integers from 0 to 3')
@@ -200,6 +210,10 @@ def validate(response, documents):
             raise CrawlError("Luna evidence slot or excerpt is invalid")
         if excerpt not in documents[slot]["complete_extracted_text"]:
             raise CrawlError("Luna excerpt does not occur in the supplied source")
+    if repair_legacy_bounds and len(rating['evidence'])>2:
+        # Every original citation was checked first. Retain the complete paid
+        # response and derive the bounded metadata without another API call.
+        rating['evidence']=rating['evidence'][:2]
     # Normalize derived selection only. The complete paid API response is cached
     # unchanged; no retry/spend is needed just to keep a safer scope or score.
     if rating['content_kind'] in ('identity_only', 'unavailable', 'unrelated'):
@@ -287,6 +301,58 @@ def save_rating(store, candidate, rating):
                 'grading_criteria': rating.get('grading_criteria', '')})
 
 
+def judgment(args,store,candidate,signature,old_signature,payload,client,documents):
+    """Two automatic received attempts; explicit retries retain all paid history."""
+    generation=getattr(args,'grading_retry',0)
+    if type(generation) is not int or not 0<=generation<=8:
+        raise CrawlError('Grading retry limit reached; inspect retained attempts')
+    last_error=None
+    for _ in range(4):
+        cache_signature=signature
+        cached=store.get('luna_response:'+signature)
+        if not cached and not store.get('luna_bounds_checked:'+old_signature):
+            cached=store.get('luna_response:'+old_signature)
+            if cached:cache_signature=old_signature
+        if cached and not store.get(f"luna_rejected:{cache_signature}:{cached['attempt']}:{digest(cached['response'])}"):
+            attempt,response=cached['attempt'],cached['response']
+        else:
+            if cached:
+                last_error=store.get(f"luna_rejected:{cache_signature}:{cached['attempt']}:{digest(cached['response'])}")
+            received=store.db.execute("SELECT COUNT(*) FROM attempts WHERE signature IN (?,?) AND status IN ('response_received','validation_rejected','judged')",
+                                      (signature,old_signature)).fetchone()[0]
+            latest=store.db.execute('SELECT status FROM attempts WHERE signature IN (?,?) ORDER BY id DESC LIMIT 1',
+                                     (signature,old_signature)).fetchone()
+            explicit=generation>store.get('luna_retry_generation:'+signature,0)
+            if (received>=2 or latest and latest[0]=='reserved') and not explicit:
+                raise CrawlError(last_error or 'Previous grading request has an uncertain outcome; retry explicitly under the saved budget')
+            if transport:=current_transport.get():transport.require_available()
+            attempt=reserve(store,candidate['id'],signature,payload,args.max_usd)
+            store.set('luna_retry_generation:'+signature,generation)
+            response=client.request(payload);cache_signature=signature
+            cached={'attempt':attempt,'response':response}
+            store.set(f'luna_response_record:{signature}:{attempt}:{digest(response)}',cached)
+            store.set('luna_response:'+signature,cached)
+        # Archive legacy cache entries before changing derived validation state.
+        if not store.get(f'luna_response_record:{cache_signature}:{attempt}:{digest(response)}'):
+            store.set(f'luna_response_record:{cache_signature}:{attempt}:{digest(response)}',cached)
+        usage=response.get('usage',{});actual=None
+        if isinstance(usage,dict) and all(type(usage.get(k)) is int and usage[k]>=0 for k in ('input_tokens','output_tokens')):
+            actual=(usage['input_tokens']*PRICING['input_per_million']+usage['output_tokens']*PRICING['output_per_million'])/1_000_000
+        owned=store.db.execute('SELECT 1 FROM attempts WHERE id=? AND signature=?',(attempt,cache_signature)).fetchone()
+        if actual is not None and owned:settle_attempt(store,attempt,actual,usage)
+        store.db.execute("UPDATE attempts SET actual=?,status='response_received' WHERE id=? AND signature=?",(actual,attempt,cache_signature));store.db.commit()
+        try:
+            rating=validate(response,documents,repair_legacy_bounds=cache_signature==old_signature)
+        except CrawlError as error:
+            last_error=str(error)
+            store.set(f'luna_rejected:{cache_signature}:{attempt}:{digest(response)}',last_error)
+            store.db.execute("UPDATE attempts SET status='validation_rejected' WHERE id=? AND signature=?",(attempt,cache_signature));store.db.commit()
+            if cache_signature==old_signature:store.set('luna_bounds_checked:'+old_signature,True)
+            continue
+        return attempt,response,cache_signature,rating
+    raise CrawlError(last_error or 'Grading retry limit reached; inspect retained responses')
+
+
 def grade(args, store, *, candidates=None, client=None):
     focus = criteria(getattr(args, 'grading_criteria', ''))
     grader = grader_signature(focus)
@@ -303,12 +369,11 @@ def grade(args, store, *, candidates=None, client=None):
                 documents = sources(store, candidate, args.max_source_characters)
                 signature = judgment_signature(documents, focus)
                 previous = json.loads(candidate['rating']) if candidate['rating'] else None
-                if previous and previous.get('signature') in (judgment_signature(documents, previous.get('grading_criteria', '')),
-                        judgment_signature(documents, previous.get('grading_criteria', ''), legacy=True)):
+                if previous and previous.get('signature') in (compatible_signatures(documents,previous.get('grading_criteria','')) | {judgment_signature(documents,previous.get('grading_criteria',''),legacy=True)}):
                     store.set('luna_grade:' + previous['signature'], previous)
-                if current_rating(previous) and previous.get('signature') == signature:
+                if current_rating(previous) and previous.get('signature') in compatible_signatures(documents,focus) and previous.get('grading_criteria','')==focus:
                     continue
-                saved = store.get('luna_grade:' + signature)
+                saved = store.get('luna_grade:' + signature) or store.get('luna_grade:' + judgment_signature(documents,focus,before_bounds=True))
                 if saved:
                     save_rating(store, candidate, saved)
                     count += 1
@@ -317,32 +382,9 @@ def grade(args, store, *, candidates=None, client=None):
                            "input": json.dumps({"captures": documents, **({'grading_criteria': focus} if focus else {})}, ensure_ascii=False),
                            "reasoning": {"effort": "low"}, "max_output_tokens": 2500,
                            "text": {"format": {"type": "json_schema", "name": "eq_candidate", "strict": True, "schema": SCHEMA}}}
-                cached = store.get('luna_response:' + signature)
-                if cached:
-                    attempt, response = cached['attempt'], cached['response']
-                else:
-                    if transport := current_transport.get():
-                        transport.require_available()
-                    attempt = reserve(store, candidate["id"], signature, payload, args.max_usd)
-                    response = client.request(payload)
-                    # Cache received responses before validation, including
-                    # rejected evidence. Changing criteria never reuses a grade
-                    # made for a different focus or resets reservations.
-                    store.set('luna_response:' + signature, {'attempt': attempt, 'response': response})
-                usage = response.get("usage", {})
-                actual = None  # Unknown usage retains the full reservation.
-                if isinstance(usage, dict) and all(type(usage.get(key)) is int and usage[key] >= 0 for key in ('input_tokens', 'output_tokens')):
-                    actual = (usage['input_tokens'] * PRICING['input_per_million']
-                              + usage['output_tokens'] * PRICING['output_per_million']) / 1_000_000
-                # A campaign copies cached responses from its seed ledger but
-                # starts its own attempt IDs. Never settle an unrelated local
-                # request that happens to reuse a copied cache's integer ID.
-                owned_attempt = store.db.execute('SELECT 1 FROM attempts WHERE id=? AND signature=?', (attempt, signature)).fetchone()
-                if actual is not None and owned_attempt:
-                    settle_attempt(store, attempt, actual, usage)
-                store.db.execute("UPDATE attempts SET actual=?,status='response_received' WHERE id=? AND signature=?", (actual, attempt, signature))
-                store.db.commit()
-                rating = validate(response, documents)
+                attempt,response,signature,rating=judgment(args,store,candidate,signature,judgment_signature(documents,focus,before_bounds=True),payload,client,documents)
+                grader=grader_signature(focus,before_bounds=signature==judgment_signature(documents,focus,before_bounds=True))
+                usage=response.get('usage',{})
                 rating.update({"origin": "model", "model": MODEL, "signature": signature,
                                "response_model": response.get("model"), "response_id": response.get("id"),
                                "grader_signature": grader, "grading_criteria": focus, "usage": usage, "graded_at": now(),

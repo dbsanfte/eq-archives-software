@@ -7,6 +7,37 @@ from indexer import gemma, passages
 RID = "websites/example.org/20000101000000/guide.html"
 
 
+def test_nested_quote_overlap_keeps_coverage_and_increasing_offsets():
+    title='Re: Questions about raid preparation and quality - Official EverQuest Forums'
+    view=('Post by TestPoster | 03-17-2006 03:38 AM | Discussion about raid preparation\n'+'-'*80+
+          '\n\n  \n> ---\n>\n> First wrote:  \n>   \n> > ---\n> >\n> > Second wrote:  \n> >\n> > Third wrote:\n> >\n> > '+
+          '\xa0'*160+'\n> >\n> > Some raids are easier with a patient group, and a long quote with whitespace still needs every word preserved.  \n> > '+
+          '\xa0'*160+'\n> >\n> > Further advice remains searchable.\n\nOur next raid is scheduled for Tuesday.\n')
+    chunks=passages._chunks(view,title)
+    result=passages.Plan(passages.digest(view),None,view,title,'forum_posts',(),chunks)
+    passages.verify(view,result)
+    assert all(a.start<b.start for a,b in zip(chunks,chunks[1:]))
+    assert chunks[-1].end==len(view) and 'Further advice remains searchable.' in view
+
+
+@pytest.mark.parametrize('host',['eqforums.station.sony.com','another-forum.example'])
+def test_image_toolbar_removed_without_removing_profiles_or_topic_data(host):
+    def toolbar():
+        return '<table><tr>'+''.join('<td><a href="/account"><img src="/button.gif" alt="'+label+'"></a></td>' for label in
+            ['Sign In / Change User','Join Free','Why Join?','My Account','Help'])+'</tr></table>'
+    raw='<title>Member profile</title>'+toolbar()+'<h1>Test cleric</h1><p>Raiding since 1999.</p><table><tr><td>Posts</td><td>0</td></tr></table>'
+    result=plan(raw,rid=f'websites/{host}/20000101000000/profile.html')
+    assert 'Raiding since 1999.' in result.view and 'Test cleric' in result.view
+    assert 'Sign In / Change User' not in result.view
+    assert 'image_navigation_toolbar' in result.exclusions
+    empty=plan(toolbar())
+    assert empty.method=='archive_status' and not empty.passages
+    # Populated tables and quoted/code examples are source content.
+    for extra in ['<caption>Authored screenshot guide</caption>','<tr><td>Unique guild instructions</td></tr>']:
+        kept=plan(toolbar().replace('<tr>',extra+'<tr>',1)+'<p>Body</p>')
+        assert 'Sign In / Change User' in kept.view
+
+
 def plan(raw, rid=RID, title="", mime="text/html"):
     return passages.prepare("The complete archival reader, including its navigation.",rid,title,
                             html_source=raw,mime_type=mime)

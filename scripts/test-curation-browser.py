@@ -1542,7 +1542,7 @@ async def candidate_grade_controls(browser,base,width):
         body={**snapshot,'candidates':selected[offset:offset+50],'total':len(selected),'operations':copy.deepcopy(operations),
               'stage_counts':{name:sum(row['stage']==name for row in rows) for name in snapshot['stage_counts']},
               'candidate_grades':{str(grade):sum((row['rating'] or {}).get('grade',-1)==grade for row in candidates) for grade in range(-1,4)},
-              'dismissal':{'count':len(candidates),'token':str(revision)}}
+              'dismissal':{'count':len(candidates),'token':str(revision) if query.get('action_tokens')==['1'] else None}}
         if minimum==1:await asyncio.sleep(.65)
         try:await route.fulfill(status=200,json=body)
         except Exception:pass  # Obsolete responses are intentionally aborted.
@@ -1579,7 +1579,7 @@ async def candidate_grade_controls(browser,base,width):
     retry_button=page.get_by_role('button',name='Retry evidence & grading: '+urlsplit(retry['scope']).netloc,exact=True)
     await retry_button.click();await settled(page)
     assert len(posts)==1 and operations[0]['id']=='a'*32
-    await expect(find).to_be_disabled()
+    await expect(find).to_be_enabled()  # Other sites may join the candidate queue.
     retry['candidate_check'].update(state='running',phase='grading');operations[0]['state']='running'
     await page.locator('#refresh').click();await settled(page)
     await page.get_by_role('button',name='Grading with Luna: '+urlsplit(retry['scope']).netloc,exact=True).wait_for()
@@ -1604,6 +1604,7 @@ async def candidate_grade_controls(browser,base,width):
     await page.get_by_label('Find a site',exact=True).fill('grade-3-3.')
     await page.locator('#view-total').filter(has_text='1 site').wait_for()
     await page.locator('#dismiss-all').click()
+    await expect(page.locator('#dismiss-dialog')).to_be_visible()
     assert 'all 58 remaining candidates' in await page.locator('#dismiss-description').inner_text()
     assert 'hidden by grade or search filters and other pages' in await page.locator('#dismiss-description').inner_text()
     await safe_layout(page,width)
@@ -2402,7 +2403,7 @@ async def capture_retry_flow(browser,base,width):
     await page.route('**/api/**',fixture)
     await page.goto(base+'/?view=capturing&candidate='+site['id']);await settled(page)
     await expect(page.get_by_role('heading',name='Automatic retry scheduled')).to_be_visible()
-    await expect(page.locator('#site-workspace')).to_contain_text('Next capture retry in')
+    await expect(page.locator('#site-workspace')).to_contain_text('Retry eligibility in')
     await expect(page.locator('#site-workspace')).to_contain_text('three attempts')
     await page.evaluate('refresh()');await settled(page)
     assert not posts, 'Status reads started a retry'

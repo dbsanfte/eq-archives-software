@@ -262,7 +262,7 @@ extraction checkpoints, enrichment, source identity, dates and last_indexed. No
 paid enrichment during this backfill. Do not reuse Nomic checkpoints as Gemma
 completion. The Nomic repair entry point remains for historical recovery only.
 Follow the embedding-service migration runbook for operator-authorized handoffs.
-Gemma text uses `eq-passages-480-v12`: budget title/context with every 480-token
+Gemma text uses `eq-passages-480-v13`: budget title/context with every 480-token
 request, retain full reader text, verify source-bound selected-view coverage and
 store view offsets/provenance separately. Unknown layouts retain content;
 format-specific navigation/post/table handling needs regression evidence. Resume
@@ -1369,3 +1369,20 @@ dates are unique calendar days with one or more verbatim excerpts per day; accep
 long news indexes up to the explicit 1,024-item metadata bounds. Normalize only
 derived metadata, retaining distinct proof and immutable paid responses/signatures
 so previously rejected but valid cached corrections can recover without new calls.
+
+The v13 policy compacts only fully contained same-start passages with identical
+title/context/kind after post-header packing; preserve source coverage and all
+other overlap. Shared image-only navigation toolbars require multiple account/
+search/menu roles and no authored text/data. Retain profile and topic content.
+New same-model maintenance keys inherit the unfinished older-policy cursor,
+retain old ledgers/Jobs, retry scoped failures and sweep the completed prefix
+after the tail. Exact source/view/request proof still gates vector reuse.
+Compact portal reads page in SQL; only visible records decode full manifests.
+Bulk action tokens are fetched explicitly at confirmation preparation and
+revalidated transactionally. Keep stage/filter/search/order/count parity.
+Luna schema array bounds retain known pre-bounds source-grade compatibility;
+cache every paid response by request, attempt and response hash. Bound automatic
+validation retries to two received attempts, retain uncertain charges, and let
+explicit retries consume a saved generation under original and shared caps.
+Never truncate invalid citations into approval. Retry scheduling runs on the
+independent control loop; eligible captures join the existing unbounded FIFO.

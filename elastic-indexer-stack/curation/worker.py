@@ -516,6 +516,14 @@ class Worker:
                 self.index_wake.clear()
 
     def indexing_turn(self):
+        # This control loop stays free while the capture executor downloads a
+        # large site. A due retry joins the existing FIFO; it never preempts it.
+        from capture_recovery import schedule
+        try:
+            schedule(self.root)
+        except Exception as error:
+            if database_busy(error):raise
+            LOG.warning('Capture retry scheduling paused; retained approvals need attention')
         try:
             self.indexing()
         except Exception as error:

@@ -429,11 +429,11 @@ function recoveryControls(row) {
   const label=active ? statusLabel(row) : paused ? 'Retry evidence & grading' : row.selection_current===false && row.rating ? 'Update quality assessment' : row.captures?.length ? 'Grade source evidence' : 'Find samples & grade';
   const focus=check?.grading_criteria ?? $('grading-criteria').value.trim();
   const button=mutation(label,()=>request('/api/check-candidate',{id:row.id,manifest_sha256:row.manifest_sha256,max_usd:2,...(!check && focus ? {grading_criteria:focus} : {})}),
-    'Evidence check queued for this site. Progress appears on its card.',true,Boolean(active || hasOperation()));
+    'Evidence check queued for this site. Progress appears on its card.',true,Boolean(active));
   button.setAttribute('aria-label',`${label}: ${siteName(row)}`);box.append(button);
   box.append(node('p',active ? 'This site is being checked. Approval becomes available after readable samples receive a grade.' :
     `${check ? 'Original' : 'One site ·'} $${check?.max_usd ?? 2} cap for Luna. ${row.captures?.length ? 'Uses the saved source samples.' : 'Finds exact Wayback samples from 1999–2006 before grading.'}`,'meta'));
-  if (!active && hasOperation()) box.append(node('p','Discovery or another evidence check is using the candidate worker. This action becomes available when it finishes. Capture and indexing run separately.','meta'));
+  if (!active && hasOperation()) box.append(node('p','This request joins the candidate queue and runs when the current check finishes. Its original budget and paid results are retained.','meta'));
   box.append(node('p',`Grading focus: ${focus || 'General EverQuest relevance'}`,'meta'));
   return box;
 }
@@ -774,7 +774,7 @@ function renderLive() {
     const paused=op?.state==='interrupted',progress=op?.result?.progress,retrying=paused && retryPending(op.retry);
     const box=panel(retrying ? 'Automatic retry scheduled' : paused ? 'Capture paused' : 'Capture in progress',retrying ? 'Saved files and catalog progress are retained. Temporary file failures get up to three attempts; remaining gaps proceed to indexing and can be retried from History.' : paused ? (progress?.capture_policy==='complete-files-v1' ? 'Saved files and catalog progress are retained. Resume continues pending files and extends an exhausted transport allowance without resetting usage.' : 'Staged files are retained. Resume within the original capture budget.') : 'This screen updates automatically as URLs are checked and downloaded.',paused ? 'attention' : '');
     if (op?.error) box.append(node('p',op.error));
-    if (retrying) {activityDeadline(box,op.retry.retry_at,'Next capture retry');box.append(node('p','Other queued sites continue during this wait. No action is needed.','meta'));}
+    if (retrying) {activityDeadline(box,op.retry.retry_at,'Retry eligibility');box.append(node('p','The retry joins Queue when eligible and waits for its turn. An active capture finishes first; saved files are retained.','meta'));}
     else if (paused) box.append(node('p','This site needs a decision or correction. Other approved sites continue.','meta'));
     if (progress) {
       box.append(captureMeter(op));
@@ -1269,11 +1269,18 @@ $('minimum-grade').addEventListener('input',()=>{
 });
 $('graded-view').addEventListener('click',()=>go({needsGrade:false,offset:0}));
 $('ungraded-view').addEventListener('click',()=>go({needsGrade:true,offset:0}));
-$('dismiss-all').addEventListener('click',()=>{
+$('dismiss-all').addEventListener('click',async()=>{
   if (busy || !data?.dismissal?.count) return;
-  dismissSnapshot={...data.dismissal};
-  $('dismiss-description').textContent=`Move all ${dismissSnapshot.count} remaining candidates to History, including sites hidden by grade or search filters and other pages. Queued captures and other stages stay as they are. Undo will be available.`;
-  $('dismiss-dialog').showModal();
+  const view=route.view;busy=true;renderShell();
+  try {
+    const snapshot=data.dismissal.token ? {...data.dismissal} : (await request('/api/queue?compact=1&filter=candidates&action_tokens=1')).dismissal;
+    if (route.view!==view) return;
+    if (!snapshot.count) {notification('notice','There are no remaining candidates to dismiss.');return;}
+    dismissSnapshot=snapshot;
+    $('dismiss-description').textContent=`Move all ${dismissSnapshot.count} remaining candidates to History, including sites hidden by grade or search filters and other pages. Queued captures and other stages stay as they are. Undo will be available.`;
+    $('dismiss-dialog').showModal();
+  } catch(error) {notification('error',error.message);}
+  finally {busy=false;renderShell();}
 });
 $('dismiss-cancel').addEventListener('click',()=>$('dismiss-dialog').close());
 $('dismiss-confirm').addEventListener('click',()=>{
