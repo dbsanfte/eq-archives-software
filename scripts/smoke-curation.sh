@@ -55,6 +55,65 @@ plan=passages.prepare('A guild expedition defeated Nagafen and explored Lower Gu
 assert plan.passages
 print(json.dumps({'import_tokenizer_startup':'passed','peak_mib':round(resource.getrusage(resource.RUSAGE_SELF).ru_maxrss/1024,1)}))
 PYTHON
+# Exercise real spawn/pipes and the pinned tokenizer under the maintenance
+# Job's UID, read-only filesystem, CPU/memory limits and dropped capabilities.
+docker run --rm --network none --read-only --user 10001:10001 --memory=3g --cpus=2 \
+  --tmpfs /tmp:rw,uid=10001,gid=10001,mode=700 --cap-drop ALL --security-opt no-new-privileges \
+  -i --entrypoint python "$image" - <<'PYTHON'
+from pathlib import Path
+import subprocess
+probe=Path('/tmp/policy-runtime.py')
+probe.write_text('''
+import hashlib,multiprocessing,os
+from pathlib import Path
+from indexer import passages,gemma
+from indexer.html_extraction import WEBSITE_EXTRACTION_VERSION
+from policy_maintenance import State,identity,run
+from policy_pool import PreparationPool
+from policy_sources import Sources
+from policy_scheduler import job_for
+
+class Local:
+    def __init__(self,hits):self.hits=hits;self.writes=0
+    def get(self,identifier):return self.hits[identifier]
+    def select(self,cursor):return [identifier for identifier in sorted(self.hits) if identifier>cursor]
+    def update(self,hit,patch):
+        assert set(patch)<=set(['text_chunking_version','text_passage_provenance'])
+        self.writes+=1
+    def vectors(self,*args):raise AssertionError('Unchanged bound requests must reuse vectors')
+
+def main():
+    assert os.getuid()==10001
+    name='eqarchives-policy-'+identity()+'-1'
+    job=job_for(name,'dbsanfte/frontend@sha256:'+'1'*64)
+    container=job['spec']['template']['spec']['containers'][0]
+    assert container['resources']['limits']=={'cpu':'2','memory':'3Gi'}
+    root=Path('/tmp/archive');hits={}
+    for leaf in ('a.html','b.html'):
+        identifier='websites/guild.example/20000101000000/'+leaf
+        raw='<html><title>Guild history</title><p>Our guild defeated Nagafen.</p></html>'
+        reader='Complete archival reader.'
+        plan=passages.prepare(reader,identifier,'Guild history',html_source=raw,mime_type='text/html')
+        source=dict(id=identifier,file_type='text',mime_type='text/html',title='Guild history',text_full=reader,
+            embedding_model=gemma.MODEL,text_extraction_version=WEBSITE_EXTRACTION_VERSION,
+            text_chunking_version='eq-passages-480-v10',archive_source_sha256=hashlib.sha256(raw.encode()).hexdigest(),
+            text_passage_provenance={'version':'eq-passages-480-v10','sources':[{**plan.provenance(),'version':'eq-passages-480-v10'}]},
+            text=[dict(text_chunk=p.text,title=p.title,context=p.context,kind=p.kind,source_start=p.start,source_end=p.end) for p in plan.passages])
+        path=root/identifier;path.parent.mkdir(parents=True,exist_ok=True);path.write_text(raw)
+        hits[identifier]={'_id':identifier,'_source':source}
+    service=Local(hits);state=State('/tmp/state');sources=Sources([root]);pool=PreparationPool([root],None,2)
+    try:
+        result=run('/tmp',state,service,sources,name,maximum=2,should_yield=lambda:False,pool=pool)
+        assert result['scanned']==2 and result['failed']==0 and service.writes==2
+        assert len(pool.slots)==2 and state.snapshot()['cursor']==max(hits)
+    finally:pool.close();sources.close();state.close()
+    assert not multiprocessing.active_children()
+    print('Non-root policy spawn, source proof, cursor writes and process cleanup verified')
+
+if __name__=='__main__':main()
+''')
+subprocess.run(['python',str(probe)],check=True,timeout=60)
+PYTHON
 mkdir "$curation_runtime/credentials" "$curation_runtime/kubernetes"
 printf '%s\n' dummy-paid-key > "$curation_runtime/credentials/luna_api_key"
 printf '%s\n' dummy-service-token > "$curation_runtime/kubernetes/token"
