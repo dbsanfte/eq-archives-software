@@ -19,9 +19,12 @@ def test_compact_listing_preserves_review_records_counts_filters_and_action_toke
     app = create_app(root, start_worker=False)
     original = call(app, 'GET', '/api/queue?filter=' + selected).json()
     compact = call(app, 'GET', '/api/queue?compact=1&filter=' + selected).json()
-    for key in ('candidates', 'total', 'offset', 'stage_counts', 'candidate_grades', 'dismissal', 'review_actions',
+    for key in ('candidates', 'total', 'offset', 'stage_counts', 'candidate_grades', 'review_actions',
                 'all_count', 'approved', 'recommended', 'capturing', 'captured'):
         assert compact[key] == original[key], key
+    assert compact['dismissal']['count']==original['dismissal']['count']
+    actions=call(app,'GET','/api/queue?compact=1&action_tokens=1&filter='+selected).json()
+    assert actions['dismissal']==original['dismissal']
 
 
 @pytest.mark.parametrize('stage', ['candidates', 'queued', 'capturing', 'indexing', 'saved', 'history'])
@@ -83,16 +86,17 @@ def test_claim_during_listing_cannot_remove_a_queue_sort_key(candidate, monkeypa
                          (json.dumps({'decision': 'approve', 'reviewed_at': '2026-01-01T00:00:00Z'}), row['id']))
         store.db.commit()
     app = create_app(root, start_worker=False)
-    import server
-    order = server.queue_order
+    import compact_queue
+    order = compact_queue.listing
 
-    def concurrent_claim(store):
+    def concurrent_claim(store,*args):
+        result=order(store,*args)
         with connect(root) as worker:
             worker.db.execute("UPDATE candidates SET state='capturing' WHERE id=?", (row['id'],))
             worker.db.commit()
-        return order(store)
+        return result
 
-    monkeypatch.setattr('server.queue_order', concurrent_claim)
+    monkeypatch.setattr('compact_queue.listing', concurrent_claim)
     first = call(app, 'GET', '/api/queue?compact=1&filter=queued').json()
     assert first['total'] == first['stage_counts']['queued'] == 1
     assert first['candidates'][0]['state'] == 'approved_waiting_batch'

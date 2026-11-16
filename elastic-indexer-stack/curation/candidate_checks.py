@@ -72,7 +72,8 @@ def start(store, payload):
     previous = unpack(previous) if previous else None
     focus = criteria(payload.get('grading_criteria', previous['payload'].get('grading_criteria', '') if previous else (row['rating'] or {}).get('grading_criteria', '')))
     payload = {**payload, 'grading_criteria': focus, 'selection_policy': SELECTION_VERSION,
-               'grading_refresh': row['coverage'].get('grading_refresh_required')}
+               'grading_refresh': row['coverage'].get('grading_refresh_required'),
+               'grading_retry': (previous['payload'].get('grading_retry',0)+int(previous['state']=='interrupted') if previous else 0)}
     if previous and previous['state'] in ('queued', 'running'):
         if focus != previous['payload'].get('grading_criteria', ''):
             raise CrawlError('This check is already running with saved grading criteria. Wait for it to finish before changing them.')
@@ -83,12 +84,12 @@ def start(store, payload):
         if (previous['payload']['manifest_sha256'] != row['manifest_sha256']
                 and previous['payload'].get('source_sha256') != source_identity(row)):
             raise CrawlError('Evidence changed since this check. Its saved results and budget are retained.')
-        if active_operation(store, Lane.CANDIDATES):
-            raise CrawlError('Another discovery or evidence check is queued or running. Retry when it finishes.')
+        if payload['grading_retry']>8:
+            raise CrawlError('Grading retry limit reached; inspect retained attempts')
         # A changed capture scope can reuse the same samples, cached grade and
         # budget. Bind the next merge to the newly reviewed scope, never an old one.
         resumed = {**previous['payload'], 'manifest_sha256': row['manifest_sha256'], 'grading_criteria': focus,
-                   'selection_policy': SELECTION_VERSION, 'grading_refresh': payload['grading_refresh']}
+                   'selection_policy': SELECTION_VERSION, 'grading_refresh': payload['grading_refresh'], 'grading_retry':payload['grading_retry']}
         store.db.execute('INSERT INTO events(candidate,action,detail,created) VALUES (?,?,?,?)',
                          (row['id'], 'grading_requested', json.dumps({'operation': previous['id'], 'grading_criteria': focus}), now()))
         store.db.execute("UPDATE operations SET state='queued',payload=?,error=NULL,updated=? WHERE id=?",
@@ -155,6 +156,7 @@ def run(root, operation):
             args = options.parse_args(['--work-dir', str(directory), 'grade', '--max-candidates', '1',
                                        '--api-key-file', '/run/secrets/luna_api_key', '--max-usd', str(payload['max_usd'])])
             args.grading_criteria = payload.get('grading_criteria', '')
+            args.grading_retry = payload.get('grading_retry',0)
             grade(args, run_store)
         checked = record(run_store, run_store.candidates()[0])
         retained = run_store.get('retained_sources', {})

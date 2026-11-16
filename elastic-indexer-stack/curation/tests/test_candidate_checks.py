@@ -76,12 +76,30 @@ def test_received_invalid_grade_is_cached_and_retry_keeps_criteria(tmp_path, mon
             worker.operation(Lane.CANDIDATES)
             current = call(app, 'GET', '/api/candidate?id=' + row['id']).json()['candidate']
             assert current['state'] == 'grade_error'
+            assert client.return_value.request.call_count == 2  # Bounded automatic retry.
+            client.return_value.request.return_value=response()
+            from state import enqueue,active_operation
+            with connect(root) as store:
+                other=enqueue(store,'discover',{'max_candidates':50,'max_usd':2})
+                store.db.execute("UPDATE operations SET state='running' WHERE id=?",(other,));store.db.commit()
             assert call(app, 'POST', '/api/check-candidate', {**payload, 'manifest_sha256': current['manifest_sha256']}).json()['operation'] == operation
+            with connect(root) as store:
+                assert active_operation(store,Lane.CANDIDATES)['id']==other
+                store.db.execute("UPDATE operations SET state='completed' WHERE id=?",(other,));store.db.commit()
             worker.operation(Lane.CANDIDATES)
-            assert client.return_value.request.call_count == 1
+            assert client.return_value.request.call_count == 3
             assert json.loads(client.return_value.request.call_args.args[0]['input'])['grading_criteria'] == 'Cleric sites'
+            current=call(app,'GET','/api/candidate?id='+row['id']).json()['candidate']
+            assert call(app,'POST','/api/check-candidate',{**payload,'manifest_sha256':current['manifest_sha256'],
+                                                         'grading_criteria':'Guild sites'}).status_code==202
+            with connect(root) as store:
+                from state import unpack
+                assert unpack(store.db.execute('SELECT * FROM operations WHERE id=?',(operation,)).fetchone())['payload']['grading_retry']==1
+            worker.operation(Lane.CANDIDATES)
         with connect(root / 'runs' / operation) as store:
-            assert store.db.execute('SELECT COUNT(*) FROM attempts').fetchone()[0] == 1
+            assert store.db.execute('SELECT COUNT(*) FROM attempts').fetchone()[0] == 4
+            assert store.db.execute("SELECT COUNT(*) FROM attempts WHERE status='validation_rejected'").fetchone()[0] == 2
+            assert store.db.execute("SELECT COUNT(*) FROM meta WHERE key LIKE 'luna_response_record:%'").fetchone()[0] == 4
             assert store.db.execute('SELECT actual FROM attempts').fetchone()[0] > 0
     finally:
         worker.lease.close()

@@ -1168,3 +1168,32 @@ retains their exact spelling without permitting wildcard prefix scans or identit
 substitution. Malformed external supporting-file inventories become explicit gaps; a failed
 primary site inventory still requires successful listing before completion.
 An individual site's Wayback HTTP 403 is recorded while discovery continues.
+
+### Recovery and bounded portal reads
+
+Compact queue requests select and order the visible 50 records in SQL. Global
+counts use scalar projections; retired sites do not decode full review manifests.
+The response gives a dismissal count with a null token; the portal requests
+`action_tokens=1` when preparing the bulk confirmation. Legacy operator reads and
+explicit action snapshots retain complete tokens, with fresh transactional
+validation before changes. Search, stage counts, grade filters and FIFO ordering
+share one SQLite read transaction.
+
+Capture retry eligibility is checked by the independent reconciliation loop, so
+a large active download cannot hold its timer. Eligible retries move into Queue
+and retain their actual queue position, original files and cancellation controls.
+
+Candidate grading requires one or two excerpts in the API schema. Known grades
+from the earlier equivalent validator remain source-verifiable. Old responses
+with extra excerpts can derive bounded metadata only after every citation passes
+verbatim validation. Paid responses, including rejected ones, retain immutable
+request/attempt/content identities. A judgment can receive at most two automatic
+responses; explicit retries consume a saved retry generation (maximum eight),
+retaining the original operation allowance, shared caps and uncertain charges.
+A lost response never becomes a free automatic retry.
+
+Passage policy `eq-passages-480-v13` repairs a contained-overlap packing edge case
+and removes structurally proven image toolbars from auxiliary forum pages.
+Maintenance continues the unfinished older-policy frontier, retries scoped gaps
+and then sweeps the earlier prefix, reusing vectors only with exact proof.
+Existing broad Jobs and old checkpoints remain retained.

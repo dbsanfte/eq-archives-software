@@ -21,7 +21,7 @@ from .chunking import SourceChunk, chunk_source
 from .html_extraction import website_markdown, repair_script_markup
 from . import passage_forums, passage_sites, passage_scaffolding, passage_catalogs
 
-VERSION = "eq-passages-480-v12"
+VERSION = "eq-passages-480-v13"
 MAX_TOKENS = 480
 ASSETS = {".js", ".css", ".map", ".ico", ".svg", ".woff", ".woff2"}
 CONTROLS = re.compile(r"^(?:reply(?: to (?:item|topic))?(?: with quote)?|quote|edit|delete|"
@@ -319,6 +319,22 @@ def _layout_utility(soup,path):
     return None
 
 
+def _image_navigation(soup, excluded):
+    """Image-only toolbars with cooperating account/search/menu roles."""
+    roles=re.compile(r'^(?:sign in(?: / change user)?|join free|why join\??|search the knowledge base|games|community|store|my account|help)$',re.I)
+    account=re.compile(r'^(?:sign in(?: / change user)?|join free|my account|search the knowledge base)$',re.I)
+    for node in reversed(list(soup.find_all('table'))):
+        if not node.parent or node.find_parent(['blockquote','pre','code','article']):continue
+        if node.find(['th','caption','blockquote','pre','code','textarea','h1','h2','h3']):continue
+        links=node.find_all('a')
+        if len(links)<3 or any(not a.find('img') for a in links):continue
+        labels=[' '.join(img.get('alt','').split()) for a in links for img in a.find_all('img')]
+        if sum(bool(roles.fullmatch(label)) for label in set(labels))<3 or not any(account.fullmatch(label) for label in labels):continue
+        # Real topic rows, descriptions, data and authored image captions win.
+        if node.get_text(' ',strip=True):continue
+        node.decompose();excluded.append('image_navigation_toolbar')
+
+
 def _structured_navigation(soup,excluded):
     for node in reversed(list(soup.find_all(['table','td','div']))):
         if not node.parent or node.find_parent(['blockquote','pre','code','article']):continue
@@ -463,6 +479,7 @@ def _html_view(raw, host, _preserve_layout=False, path=""):
     initial_reason=None if thread else (passage_forums.excluded_page(soup,title,path) or _layout_utility(soup,path))
     if initial_reason:return "",title,"archive_status",[initial_reason]
     if not thread:
+        _image_navigation(soup,excluded)
         passage_scaffolding.expand_fallbacks(soup,excluded)
         _encoded_advertising(soup,excluded)
         passage_scaffolding.clean(soup,excluded)
@@ -631,6 +648,8 @@ def _html_view(raw, host, _preserve_layout=False, path=""):
             if len(cells)>1 and all(COLUMN_NAMES.fullmatch(c.get_text(' ',strip=True)) for c in cells):
                 for cell in cells:cell.name='th'
     view=website_markdown(str(soup))
+    if not view.strip() and 'image_navigation_toolbar' in excluded:
+        return '',title,'archive_status',excluded+['navigation_only']
     if not _preserve_layout and len(_plain(view))<50 and len(raw)>300:
         fallback, fallback_title, method, reasons=_html_view(raw,host,_preserve_layout=True,path=path)
         if len(_plain(fallback))>len(_plain(view))+100:
@@ -824,7 +843,16 @@ def _chunks(view, title, document_context="", strict_sections=False):
                     packed[-1]=Passage(previous.start,passage.end,body,title,context,kind)
                     continue
         packed.append(passage)
-    return tuple(packed)
+    compact=[]
+    for passage in packed:
+        # Attaching a post header can rechunk the first quoted fragment. Its
+        # trailing overlap can be wholly contained in the next original chunk.
+        # Retain that larger exact span only with identical attribution/kind.
+        while (compact and compact[-1].start==passage.start and compact[-1].end<=passage.end
+               and (compact[-1].title,compact[-1].context,compact[-1].kind)==(passage.title,passage.context,passage.kind)):
+            compact.pop()
+        compact.append(passage)
+    return tuple(compact)
 
 
 def prepare(text, record_id="", title="", *, html_source=None, mime_type=""):
@@ -873,15 +901,21 @@ def prepare(text, record_id="", title="", *, html_source=None, mime_type=""):
     return plan
 
 
+class PlanError(ValueError):
+    def __init__(self,reason,message):
+        super().__init__(message)
+        self.reason=reason
+
+
 def verify(source,plan):
     if plan.version!=VERSION or digest(source)!=plan.source_sha256:
-        raise ValueError("Passage plan differs from its source or policy")
+        raise PlanError('passage_source','Passage plan differs from its source or policy')
     end=0;previous=-1;tokenizer=gemma.load_tokenizer()
     for passage in plan.passages:
-        if (not 0<=passage.start<passage.end<=len(plan.view) or passage.start>end or passage.start<=previous
-                or plan.view[passage.start:passage.end]!=passage.text
-                or len(tokenizer.encode(passage.request).ids)>MAX_TOKENS):
-            raise ValueError("Passage plan omits, changes or exceeds its selected source")
+        reason=('passage_offsets' if not 0<=passage.start<passage.end<=len(plan.view) or plan.view[passage.start:passage.end]!=passage.text else
+                'passage_coverage' if passage.start>end else 'passage_order' if passage.start<=previous else
+                'passage_tokens' if len(tokenizer.encode(passage.request).ids)>MAX_TOKENS else None)
+        if reason:raise PlanError(reason,'Passage plan omits, changes or exceeds its selected source')
         previous=passage.start;end=passage.end
     if end!=len(plan.view) and plan.view.strip():
-        raise ValueError("Passage plan omits selected content")
+        raise PlanError('passage_coverage','Passage plan omits selected content')

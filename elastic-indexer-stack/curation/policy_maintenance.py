@@ -92,7 +92,17 @@ class State:
             for statement in schema.split(';'):
                 if statement.strip():db.execute(statement)
         with self.db.transaction(attempts=6) as db:
-            db.execute("INSERT OR IGNORE INTO policy_cursors VALUES (?,'',0,0,0,0,0,0)",(identity(),))
+            # A same-model policy upgrade first continues the unfinished
+            # frontier. The normal sweep later revisits the completed prefix.
+            cursor=''
+            if not db.execute('SELECT 1 FROM policy_cursors WHERE key=?',(identity(),)).fetchone():
+                current=re.fullmatch(r'eq-passages-480-v(\d+)',passages.VERSION)
+                for old_cursor,old_policy in db.execute('''SELECT c.cursor,s.policy FROM policy_cursors c
+                        JOIN policy_scopes s ON s.key=c.key WHERE s.index_name=? AND s.model=?''',
+                        (index_identity(),gemma.MODEL)):
+                    old=re.fullmatch(r'eq-passages-480-v(\d+)',old_policy)
+                    if current and old and int(old[1])<int(current[1]):cursor=max(cursor,old_cursor)
+            db.execute("INSERT OR IGNORE INTO policy_cursors VALUES (?,?,0,0,0,0,0,0)",(identity(),cursor))
             db.execute('INSERT OR IGNORE INTO policy_scopes VALUES (?,?,?,?)',(identity(),index_identity(),gemma.MODEL,passages.VERSION))
 
     def close(self):
@@ -241,6 +251,11 @@ def repair(services,sources,identifier,check):
             source=hit['_source']
             error.source_sha256=((source.get('text_passage_provenance') or {}).get('decoding') or {}).get('source_sha256') or source.get('archive_source_sha256')
         raise
+    except (ValueError,TypeError,KeyError,AttributeError,RecursionError,MemoryError) as error:
+        if isinstance(error,ServiceError):raise
+        source=hit['_source']
+        hashed=((source.get('text_passage_provenance') or {}).get('decoding') or {}).get('source_sha256') or source.get('archive_source_sha256')
+        raise SourceError(getattr(error,'reason','source_validation'),hashed) from None
 
 
 def repair_hit(services,sources,hit,check):
