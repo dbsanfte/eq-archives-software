@@ -89,10 +89,17 @@ def test_received_invalid_grade_is_cached_and_retry_keeps_criteria(tmp_path, mon
             worker.operation(Lane.CANDIDATES)
             assert client.return_value.request.call_count == 3
             assert json.loads(client.return_value.request.call_args.args[0]['input'])['grading_criteria'] == 'Cleric sites'
+            current=call(app,'GET','/api/candidate?id='+row['id']).json()['candidate']
+            assert call(app,'POST','/api/check-candidate',{**payload,'manifest_sha256':current['manifest_sha256'],
+                                                         'grading_criteria':'Guild sites'}).status_code==202
+            with connect(root) as store:
+                from state import unpack
+                assert unpack(store.db.execute('SELECT * FROM operations WHERE id=?',(operation,)).fetchone())['payload']['grading_retry']==1
+            worker.operation(Lane.CANDIDATES)
         with connect(root / 'runs' / operation) as store:
-            assert store.db.execute('SELECT COUNT(*) FROM attempts').fetchone()[0] == 3
+            assert store.db.execute('SELECT COUNT(*) FROM attempts').fetchone()[0] == 4
             assert store.db.execute("SELECT COUNT(*) FROM attempts WHERE status='validation_rejected'").fetchone()[0] == 2
-            assert store.db.execute("SELECT COUNT(*) FROM meta WHERE key LIKE 'luna_response_record:%'").fetchone()[0] == 3
+            assert store.db.execute("SELECT COUNT(*) FROM meta WHERE key LIKE 'luna_response_record:%'").fetchone()[0] == 4
             assert store.db.execute('SELECT actual FROM attempts').fetchone()[0] > 0
     finally:
         worker.lease.close()

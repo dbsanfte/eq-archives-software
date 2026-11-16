@@ -73,7 +73,7 @@ def start(store, payload):
     focus = criteria(payload.get('grading_criteria', previous['payload'].get('grading_criteria', '') if previous else (row['rating'] or {}).get('grading_criteria', '')))
     payload = {**payload, 'grading_criteria': focus, 'selection_policy': SELECTION_VERSION,
                'grading_refresh': row['coverage'].get('grading_refresh_required'),
-               'grading_retry': (previous['payload'].get('grading_retry',0)+1 if previous and previous['state']=='interrupted' else 0)}
+               'grading_retry': (previous['payload'].get('grading_retry',0)+int(previous['state']=='interrupted') if previous else 0)}
     if previous and previous['state'] in ('queued', 'running'):
         if focus != previous['payload'].get('grading_criteria', ''):
             raise CrawlError('This check is already running with saved grading criteria. Wait for it to finish before changing them.')
