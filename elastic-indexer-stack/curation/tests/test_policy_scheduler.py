@@ -61,6 +61,8 @@ def test_policy_job_has_no_paid_publication_cluster_credentials_or_archive_write
     assert next(e['value'] for e in container['env'] if e['name']=='EMBEDDING_URL').startswith('http://cuda-batch-inference.')
     env={e['name']:e.get('value') for e in container['env']}
     assert env['EMBEDDING_BATCH_SIZE']=='8' and env['EMBEDDING_BATCH_CONCURRENCY']=='4'
+    assert env['POLICY_PREPARATION_WORKERS']=='2'
+    assert container['resources']['limits']=={'cpu':'2','memory':'3Gi'}
     assert next(e for e in container['env'] if e['name']=='ELASTICSEARCH_INDEX')['valueFrom']['secretKeyRef']['key']=='es_index'
     for name,image in [('invalid',IMAGE),('eqarchives-policy-'+identity()+'-1','latest')]:
         with pytest.raises(CrawlError):job_for(name,image)
@@ -95,6 +97,16 @@ def test_bounded_slices_continue_from_receipts_and_completed_sweeps_wait(tmp_pat
     assert second['progress']['reused']==17 and second['progress']['unresolved']==1
     complete(tmp_path,kube,phase='sweep_waiting',next_at=time.time()+3600)
     assert background(tmp_path,kube)['phase']=='sweep_waiting' and len(kube.created)==2
+
+
+def test_execution_receipts_report_acknowledged_work_and_reject_unbounded_fields(tmp_path):
+    kube=Kube();background(tmp_path,kube);state=complete(tmp_path,kube)
+    path=tmp_path/'indexing-state'/(state['name']+'.json')
+    data=json.loads(path.read_text());data['execution']={'preparation_workers':2,'documents':20,'stored_vectors_reused':90,'submitted_inputs':3}
+    save(path,data)
+    assert receipt(tmp_path,state)['execution']==data['execution']
+    for bad in ({'preparation_workers':True},{'preparation_workers':5},{'submitted_inputs':-1},{'private_source':'unexpected'}):
+        save(path,{**data,'execution':bad});assert receipt(tmp_path,state) is None
 
 
 def test_invalid_completion_and_worker_failures_retry_without_claiming_completion(tmp_path):

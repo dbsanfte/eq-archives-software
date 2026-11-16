@@ -4,9 +4,8 @@ Same model, no paid enrichment, no source preparation, no create/upsert/delete.
 Only acknowledged optimistic updates advance repair counts and resolve failures.
 """
 import argparse
-from dataclasses import replace
+from collections import deque, Counter
 import hashlib
-import html
 import json
 import fcntl
 import os
@@ -17,21 +16,20 @@ import time
 from urllib.parse import quote, urlencode
 
 import httpx
-from bs4 import BeautifulSoup
 
 from common import save
 from index_captures import Services
 from indexer import gemma, passages
-from indexer.archive_handler import ArchiveHandler
-from indexer.html_extraction import WEBSITE_EXTRACTION_VERSION, website_markdown
-from indexer.source_encoding import decode_source, repaired_title
+from indexer.html_extraction import WEBSITE_EXTRACTION_VERSION
 from indexer.sqlite_state import SQLiteState
 from indexer.embedding_batches import embed_batches, decode_vectors
 from indexer.vector_json import dumps as vector_json
-from policy_sources import Sources, SourceError, relative
+from policy_sources import Sources, SourceError
+from policy_preparation import (LEGACY_POLICY, FIELDS as PASSAGE_FIELDS, newer, prepare,
+                                verify_prepared,renderer_identity,request_identity)
+from policy_pool import PreparationPool, WorkerLost
 
 APP='eqarchives-policy-maintenance'
-LEGACY_POLICY='embeddinggemma2-paragraphs-480-overlap48-v1'
 FIELDS=['id','file_type','mime_type','title','text_full','text.text_chunk','text.title','text.context',
         'text.kind','text.source_start','text.source_end','embedding_model','text_chunking_version',
         'text_extraction_version','text_passage_provenance','archive_source_sha256','archive_commit']
@@ -43,13 +41,6 @@ def index_identity():
 
 def identity():
     return hashlib.sha256(json.dumps([index_identity(),gemma.MODEL,passages.VERSION,WEBSITE_EXTRACTION_VERSION]).encode()).hexdigest()[:16]
-
-
-def newer(version):
-    if version==LEGACY_POLICY:return False
-    old=re.fullmatch(r'eq-passages-480-v(\d+)',version or '')
-    current=re.fullmatch(r'eq-passages-480-v(\d+)',passages.VERSION)
-    return not old or not current or int(old[1])>int(current[1])
 
 
 class ServiceError(ValueError):
@@ -226,6 +217,26 @@ class MaintenanceServices(Services):
         if result.get('_id')!=hit['_id'] or result.get('_index')!=self.index or result.get('result') not in ('updated','noop'):
             raise ServiceError('update_not_acknowledged')
 
+    def stored_vectors(self,hit):
+        rows=hit['_source'].get('text') or []
+        if len(rows)>1024:return []  # Bound optional reuse reads, independently of source size.
+        try:
+            result=self.request('GET','/'+quote(self.index,safe='')+'/_doc/'+quote(hit['_id'],safe='')+'?'+
+                urlencode({'_source_includes':'id,embedding_model,text.vector'}))
+        except SourceError as error:
+            if error.reason=='record_too_large':return []
+            raise
+        if (result.get('_id')!=hit['_id'] or result.get('_index')!=self.index
+                or not isinstance(result.get('_source'),dict) or result['_source'].get('id')!=hit['_id']
+                or result['_source'].get('embedding_model')!=gemma.MODEL
+                or type(result.get('_seq_no')) is not int or type(result.get('_primary_term')) is not int):
+            raise ServiceError('response_identity')
+        if (result['_seq_no'],result['_primary_term'])!=(hit['_seq_no'],hit['_primary_term']):
+            raise SourceError('concurrent_update')
+        saved=result['_source'].get('text')
+        if not isinstance(saved,list) or len(saved)!=len(rows):return []
+        return [row.get('vector') if isinstance(row,dict) else None for row in saved]
+
     def vectors(self,inputs,check):
         def infer(values):
             try:response=self.embedder.post(self.embedding_url+'/v1/embeddings',json={
@@ -259,60 +270,41 @@ def repair(services,sources,identifier,check):
 
 
 def repair_hit(services,sources,hit,check):
-    source=hit['_source'];identifier=hit['_id'];reader=source.get('text_full') or ''
-    previous=source.get('text_passage_provenance') or {};version=source.get('text_chunking_version') or ''
-    if source.get('embedding_model')!=gemma.MODEL or source.get('file_type')!='text':return 'different_model'
-    if version and newer(version):return 'newer_policy'
-    relative(identifier)
-    website=identifier.startswith('websites/') and source.get('file_type')=='text'
-    mime=source.get('mime_type') or ''
-    textual=not mime or mime.startswith('text/') or mime in ('application/xhtml+xml','application/xml','application/json')
-    if not reader.strip():raise SourceError('reader_unavailable')
-    bindings=previous.get('sources') or [{k:v for k,v in previous.items() if k!='decoding'}]
-    legacy_reader=version==LEGACY_POLICY and not previous and website and textual
-    if not legacy_reader and (len(bindings)!=1 or bindings[0].get('source_sha256')!=passages.digest(reader)):
-        raise SourceError('reader_integrity')
-    complete=version==passages.VERSION and previous.get('version')==passages.VERSION and (not website or not textual or source.get('text_extraction_version')==WEBSITE_EXTRACTION_VERSION)
-    patch={};raw=None;decoding=None
-    if website and textual:
-        data=sources.read(source);hint=(previous.get('decoding') or {}).get('encoding')
-        decoded=decode_source(data,mime,detection={'encoding':hint,'confidence':1.0} if hint else None)
-        decoded=replace(decoded,text=decoded.text.replace('\r\n','\n').replace('\r','\n'))
-        raw=decoded.text;decoding=decoded.provenance()
-        title=BeautifulSoup(raw,'html.parser').title
-        corrected=repaired_title(source.get('title'),title.string if title else None,decoded)
-        if corrected!=source.get('title'):patch['title']=corrected
-        if legacy_reader or source.get('text_extraction_version')!=WEBSITE_EXTRACTION_VERSION:
-            archive=ArchiveHandler();url=archive._convert_to_archive_url(identifier)
-            alternate=archive._strip_index_html_from_url(url)
-            header='<b>Page URL:</b> '+html.escape(url)+'<br/>'
-            if alternate and alternate!=url:header+='<b>Alternate Page URL:</b> '+html.escape(alternate)+'<br/>'
-            reader=website_markdown(header+'<hr/>'+raw)
-            if not reader.strip():raise SourceError('reader_integrity')
-            if reader!=source['text_full']:patch['text_full']=reader
-            patch['text_extraction_version']=WEBSITE_EXTRACTION_VERSION
-    plan=passages.prepare(reader,identifier,patch.get('title',source.get('title')) or '',html_source=raw,mime_type=mime)
-    passages.verify(reader,plan)
-    fields=('text_chunk','title','context','kind','source_start','source_end')
-    expected=[(p.text,p.title,p.context,p.kind,p.start,p.end) for p in plan.passages]
-    saved=[tuple(row.get(k) for k in fields) for row in source.get('text') or []]
-    comparable=lambda value:{k:v for k,v in value.items() if k!='version'}
-    reuse=(not legacy_reader and reader==source.get('text_full') and expected==saved and comparable(bindings[0])==comparable(plan.provenance()))
-    if complete and not patch:
-        if not reuse:raise SourceError('checkpoint_integrity')
-        return 'external_current'
-    provenance={'version':passages.VERSION,'sources':[plan.provenance()]}
-    if decoding:provenance['decoding']=decoding
-    patch.update(text_chunking_version=passages.VERSION,text_passage_provenance=provenance)
-    if not reuse:
-        unique,positions=passages.embedding_inputs(plan)
-        vectors=services.vectors([p.request for p in unique],check)
-        patch['text']=[dict(zip(fields,(p.text,p.title,p.context,p.kind,p.start,p.end)),vector=vectors[pos])
-                       for p,pos in zip(plan.passages,positions,strict=True)]
-    if plan.method=='archive_status' or 'supporting_asset' in plan.exclusions:
-        patch.update(llm_summary_vector=None,llm_image_text_vector=None)
+    return apply_prepared(services,hit,prepare(hit,sources),check)
+
+
+def apply_prepared(services,hit,prepared,check):
+    verify_prepared(hit,prepared)
+    if prepared.result:return prepared.result
+    check();plan=prepared.plan;patch=dict(prepared.patch)
+    stats=getattr(services,'policy_stats',None)
+    if stats is None:services.policy_stats=stats=Counter()
+    reused_count=submitted_count=0
+    if not prepared.reuse:
+        reusable={}
+        desired=set(prepared.requests)
+        candidates=[(request,index) for request,index in prepared.reusable if request in desired]
+        if candidates:
+            saved=services.stored_vectors(hit)
+            for request,index in candidates:
+                if not 0<=index<len(saved) or not isinstance(saved[index],list):continue
+                try:reusable[request]=gemma.vector(saved[index]).copy()
+                except (TypeError,ValueError):continue
+        missing=[request for request in prepared.requests if request not in reusable]
+        vectors=services.vectors(missing,check) if missing else []
+        if not isinstance(vectors,list) or len(vectors)!=len(missing) or any(not isinstance(v,list) for v in vectors):
+            raise ServiceError('vector_validation')
+        try:
+            completed={**reusable,**{request:gemma.vector(vector).copy() for request,vector in zip(missing,vectors,strict=True)}}
+            ordered=[completed[request] for request in prepared.requests]
+        except (ValueError,TypeError,KeyError):raise ServiceError('vector_validation') from None
+        patch['text']=[dict(zip(PASSAGE_FIELDS,(p.text,p.title,p.context,p.kind,p.start,p.end)),vector=ordered[pos].copy())
+                       for p,pos in zip(plan.passages,prepared.positions,strict=True)]
+        reused_count,submitted_count=len(reusable),len(missing)
     check();services.update(hit,patch)
-    return 'reused' if reuse else 'updated'
+    stats['stored_vectors_reused']+=reused_count;stats['submitted_inputs']+=submitted_count
+    stats['documents']+=1
+    return 'reused' if prepared.reuse else 'updated'
 
 
 def foreground(root):
@@ -327,7 +319,7 @@ def foreground(root):
     except (OSError,ValueError,KeyError,TypeError):raise ServiceError('portal_state_unavailable') from None
 
 
-def run(root,state,services,sources,job,*,maximum=2000,seconds=600,should_yield=None,clock=time.monotonic):
+def run(root,state,services,sources,job,*,maximum=2000,seconds=600,should_yield=None,clock=time.monotonic,pool=None):
     if not re.fullmatch(r'eqarchives-policy-'+identity()+r'-[1-9][0-9]{0,8}',job) or not 1<=maximum<=2000 or not 1<=seconds<=600:
         raise ValueError('Invalid maintenance bounds')
     deadline=clock()+seconds;processed=0;phase='bounded';error=None;last_report=float('-inf')
@@ -336,22 +328,38 @@ def run(root,state,services,sources,job,*,maximum=2000,seconds=600,should_yield=
         if clock()>=deadline or should_yield():raise YieldWork()
     def receipt(terminal=False):
         record={**state.snapshot(),'job':job,'policy':passages.VERSION,'model':gemma.MODEL,
-                'image':os.environ.get('IMPORT_IMAGE',''),'phase':phase,'error':error,'updated_at':time.time(),'terminal':terminal}
+                'image':os.environ.get('IMPORT_IMAGE',''),'phase':phase,'error':error,'updated_at':time.time(),'terminal':terminal,
+                'execution':{'preparation_workers':pool.workers if pool else 0,**getattr(services,'policy_stats',{})}}
         save(state.root/(job+'.json'),record)
         return record
-    def item(identifier,retry=False):
+    def dispatch(identifier):
+        try:
+            hit=services.get(identifier)
+            try:return hit,pool.submit(hit)
+            except WorkerLost as error:return hit,error
+        except (SourceError,ServiceError) as error:return None,error
+    def item(identifier,retry=False,task=None):
         nonlocal processed,last_report
-        check();source_hash=None
+        check();source_hash=None;hit=None;pending=task[1] if task else None
         try:
             if not retry and state.deferred(identifier):result='deferred'
             else:
                 if not state.begin(identifier,job):raise SourceError('repeated_worker_interruption')
-                result=repair(services,sources,identifier,check)
+                if pool:
+                    hit,pending=task or dispatch(identifier)
+                    if isinstance(pending,Exception):raise pending
+                    prepared=pending.result(check)
+                    result=apply_prepared(services,hit,prepared,check)
+                else:result=repair(services,sources,identifier,check)
         except (SourceError,UnicodeError,ValueError,TypeError,KeyError,AttributeError,RecursionError,MemoryError) as failure:
             if isinstance(failure,ServiceError):raise
             reason=failure.reason if isinstance(failure,SourceError) else 'source_validation'
             source_hash=getattr(failure,'source_sha256',None)
+            if not source_hash and hit:
+                source_hash=((hit['_source'].get('text_passage_provenance') or {}).get('decoding') or {}).get('source_sha256') or hit['_source'].get('archive_source_sha256')
             state.reject(identifier,reason,source_hash,job);result='failed'
+        finally:
+            if pool and pending is not None and not isinstance(pending,Exception):pending.cancel()
         state.advance(identifier,result,retry=retry,job=job);processed+=1
         if clock()-last_report>=5:
             receipt();last_report=clock()
@@ -367,28 +375,52 @@ def run(root,state,services,sources,job,*,maximum=2000,seconds=600,should_yield=
             check();batch=services.select(state.snapshot()['cursor'])
             if not batch:
                 state.exhausted();phase='sweep_waiting';break
-            for identifier in batch:
-                item(identifier)
-                if processed>=maximum:break
+            if not pool:
+                for identifier in batch:
+                    item(identifier)
+                    if processed>=maximum:break
+            else:
+                remaining=iter(batch[:maximum-processed]);pending=deque();exhausted=False
+                while pending or not exhausted:
+                    while len(pending)<pool.workers and not exhausted:
+                        check()
+                        identifier=next(remaining,None)
+                        if identifier is None:exhausted=True;break
+                        pending.append((identifier,None if state.deferred(identifier) else dispatch(identifier)))
+                    if pending:
+                        identifier,task=pending.popleft();item(identifier,task=task)
     except YieldWork:
         state.abandon();phase='yielded'
+    except WorkerLost:
+        # Per-process pipes identify the exact crashing record. Retain only its
+        # inflight marker; a subsequent slice isolates it before prefetching.
+        phase='retry_wait';error='Preparation worker stopped; the exact record will retry from its saved checkpoint.'
     except (ServiceError,OSError,sqlite3.Error):
         state.abandon()
         phase='retry_wait';error='Background policy repair paused; verified progress is retained.'
+    finally:
+        if pool:pool.cancel_pending()
     return receipt(True)
 
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--root',type=Path,default=Path('/data'))
-    args=parser.parse_args();state=None;services=None;sources=None
+    args=parser.parse_args();state=None;services=None;sources=None;pool=None
     try:
         state=State('/indexing-state');services=MaintenanceServices()
         sources=Sources(['/archive-sources','/archive'],'/data/publisher.git')
-        result=run(args.root,state,services,sources,os.environ['POLICY_JOB_NAME'])
+        workers=int(os.environ.get('POLICY_PREPARATION_WORKERS','0'))
+        if not 0<=workers<=4:raise ValueError('Invalid preparation worker count')
+        if workers:
+            gemma.load_tokenizer()
+            renderer_identity();request_identity()
+            pool=PreparationPool(sources.roots,sources.publication,workers)
+        result=run(args.root,state,services,sources,os.environ['POLICY_JOB_NAME'],**({'pool':pool} if pool else {}))
         print(json.dumps(result),flush=True)
         return 1 if result['phase']=='retry_wait' else 0
     finally:
+        if pool:pool.close()
         if sources:sources.close()
         if services:services.close()
         if state:state.close()

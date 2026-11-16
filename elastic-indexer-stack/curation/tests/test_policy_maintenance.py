@@ -78,6 +78,10 @@ class Services:
         check();self.inputs+=inputs
         assert all(len(gemma.load_tokenizer().encode(value).ids)<=480 for value in inputs)
         return [V.copy() for _ in inputs]
+    def stored_vectors(self,hit):
+        current=self.hits[hit['_id']]
+        if current['_seq_no']!=hit['_seq_no']:raise SourceError('concurrent_update')
+        return [row.get('vector') for row in current['_source']['text']]
     def select(self,cursor):
         return [k for k,h in sorted(self.hits.items()) if k>cursor and h['_source']['text_chunking_version']!=passages.VERSION][:100]
 

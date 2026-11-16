@@ -1386,3 +1386,15 @@ validation retries to two received attempts, retain uncertain charges, and let
 explicit retries consume a saved generation under original and shared caps.
 Never truncate invalid citations into approval. Retry scheduling runs on the
 independent control loop; eligible captures join the existing unbounded FIFO.
+
+Policy maintenance keeps v13 and its cursor while preparing at most two records
+in spawned CPU processes. Only the parent owns credentials/clients/cache, writes
+and acknowledgements. Retain two-CPU/3-GiB bounds, per-record deadlines, process
+recycling and prompt termination/reaping on foreground yields. Per-process pipes
+identify hard failures exactly; retain the existing bounded quarantine and later-ID
+progress. Partial vector reuse requires reconstructed old-view/offset/source proof,
+full request/compiler/model identity, same-revision bounded vector reads and finite
+768-dimensional vectors. Invalid optional reuse falls back to inference; auth,
+transport and concurrent changes stay explicit. Reader reuse additionally proves
+decoded HTML and renderer/dependency identity. Unknown historical checkpoints and
+changed fingerprints reextract; never infer compatibility from version/body alone.

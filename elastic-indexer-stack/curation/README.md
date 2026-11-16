@@ -895,7 +895,7 @@ request. See the [audit guide](../../scripts/chunk-audit/README.md) for sampling
 validation limits. Historical captures and indexed records change only through
 normal import/maintenance, independently of this report.
 
-Imported text uses the shared `eq-passages-480-v12` search policy: real titles,
+Imported text uses the shared `eq-passages-480-v13` search policy: real titles,
 section/table context and attributed forum/mail quotations, with full reader
 content retained separately. Verified raster assets also receive local Gemma
 visual vectors through `gemma-image-embeddings`. This does not call Luna or change
@@ -1039,6 +1039,32 @@ receipts show upgrades, vector reuse and recent issues in the existing collapsed
 Pipeline status panel. Only these new disposable maintenance Jobs have a one-day
 TTL; all prior full reindex and import Jobs are retained. Back up maintenance
 state and the Luna ledger with the existing PVC.
+
+Maintenance preparation uses two spawned CPU processes (`POLICY_PREPARATION_WORKERS=2`)
+with a two-record queue, a two-CPU/3-GiB Job limit, 128 tasks per process and a
+120-second per-record preparation bound. The parent alone owns HTTP clients,
+embedding/cache access, optimistic writes and cursor acknowledgements. A child
+crash retains the exact inflight ID for the existing three-attempt quarantine;
+timeouts become visible per-record failures while later records continue. A yield
+terminates and reaps speculative preparation promptly. Foreground imports retain
+priority. Setting the worker count to zero keeps serial preparation for diagnosis.
+
+Exact passage requests can reuse vectors from the original document independently
+of its other passages. Reuse verifies the old selected view, overlaps, offsets,
+source hashes, model and request-compiler fingerprint. An additional bounded
+vector read must have the same Elasticsearch sequence number and primary term;
+every reused/inferred vector is finite, nonzero and 768-dimensional. Unknown
+proofs or invalid optional vectors fall back to inference. Concurrent edits and
+authentication/transport errors remain explicit, and no partial repair is saved.
+
+Reader reuse separately binds raw bytes, decoded HTML, reader and renderer/dependency
+fingerprints. The narrow legacy migration covers verified compatible extraction
+checkpoints only; new renderer or decoder evidence falls back to full extraction.
+Routine decoding does not parse a title DOM unless the decoder can prove a title
+repair. These are execution optimizations: passage version `eq-passages-480-v13`,
+selection semantics and maintenance cursor identity remain unchanged. Slice receipts
+include `execution` counters for workers, inputs and stored-vector reuse after
+acknowledged writes; cache logs separately report attempted inference/cache work.
 
 
 ## Publication resilience
