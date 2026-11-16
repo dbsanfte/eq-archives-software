@@ -45,11 +45,12 @@ def job_for(name,image):
     pod['nodeSelector']={'kubernetes.io/hostname':'eqvm'}
     container=pod['containers'][0]
     container.update(name='policy',command=['python','/app/curation/policy_maintenance.py','--root','/data'],
-        resources={'requests':{'cpu':'50m','memory':'256Mi'},'limits':{'cpu':'1','memory':'2Gi'}})
+        resources={'requests':{'cpu':'100m','memory':'512Mi'},'limits':{'cpu':'2','memory':'3Gi'}})
     container['env']=[e for e in container['env'] if e['name'] in ('ELASTICSEARCH_URL','SSL_CERT_FILE','EMBEDDING_URL','EMBEDDING_MODEL','EMBEDDING_CACHE_PATH','EMBEDDING_BATCH_SIZE','EMBEDDING_BATCH_CONCURRENCY')]+[
         {'name':'ELASTICSEARCH_INDEX','valueFrom':{'secretKeyRef':{'name':'eqarchives-policy-indexer-secrets','key':'es_index'}}},
         {'name':'POLICY_INDEX','valueFrom':{'secretKeyRef':{'name':'eqarchives-policy-indexer-secrets','key':'es_index'}}},
-        {'name':'POLICY_JOB_NAME','value':name},{'name':'IMPORT_IMAGE','value':image}]
+        {'name':'POLICY_JOB_NAME','value':name},{'name':'IMPORT_IMAGE','value':image},
+        {'name':'POLICY_PREPARATION_WORKERS','value':'2'}]
     container['volumeMounts']=[m for m in container['volumeMounts'] if m['mountPath'] in
                              ('/data','/run/secrets','/indexing-state','/usr/local/lib/python3.13/site-packages/certifi/cacert.pem')]+[
         {'name':'sources','mountPath':'/archive-sources','readOnly':True},
@@ -81,8 +82,12 @@ def receipt(root,state):
         issues=result.get('issues',[])
         if not isinstance(issues,list) or len(issues)>5:return None
         if any(not isinstance(row,dict) or any(not isinstance(row.get(k),str) or len(row[k])>16384 for k in ('id','reason')) for row in issues):return None
+        execution=result.get('execution',{})
+        if (not isinstance(execution,dict) or set(execution)-{'preparation_workers','documents','stored_vectors_reused','submitted_inputs'}
+                or any(type(v) is not int or not 0<=v<=10**12 for v in execution.values())
+                or execution.get('preparation_workers',0)>4):return None
         return {**{k:result[k] for k in ('scanned','updated','reused','failed','skipped','unresolved','next_at','phase','terminal','updated_at')},
-                'issues':[{k:row[k] for k in ('id','reason')} for row in issues]}
+                'issues':[{k:row[k] for k in ('id','reason')} for row in issues],'execution':execution}
     except (OSError,ValueError,KeyError,TypeError):return None
 
 

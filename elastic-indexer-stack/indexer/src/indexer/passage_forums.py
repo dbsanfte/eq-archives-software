@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from html.parser import HTMLParser
 import re
 from urllib.parse import urlsplit
-from bs4 import BeautifulSoup, Comment
+from bs4 import BeautifulSoup, Comment, Tag
 
 DATE = re.compile(r'\b\d{1,2}/\d{1,2}/\d{2,4}(?:\s*:\s*|\s+)\d{1,2}:\d{2}(?::\d{2})?(?:\s*[ap]m)?', re.I)
 POST_DATE = re.compile(r'\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}(?:,?\s+\d{1,2}:\d{2}(?::\d{2})?(?:\s*[ap]m)?)?',re.I)
@@ -422,7 +422,23 @@ def vbulletin_header(body):
     return None
 
 
+def vbulletin_possible(soup):
+    # Every supported vB branch needs one of these DOM roles. One cheap walk
+    # avoids several full CSS searches on unrelated engines, without changing
+    # parser precedence or trusting raw strings which may have entity escapes.
+    for node in soup.descendants:
+        if isinstance(node,Comment):
+            if str(node).strip()=='message':return True
+        elif isinstance(node,Tag):
+            labels=node.get('class') or ()
+            if 'archivebody' in labels or 'posttext' in labels:return True
+            identifier=node.get('id','')
+            if isinstance(identifier,str) and (identifier.startswith('post_message_') or re.fullmatch(r'p\d+e',identifier)):return True
+    return False
+
+
 def vbulletin(soup):
+    if not vbulletin_possible(soup):return None
     # vbHome's vBulletin archive skin uses explicit header/body row pairs,
     # without IDs or captured dates. It is shared software, not a host rule.
     legacy=soup.select('tr.archivebody')
@@ -515,13 +531,13 @@ def vbulletin(soup):
 
 
 def lithium(soup):
-    bodies=soup.select('td.msg_text_cell');posts=[];recognized=False
+    bodies=soup.find_all('td',class_='msg_text_cell');posts=[];recognized=False
     for body in bodies:
         if body.find_parent('td',class_='msg_text_cell'):continue
-        table=next((t for t in body.find_parents('table') if len(t.select('td.msg_text_cell'))==1
-                    and t.select_one('.msg_user_cell') and t.select_one('.msg_date_cell')),None)
+        table=next((t for t in body.find_parents('table') if len(t.find_all('td',class_='msg_text_cell',limit=2))==1
+                    and t.find(class_='msg_user_cell') and t.find(class_='msg_date_cell')),None)
         if table is None:return None
-        user=table.select_one('.msg_user_cell')
+        user=table.find(class_='msg_user_cell')
         author=nonempty_link(user,r'view_profile\?user\.id=') or user.select_one('.auth_text')
         if author is None:
             author=user.find(['b','strong']) or user.find('span',style=re.compile(r'font-weight\s*:\s*bold',re.I))
@@ -536,11 +552,11 @@ def lithium(soup):
                 if isinstance(node,str) and not isinstance(node,Comment):first.append(str(node))
             candidate=' '.join(' '.join(first).split())
             if len(candidate)<=120:name=candidate
-        subject=next((c for c in table.select('td.subjectbar') if c.get('width')=='100%'),None)
+        subject=next((c for c in table.find_all('td',class_='subjectbar') if c.get('width')=='100%'),None)
         if subject is None:
             first=table.find('tr');cells=row_cells(first) if first else []
             if len(cells)==2 and not words(cells[0]):subject=cells[1]
-        stamp=words(table.select_one('.msg_date_cell'))
+        stamp=words(table.find(class_='msg_date_cell'))
         if name and dated(stamp):recognized=True
         posts.append(section(name,stamp,body_copy(body),words(subject)))
     if posts and recognized:return Thread('\n'.join(posts),'lithium')
