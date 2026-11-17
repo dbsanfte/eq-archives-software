@@ -447,7 +447,7 @@ date-sort bypass, head-only permutation and before-pagination ordering. Cache fa
 orders as well as successes; never move results between pages after a transient outage.
 Keep the fixed ID/query-only browser contract, shared admission, local pinned tokenizer,
 768-token prompts, bounded source preparation, five-second deadline and complete
-finite model/score/index validation. Runtime scoring permits four concurrent searches
+finite model/score/index validation. Runtime scoring permits eight concurrent searches
 and eight shared concurrent batches of at most 20 passages, with the existing
 128 KiB request / 32 KiB response bounds. Coalesce identical in-flight searches,
 shield owners from waiter cancellation, and cancel/drain sibling batches before
@@ -483,8 +483,8 @@ writes stay on the caller. Validate every batch, drain siblings on failure and
 retain completed cache waves on yield. Future broad Gemma handoffs keep four
 document workers × eight inputs, with an explicit backend cache pin. Leave active
 Jobs on their legacy endpoint/cache namespace; do not restart them for this rollout.
-Portal/MCP query embeddings share four reserved CUDA query slots with an 800 ms
-primary deadline and serial Vulkan fallback. Their shared four-search/eight-batch
+Portal/MCP query embeddings share eight reserved CUDA query slots with an 800 ms
+primary deadline and serial Vulkan fallback. Their shared eight-search/eight-batch
 reranker uses the unchanged private bridge, now forwarding to RTX loopback 8084.
 Browser and MCP are coequal: each admits eight full-lifecycle HTTP requests,
 sharing sixteen retrieval slots and the same inference pools. Preserve public

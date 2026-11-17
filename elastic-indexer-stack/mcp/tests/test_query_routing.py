@@ -57,23 +57,23 @@ def test_bad_input_does_not_change_cooldown_or_use_fallback():
     run(exercise())
 
 
-def test_four_query_embeddings_overlap_while_vulkan_fallback_remains_serial():
+def test_eight_query_embeddings_overlap_while_vulkan_fallback_remains_serial():
     async def exercise():
         ready, release = asyncio.Event(), asyncio.Event()
         calls = []
         async def primary(request):
             calls.append(request)
-            if len(calls) == 4: ready.set()
+            if len(calls) == 8: ready.set()
             await release.wait()
             return httpx.Response(200, json={'data': [{'embedding': VECTOR}]})
         archive = make_archive()
         archive.query_embeddings = client(primary)
-        archive.embedding_lock = asyncio.Semaphore(4)
-        tasks = [asyncio.create_task(archive.embedding(str(n))) for n in range(4)]
+        archive.embedding_lock = asyncio.Semaphore(8)
+        tasks = [asyncio.create_task(archive.embedding(str(n))) for n in range(8)]
         await asyncio.wait_for(ready.wait(), 1)
         assert await archive.embedding('excess') is None
         release.set()
-        assert await asyncio.gather(*tasks) == [VECTOR]*4
+        assert await asyncio.gather(*tasks) == [VECTOR]*8
         archive.query_cooldown = float('inf')
         async with archive.fallback_lock:
             assert await archive.embedding('fallback busy') is None

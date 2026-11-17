@@ -333,22 +333,23 @@ def test_runtime_batches_overlap_with_a_shared_eight_request_limit():
     run(scenario())
 
 
-def test_four_distinct_searches_score_concurrently_and_overload_is_bounded():
+def test_eight_distinct_searches_score_concurrently_and_overload_is_bounded():
     async def scenario():
         ready,release=asyncio.Event(),asyncio.Event();calls=[]
         async def handler(request):
             calls.append(json.loads(request.content)['query'])
-            if len(calls)==4:ready.set()
+            if len(calls)==8:ready.set()
             await release.wait()
             return httpx.Response(200,json={'model':MODEL,'results':[
                 {'index':0,'relevance_score':0},{'index':1,'relevance_score':1}]})
         archive,_=fixture_archive(handler)
-        tasks=[asyncio.create_task(archive.rank_ids(q,['a','b'])) for q in ('bard','cleric','druid','ranger')]
+        queries = ('bard','cleric','druid','ranger','rogue','shaman','monk','warrior')
+        tasks=[asyncio.create_task(archive.rank_ids(q,['a','b'])) for q in queries]
         await asyncio.wait_for(ready.wait(),1)
         assert await archive.rank_ids('wizard',['a','b'])==(['a','b'],'fallback')
-        assert set(calls)=={'bard','cleric','druid','ranger'}
+        assert set(calls)==set(queries)
         release.set()
-        assert await asyncio.gather(*tasks)==[(['b','a'],'applied')]*4
+        assert await asyncio.gather(*tasks)==[(['b','a'],'applied')]*8
         assert not archive.reranker.pending and not archive.reranker.lock.locked()
         await archive.close()
     run(scenario())

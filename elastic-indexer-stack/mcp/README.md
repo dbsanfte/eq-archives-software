@@ -67,7 +67,7 @@ passage is scored with the pinned local Qwen tokenizer and a complete 768-token 
 An 8,192-character preparation bound applies to scoring excerpts; readers retain
 full text. Images without text keep their slots.
 
-Scoring permits four concurrent searches and eight shared concurrent scoring requests,
+Scoring permits eight concurrent searches and eight shared concurrent scoring requests,
 with a five-second total deadline per search, a 15-second
 outage cooldown, 128 KiB request / 32 KiB response bounds and strict model/score/index
 validation. Production selects one matching passage per candidate. The internal
@@ -324,7 +324,7 @@ traffic to five requests/second with a burst of twenty and eight in-flight reque
 The cache is process-local; a rolling update can briefly have two active instances.
 
 Browser and MCP have equal admission limits and share the inference pools. Query
-embeddings prefer four reserved CUDA slots, with an 800 ms primary deadline and
+embeddings prefer eight reserved CUDA slots, with an 800 ms primary deadline and
 serial Vulkan fallback. Bulk indexing cannot consume the reserved GPU admission.
 Each interface retains eight slots through delivery; the API has a 1 GiB memory
 limit. These are bounded process-wide limits, not an
@@ -455,7 +455,7 @@ public query features. Capture history allows only a literal host/path around a
 
 Public embeddings accept one query, the deployed model alias and float encoding;
 query text is at most 600 characters. Server-side prefixing, the existing
-128-entry/five-minute cache, four shared CUDA query slots, an 800 ms primary
+128-entry/five-minute cache, eight shared CUDA query slots, an 800 ms primary
 deadline, serial three-second Vulkan fallback, 512-token upstream context limit
 and independent 15-second endpoint failure cooldowns also apply.
 Batch/document embedding compatibility is tested directly against the private

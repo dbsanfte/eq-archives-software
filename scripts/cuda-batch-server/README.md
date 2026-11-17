@@ -120,7 +120,7 @@ document is written only after all its vectors validate. Completed cache waves
 survive cooperative yields. Future broad Gemma handoffs keep four document workers
 with eight inputs per request, avoiding nested concurrency.
 
-Portal and MCP share the same reranker client: four concurrent searches, eight shared
+Portal and MCP share the same reranker client: eight concurrent searches, eight shared
 HTTP batches of at most 20 passages, complete response validation and the existing
 five-second deadline. They submit batches concurrently, allowing requests to
 share GPU work. Duplicate searches coalesce; cached fallback orders and pagination
