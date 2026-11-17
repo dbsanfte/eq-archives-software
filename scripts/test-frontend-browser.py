@@ -170,6 +170,116 @@ class FrontendBrowserTests(unittest.TestCase):
                     context.unroute_all(behavior='ignoreErrors')
                     context.close()
 
+    def test_search_progress_preserves_previous_results_through_superseded_requests(self):
+        for width in (390, 1280):
+            with self.subTest(width=width):
+                context = self.browser.new_context(viewport={'width': width, 'height': 900},
+                    is_mobile=width < 800, has_touch=width < 800)
+                held = {'embedding': [], 'older': [], 'current': [], 'rank': []}
+                try:
+                    page = context.new_page()
+                    mode = ['original']
+                    def reply(route, name):
+                        hits = [] if name == 'empty' else [{'_id': f'newsgroups/{name}-{n}', '_score': 2-n,
+                            '_source': {'title': f'{name} result {n}', 'url': f'https://example.org/{name}/{n}'}}
+                            for n in range(2)]
+                        facets = {f: {'buckets': []} for f in ('domain_name', 'llm_content_flavour', 'file_type', 'mime_type', 'mailing_list_name', 'llm_tags')}
+                        facets['last_indexed'] = {'buckets': {}}
+                        route.fulfill(json={'hits': {'total': {'value': len(hits), 'relation': 'eq'}, 'hits': hits},
+                            'aggregations': {'facet_bucket_all': {'doc_count': len(hits), **facets}}})
+                    def archive(route):
+                        if route.request.url.endswith('/_count'):
+                            return route.fulfill(json={'count': 2})
+                        if route.request.url.endswith('/_rerank'):
+                            held['rank'].append(route)
+                        elif mode[0] in ('older', 'current'):
+                            held[mode[0]].append(route)
+                        else:
+                            reply(route, mode[0])
+                    vector = {'data': [{'embedding': [1.0] + [0.0] * 767}]}
+                    def embed(route):
+                        if 'cleric healing' in route.request.post_data_json['input'][0]:
+                            held['embedding'].append(route)
+                        else:
+                            route.fulfill(json=vector)
+                    page.route('**/elasticsearch/**', archive)
+                    page.route('**/openai/v1/embeddings', embed)
+                    page.goto(self.base_url, wait_until='networkidle')
+                    expect(page.locator('.sui-result')).to_have_count(2)
+                    expect(page.locator('.sui-result').first).to_contain_text('original result')
+                    expect(page.get_by_role('progressbar', name='Search progress')).to_have_count(0)
+                    page.evaluate('''() => {
+                        window.emptyResultFlashes = 0;
+                        new MutationObserver(() => {
+                            if (document.querySelector('.archive-group-summary')?.textContent.includes('No sources found'))
+                                window.emptyResultFlashes += 1;
+                        }).observe(document.querySelector('.sui-layout-main-header'), {subtree: true, childList: true, characterData: true});
+                    }''')
+                    field = page.locator('.sui-search-box__text-input')
+                    field.fill('cleric healing')
+                    status = page.locator('.archive-search-progress')
+                    expect(status).to_contain_text('Preparing semantic search')
+                    expect(status).to_contain_text('Showing previous results')
+                    expect(page.get_by_role('region', name='Search results')).to_have_attribute('aria-busy', 'true')
+                    expect(page.locator('.sui-result').first).to_contain_text('original result')
+                    box = status.bounding_box()
+                    self.assertGreaterEqual(box['x'], 0)
+                    self.assertLessEqual(box['x'] + box['width'], width)
+                    mode[0] = 'older'
+                    with page.expect_request('**/elasticsearch/**/_search'):
+                        held['embedding'].pop().fulfill(json=vector)
+                    expect(status).to_contain_text('Searching the archive')
+                    mode[0] = 'current'
+                    with page.expect_request('**/elasticsearch/**/_search'):
+                        field.fill('wizard research')
+                    expect(status).to_contain_text('Searching the archive')
+                    # An obsolete empty success used to clear the page before
+                    # the current request and its reranking had finished.
+                    for route in held['older']:
+                        reply(route, 'empty')
+                    held['older'].clear()
+                    page.evaluate('() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+                    expect(page.locator('.sui-result').first).to_contain_text('original result')
+                    expect(status).to_be_visible()
+                    self.assertEqual(page.evaluate('window.emptyResultFlashes'), 0)
+                    mode[0] = 'updated'
+                    with page.expect_request('**/elasticsearch/**/_rerank'):
+                        for route in held['current']:
+                            reply(route, 'updated')
+                        held['current'].clear()
+                    expect(status).to_contain_text('Reranking matches')
+                    expect(page.locator('.sui-result').first).to_contain_text('original result')
+                    rank = held['rank'].pop()
+                    rank.fulfill(json={'ids': list(reversed(rank.request.post_data_json['ids'])), 'status': 'applied'})
+                    expect(page.locator('.sui-result').first).to_contain_text('updated result')
+                    expect(status).to_have_count(0)
+                    expect(page.get_by_role('region', name='Search results')).to_have_attribute('aria-busy', 'false')
+                    self.assertEqual(page.evaluate('window.emptyResultFlashes'), 0)
+                    mode[0] = 'empty'
+                    field.fill('no archived matches')
+                    expect(page.locator('.archive-group-summary')).to_contain_text('No sources found')
+                    expect(status).to_have_count(0)
+                    expect(page.locator('.sui-result')).to_have_count(0)
+                    # A previous genuinely empty page must not look like the
+                    # answer to the next query while that query is still running.
+                    mode[0] = 'current'
+                    with page.expect_request('**/elasticsearch/**/_search'):
+                        field.fill('another empty search')
+                    expect(status).to_contain_text('Searching the archive')
+                    expect(page.locator('.archive-group-summary')).to_have_count(0)
+                    mode[0] = 'empty'
+                    for route in held['current']:
+                        reply(route, 'empty')
+                    held['current'].clear()
+                    expect(status).to_have_count(0)
+                    expect(page.locator('.archive-group-summary')).to_contain_text('No sources found')
+                finally:
+                    for routes in held.values():
+                        for route in routes:
+                            route.abort()
+                    context.unroute_all(behavior='ignoreErrors')
+                    context.close()
+
     def test_untrusted_summary_snippet_and_source_url_cannot_execute_script(self):
         context = self.browser.new_context()
         try:

@@ -18,7 +18,7 @@ import {
   getDatePickerFacetFields,
   buildSortOptionsFromConfig
 } from "./config/config-helper";
-import { Box, Button, Checkbox, FormControlLabel, Collapse, CircularProgress, CssBaseline, ThemeProvider } from "@mui/material";
+import { Box, Button, Checkbox, FormControlLabel, Collapse, CssBaseline, ThemeProvider } from "@mui/material";
 import { KeyboardArrowUp } from "@mui/icons-material";
 import CustomResultView from "./views/result/CustomResultView";
 import HeaderContent from "./views/HeaderContent"; 
@@ -30,6 +30,8 @@ import { getSearchConfig } from "./search/Connector";
 import DateRangeFacet from "./views/search/DateRangeFacet";
 import EnhancedSearchBox from "./views/search/EnhancedSearchBox";
 import SearchError from "./views/search/SearchError";
+import SearchProgress from "./views/search/SearchProgress";
+import { createSearchActivity, SearchActivityContext, useSearchActivity } from './search/SearchActivity';
 import archiveTheme from "./theme";
 import { CapturePaging, CaptureSummary } from "./views/search/CapturePaging";
 import DocumentReader from "./views/reader/DocumentReader";
@@ -45,15 +47,25 @@ import "./views/ArchiveTheme.css";
 // options cannot unmount the input and cancel a pending automatic search.
 const SearchState = withSearch(({
   wasSearched, isLoading, error, searchTerm, setSearchTerm, setCurrent,
-  totalResults, pagingStart, pagingEnd, rawResponse, resultSearchTerm, filters, removeFilter
+  totalResults, pagingStart, pagingEnd, rawResponse, resultSearchTerm, filters, removeFilter, results,
+  current, totalPages, resultsPerPage
 }) => ({
   wasSearched, isLoading, error,
   executeSearch: () => setSearchTerm(searchTerm, { shouldClearFilters: false }),
   searchTerm, setSearchTerm, setCurrent, totalResults, pagingStart, pagingEnd,
-  rawResponse, resultSearchTerm, filters, removeFilter
-}))(({ children, ...state }) => children(state));
+  rawResponse, resultSearchTerm, filters, removeFilter, results, current, totalPages, resultsPerPage
+}))(({ children, ...state }) => {
+  const { phase, display } = useSearchActivity();
+  const pending = ['waiting', 'preparing', 'searching', 'reranking'].includes(phase);
+  return children({ ...state, ...display,
+    isLoading: pending || (phase === 'idle' && !display && !state.error && state.isLoading),
+    searchPhase: phase, hasPreviousResults: Boolean(display?.results.length),
+    results: display?.results || [], wasSearched: Boolean(display) || (phase === 'idle' && state.wasSearched)
+  });
+});
 
 function SearchApp() {
+  const [activity] = useState(createSearchActivity);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showSyntax, setShowSyntax] = useState(false);
   const [knnParams, setKnnParams] = useState({ ...DEFAULT_KNN_PARAMS, groupCaptures: true });
@@ -80,32 +92,21 @@ function SearchApp() {
     const baseConfig = getSearchConfig(knnParamsRef);
     return {
       ...baseConfig,
+      onSearch: (state, queryConfig, next) => activity.search(state,
+        prepared => (baseConfig.onSearch || next)(prepared, queryConfig)),
       // Override these settings to prevent automatic searches
       searchQuery: {
         ...(baseConfig.searchQuery || {}),
         searchAsYouType: false // This disables automatic searches
       }
     };
-  }, [knnParamsRef]);
+  }, [knnParamsRef, activity]);
 
   return (
-      <SearchProvider config={config}>
+      <SearchActivityContext.Provider value={activity}><SearchProvider config={config}>
         <SearchState>
-          {({ wasSearched, isLoading, error, executeSearch, setCurrent, resultSearchTerm, filters, removeFilter, ...searchState }) => (
+          {({ wasSearched, isLoading, error, executeSearch, setCurrent, resultSearchTerm, filters, removeFilter, searchPhase, hasPreviousResults, ...searchState }) => (
             <div className="App" style={{ position: "relative" }} data-testid="app-container">
-              {isLoading && !error && (
-                <Box
-                  sx={{
-                    position: "absolute",
-                    top: "50%",
-                    left: "50%",
-                    transform: "translate(-50%, -50%)",
-                    zIndex: 999
-                  }}
-                >
-                  <CircularProgress size={80} />
-                </Box>
-              )}
               <Layout
                 header={
                   <>
@@ -113,6 +114,7 @@ function SearchApp() {
                     <HeaderContent compact={scopedDomains(filters).length > 0 || websiteScope(filters)} />
                     <SiteSearchScope filters={filters} removeFilter={removeFilter} />
                     <EnhancedSearchBox searchAsYouType={true} enableSemanticSearch={knnParams.enableSemanticSearch} /> {/* We'll handle automatic searches ourselves */}
+                    <SearchProgress phase={searchPhase} isLoading={isLoading} hasResults={hasPreviousResults} />
                     <Button
                       className="archive-search-option"
                       variant="contained"
@@ -171,9 +173,11 @@ function SearchApp() {
                   </div>
                 }
                 bodyContent={
-                  <ErrorBoundary view={SearchError} onRetry={executeSearch}>
+                  <ErrorBoundary view={SearchError} error={isLoading ? '' : error} onRetry={executeSearch}>
+                  <section aria-label="Search results" aria-busy={isLoading}>
                     <ReaderSearchContext.Provider value={searchPhrase(resultSearchTerm)}>
                       <Results
+                        results={searchState.results}
                         titleField={getConfig().titleField}
                         urlField={getConfig().urlField}
                         thumbnailField={getConfig().thumbnailField}
@@ -181,6 +185,7 @@ function SearchApp() {
                         resultView={CustomResultView}
                       />
                     </ReaderSearchContext.Provider>
+                  </section>
                   </ErrorBoundary>
                 }
                 bodyHeader={
@@ -192,14 +197,16 @@ function SearchApp() {
                         setKnnParams(next);
                         setCurrent(1);
                       }} />} />
-                      {knnParams.groupCaptures ? <CaptureSummary {...searchState} /> : <PagingInfo />}
+                      {(!isLoading || searchState.pagingEnd > 0) && (knnParams.groupCaptures ? <CaptureSummary {...searchState} /> : <PagingInfo
+                        totalResults={searchState.totalResults} pagingStart={searchState.pagingStart} pagingEnd={searchState.pagingEnd} />)}
                     </div>}
                     {wasSearched && <ResultsPerPage />}
                   </>
                 }
                 bodyFooter={
                   <div>
-                    <Paging view={knnParams.groupCaptures ? CapturePaging : undefined} isLoading={isLoading} />
+                    <Paging view={knnParams.groupCaptures ? CapturePaging : undefined}
+                      current={searchState.current} totalPages={searchState.totalPages} isLoading={isLoading} />
                     {wasSearched && (
                       <Box sx={{ display: 'flex', justifyContent: 'center', marginTop: '1rem' }}>
                         <Button
@@ -218,7 +225,7 @@ function SearchApp() {
             </div>
           )}
         </SearchState>
-      </SearchProvider>
+      </SearchProvider></SearchActivityContext.Provider>
   );
 }
 

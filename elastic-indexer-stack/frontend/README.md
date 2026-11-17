@@ -412,6 +412,11 @@ to the browser; MCP retains its own bounded cache.
 The search layout's `withSearch` subscription is defined at module scope. Opening
 Advanced or Search Syntax and changing options preserve the input, pending
 400 ms automatic-search debounce, embedding preparation and date-filter drafts.
+An accessible progress bar beside the search controls reports preparation,
+retrieval and reranking. The last completed page and its counts stay visible
+until the current run finishes; superseded responses cannot flash an empty page
+or end the current progress indication. A completed empty search still shows
+the normal empty state, and current failures retain their retry action.
 
 NGINX enables gzip for JavaScript, CSS, JSON, text and SVG. Content-hashed files
 under `/static/` use `Cache-Control: public, max-age=31536000, immutable`; HTML,

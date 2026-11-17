@@ -102,8 +102,15 @@ export const createConnector = (paramsRef) => {
       dateFilters: filterRegistry.applyFilters({}),
       embedding: embeddingService.getEmbedding(state.searchTerm, embeddingModel)
     });
-    const grouped = createGroupedSearch(createFusedSearch(connector.onSearch.bind(connector), context), context,
-      (query, results) => rerankResults(query, results, indexName));
+    const retrieve = connector.onSearch.bind(connector);
+    const grouped = createGroupedSearch(createFusedSearch((state, config) => {
+      state._archiveProgress?.('searching');
+      return retrieve(state, config);
+    }, context), context,
+      (query, results, progress) => {
+        progress?.('reranking');
+        return rerankResults(query, results, indexName);
+      });
     connector.onSearch = createPreparedSearch(grouped, context,
       (query, options) => embeddingService.fetchEmbedding(query, embeddingModel, options));
   }

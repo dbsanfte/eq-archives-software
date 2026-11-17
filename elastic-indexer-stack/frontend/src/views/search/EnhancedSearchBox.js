@@ -1,10 +1,11 @@
-import React, { useCallback, useEffect, useMemo, useRef } from "react";
+import React, { useCallback, useContext, useEffect, useMemo, useRef } from "react";
 import { SearchBox, withSearch } from "@elastic/react-search-ui";
 import { embeddingService } from "../../search/EmbeddingService";
 import { getConfig } from "../../config/config-helper";
 import debounce from "lodash/debounce";
 import { shouldUseSemanticSearch } from "../../search/QueryPolicy";
 import PropTypes from "prop-types";
+import { SearchActivityContext } from '../../search/SearchActivity';
 
 const EnhancedSearchBox = ({
   searchTerm,
@@ -14,6 +15,7 @@ const EnhancedSearchBox = ({
   enableSemanticSearch = true,
   ...props
 }) => {
+  const activity = useContext(SearchActivityContext);
   const semanticEnabled = useRef(enableSemanticSearch);
   semanticEnabled.current = enableSemanticSearch;
   const revision = useRef(0);
@@ -27,6 +29,7 @@ const EnhancedSearchBox = ({
     try {
       if (shouldUseSemanticSearch(value, semanticEnabled.current, vectorFields, nestedVectorFields) &&
           embeddingService.isEmbeddingServiceAvailable() && !embeddingService.getEmbedding(value, embeddingModel)) {
+        activity?.preparing(value);
         await embeddingService.fetchEmbedding(value, embeddingModel, { signal: controller.signal });
       }
     } catch (error) {
@@ -40,7 +43,7 @@ const EnhancedSearchBox = ({
     if (requestRevision === revision.current) {
       setSearchTerm(value, { shouldClearFilters: false });
     }
-  }, [setSearchTerm]);
+  }, [setSearchTerm, activity]);
 
   const debouncedSearch = useMemo(
     () => debounce(executeSearchWithEmbedding, 400),
@@ -68,6 +71,7 @@ const EnhancedSearchBox = ({
     activeEmbedding.current?.abort();
     const requestRevision = ++revision.current;
     latestValue.current = value;
+    activity?.draft(value);
     // Search UI owns the input value. Update it immediately, but defer the
     // network search until the debounce and embedding preparation complete.
     setSearchTerm(value, { refresh: false });

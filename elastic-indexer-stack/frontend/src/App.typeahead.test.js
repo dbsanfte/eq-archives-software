@@ -32,6 +32,45 @@ afterEach(() => {
 });
 
 describe.each([true, false])('full search controls with legacyRoot=%s', legacyRoot => {
+  test('a first search failure shows an error rather than an empty-result conclusion', async () => {
+    const onSearch = jest.fn().mockRejectedValue(new Error('Search timed out. Please try again.'));
+    getSearchConfig.mockReturnValue({ onSearch, trackUrlState: false, hasA11yNotifications: false,
+      alwaysSearchOnInitialLoad: false });
+    embeddingService.getEmbedding.mockReturnValue([1, 2]);
+    render(<App />, { legacyRoot });
+    fireEvent.change(screen.getByPlaceholderText('Search'), { target: { value: 'cleric' } });
+    await tick(400);
+    await tick(1);
+    expect(screen.getByRole('alert')).toBeInTheDocument();
+    expect(screen.queryByText(/No sources found/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+  });
+
+  test('hides a previous empty state while the next query is pending', async () => {
+    let finish;
+    const empty = { results: [], totalResults: 0, totalPages: 1 };
+    const onSearch = jest.fn().mockResolvedValueOnce(empty)
+      .mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    getSearchConfig.mockReturnValue({ onSearch, trackUrlState: false, hasA11yNotifications: false,
+      alwaysSearchOnInitialLoad: false });
+    embeddingService.getEmbedding.mockReturnValue([1, 2]);
+    render(<App />, { legacyRoot });
+    const input = screen.getByPlaceholderText('Search');
+    fireEvent.change(input, { target: { value: 'old empty query' } });
+    await tick(400);
+    await tick(1);
+    expect(screen.getByText(/No sources found/)).toBeInTheDocument();
+    fireEvent.change(input, { target: { value: 'current query' } });
+    await tick(400);
+    await tick(1);
+    expect(screen.queryByText(/No sources found/)).not.toBeInTheDocument();
+    expect(screen.getByRole('status', { name: 'Search status' })).toHaveTextContent('Searching the archive');
+    await act(async () => { finish(empty); });
+    await tick(1);
+    expect(screen.getByText(/No sources found/)).toBeInTheDocument();
+    expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+  });
+
   test.each([
     ['debounce', 'Advanced...'], ['embedding', 'Advanced...'],
     ['debounce', 'Search Syntax...'], ['embedding', 'Search Syntax...']

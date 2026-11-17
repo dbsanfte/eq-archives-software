@@ -44,6 +44,7 @@ export function createPreparedSearch(search, getContext, prepare) {
       preparation = { key, controller: new AbortController() };
       if (relevanceSearch(state) && scope.params.enableSemanticSearch &&
           !embedding && !usesQuerySyntax(state.searchTerm)) {
+        state._archiveProgress?.('preparing');
         const signal = preparation.controller.signal;
         preparation.promise = (async () => {
           try { await prepare(state.searchTerm, { signal }); } catch (_) {
