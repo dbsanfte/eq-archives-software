@@ -14,7 +14,7 @@ using verified SSH host keys and an operator-owned identity. Only the search API
 gets the dedicated reranker key; the static frontend receives no credentials.
 The API egress policy adds only this exact host/port. No public model ingress exists.
 Both clients share two search slots and eight concurrent 20-passage HTTP batches;
-the GPU scheduler can combine work across searches. The three-second deadline,
+the GPU scheduler can combine work across searches. The five-second deadline,
 fallback caching, response validation and admission limits remain unchanged.
 The previous CUDA embedding and vision containers retain their configuration.
 

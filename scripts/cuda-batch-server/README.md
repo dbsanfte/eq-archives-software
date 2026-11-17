@@ -2,7 +2,8 @@
 
 Private text inference for the RTX 3080 Laptop GPU (SM86). New curation imports
 and policy slices use this service; portal/MCP reranking reaches it through the
-existing private SSH bridge. Live query embeddings remain on eqvm Vulkan.
+existing private SSH bridge. Live browser/MCP query embeddings prefer reserved
+CUDA capacity, with eqvm Vulkan retained as a bounded fallback.
 The previous llama.cpp and vision containers remain available, and active
 indexing Jobs finish on their original endpoint without being restarted.
 
@@ -88,7 +89,26 @@ Interactive reranking gets bursts of up to 500 ms before another embedding GPU
 batch starts. Already running forwards can overlap on independent streams. The
 bounded burst prevents embedding starvation under continuous searches; there is
 no intentional delay when reranking is idle. This protects the public client's
-unchanged three-second deadline from continuous bulk traffic.
+five-second deadline from continuous bulk traffic. The API-only reranker key can
+also submit one prefixed search query to `/v1/embeddings`, with eight reserved
+HTTP slots that bulk embedding clients cannot consume. Query and rerank requests
+are coequal. Query embeddings run ahead of bulk embedding batches; after a
+500 ms burst, one bulk batch may proceed so indexing retains bounded progress.
+The existing embedding key cannot request priority.
+
+`Dockerfile.scheduler` supports scheduling-only releases from the immutable
+validated runtime image. It copies only Python scheduling/HTTP code; the three
+compiled kernel libraries, models and tokenizer pins remain unchanged. Pass an
+immutable local base tag and `SOURCE_SHA`, then check both image metadata and the
+reported health revision. Retain the old numerical cache identity when those
+complete inference inputs and compiled kernels have not changed.
+
+`benchmark_capacity.py` uses private source-linked cases and the pinned tokenizer
+to exercise query embedding plus 60-passage reranking at concurrency 1/2/4/8.
+The optional `--bulk` mode adds four eight-input embedding workers. It validates
+response identities and finite values and reports aggregate timings only. Keep
+fixtures and generated results outside Git. Raw GPU capacity is distinct from
+browser/MCP end-to-end latency, which also includes retrieval and rendering.
 
 ## Client batching and rollout
 
@@ -102,7 +122,7 @@ with eight inputs per request, avoiding nested concurrency.
 
 Portal and MCP share the same reranker client: four concurrent searches, eight shared
 HTTP batches of at most 20 passages, complete response validation and the existing
-three-second deadline. They submit batches concurrently, allowing requests to
+five-second deadline. They submit batches concurrently, allowing requests to
 share GPU work. Duplicate searches coalesce; cached fallback orders and pagination
 remain stable. Query embeddings use reserved CUDA admission through the same private bridge,
 with Vulkan retained as the bounded fallback.

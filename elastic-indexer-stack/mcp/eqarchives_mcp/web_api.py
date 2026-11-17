@@ -320,7 +320,7 @@ class WebAPI:
                     # rank_ids validates the complete fixed contract before any I/O.
                     if self.slots.locked() or self.archive.requests.locked():
                         raise ToolError("Busy")
-                    async with self.slots, self.archive.requests, asyncio.timeout(4):
+                    async with self.slots, self.archive.requests, asyncio.timeout(6):
                         ids, status = await self.archive.rank_ids(value.get("query"), value.get("ids"))
                     return JSONResponse({"ids": ids, "status": status}, headers=headers)
                 if operation == "embedding":

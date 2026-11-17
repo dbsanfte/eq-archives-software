@@ -446,7 +446,7 @@ Qwen CUDA service. Preserve post-grouping representatives, exact retrieval filte
 date-sort bypass, head-only permutation and before-pagination ordering. Cache fallback
 orders as well as successes; never move results between pages after a transient outage.
 Keep the fixed ID/query-only browser contract, shared admission, local pinned tokenizer,
-768-token prompts, bounded source preparation, three-second deadline and complete
+768-token prompts, bounded source preparation, five-second deadline and complete
 finite model/score/index validation. Runtime scoring permits four concurrent searches
 and eight shared concurrent batches of at most 20 passages, with the existing
 128 KiB request / 32 KiB response bounds. Coalesce identical in-flight searches,

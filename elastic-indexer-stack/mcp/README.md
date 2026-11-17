@@ -68,7 +68,7 @@ An 8,192-character preparation bound applies to scoring excerpts; readers retain
 full text. Images without text keep their slots.
 
 Scoring permits four concurrent searches and eight shared concurrent scoring requests,
-with a three-second total deadline per search, a 15-second
+with a five-second total deadline per search, a 15-second
 outage cooldown, 128 KiB request / 32 KiB response bounds and strict model/score/index
 validation. Production selects one matching passage per candidate. The internal
 evaluation path permits at most two passages per candidate and 120 prompts;
@@ -455,8 +455,9 @@ public query features. Capture history allows only a literal host/path around a
 
 Public embeddings accept one query, the deployed model alias and float encoding;
 query text is at most 600 characters. Server-side prefixing, the existing
-128-entry/five-minute cache, one shared embedding slot, three-second timeout,
-512-token upstream context limit and 15-second failure cooldown also apply.
+128-entry/five-minute cache, four shared CUDA query slots, an 800 ms primary
+deadline, serial three-second Vulkan fallback, 512-token upstream context limit
+and independent 15-second endpoint failure cooldowns also apply.
 Batch/document embedding compatibility is tested directly against the private
 model service, not exposed through the public adapter.
 

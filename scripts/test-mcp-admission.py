@@ -62,6 +62,8 @@ def check(endpoint):
                 assert response.status == 200, "Health probe blocked by research traffic"
             if path == browser_path:
                 assert call("ping")[0] == 200, "Browser transfers blocked independent MCP admission"
+            else:
+                assert post(browser_path, b'{"size":0}')[0] == 200, "MCP transfers blocked independent browser admission"
         finally:
             for client in sockets:
                 client.close()

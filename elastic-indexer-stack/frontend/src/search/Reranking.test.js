@@ -69,7 +69,7 @@ test('a stalled request is aborted and falls back', async () => {
   jest.useFakeTimers();
   global.fetch=jest.fn((_,opts)=>new Promise((resolve,reject)=>opts.signal.addEventListener('abort',()=>reject(new Error('aborted')))));
   const flight=rerankResults('bard',rows.slice(0,2),'eq-archive');
-  jest.advanceTimersByTime(4500);
+  jest.advanceTimersByTime(6500);
   expect(await flight).toEqual(rows.slice(0,2));
 });
 
