@@ -497,3 +497,6 @@
 .archive-discussion-excerpt { margin: 0 0 8px; white-space: normal; overflow-wrap: anywhere; }
 .archive-discussion-matches a { display: inline-flex; flex-wrap: wrap; align-items: center; min-height: 44px; gap: 4px; }
 .archive-discussion-date { color: var(--archive-muted); font-size: .8rem; }
+/* Recovery controls remain usable on a narrow touch screen. */
+.archive-search-error { padding: 1rem; overflow-wrap: anywhere; }
+.archive-search-error button { min-height: 44px; min-width: 100px; padding: .5rem 1rem; cursor: pointer; }

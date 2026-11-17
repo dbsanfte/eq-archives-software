@@ -69,16 +69,17 @@ test('a stalled request is aborted and falls back', async () => {
   jest.useFakeTimers();
   global.fetch=jest.fn((_,opts)=>new Promise((resolve,reject)=>opts.signal.addEventListener('abort',()=>reject(new Error('aborted')))));
   const flight=rerankResults('bard',rows.slice(0,2),'eq-archive');
-  jest.advanceTimersByTime(4500);
+  jest.advanceTimersByTime(10000);
   expect(await flight).toEqual(rows.slice(0,2));
 });
 
 test('delayed old ranking cannot contaminate a newer query or duplicate a concurrent ranking', async () => {
-  let release;
-  const rank=jest.fn((q,values)=>q==='old'?new Promise(resolve=>{release=()=>resolve([...values].reverse());}):Promise.resolve(values));
+  let release, started;
+  const entered = new Promise(resolve => { started = resolve; });
+  const rank=jest.fn((q,values)=>q==='old'?new Promise(resolve=>{release=()=>resolve([...values].reverse());started();}):Promise.resolve(values));
   const grouped=createGroupedSearch(search,()=>({}),rank);
   const old=grouped({...searchState,searchTerm:'old'},{});
-  await Promise.resolve(); await Promise.resolve();
+  await entered;
   const current=await grouped({...searchState,searchTerm:'new'},{});
   release(); await old;
   expect((await grouped({...searchState,searchTerm:'new'},{})).results).toEqual(current.results);

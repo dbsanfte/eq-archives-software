@@ -26,6 +26,7 @@ class RequestGroup:
     progressed: float
     remaining: int = 0
     requests: int = 0
+    interactive: bool = False
 
 
 class BatchBudget:
@@ -87,6 +88,7 @@ class Scheduler:
         self.failed = False
         self.running_since = {kind: None for kind in self.queues}
         self.counters = {"batches": 0, "items": 0, "expired": 0, "errors": 0}
+        self.bulk_progressed = time.monotonic()
 
     def start(self):
         self.tasks = [asyncio.create_task(self._run(kind)) for kind in self.queues]
@@ -100,7 +102,7 @@ class Scheduler:
         for worker in self.workers.values():
             worker.shutdown(wait=True, cancel_futures=True)
 
-    async def submit(self, kind, rows, deadline, group=None):
+    async def submit(self, kind, rows, deadline, group=None, interactive=False):
         if deadline <= time.monotonic():
             raise asyncio.TimeoutError()
         if kind not in self.queues or not rows:
@@ -112,7 +114,7 @@ class Scheduler:
         futures = [loop.create_future() for _ in rows]
         key = (kind, object() if group is None else group)
         now = time.monotonic()
-        owner = self.groups.setdefault(key, RequestGroup(now, now))
+        owner = self.groups.setdefault(key, RequestGroup(now, now, interactive=interactive))
         owner.requests += 1
         owner.remaining += sum((len(row) + 31) // 32 * 32 for row in rows)
         self.queues[kind].extend(Item(row, f, deadline, owner) for row, f in zip(rows, futures))
@@ -145,6 +147,12 @@ class Scheduler:
             else:
                 pending.append(item)
         primary = None
+        if kind == 'embed' and pending:
+            # The API-only query credential owns this priority. Bulk callers
+            # cannot promote work with a header or a request body field.
+            bulk_due = now - self.bulk_progressed >= self.interactive_burst
+            pending.sort(key=lambda item: (item.group.interactive if bulk_due else not item.group.interactive,
+                                           item.group.created))
         if kind == "rerank" and pending:
             # Prefer finishing an entire search over partially serving many.
             # An aged group receives a GPU quantum even under fresh short work.
@@ -158,6 +166,9 @@ class Scheduler:
         batch, budget = [], BatchBudget(causal=kind == "rerank")
         limited = False
         for item in pending:
+            if kind == 'embed' and batch and batch[0].group.interactive != item.group.interactive:
+                queue.append(item)
+                continue
             if primary is not None and item.group is not primary and not limited:
                 # Spare capacity is not free latency. Allow only a small amount
                 # of extra work to piggyback on the group we are trying to finish.
@@ -168,6 +179,8 @@ class Scheduler:
             if len(batch) < self.batch and budget.add(item.tokens):
                 batch.append(item)
                 item.group.remaining -= (len(item.tokens) + 31) // 32 * 32
+                if kind == 'embed' and not item.group.interactive:
+                    self.bulk_progressed = now
             else:
                 queue.append(item)
         return batch
@@ -179,6 +192,8 @@ class Scheduler:
         # there is no delay at all when reranking is idle.
         until = time.monotonic() + self.interactive_burst
         while (self.queues['rerank'] or self.running_since['rerank'] is not None):
+            if any(item.group.interactive and not item.future.done() for item in self.queues['embed']):
+                return  # Query embeddings and reranking are coequal interactive work.
             if self.closed or self.failed:
                 return
             remaining = until - time.monotonic()

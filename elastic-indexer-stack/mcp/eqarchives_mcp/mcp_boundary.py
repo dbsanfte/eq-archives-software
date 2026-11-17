@@ -7,6 +7,7 @@ from starlette.requests import ClientDisconnect, Request
 from starlette.responses import JSONResponse
 
 from .http_limits import send_body
+from .capacity import HTTP_SLOTS
 
 MAX_REQUEST_BYTES = 16 * 1024
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
@@ -39,7 +40,7 @@ class MCPBoundary:
     def __init__(self, app, security):
         self.app = app
         self.security = TransportSecurityMiddleware(security)
-        self.slots = asyncio.Semaphore(2)
+        self.slots = asyncio.Semaphore(HTTP_SLOTS)
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http" or scope["path"] != "/mcp" or scope["method"] != "POST":

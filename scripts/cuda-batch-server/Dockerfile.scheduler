@@ -1,0 +1,9 @@
+# Scheduling-only release: retain all validated models and compiled GPU kernels.
+# The operator supplies the immutable local image ID from deployment.env.
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
+COPY scheduler.py server.py /app/
+ARG SOURCE_SHA
+# A distinct ARG name avoids the base image's inherited GIT_SHA taking priority.
+ENV GIT_SHA=$SOURCE_SHA
+LABEL org.opencontainers.image.revision=$SOURCE_SHA

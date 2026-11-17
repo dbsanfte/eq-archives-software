@@ -96,7 +96,7 @@ class App:
         self.engine, self.keys, self.batch = engine, keys, batch
         self.scheduler = None
         self.active = 0
-        self.active_by_kind = {"embed": 0, "rerank": 0}
+        self.active_by_kind = {"embed": 0, "query": 0, "rerank": 0}
         self.ready = False
 
     async def start(self):
@@ -161,27 +161,30 @@ class App:
             return
         headers = scope["headers"]
         auth = [v for k, v in headers if k.lower() == b"authorization"]
-        if not self.keys or len(auth) != 1 or not hmac.compare_digest(auth[0], b"Bearer " + self.keys[kind]):
+        interactive = bool(self.keys and len(auth) == 1 and kind == 'embed' and
+                           hmac.compare_digest(auth[0], b'Bearer ' + self.keys['rerank']))
+        if not self.keys or len(auth) != 1 or not (interactive or hmac.compare_digest(auth[0], b"Bearer " + self.keys[kind])):
             await self.send(send, 401, {"error": {"message": "Invalid credential"}})
             return
         # Reserve eight full-lifecycle slots for each model, including uploads
         # and slow response readers. Bulk clients cannot consume rerank admission.
-        if not self.ready or not self.scheduler.healthy() or self.active_by_kind[kind] >= 8:
+        lane = 'query' if interactive else kind
+        if not self.ready or not self.scheduler.healthy() or self.active_by_kind[lane] >= 8:
             await self.send(send, 503, {"error": {"message": "Inference capacity unavailable"}})
             return
         self.active += 1
-        self.active_by_kind[kind] += 1
+        self.active_by_kind[lane] += 1
         try:
-            await asyncio.wait_for(self.request(kind, receive, send), 15)
+            await asyncio.wait_for(self.request(kind, receive, send, interactive=interactive), 15)
         except asyncio.TimeoutError:
             # If delivery itself timed out, terminate the connection rather than
             # attempt a second response after headers/body may already be sent.
             raise
         finally:
             self.active -= 1
-            self.active_by_kind[kind] -= 1
+            self.active_by_kind[lane] -= 1
 
-    async def request(self, kind, receive, send):
+    async def request(self, kind, receive, send, interactive=False):
         try:
             raw = bytearray()
             deadline = time.monotonic() + 2
@@ -210,10 +213,14 @@ class App:
                 parse_constant=lambda _: (_ for _ in ()).throw(ValueError("Nonfinite JSON")),
             )
             rows, token_input = validate(kind, body)
+            if interactive and (token_input or len(rows) != 1 or len(rows[0]) > 630 or
+                                not rows[0].startswith('task: search result | query: ')):
+                raise ValueError('Interactive embeddings require one bounded search query')
             tokens = rows if token_input else await asyncio.to_thread(self.engine.encode, kind, rows)
             inference = asyncio.create_task(self.scheduler.submit(
                 kind, tokens, time.monotonic() + 10,
                 group=body["query"] if kind == "rerank" else None,
+                interactive=interactive,
             ))
             disconnect = asyncio.create_task(receive())
             try:

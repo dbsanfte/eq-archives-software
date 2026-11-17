@@ -22,6 +22,16 @@ from pathlib import Path
 
 
 class ContractTests(unittest.TestCase):
+    def test_scheduling_only_runtime_keeps_an_explicit_numerical_cache_identity(self):
+        root = Path(__file__).parent
+        pins = dict(line.split('=',1) for line in (root/'deployment.env').read_text().splitlines()
+                    if line and not line.startswith('#'))
+        self.assertEqual(pins['CUDA_IMAGE'], 'eqarchives-cuda-batch@'+pins['NUMERICAL_IMAGE_ID'])
+        self.assertNotEqual(pins['IMAGE_ID'], pins['NUMERICAL_IMAGE_ID'])
+        dockerfile = (root/'Dockerfile.scheduler').read_text()
+        self.assertIn('COPY scheduler.py server.py /app/', dockerfile)
+        self.assertNotIn('build_kernels', dockerfile)
+
     def test_dynamic_budget_matches_full_causal_plan_without_mutating_on_rejection(self):
         rows = [[1] * 64 + [i] * (200 + i) for i in range(2, 20)]
         for causal in (True, False):
@@ -301,6 +311,25 @@ class FakeEngine:
 
 
 class SchedulerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_query_embeddings_precede_bulk_without_starving_bulk(self):
+        # Start with a stopped worker to make ordering independent of wall time.
+        await self.scheduler.close()
+        self.scheduler = Scheduler(self.engine, batch=1, interactive_burst=10)
+        bulk = asyncio.create_task(self.scheduler.submit('embed', [[1]], time.monotonic()+2))
+        query = asyncio.create_task(self.scheduler.submit('embed', [[2]], time.monotonic()+2, interactive=True))
+        await asyncio.sleep(0)
+        first = self.scheduler._take_batch('embed')
+        self.assertEqual([i.tokens for i in first], [[2]])
+        for item in first: item.future.set_result([0.2]*768)
+        self.scheduler.bulk_progressed = time.monotonic()-11
+        newer = asyncio.create_task(self.scheduler.submit('embed', [[3]], time.monotonic()+2, interactive=True))
+        await asyncio.sleep(0)
+        second = self.scheduler._take_batch('embed')
+        self.assertEqual([i.tokens for i in second], [[1]])
+        for item in second: item.future.set_result([0.1]*768)
+        self.scheduler.start()
+        await asyncio.gather(bulk, query, newer)
+
     async def asyncSetUp(self):
         self.engine = FakeEngine()
         self.scheduler = Scheduler(self.engine, batch=4, capacity=8, wait=0.01)
@@ -588,6 +617,20 @@ class SchedulerTests(unittest.IsolatedAsyncioTestCase):
 
 
 class HttpTests(unittest.IsolatedAsyncioTestCase):
+    async def test_query_key_has_reserved_capacity_and_cannot_submit_bulk(self):
+        self.app.active_by_kind['embed'] = 8
+        headers = [(b'authorization', b'Bearer '+b'r'*32)]
+        body = {'model': EMBED_MODEL, 'input': ['task: search result | query: cleric']}
+        result = await self.request(json.dumps(body).encode(), headers=headers)
+        self.assertEqual(result[0], 200)
+        for inputs in ([body['input'][0]]*2, ['title: none | text: bulk'], [[1, 2]]):
+            result = await self.request(json.dumps({**body, 'input': inputs}).encode(), headers=headers)
+            self.assertEqual(result[0], 400)
+        self.app.active_by_kind['query'] = 8
+        result = await self.request(json.dumps(body).encode(), headers=headers)
+        self.assertEqual(result[0], 503)
+        self.app.active_by_kind.update(embed=0, query=0)
+
     async def asyncSetUp(self):
         self.engine = FakeEngine()
         self.app = App(self.engine, {"embed": b"test-only", "rerank": b"r" * 32})
@@ -646,11 +689,11 @@ class HttpTests(unittest.IsolatedAsyncioTestCase):
         task = asyncio.create_task(self.request(raw, send_hook=hook))
         await blocked.wait()
         self.assertEqual(self.app.active, 1)
-        self.assertEqual(self.app.active_by_kind, {"embed": 1, "rerank": 0})
+        self.assertEqual(self.app.active_by_kind, {"embed": 1, "query": 0, "rerank": 0})
         release.set()
         await task
         self.assertEqual(self.app.active, 0)
-        self.assertEqual(self.app.active_by_kind, {"embed": 0, "rerank": 0})
+        self.assertEqual(self.app.active_by_kind, {"embed": 0, "query": 0, "rerank": 0})
 
     async def test_bulk_http_clients_cannot_consume_reranking_admission(self):
         self.app.active_by_kind["embed"] = 8

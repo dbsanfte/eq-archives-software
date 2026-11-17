@@ -79,7 +79,7 @@ fixture_id=$(docker run --detach --network "$network" --network-alias archive-fi
     --mount "type=bind,source=$repo_dir/scripts/mcp-smoke-fixture.py,target=/fixture.py,readonly" \
     --entrypoint python "$mcp_image" /fixture.py)
   mcp_id=$(docker run --detach --network "$network" --network-alias eqarchives-mcp --publish 127.0.0.1::8080 \
-    --cap-drop ALL --security-opt no-new-privileges --read-only --memory 256m \
+    --cap-drop ALL --security-opt no-new-privileges --read-only --memory 1g \
     --sysctl 'net.ipv4.tcp_wmem=4096 16384 262144' \
     --mount "type=bind,source=$work_dir/secrets,target=/run/secrets,readonly" \
     --env ELASTICSEARCH_URL=http://archive-fixture:9200 --env EMBEDDING_URL=http://nomic:8080 \

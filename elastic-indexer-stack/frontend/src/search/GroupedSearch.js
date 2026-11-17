@@ -60,6 +60,7 @@ export function createGroupedSearch(search, getContext, rank) {
         if (cache.flight === flight) cache.flight = null;
       }
     }
+    if (active !== cache) return { results: [], totalResults: 0 };
     let ordered = Array.from(cache.groups.values());
     if (ranked && ordered.length) {
       if (!cache.ranking) {

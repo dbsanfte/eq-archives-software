@@ -1,5 +1,6 @@
 """Regression check for the fully transformed Kubernetes embedding routes."""
 import sys
+import re
 from pathlib import Path
 import yaml
 
@@ -23,7 +24,9 @@ assert not batch_service['spec'].get('selector'), 'CUDA batch service must not s
 assert batch_service['spec']['ports'][0]['targetPort'] == int(batch['BIND_PORT'])
 assert batch_endpoints['subsets'] == [{'addresses': [{'ip': batch['BIND_ADDRESS']}],
     'ports': [{'name': 'http', 'port': int(batch['BIND_PORT']), 'protocol': 'TCP'}]}]
-assert batch['CUDA_IMAGE'] == 'eqarchives-cuda-batch@' + batch['IMAGE_ID']
+numerical_image = batch.get('NUMERICAL_IMAGE_ID', batch['IMAGE_ID'])
+assert re.fullmatch(r'sha256:[0-9a-f]{64}', numerical_image), 'Require an immutable numerical runtime pin'
+assert batch['CUDA_IMAGE'] == 'eqarchives-cuda-batch@' + numerical_image
 assert batch['IMAGE_ID'] != config['CUDA_IMAGE'].split('@')[-1], 'Retain independent runtime cache identities'
 vision = dict(line.split('=', 1) for line in Path(__file__).with_name('vision.env').read_text().splitlines()
               if line and not line.startswith('#'))

@@ -5,6 +5,26 @@ const state = { searchTerm: 'bard songs', current: 1, resultsPerPage: 20 };
 const context = () => ({ params: { enableSemanticSearch: true }, embedding: [1] });
 const ids = response => response.results.map(row => row._meta.id);
 
+test.each(['lexical', 'semantic'])('a superseded %s request cannot launch more hybrid work', async phase => {
+  let finish, started;
+  const entered = new Promise(resolve => { started = resolve; });
+  const fetch = jest.fn(async request => {
+    if (request.searchTerm === state.searchTerm && request._archiveRetrieval === phase) {
+      started();
+      await new Promise(resolve => { finish = resolve; });
+    }
+    return { results: [result(request.searchTerm)], totalResults: 1 };
+  });
+  const fused = createFusedSearch(fetch, context);
+  const old = fused(state, {});
+  await entered;
+  expect(ids(await fused({ ...state, searchTerm: 'new query' }, {}))).toEqual(['new query']);
+  finish();
+  expect(ids(await old)).toEqual([]);
+  expect(fetch.mock.calls.filter(([request]) => request.searchTerm === state.searchTerm)
+    .map(([request]) => request._archiveRetrieval)).toEqual(phase === 'lexical' ? ['lexical'] : ['lexical', 'semantic']);
+});
+
 test('bookmarked searches prepare embeddings before grouping context is captured', async () => {
   let embedding;
   const getContext = () => ({ ...context(), embedding });

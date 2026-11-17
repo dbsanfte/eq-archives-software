@@ -22,10 +22,14 @@ export default function ArchiveStatusBar() {
 
   const fetchStats = () => {
     fetch("/elasticsearch/" + indexName + "/_count")
-      .then((response) => response.json())
+      .then((response) => {
+        if (response.ok === false) throw new Error('Archive statistics are temporarily unavailable');
+        return response.json();
+      })
       .then((data) => {
         // Use count from the _count endpoint
-        const count = data.count || 0;
+        const count = data.count;
+        if (!Number.isSafeInteger(count) || count < 0) return;
         // Discard the very first result
         if (isFirstSampleRef.current) {
           isFirstSampleRef.current = false;

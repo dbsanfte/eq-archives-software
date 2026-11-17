@@ -37,7 +37,7 @@ def check(endpoint):
     for path, body, probe in stages:
         sockets = []
         try:
-            for _ in range(2):
+            for _ in range(8):
                 client = socket.socket()
                 sockets.append(client)
                 client.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024)
@@ -62,6 +62,8 @@ def check(endpoint):
                 assert response.status == 200, "Health probe blocked by research traffic"
             if path == browser_path:
                 assert call("ping")[0] == 200, "Browser transfers blocked independent MCP admission"
+            else:
+                assert post(browser_path, b'{"size":0}')[0] == 200, "MCP transfers blocked independent browser admission"
         finally:
             for client in sockets:
                 client.close()

@@ -86,7 +86,7 @@ budget across main queries, URL phrases, filters, facets and kNN pre-filters;
 whitespace alone is not a token bound. Reject malformed Unicode and oversized
 numeric inputs before upstream work. Invalid caller input must not change shared
 embedding cooldown; preserve backoff for actual service/auth/rate failures.
-MCP uses the same analyzed-text policy as browser search. Retain its two process-wide
+MCP uses the same analyzed-text policy as browser search. Retain its eight process-wide
 HTTP slots through response delivery, 16 KiB/two-second uploads, 30-second lifecycle
 and 8 MiB serialized output limit; reject oversized output explicitly without
 truncating source text. Deliver MCP/browser bodies in 64 KiB writes with a final
@@ -241,7 +241,7 @@ uses the same pinned Q8_0 weights and alias, 64 slots with 512 tokens per input,
 and a 512-token compute microbatch. `NOMIC_EMBEDDING_PROFILE=cuda` permits up to
 64 inputs per request; the measured starting point is eight inputs, base64 wire
 encoding and four workers. Production indexers use only the CUDA service;
-Vulkan is reserved for live search and MCP. Handoffs remove inherited
+live browser/MCP query embeddings prefer reserved CUDA capacity and fall back to Vulkan. Handoffs remove inherited
 `REINDEX_SECONDARY_*` settings and explicitly set both primary and embedding
 URLs to CUDA. Curation imports and saved indexing Job templates also target CUDA.
 Opt-in `REINDEX_PREPARATION_WORKERS=2` moves CPU extraction
@@ -254,7 +254,7 @@ saving a document. Keep real near-limit compatibility and oversize recovery chec
 The current model upgrade uses `reindex_embeddings.py`: EmbeddingGemma 2 Q8_0,
 768 dimensions, Gemma's pinned tokenizer, 480-token source-preserving chunks and
 48-token overlap. Use `task: search result | query: ` for queries and
-`title: none | text: ` for documents. Live search/MCP stay on eqvm Vulkan;
+`title: none | text: ` for documents. Live search/MCP prefer RTX CUDA query capacity with a bounded Vulkan fallback;
 all indexing uses RTX 3080 CUDA. Replace chunks, summary and OCR vectors atomically
 before marking `embedding_model=embeddinggemma-2-768-v1`; semantic search must
 filter that marker while lexical search covers the full corpus. Preserve old
@@ -446,9 +446,9 @@ Qwen CUDA service. Preserve post-grouping representatives, exact retrieval filte
 date-sort bypass, head-only permutation and before-pagination ordering. Cache fallback
 orders as well as successes; never move results between pages after a transient outage.
 Keep the fixed ID/query-only browser contract, shared admission, local pinned tokenizer,
-768-token prompts, bounded source preparation, three-second deadline and complete
-finite model/score/index validation. Runtime scoring permits two concurrent searches
-and four shared concurrent batches of at most 20 passages, with the existing
+768-token prompts, bounded source preparation, eight-second deadline and complete
+finite model/score/index validation. Runtime scoring permits eight concurrent searches
+and eight shared concurrent batches of at most 20 passages, with the existing
 128 KiB request / 32 KiB response bounds. Coalesce identical in-flight searches,
 shield owners from waiter cancellation, and cancel/drain sibling batches before
 releasing capacity on failure. Offline local-model evaluation remains serial.
@@ -457,7 +457,7 @@ start another embedding request for passage selection. Retain lexical/first-pass
 and reader/OCR fallbacks, exact-ID/model restrictions and fixed source projections.
 The operator-owned `eqarchives-reranker` Secret and host SSH forward persist through
 CI; only the API may access the dedicated key/bridge port. Never expose the raw model
-API, alter live Vulkan embeddings or restart index Jobs for reranker deployment.
+API or restart index Jobs for reranker deployment; preserve Vulkan as a bounded query fallback.
 
 The additive CUDA batch service in `scripts/cuda-batch-server` uses independent
 embedding/reranking queues, worker threads and CUDA streams. Preserve complete
@@ -483,9 +483,12 @@ writes stay on the caller. Validate every batch, drain siblings on failure and
 retain completed cache waves on yield. Future broad Gemma handoffs keep four
 document workers × eight inputs, with an explicit backend cache pin. Leave active
 Jobs on their legacy endpoint/cache namespace; do not restart them for this rollout.
-Portal/MCP query embeddings stay on Vulkan. Their shared two-search/four-batch
+Portal/MCP query embeddings share eight reserved CUDA query slots with an 800 ms
+primary deadline and serial Vulkan fallback. Their shared eight-search/eight-batch
 reranker uses the unchanged private bridge, now forwarding to RTX loopback 8084.
-Preserve public deadlines and bounds. The GPU scheduler yields bulk work for at
+Browser and MCP are coequal: each admits eight full-lifecycle HTTP requests,
+sharing sixteen retrieval slots and the same inference pools. Preserve public
+deadlines and bounds. The GPU scheduler yields bulk work for at
 most 500 ms per interactive burst, then permits an embedding batch, retaining
 independent streams and bounded progress. Validate mixed search/embedding load
 before cutover, and keep the previous llama endpoints available for rollback.

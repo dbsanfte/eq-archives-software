@@ -76,12 +76,13 @@ def scores(data, count):
 class Reranker:
     def __init__(self, client, tokenizer):
         self.client, self.tokenizer = client, tokenizer
-        self.lock = asyncio.Semaphore(2)
-        self.batch_slots = asyncio.Semaphore(4)
+        from .capacity import RERANK_SEARCHES, RERANK_BATCHES
+        self.lock = asyncio.Semaphore(RERANK_SEARCHES)
+        self.batch_slots = asyncio.Semaphore(RERANK_BATCHES)
         self.pending = {}
         self.cache = OrderedDict()
         self.cooldown = 0.0
-        self.deadline = 3.0
+        self.deadline = 8.0
         self.passage_mode = PASSAGE_MODE
 
     @classmethod
@@ -98,7 +99,7 @@ class Reranker:
         if not key:
             raise ValueError("Reranker credential is empty")
         return cls(httpx.AsyncClient(base_url=url.rstrip("/") + "/", headers={"Authorization": "Bearer " + key},
-                   trust_env=False, follow_redirects=False, timeout=2.5, limits=httpx.Limits(max_connections=4)),
+                   trust_env=False, follow_redirects=False, timeout=7.5, limits=httpx.Limits(max_connections=8)),
                    Tokenizer.from_file(str(tokenizer_path)))
 
     async def close(self):
