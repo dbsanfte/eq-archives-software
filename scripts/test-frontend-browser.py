@@ -108,6 +108,47 @@ class FrontendBrowserTests(unittest.TestCase):
                 finally:
                     context.close()
 
+    def test_automatic_search_survives_options_and_delayed_embeddings(self):
+        for width in (390, 1280):
+            with self.subTest(width=width):
+                context = self.browser.new_context(viewport={'width': width, 'height': 900},
+                    is_mobile=width < 800, has_touch=width < 800)
+                try:
+                    page = context.new_page()
+                    searches, embeddings, errors = [], [], []
+                    page.on('pageerror', lambda error: errors.append(str(error)))
+                    def archive(route):
+                        if route.request.url.endswith('/_search'):
+                            searches.append(route.request.post_data_json)
+                        self.mock_elasticsearch(route)
+                    page.route('**/elasticsearch/**', archive)
+                    page.route('**/openai/v1/embeddings', lambda route: embeddings.append(route))
+                    page.goto(self.base_url, wait_until='networkidle')
+                    field = page.locator('.sui-search-box__text-input')
+                    for query, panel in (('cleric healing', 'Advanced...'), ('wizard epic quest', 'Search Syntax...')):
+                        with page.expect_request('**/openai/v1/embeddings'):
+                            field.fill(query)
+                        # Opening a panel while preparation is pending must not
+                        # replace the input and silently discard its search.
+                        field.evaluate('(el)=>window.pendingSearchInput=el')
+                        page.get_by_role('button', name=panel, exact=True).click()
+                        self.assertTrue(field.evaluate('(el)=>el===window.pendingSearchInput'))
+                        embeddings[-1].fulfill(json={'data': [{'embedding': [1.0] + [0.0] * 767}]})
+                        page.wait_for_url(lambda url: parse_qs(urlparse(url).query).get('q') == [query])
+                        expect(field).to_have_value(query)
+                        self.assertTrue(any(query in json.dumps(body) for body in searches))
+                        expect(page.locator('.sui-search-error')).to_have_count(0)
+                    # A later edit still searches automatically: no Enter key or
+                    # Search button may be needed after results have arrived.
+                    with page.expect_request('**/openai/v1/embeddings'):
+                        field.press_sequentially(' Kunark', delay=40)
+                    embeddings[-1].fulfill(json={'data': [{'embedding': [1.0] + [0.0] * 767}]})
+                    page.wait_for_url(lambda url: parse_qs(urlparse(url).query).get('q') == ['wizard epic quest Kunark'])
+                    self.assertEqual(errors, [])
+                finally:
+                    context.unroute_all(behavior='ignoreErrors')
+                    context.close()
+
     def test_untrusted_summary_snippet_and_source_url_cannot_execute_script(self):
         context = self.browser.new_context()
         try:

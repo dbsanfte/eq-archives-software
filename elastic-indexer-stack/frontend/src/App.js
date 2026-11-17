@@ -8,7 +8,7 @@ import {
   ResultsPerPage,
   Paging,
   Sorting,
-  WithSearch
+  withSearch
 } from "@elastic/react-search-ui";
 import { Layout } from "@elastic/react-search-ui-views";
 import "@elastic/react-search-ui-views/lib/styles/styles.css";
@@ -39,6 +39,19 @@ import RecentSites from "./views/sites/RecentSites";
 import Explore from "./views/explore/Explore";
 import SiteSearchScope, { scopedDomains, websiteScope } from "./views/search/SiteSearchScope";
 import "./views/ArchiveTheme.css";
+
+// Search UI's render-prop WithSearch creates a new component type whenever its
+// parent renders. Keep this subscription stable so opening panels or changing
+// options cannot unmount the input and cancel a pending automatic search.
+const SearchState = withSearch(({
+  wasSearched, isLoading, error, searchTerm, setSearchTerm, setCurrent,
+  totalResults, pagingStart, pagingEnd, rawResponse, resultSearchTerm, filters, removeFilter
+}) => ({
+  wasSearched, isLoading, error,
+  executeSearch: () => setSearchTerm(searchTerm, { shouldClearFilters: false }),
+  searchTerm, setSearchTerm, setCurrent, totalResults, pagingStart, pagingEnd,
+  rawResponse, resultSearchTerm, filters, removeFilter
+}))(({ children, ...state }) => children(state));
 
 function SearchApp() {
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -77,11 +90,7 @@ function SearchApp() {
 
   return (
       <SearchProvider config={config}>
-        <WithSearch
-          mapContextToProps={({ wasSearched, isLoading, error, searchTerm, setSearchTerm, setCurrent, totalResults, pagingStart, pagingEnd, rawResponse, resultSearchTerm, filters, removeFilter }) => ({ wasSearched, isLoading, error,
-            executeSearch: () => setSearchTerm(searchTerm, { shouldClearFilters: false }),
-            searchTerm, setSearchTerm, setCurrent, totalResults, pagingStart, pagingEnd, rawResponse, resultSearchTerm, filters, removeFilter })}
-        >
+        <SearchState>
           {({ wasSearched, isLoading, error, executeSearch, setCurrent, resultSearchTerm, filters, removeFilter, ...searchState }) => (
             <div className="App" style={{ position: "relative" }} data-testid="app-container">
               {isLoading && !error && (
@@ -208,7 +217,7 @@ function SearchApp() {
               />
             </div>
           )}
-        </WithSearch>
+        </SearchState>
       </SearchProvider>
   );
 }
