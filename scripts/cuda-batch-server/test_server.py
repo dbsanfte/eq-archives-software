@@ -22,6 +22,16 @@ from pathlib import Path
 
 
 class ContractTests(unittest.TestCase):
+    def test_scheduling_only_runtime_keeps_an_explicit_numerical_cache_identity(self):
+        root = Path(__file__).parent
+        pins = dict(line.split('=',1) for line in (root/'deployment.env').read_text().splitlines()
+                    if line and not line.startswith('#'))
+        self.assertEqual(pins['CUDA_IMAGE'], 'eqarchives-cuda-batch@'+pins['NUMERICAL_IMAGE_ID'])
+        self.assertNotEqual(pins['IMAGE_ID'], pins['NUMERICAL_IMAGE_ID'])
+        dockerfile = (root/'Dockerfile.scheduler').read_text()
+        self.assertIn('COPY scheduler.py server.py /app/', dockerfile)
+        self.assertNotIn('build_kernels', dockerfile)
+
     def test_dynamic_budget_matches_full_causal_plan_without_mutating_on_rejection(self):
         rows = [[1] * 64 + [i] * (200 + i) for i in range(2, 20)]
         for causal in (True, False):
