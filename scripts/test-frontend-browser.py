@@ -121,8 +121,13 @@ class FrontendBrowserTests(unittest.TestCase):
                         if route.request.url.endswith('/_search'):
                             searches.append(route.request.post_data_json)
                         self.mock_elasticsearch(route)
+                    embedding_reply = {'data': [{'embedding': [1.0] + [0.0] * 767}]}
+                    def embed(route):
+                        if route.request.post_data_json['input'][0].endswith(' Kunark'):
+                            return route.fulfill(json=embedding_reply)
+                        embeddings.append(route)
                     page.route('**/elasticsearch/**', archive)
-                    page.route('**/openai/v1/embeddings', lambda route: embeddings.append(route))
+                    page.route('**/openai/v1/embeddings', embed)
                     page.goto(self.base_url, wait_until='networkidle')
                     field = page.locator('.sui-search-box__text-input')
                     for query, panel in (('cleric healing', 'Advanced...'), ('wizard epic quest', 'Search Syntax...')):
@@ -133,7 +138,7 @@ class FrontendBrowserTests(unittest.TestCase):
                         field.evaluate('(el)=>window.pendingSearchInput=el')
                         page.get_by_role('button', name=panel, exact=True).click()
                         self.assertTrue(field.evaluate('(el)=>el===window.pendingSearchInput'))
-                        embeddings[-1].fulfill(json={'data': [{'embedding': [1.0] + [0.0] * 767}]})
+                        embeddings.pop().fulfill(json=embedding_reply)
                         page.wait_for_url(lambda url: parse_qs(urlparse(url).query).get('q') == [query])
                         expect(field).to_have_value(query)
                         self.assertTrue(any(query in json.dumps(body) for body in searches))
@@ -142,10 +147,11 @@ class FrontendBrowserTests(unittest.TestCase):
                     # Search button may be needed after results have arrived.
                     with page.expect_request('**/openai/v1/embeddings'):
                         field.press_sequentially(' Kunark', delay=40)
-                    embeddings[-1].fulfill(json={'data': [{'embedding': [1.0] + [0.0] * 767}]})
                     page.wait_for_url(lambda url: parse_qs(urlparse(url).query).get('q') == ['wizard epic quest Kunark'])
                     self.assertEqual(errors, [])
                 finally:
+                    for route in embeddings:
+                        route.abort()
                     context.unroute_all(behavior='ignoreErrors')
                     context.close()
 
