@@ -291,8 +291,9 @@ requests arriving at an idle GPU.
 run serially and concurrently. Its primary metric is elapsed time until both
 requests finish; individual request latencies and output agreement are retained.
 It alternates execution order and reports paired speedups with a diagnostic
-bootstrap interval. Both HTTP benchmarks retain the live client's 20-document,
-128 KiB batch bounds and four shared batch slots. A small fixture cannot establish
+bootstrap interval. Both HTTP benchmarks retain 20-document, 128 KiB batch bounds
+and the earlier four-slot comparison profile; production now uses eight shared
+HTTP batch slots as described above. A small fixture cannot establish
 a universal performance guarantee. Use `--documents 1 2 8 20 60` to report the
 batching curve, including searches that already fill several GPU batches alone.
 
@@ -315,9 +316,9 @@ cancelled; this is not a query/history cache. Embedding scheduling is unchanged.
 
 `benchmark_queue_latency.py` submits a short search 20 ms after a top-60 search
 starts. It compares the deployed service, candidate service and llama.cpp with
-the same four shared HTTP slots. Report short-request latency, large-request
-latency and total completion together; a throughput improvement alone can hide
-short searches waiting behind unrelated work.
+the same four shared HTTP slots from the earlier comparison profile. Report
+short-request latency, large-request latency and total completion together;
+a throughput improvement alone can hide short searches waiting behind unrelated work.
 
 `benchmark_mixed.py --fixtures /private/fixtures.json --output /private/mixed.json`
 runs two concurrent top-60 searches while four embedding requests continuously

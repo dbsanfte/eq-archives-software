@@ -39,8 +39,9 @@ date sorting retain their lexical constraints.
 The frontend is React with Elastic Search UI and Material UI. A bounded, read-only
 API serves both browser search and MCP over Elasticsearch. The browser and NGINX
 receive no database or model credentials, and callers cannot submit arbitrary
-Elasticsearch queries. Query embeddings run locally on Vulkan; reranking uses the
-private CUDA service below. Public searches make no paid Luna calls.
+Elasticsearch queries. Query embeddings and reranking use the private CUDA service
+below, with bounded Vulkan fallback for query embeddings. Public searches make no
+paid Luna calls.
 
 ## MCP: the archive as a research tool
 
@@ -156,8 +157,9 @@ migrations, passage policies, images and recovery.
 [`scripts/cuda-batch-server`](scripts/cuda-batch-server/README.md) is the project's
 specialized HTTP inference server for **EmbeddingGemma 2** and
 **Qwen3-Reranker 0.6B**, tuned for the **RTX 3080 Laptop GPU (SM86)**. It serves new
-curation imports and policy maintenance, plus portal/MCP reranking. Live query
-embeddings remain on eqvm's Vulkan service.
+curation imports and policy maintenance, plus portal/MCP query embeddings and
+reranking. Browser and MCP requests share equal priority over bulk embedding work;
+eqvm's Vulkan service provides bounded query-embedding fallback.
 
 ### Architecture
 

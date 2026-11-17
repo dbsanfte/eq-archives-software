@@ -7,11 +7,13 @@ four HTTP requests in flight. New `--gemma` reindex handoffs use that route and
 its pinned cache identity with four document workers × eight inputs; they do not
 multiply that concurrency by adding an inner worker pool. Existing Jobs retain
 the legacy endpoint described below and finish without interruption. Live query
-embeddings remain on eqvm Vulkan; the image companion remains separate.
+embeddings prefer reserved CUDA batch capacity, with bounded eqvm Vulkan fallback;
+the image companion remains separate.
 
 The Ubuntu GPU host runs the **same EmbeddingGemma 2 Q8_0 weights,
 768-dimensional normalized vectors, document/query prefixes and model alias** as
-the Vulkan service. All indexers use CUDA; live search and MCP use Vulkan.
+the Vulkan service. All indexers use CUDA; live search and MCP share equal priority
+on the CUDA batch service and retain Vulkan as query-embedding fallback.
 The separately managed CUDA server is reachable on the wired LAN only, at
 `192.168.68.108:8081`, with the existing Nomic API key. It is not a paid API.
 The root Kubernetes Kustomization manages a selectorless
