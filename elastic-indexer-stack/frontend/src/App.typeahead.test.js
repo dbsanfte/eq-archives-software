@@ -65,10 +65,12 @@ describe.each([true, false])('full search controls with legacyRoot=%s', legacyRo
     await tick(1);
     expect(screen.queryByText(/No sources found/)).not.toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Search status' })).toHaveTextContent('Searching the archive');
+    expect(screen.getByRole('button', { name: 'Search', exact: true })).toHaveValue('Searching…');
     await act(async () => { finish(empty); });
     await tick(1);
     expect(screen.getByText(/No sources found/)).toBeInTheDocument();
     expect(screen.queryByRole('progressbar')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Search', exact: true })).toHaveValue('Search');
   });
 
   test.each([

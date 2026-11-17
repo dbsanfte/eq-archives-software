@@ -413,7 +413,9 @@ The search layout's `withSearch` subscription is defined at module scope. Openin
 Advanced or Search Syntax and changing options preserve the input, pending
 400 ms automatic-search debounce, embedding preparation and date-filter drafts.
 An accessible progress bar beside the search controls reports preparation,
-retrieval and reranking. The last completed page and its counts stay visible
+retrieval and reranking. The submit button also shows its busy state while a
+mobile keyboard obscures the status underneath. The last completed page and its
+counts stay visible
 until the current run finishes; superseded responses cannot flash an empty page
 or end the current progress indication. A completed empty search still shows
 the normal empty state, and current failures retain their retry action.

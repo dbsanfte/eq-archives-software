@@ -5,7 +5,21 @@ import { getConfig } from "../../config/config-helper";
 import debounce from "lodash/debounce";
 import { shouldUseSemanticSearch } from "../../search/QueryPolicy";
 import PropTypes from "prop-types";
-import { SearchActivityContext } from '../../search/SearchActivity';
+import { SearchActivityContext, useSearchActivity } from '../../search/SearchActivity';
+
+// Keep the busy indication in the input row as well as beneath it: mobile
+// keyboards can obscure everything below a focused search field.
+function SearchInput({ getInputProps, getButtonProps, getAutocomplete }) {
+  const { phase } = useSearchActivity();
+  const busy = ['waiting', 'preparing', 'searching', 'reranking'].includes(phase);
+  return <>
+    <div className="sui-search-box__wrapper">
+      <input {...getInputProps({ 'aria-busy': busy })} />
+      {getAutocomplete()}
+    </div>
+    <input {...getButtonProps({ value: busy ? 'Searching…' : 'Search', 'aria-label': 'Search', 'aria-busy': busy })} />
+  </>;
+}
 
 const EnhancedSearchBox = ({
   searchTerm,
@@ -80,6 +94,7 @@ const EnhancedSearchBox = ({
 
   return (
     <SearchBox
+      inputView={SearchInput}
       searchTerm={searchTerm || ""}
       onChange={(value) => {
         const requestRevision = updateInput(value);

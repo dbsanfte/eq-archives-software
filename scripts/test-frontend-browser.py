@@ -216,10 +216,16 @@ class FrontendBrowserTests(unittest.TestCase):
                         }).observe(document.querySelector('.sui-layout-main-header'), {subtree: true, childList: true, characterData: true});
                     }''')
                     field = page.locator('.sui-search-box__text-input')
+                    if width == 390:
+                        page.set_viewport_size({'width': width, 'height': 500})
                     field.fill('cleric healing')
                     status = page.locator('.archive-search-progress')
                     expect(status).to_contain_text('Preparing semantic search')
                     expect(status).to_contain_text('Showing previous results')
+                    submit = page.get_by_role('button', name='Search', exact=True)
+                    expect(submit).to_have_value('Searching…')
+                    button_box = submit.bounding_box()
+                    self.assertLessEqual(button_box['y'] + button_box['height'], page.viewport_size['height'])
                     expect(page.get_by_role('region', name='Search results')).to_have_attribute('aria-busy', 'true')
                     expect(page.locator('.sui-result').first).to_contain_text('original result')
                     box = status.bounding_box()
@@ -253,6 +259,7 @@ class FrontendBrowserTests(unittest.TestCase):
                     rank.fulfill(json={'ids': list(reversed(rank.request.post_data_json['ids'])), 'status': 'applied'})
                     expect(page.locator('.sui-result').first).to_contain_text('updated result')
                     expect(status).to_have_count(0)
+                    expect(submit).to_have_value('Search')
                     expect(page.get_by_role('region', name='Search results')).to_have_attribute('aria-busy', 'false')
                     self.assertEqual(page.evaluate('window.emptyResultFlashes'), 0)
                     mode[0] = 'empty'
