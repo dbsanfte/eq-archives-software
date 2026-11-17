@@ -13,7 +13,7 @@ jest.mock('./config/config-helper', () => ({
 }));
 jest.mock('@elastic/react-search-ui', () => ({
   SearchProvider: ({ children }) => children,
-  WithSearch: ({ children, mapContextToProps }) => children(mapContextToProps(mockSearchState)),
+  withSearch: mapContextToProps => Component => props => <Component {...mapContextToProps(mockSearchState)} {...props} />,
   ErrorBoundary: ({ children }) => children,
   Facet: ({ label }) => <span>{label}</span>,
   Results: () => <span>Search results</span>,

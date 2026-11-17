@@ -43,6 +43,25 @@
   margin: 0;
 }
 
+.archive-search-progress {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  color: var(--archive-ink);
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+.archive-search-progress small {
+  color: var(--archive-muted);
+  font-size: 12px;
+}
+
+.archive-search-progress .MuiLinearProgress-root {
+  height: 3px;
+  border-radius: 3px;
+}
+
 .App .sui-result {
   padding: 24px;
   border: 1px solid var(--archive-border);

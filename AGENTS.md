@@ -1044,6 +1044,11 @@ ChatGPT/Claude or Deep Research validation after actually performing it.
   palette and mobile interactions consistent.
 - Search responses must not replace newer text the user is typing. Preserve the
   existing asynchronous input regression coverage when changing search controls.
+  Keep subscribed search-layout wrappers at module scope: option/panel updates
+  must not remount the input or silently cancel its debounce/embedding work.
+  Keep progress visible near the input through preparation, retrieval and
+  reranking; retain the last completed result page/counts while updating. Only
+  the current run may replace them or display a completed empty state.
 - Applied date ranges belong to Search UI's filter/URL state. New searches must
   pass `shouldClearFilters: false`; do not keep a separate global date registry.
   Preserve draft picker edits across results and equivalent filter objects, and

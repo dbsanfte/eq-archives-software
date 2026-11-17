@@ -409,6 +409,17 @@ covers both headers and the body; failures fall back to keyword search. Complete
 embeddings are retained in a bounded 50-entry browser cache. This cache is local
 to the browser; MCP retains its own bounded cache.
 
+The search layout's `withSearch` subscription is defined at module scope. Opening
+Advanced or Search Syntax and changing options preserve the input, pending
+400 ms automatic-search debounce, embedding preparation and date-filter drafts.
+An accessible progress bar beside the search controls reports preparation,
+retrieval and reranking. The submit button also shows its busy state while a
+mobile keyboard obscures the status underneath. The last completed page and its
+counts stay visible
+until the current run finishes; superseded responses cannot flash an empty page
+or end the current progress indication. A completed empty search still shows
+the normal empty state, and current failures retain their retry action.
+
 NGINX enables gzip for JavaScript, CSS, JSON, text and SVG. Content-hashed files
 under `/static/` use `Cache-Control: public, max-age=31536000, immutable`; HTML,
 connection guides and unversioned assets use `no-cache` so they revalidate after a

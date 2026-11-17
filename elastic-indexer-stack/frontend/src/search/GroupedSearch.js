@@ -65,7 +65,7 @@ export function createGroupedSearch(search, getContext, rank) {
     if (ranked && ordered.length) {
       if (!cache.ranking) {
         const head = ordered.slice(0, RERANK_WINDOW);
-        cache.ranking = rank(searchTerm, head.map(group => group.result)).then(results => {
+        cache.ranking = rank(searchTerm, head.map(group => group.result), state._archiveProgress).then(results => {
           const groups = new Map(head.map(group => [group.result, group]));
           return results.map(result => groups.get(result));
         });
