@@ -57,6 +57,18 @@ def test_bad_input_does_not_change_cooldown_or_use_fallback():
     run(exercise())
 
 
+@pytest.mark.parametrize('data', [[], {'data': [None]}, {'data': {'embedding': VECTOR}},
+    {'data': [{'index': False, 'embedding': VECTOR}]}, {'data': [{'index': 1, 'embedding': VECTOR}]}])
+def test_malformed_primary_identity_fails_over_without_an_api_error(data):
+    async def exercise():
+        archive = make_archive()
+        archive.query_embeddings = client(lambda _: httpx.Response(200, json=data))
+        assert await archive.embedding('cleric') == VECTOR
+        assert archive.query_cooldown > 0
+        await archive.close()
+    run(exercise())
+
+
 def test_eight_query_embeddings_overlap_while_vulkan_fallback_remains_serial():
     async def exercise():
         ready, release = asyncio.Event(), asyncio.Event()

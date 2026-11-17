@@ -214,8 +214,10 @@ class Archive(Catalog):
                 if len(raw) > 65536:
                     raise ValueError('Oversized query embedding')
         data = json.loads(raw)
-        rows = data['data']
-        if len(rows) != 1 or rows[0].get('index', 0) != 0 or data.get('model', self.settings.model) != self.settings.model:
+        rows = data.get('data') if isinstance(data, dict) else None
+        if (not isinstance(rows, list) or len(rows) != 1 or not isinstance(rows[0], dict) or
+                type(rows[0].get('index', 0)) is not int or rows[0].get('index', 0) != 0 or
+                data.get('model', self.settings.model) != self.settings.model):
             raise ValueError('Embedding response identity differs')
         vector = rows[0]['embedding']
         if (not isinstance(vector, list) or len(vector) != 768 or
