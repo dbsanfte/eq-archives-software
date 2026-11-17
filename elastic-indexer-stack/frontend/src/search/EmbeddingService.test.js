@@ -236,13 +236,22 @@ describe('embedding request lifecycle', () => {
   });
   afterEach(() => { jest.clearAllTimers(); jest.useRealTimers(); jest.restoreAllMocks(); });
 
+  test.each([400, 429, 502, 503, 504])('HTTP %s does not disable unrelated semantic searches', async status => {
+    fetch.mockRejectedValueOnce(Object.assign(new Error('request could not complete'), { status }));
+    expect(await embeddingService.fetchEmbedding('first query', 'model')).toBeNull();
+    expect(embeddingService.isServiceAvailable).toBe(true);
+    expect(embeddingService.lastFailureTime).toBeNull();
+    fetch.mockResolvedValueOnce({ ok: true, json: async () => ({ data: [{ embedding: [1, 0] }] }) });
+    expect(await embeddingService.fetchEmbedding('second query', 'model')).toEqual([1, 0]);
+  });
+
   test('cancels obsolete work without disabling semantic search or caching a late response', async () => {
     let resolve;
     fetch.mockReturnValueOnce(new Promise(done => { resolve = done; }));
     const controller = new AbortController();
     const pending = embeddingService.fetchEmbedding('obsolete', 'model', { signal: controller.signal });
     controller.abort();
-    await jest.advanceTimersByTimeAsync(5001);
+    await jest.advanceTimersByTimeAsync(10001);
     expect(await pending).toBeNull();
     expect(embeddingService.isEmbeddingServiceAvailable()).toBe(true);
     expect(fetch.mock.calls[0][1].signal.aborted).toBe(true);
@@ -272,7 +281,7 @@ describe('embedding request lifecycle', () => {
     fetch.mockResolvedValueOnce({ ok: true, json: () => new Promise(() => {}) });
     const log = jest.spyOn(console, 'error').mockImplementation(() => {});
     const pending = embeddingService.fetchEmbedding('stalled body');
-    await jest.advanceTimersByTimeAsync(5001);
+    await jest.advanceTimersByTimeAsync(10001);
     expect(await pending).toBeNull();
     expect(fetch.mock.calls[0][1].signal.aborted).toBe(true);
     expect(embeddingService.isServiceAvailable).toBe(false);

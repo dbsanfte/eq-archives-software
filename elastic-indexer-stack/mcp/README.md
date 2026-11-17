@@ -67,7 +67,7 @@ passage is scored with the pinned local Qwen tokenizer and a complete 768-token 
 An 8,192-character preparation bound applies to scoring excerpts; readers retain
 full text. Images without text keep their slots.
 
-Scoring permits two concurrent searches and four shared concurrent scoring requests,
+Scoring permits four concurrent searches and eight shared concurrent scoring requests,
 with a three-second total deadline per search, a 15-second
 outage cooldown, 128 KiB request / 32 KiB response bounds and strict model/score/index
 validation. Production selects one matching passage per candidate. The internal
@@ -306,7 +306,7 @@ from the existing read-only account and shared model key. Credential checksums
 trigger a rollout only when values change. Normal connector changes do not restart
 Nomic or change ingestion/Elasticsearch data.
 
-Limits: two active MCP HTTP exchanges per process, retained until response delivery
+Limits: eight active MCP HTTP exchanges per process, retained until response delivery
 finishes, independently of ingress replica count. Busy requests receive HTTP 503
 with `Retry-After`. The adapter reads at most 16 KiB within two seconds, and bounds
 the complete request/response lifetime at 30 seconds. It buffers at most 8 MiB of
@@ -323,7 +323,11 @@ embeddings but retain their entire lexical query. Traefik additionally limits MC
 traffic to five requests/second with a burst of twenty and eight in-flight requests.
 The cache is process-local; a rolling update can briefly have two active instances.
 
-These limits protect the shared single-slot embedding service; they are not an
+Browser and MCP have equal admission limits and share the inference pools. Query
+embeddings prefer four reserved CUDA slots, with an 800 ms primary deadline and
+serial Vulkan fallback. Bulk indexing cannot consume the reserved GPU admission.
+Each interface retains eight slots through delivery; the API has a 1 GiB memory
+limit. These are bounded process-wide limits, not an
 authenticated per-user quota. Review traffic/capacity as public usage grows.
 The service does not log request bodies or intentionally store conversations.
 Upstream/proxy operational logging is separate. Public descriptions must not promise
@@ -442,8 +446,8 @@ a 1,000-result window, 160 query nodes/eight nesting levels, eight text clauses,
 Every search has an eight-second ES timeout, ten-second total execution deadline,
 fixed result/reader projections and safe highlight encoding/markers. Full reader
 text is available only for one exact ID; vectors cannot be retrieved. Responses
-retain the existing 8 MiB limit. Two browser requests retain admission until response transfer finishes (30-second
-absolute deadline) and share the four-slot MCP retrieval budget; extra work fails promptly instead of waiting in an unbounded
+retain the existing 8 MiB limit. Eight browser requests retain admission until response transfer finishes (30-second
+absolute deadline) and share the sixteen-slot retrieval budget with MCP; extra work fails promptly instead of waiting in an unbounded
 queue. Counts are cached for 30 seconds. Phrase/operator search uses safe simple
 query syntax; regexes, field selectors, wildcard expansion and fuzziness are not
 public query features. Capture history allows only a literal host/path around a

@@ -29,6 +29,7 @@ import SyntaxExamples from "./views/search/SyntaxExamples";
 import { getSearchConfig } from "./search/Connector";
 import DateRangeFacet from "./views/search/DateRangeFacet";
 import EnhancedSearchBox from "./views/search/EnhancedSearchBox";
+import SearchError from "./views/search/SearchError";
 import archiveTheme from "./theme";
 import { CapturePaging, CaptureSummary } from "./views/search/CapturePaging";
 import DocumentReader from "./views/reader/DocumentReader";
@@ -77,11 +78,13 @@ function SearchApp() {
   return (
       <SearchProvider config={config}>
         <WithSearch
-          mapContextToProps={({ wasSearched, isLoading, executeSearch, setCurrent, totalResults, pagingStart, pagingEnd, rawResponse, resultSearchTerm, filters, removeFilter }) => ({ wasSearched, isLoading, executeSearch, setCurrent, totalResults, pagingStart, pagingEnd, rawResponse, resultSearchTerm, filters, removeFilter })}
+          mapContextToProps={({ wasSearched, isLoading, error, searchTerm, setSearchTerm, setCurrent, totalResults, pagingStart, pagingEnd, rawResponse, resultSearchTerm, filters, removeFilter }) => ({ wasSearched, isLoading, error,
+            executeSearch: () => setSearchTerm(searchTerm, { shouldClearFilters: false }),
+            searchTerm, setSearchTerm, setCurrent, totalResults, pagingStart, pagingEnd, rawResponse, resultSearchTerm, filters, removeFilter })}
         >
-          {({ wasSearched, isLoading, executeSearch, setCurrent, resultSearchTerm, filters, removeFilter, ...searchState }) => (
+          {({ wasSearched, isLoading, error, executeSearch, setCurrent, resultSearchTerm, filters, removeFilter, ...searchState }) => (
             <div className="App" style={{ position: "relative" }} data-testid="app-container">
-              {isLoading && (
+              {isLoading && !error && (
                 <Box
                   sx={{
                     position: "absolute",
@@ -159,7 +162,7 @@ function SearchApp() {
                   </div>
                 }
                 bodyContent={
-                  <ErrorBoundary>
+                  <ErrorBoundary view={SearchError} onRetry={executeSearch}>
                     <ReaderSearchContext.Provider value={searchPhrase(resultSearchTerm)}>
                       <Results
                         titleField={getConfig().titleField}

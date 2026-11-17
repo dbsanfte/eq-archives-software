@@ -5,7 +5,7 @@ class EmbeddingService {
     this.isServiceAvailable = true;
     this.lastFailureTime = null;
     this.RETRY_INTERVAL = 60000; // 60 seconds
-    this.FETCH_TIMEOUT = 5000; // 5 seconds
+    this.FETCH_TIMEOUT = 10000; // Includes one Retry-After pause during congestion.
 
     // Create notification container once
     this.createNotificationContainer();
@@ -59,6 +59,12 @@ class EmbeddingService {
     } catch (error) {
       // Editing or leaving the page is not an upstream service failure.
       if (signal?.aborted && !timedOut) return null;
+      if ([400, 429, 502, 503, 504].includes(error.status)) {
+        this.showNotification(error.status === 400
+          ? 'Semantic search could not accept this query. Showing keyword results.'
+          : 'Semantic search is temporarily busy. Showing keyword results for this search.');
+        return null; // A busy request must not disable later, unrelated searches.
+      }
       console.error('Error fetching embedding:', error);
       if (this.isServiceAvailable) {
         this.isServiceAvailable = false;

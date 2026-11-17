@@ -309,14 +309,14 @@ def test_legacy_control_and_matching_modes_have_independent_cached_orders():
     run(scenario())
 
 
-def test_runtime_batches_overlap_with_a_shared_four_request_limit():
+def test_runtime_batches_overlap_with_a_shared_eight_request_limit():
     async def scenario():
         ready,release=asyncio.Event(),asyncio.Event()
         active=maximum=0
         async def handler(request):
             nonlocal active,maximum
             active+=1;maximum=max(active,maximum)
-            if active==4:ready.set()
+            if active==6:ready.set()
             try:
                 await release.wait()
                 docs=json.loads(request.content)['documents']
@@ -326,29 +326,29 @@ def test_runtime_batches_overlap_with_a_shared_four_request_limit():
         rank=scorer(handler)
         task=asyncio.create_task(rank.score('bard',[(n,str(n)) for n in range(120)]))
         await asyncio.wait_for(ready.wait(),1)
-        assert active==4 and not task.done()
+        assert active==6 and not task.done()
         release.set();values=await task
-        assert maximum==4 and active==0 and values[119]==119/120
+        assert maximum==6 and active==0 and values[119]==119/120
         await rank.close()
     run(scenario())
 
 
-def test_two_distinct_searches_score_concurrently_and_overload_is_bounded():
+def test_four_distinct_searches_score_concurrently_and_overload_is_bounded():
     async def scenario():
         ready,release=asyncio.Event(),asyncio.Event();calls=[]
         async def handler(request):
             calls.append(json.loads(request.content)['query'])
-            if len(calls)==2:ready.set()
+            if len(calls)==4:ready.set()
             await release.wait()
             return httpx.Response(200,json={'model':MODEL,'results':[
                 {'index':0,'relevance_score':0},{'index':1,'relevance_score':1}]})
         archive,_=fixture_archive(handler)
-        tasks=[asyncio.create_task(archive.rank_ids(q,['a','b'])) for q in ('bard','cleric')]
+        tasks=[asyncio.create_task(archive.rank_ids(q,['a','b'])) for q in ('bard','cleric','druid','ranger')]
         await asyncio.wait_for(ready.wait(),1)
         assert await archive.rank_ids('wizard',['a','b'])==(['a','b'],'fallback')
-        assert set(calls)=={'bard','cleric'}
+        assert set(calls)=={'bard','cleric','druid','ranger'}
         release.set()
-        assert await asyncio.gather(*tasks)==[(['b','a'],'applied')]*2
+        assert await asyncio.gather(*tasks)==[(['b','a'],'applied')]*4
         assert not archive.reranker.pending and not archive.reranker.lock.locked()
         await archive.close()
     run(scenario())

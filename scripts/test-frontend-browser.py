@@ -47,6 +47,67 @@ class FrontendBrowserTests(unittest.TestCase):
                    if 'aggs' in route.request.post_data_json else {}),
             })
 
+    def test_search_congestion_retries_and_errors_offer_safe_mobile_recovery(self):
+        for width in (390, 1280):
+            with self.subTest(width=width):
+                context = self.browser.new_context(viewport={'width': width, 'height': 900})
+                try:
+                    page = context.new_page()
+                    embeddings, searches = [], []
+                    failed = [False]
+                    def embedding(route):
+                        value = route.request.post_data_json['input'][0]
+                        embeddings.append(value)
+                        if len(embeddings) == 1 or 'busy embedding' in value:
+                            return route.fulfill(status=503, headers={'Retry-After': '0'},
+                                json={'error': {'code': 'busy', 'message': 'private diagnostic'}})
+                        route.fulfill(json={'data': [{'embedding': [1.0] + [0.0] * 767}]})
+                    def archive(route):
+                        if route.request.url.endswith('/_count'):
+                            return route.fulfill(json={'count': 2})
+                        if route.request.url.endswith('/_rerank'):
+                            return route.fulfill(json={'ids': route.request.post_data_json['ids'], 'status': 'applied'})
+                        searches.append(route.request.post_data_json)
+                        if len(searches) == 1 or failed[0]:
+                            return route.fulfill(status=503, headers={'Retry-After': '0'},
+                                json={'error': {'code': 'busy', 'message': 'private diagnostic'}})
+                        facets = {f: {'buckets': []} for f in ('domain_name', 'llm_content_flavour', 'file_type', 'mime_type', 'mailing_list_name', 'llm_tags')}
+                        facets['last_indexed'] = {'buckets': {}}
+                        route.fulfill(json={'hits': {'total': {'value': 2, 'relation': 'eq'}, 'hits': [
+                            {'_id': f'newsgroups/{n}', '_score': 2-n, '_source': {
+                                'title': f'Recovered search result {n}', 'url': f'https://example.com/{n}'}}
+                            for n in range(2)]}, 'aggregations': {'facet_bucket_all': {'doc_count': 2, **facets}}})
+                    page.route('**/openai/v1/embeddings', embedding)
+                    page.route('**/elasticsearch/**', archive)
+                    page.goto(self.base_url + '/?q=cleric', wait_until='networkidle')
+                    expect(page.locator('.sui-result')).to_have_count(2)
+                    self.assertGreaterEqual(len(embeddings), 2)
+                    self.assertGreaterEqual(len(searches), 2)
+                    expect(page.locator('#embedding-service-notifications')).not_to_contain_text('unavailable')
+                    field = page.locator('.sui-search-box__text-input')
+                    field.fill('busy embedding'); field.press('Enter')
+                    expect(page.locator('#embedding-service-notifications')).to_contain_text('Showing keyword results')
+                    with page.expect_request('**/openai/v1/embeddings'):
+                        field.fill('another query'); field.press('Enter')
+                    page.wait_for_load_state('networkidle')
+                    expect(page.locator('.sui-result')).to_have_count(2)
+                    self.assertTrue(any('another query' in q for q in embeddings))
+                    failed[0] = True
+                    field.fill('failed query'); field.press('Enter')
+                    alert = page.get_by_role('alert')
+                    expect(alert).to_contain_text('Search is busy')
+                    expect(alert).not_to_contain_text('private diagnostic')
+                    page.wait_for_load_state('networkidle')
+                    button = alert.get_by_role('button', name='Try again')
+                    expect(button).to_be_visible()
+                    self.assertGreaterEqual(button.bounding_box()['height'], 44)
+                    failed[0] = False
+                    button.click()
+                    expect(page.locator('.sui-result')).to_have_count(2)
+                    expect(page.get_by_role('alert')).to_have_count(0)
+                finally:
+                    context.close()
+
     def test_untrusted_summary_snippet_and_source_url_cannot_execute_script(self):
         context = self.browser.new_context()
         try:

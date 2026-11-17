@@ -155,6 +155,7 @@ def test_embedding_busy_and_upstream_failures_are_sanitized():
     with TestClient(create_app(archive)) as client:
         response=client.post('/openai/v1/embeddings',json={'model':archive.settings.model,'input':'task: search result | query: a'})
         assert response.status_code==503 and 'private' not in response.text
+        assert response.json()['error']['code']=='unavailable'
 
 
 def test_count_is_cached_routes_are_exact_and_host_origin_are_validated():
@@ -179,7 +180,7 @@ def test_concurrent_requests_reject_excess_work_without_queuing_and_recover():
         release=asyncio.Event();started=asyncio.Event();calls=[]
         async def es(req):
             calls.append(req)
-            if len(calls)==2:started.set()
+            if len(calls)==8:started.set()
             await release.wait()
             return httpx.Response(200,json={'hits':{'hits':[]}})
         archive=make_archive(es)
@@ -189,12 +190,14 @@ def test_concurrent_requests_reject_excess_work_without_queuing_and_recover():
         def request():
             async def receive():return {'type':'http.request','body':b'{}','more_body':False}
             return Request({'type':'http','method':'POST','path':'/','query_string':b'','headers':[(b'content-type',b'application/json')]},receive)
-        tasks=[asyncio.create_task(api.handle(request(),'search')) for _ in range(2)]
+        tasks=[asyncio.create_task(api.handle(request(),'search')) for _ in range(8)]
         await asyncio.wait_for(started.wait(),1)
-        assert (await api.handle(request(),'search')).status_code==503
+        rejected = await api.handle(request(),'search')
+        assert rejected.status_code==503 and json.loads(rejected.body)['error']['code']=='busy'
         release.set();assert all(r.status_code==200 for r in await asyncio.gather(*tasks))
         assert (await api.handle(request(),'search')).status_code==200
-        async with archive.requests,archive.requests,archive.requests,archive.requests:
+        archive.requests = asyncio.Semaphore(0)
+        async with asyncio.timeout(1):
             assert (await api.handle(request(),'search')).status_code==503
         await archive.close()
     asyncio.run(exercise())
@@ -208,6 +211,7 @@ def test_timeout_releases_admission_slots_without_replaying_work(monkeypatch):
     with TestClient(create_app(make_archive(es))) as client:
         response=client.post(URL,json={})
         assert response.status_code==503 and response.headers['retry-after']=='5'
+        assert response.json()['error']['code']=='timeout'
 
 
 def test_query_cost_budget_applies_across_clauses_and_facets_and_preserves_quotes():
@@ -226,7 +230,7 @@ def test_slow_response_consumers_cannot_bypass_global_admission_and_cancellation
         entered=asyncio.Event();release=asyncio.Event();counter=[];rejected=[]
         async def app(scope,receive,send):
             counter.append(scope)
-            if len(counter)==2:entered.set()
+            if len(counter)==8:entered.set()
             await send({'type':'http.response.start','status':200,'headers':[]})
             await release.wait()
             await send({'type':'http.response.body','body':b'{}'})
@@ -235,14 +239,14 @@ def test_slow_response_consumers_cannot_bypass_global_admission_and_cancellation
         async def send(message):pass
         async def capture(message):rejected.append(message)
         scope={'type':'http','path':URL}
-        tasks=[asyncio.create_task(guard(scope,receive,send)) for _ in range(2)]
+        tasks=[asyncio.create_task(guard(scope,receive,send)) for _ in range(8)]
         await entered.wait()
         await guard(scope,receive,capture)
-        assert rejected[0]['status']==503 and len(counter)==2
+        assert rejected[0]['status']==503 and len(counter)==8
         tasks[0].cancel();await asyncio.gather(tasks[0],return_exceptions=True)
-        release.set();await tasks[1]
+        release.set();await asyncio.gather(*tasks[1:])
         await guard(scope,receive,send)
-        assert len(counter)==3
+        assert len(counter)==9
     asyncio.run(exercise())
 
 

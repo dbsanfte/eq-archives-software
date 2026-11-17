@@ -17,6 +17,7 @@ from starlette.responses import JSONResponse
 from .limits import TextBudget
 from .http_limits import send_body
 from .ranking_policy import BROWSER_VECTOR_BOOST
+from .capacity import HTTP_SLOTS
 
 FACETS = {"domain_name", "llm_content_flavour", "file_type", "mime_type", "mailing_list_name", "llm_tags"}
 DATES = {"capture_date", "llm_guessed_date", "last_indexed", "llm_extracted_dates.date"}
@@ -29,6 +30,7 @@ READER_FIELDS = ["title", "url", "alternate_url", "text_full", "llm_image_text_f
 HIGHLIGHT = {"encoder": "html", "fields": {"text_full": {
     "fragment_size": 240, "number_of_fragments": 1, "no_match_size": 240}}}
 MAX_BODY = 96 * 1024
+BROWSER_REQUEST_SLOTS = HTTP_SLOTS
 
 
 class WebAdmission:
@@ -39,12 +41,12 @@ class WebAdmission:
     """
     def __init__(self, app):
         self.app = app
-        self.slots = asyncio.Semaphore(2)
+        self.slots = asyncio.Semaphore(BROWSER_REQUEST_SLOTS)
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http" or not scope["path"].startswith(("/elasticsearch/", "/openai/")):
             return await self.app(scope, receive, send)
-        unavailable = JSONResponse({"error": {"message": "Search is busy. Please retry shortly."}},
+        unavailable = JSONResponse({"error": {"code": "busy", "message": "Search is busy. Please retry shortly."}},
                                    status_code=503, headers={"Retry-After": "5", "Cache-Control": "no-store"})
         if self.slots.locked():
             return await unavailable(scope, receive, send)
@@ -63,7 +65,8 @@ class WebAdmission:
             except TimeoutError:
                 if started:
                     raise  # Close an incomplete transfer; never return truncated JSON as success.
-                await unavailable(scope, receive, send)
+                await JSONResponse({"error": {"code": "timeout", "message": "Search took too long. Please retry shortly."}},
+                    status_code=503, headers={"Retry-After": "5", "Cache-Control": "no-store"})(scope, receive, send)
 
 
 def check(condition):
@@ -286,7 +289,7 @@ class Builder:
 class WebAPI:
     def __init__(self, archive):
         self.archive = archive
-        self.slots = asyncio.Semaphore(2)
+        self.slots = asyncio.Semaphore(BROWSER_REQUEST_SLOTS)
         self.count_cache = None
 
     async def handle(self, request, operation):
@@ -345,6 +348,7 @@ class WebAPI:
                 self.count_cache = (time.monotonic() + 30, result)
             return JSONResponse(result, headers=headers)
         except (ValueError, KeyError, TypeError, RecursionError, OverflowError):
-            return JSONResponse({"error": {"message": "Unsupported search request. Use at most 1,000 results and refine your filters."}}, status_code=400, headers=headers)
-        except (ToolError, TimeoutError):
-            return JSONResponse({"error": {"message": "Search is busy or temporarily unavailable. Please retry shortly."}}, status_code=503, headers={**headers, "Retry-After": "5"})
+            return JSONResponse({"error": {"code": "invalid_request", "message": "Unsupported search request. Use at most 1,000 results and refine your filters."}}, status_code=400, headers=headers)
+        except (ToolError, TimeoutError) as error:
+            code = "timeout" if isinstance(error, TimeoutError) else "busy" if str(error) == "Busy" else "unavailable"
+            return JSONResponse({"error": {"code": code, "message": "Search is busy or temporarily unavailable. Please retry shortly."}}, status_code=503, headers={**headers, "Retry-After": "5"})

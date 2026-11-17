@@ -100,11 +100,12 @@ document is written only after all its vectors validate. Completed cache waves
 survive cooperative yields. Future broad Gemma handoffs keep four document workers
 with eight inputs per request, avoiding nested concurrency.
 
-Portal and MCP share the same reranker client: two concurrent searches, four shared
+Portal and MCP share the same reranker client: four concurrent searches, eight shared
 HTTP batches of at most 20 passages, complete response validation and the existing
 three-second deadline. They submit batches concurrently, allowing requests to
 share GPU work. Duplicate searches coalesce; cached fallback orders and pagination
-remain stable. Query embeddings continue to use Vulkan as configured previously.
+remain stable. Query embeddings use reserved CUDA admission through the same private bridge,
+with Vulkan retained as the bounded fallback.
 
 The additive `cuda-batch-inference:8080` Kubernetes route targets the RTX host's
 8084 service. The legacy `nomic-embeddings-rtx3080:8080` route still targets 8081,

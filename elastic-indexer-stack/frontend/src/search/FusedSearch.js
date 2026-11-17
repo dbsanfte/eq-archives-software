@@ -77,6 +77,7 @@ export function createFusedSearch(search, getContext) {
       cache.head = (async () => {
         cache.response = await search({ ...state, current: 1, resultsPerPage: FUSION_WINDOW,
           _archiveRetrieval: 'lexical' }, queryConfig);
+        if (active !== cache) return;
         cache.lexicalTotal = cache.response.totalResults;
         let semantic = [];
         let semanticAvailable = false;
@@ -88,6 +89,7 @@ export function createFusedSearch(search, getContext) {
         } catch (_) {
           // Keep this lexical fallback for the entire paging session.
         }
+        if (active !== cache) return;
         cache.rows = fuseResults(cache.response.results, semantic);
         cache.seen = new Set(cache.rows.map(idOf));
         cache.upper = Math.min(CAPTURE_WINDOW + 1,
@@ -107,6 +109,7 @@ export function createFusedSearch(search, getContext) {
       if (active === cache) active = null;
       throw error;
     }
+    if (active !== cache) return { results: [], totalResults: 0 };
     const { current = 1, resultsPerPage = 20 } = state;
     const start = (current - 1) * resultsPerPage;
     const end = Math.min(CAPTURE_WINDOW, start + resultsPerPage);
@@ -127,7 +130,7 @@ export function createFusedSearch(search, getContext) {
       const flight = cache.flight;
       try { await flight; } finally { if (cache.flight === flight) cache.flight = null; }
     }
-    const truncated = cache.rows.length > CAPTURE_WINDOW || cache.offset >= CAPTURE_WINDOW && cache.offset < cache.lexicalTotal;
+    const truncated = cache.rows.length > CAPTURE_WINDOW || (cache.offset >= CAPTURE_WINDOW && cache.offset < cache.lexicalTotal);
     return { ...cache.response, results: cache.rows.slice(start, end),
       totalResults: cache.done && !truncated ? cache.rows.length : cache.upper };
   };

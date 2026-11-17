@@ -17,6 +17,20 @@ beforeEach(() => {
   jest.clearAllMocks();
   embeddingService.isEmbeddingServiceAvailable.mockReturnValue(true);
 });
+
+test('failed or malformed statistics never reset the displayed corpus count', async () => {
+  const original = global.fetch;
+  global.fetch = jest.fn().mockResolvedValueOnce({ ok: true, json: async () => ({ count: 1234 }) })
+    .mockResolvedValueOnce({ ok: false }).mockResolvedValueOnce({ ok: true, json: async () => ({ error: 'busy' }) });
+  jest.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    render(<ArchiveStatusBar />);
+    await act(async () => {});
+    expect(screen.getByText('Documents Indexed: 1,234')).toBeInTheDocument();
+    await act(async () => { await jest.advanceTimersByTimeAsync(10000); });
+    expect(screen.getByText('Documents Indexed: 1,234')).toBeInTheDocument();
+  } finally { global.fetch = original; }
+});
 afterEach(() => {
   jest.clearAllTimers();
   jest.useRealTimers();

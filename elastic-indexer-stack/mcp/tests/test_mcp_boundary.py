@@ -55,7 +55,7 @@ def test_mcp_holds_process_capacity_until_slow_responses_finish_and_cancel_recov
                            "params": {"name": "fetch", "arguments": {"id": HIT["_id"]}}}).encode()
         async with app.router.lifespan_context(app):
             try:
-                for _ in range(2):
+                for _ in range(8):
                     entered = asyncio.Event()
                     async def slow_send(message, entered=entered):
                         if message["type"] == "http.response.body":
@@ -66,13 +66,13 @@ def test_mcp_holds_process_capacity_until_slow_responses_finish_and_cancel_recov
                 sent = []
                 async def send(message): sent.append(message)
                 await asyncio.wait_for(app(scope(), receiver(body), send), 2)
-                assert sent[0]["status"] == 503 and len(calls) == 2
+                assert sent[0]["status"] == 503 and len(calls) == 8
                 tasks[0].cancel()
                 await asyncio.gather(tasks[0], return_exceptions=True)
                 sent.clear()
                 await asyncio.wait_for(app(scope(), receiver(body), send), 2)
-                assert sent[0]["status"] == 200 and len(calls) == 3
-                assert archive.requests._value == 4
+                assert sent[0]["status"] == 200 and len(calls) == 9
+                assert archive.requests._value == 16
             finally:
                 release.set()
                 await asyncio.gather(*tasks, return_exceptions=True)
@@ -224,7 +224,7 @@ def test_mcp_upload_deadline_disconnect_and_partial_send_release_capacity(monkey
             if mode == "disconnect": assert not sent
             elif mode == "passthrough": assert sent == [{"passed": True}]
             else: assert sent[0]["status"] == 503
-        assert guard.slots._value == 2
+        assert guard.slots._value == 8
     for mode in ("upload", "disconnect", "work", "send", "second_receive", "passthrough"):
         asyncio.run(exercise(mode))
 
@@ -247,8 +247,8 @@ def test_mcp_total_deadline_cancels_sdk_work_and_releases_retrieval(monkeypatch)
             # cancellation on the server loop, not a cross-thread response race.
             async with asyncio.timeout(.25):
                 await cancelled.wait()
-                while archive.requests._value != 4:
+                while archive.requests._value != 16:
                     await asyncio.sleep(0)
         client.portal.call(released)
-        assert archive.requests._value == 4
+        assert archive.requests._value == 16
         assert rpc(client, "ping").status_code == 200

@@ -37,7 +37,7 @@ def check(endpoint):
     for path, body, probe in stages:
         sockets = []
         try:
-            for _ in range(2):
+            for _ in range(8):
                 client = socket.socket()
                 sockets.append(client)
                 client.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024)

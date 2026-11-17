@@ -102,35 +102,48 @@ def provenance(source: dict) -> dict[str, str]:
 
 
 class Archive(Catalog):
-    def __init__(self, settings: Settings, es: httpx.AsyncClient, embeddings: httpx.AsyncClient, reranker=None):
+    def __init__(self, settings: Settings, es: httpx.AsyncClient, embeddings: httpx.AsyncClient, reranker=None, query_embeddings=None):
+        from .capacity import RETRIEVAL_SLOTS, QUERY_SLOTS
         self.reranker = reranker
         self.settings = settings
         self.es = es
         self.embeddings = embeddings
-        self.embedding_lock = asyncio.Lock()
-        self.requests = asyncio.Semaphore(4)
+        self.query_embeddings = query_embeddings
+        self.query_cooldown = 0.0
+        self.fallback_lock = asyncio.Lock()
+        self.embedding_lock = asyncio.Semaphore(QUERY_SLOTS if query_embeddings else 1)
+        self.requests = asyncio.Semaphore(RETRIEVAL_SLOTS)
         self.cache: OrderedDict[str, tuple[float, list[float]]] = OrderedDict()
         self.research_plans = OrderedDict()
         self.cooldown_until = 0.0
 
     @classmethod
     def connect(cls, settings: Settings):
+        from .capacity import RETRIEVAL_SLOTS, QUERY_SLOTS
         def secret(name):
             return (Path(settings.secret_dir) / name).read_text().strip()
 
+        query_url = os.getenv('QUERY_EMBEDDING_URL')
+        query_embeddings = None
+        if query_url:
+            query_embeddings = httpx.AsyncClient(base_url=query_url.rstrip('/') + '/',
+                headers={'Authorization': 'Bearer ' + Path(os.getenv('RERANK_KEY_FILE', '/run/reranker/api_key')).read_text().strip()},
+                timeout=httpx.Timeout(0.75), limits=httpx.Limits(max_connections=QUERY_SLOTS), trust_env=False)
         return cls(settings, httpx.AsyncClient(
             base_url=settings.elasticsearch_url.rstrip("/") + "/",
             auth=(secret("es_readonly_username"), secret("es_readonly_password")),
-            timeout=12, limits=httpx.Limits(max_connections=4), trust_env=False,
+            timeout=12, limits=httpx.Limits(max_connections=RETRIEVAL_SLOTS), trust_env=False,
         ), httpx.AsyncClient(
             base_url=settings.embedding_url.rstrip("/") + "/",
             headers={"Authorization": "Bearer " + secret("openai_api_key")},
             timeout=3, limits=httpx.Limits(max_connections=1), trust_env=False,
-        ), reranker=Reranker.connect())
+        ), reranker=Reranker.connect(), query_embeddings=query_embeddings)
 
     async def close(self):
         await self.es.aclose()
         await self.embeddings.aclose()
+        if self.query_embeddings:
+            await self.query_embeddings.aclose()
         if self.reranker:
             await self.reranker.close()
 
@@ -168,38 +181,68 @@ class Archive(Catalog):
             return cached[1]
         # Do not queue research traffic behind the single-slot shared model.
         # Long queries still get full lexical search without silent truncation.
-        if len(query) > 600 or self.embedding_lock.locked() or now < self.cooldown_until:
+        if len(query) > 600 or self.embedding_lock.locked() or (
+                now < self.cooldown_until and (not self.query_embeddings or now < self.query_cooldown)):
             return None
         async with self.embedding_lock:
-            try:
-                response = await self.embeddings.post("v1/embeddings", json={
-                    "input": [("task: search result | query: " if self.settings.model == "embeddinggemma-2-768-v1"
-                               else "search_query: ") + query], "model": self.settings.model,
-                })
-                response.raise_for_status()
-                vector = response.json()["data"][0]["embedding"]
-                if not isinstance(vector, list) or len(vector) != 768:
-                    raise ValueError("Invalid embedding dimensions")
-                if not all(type(x) in (float, int) and abs(x) <= 1
-                           and math.isfinite(x) for x in vector):
-                    raise ValueError("Invalid embedding values")
-                norm = math.sqrt(sum(x * x for x in vector))
-                if not 0.9 < norm < 1.1:
-                    raise ValueError("Embedding must be normalized")
-            except httpx.HTTPStatusError as error:
-                # A rejected input (e.g. token overflow) does not disable other
-                # users. Authentication, rate limits and outages still back off.
-                if error.response.status_code in (401, 403, 408, 429) or error.response.status_code >= 500:
-                    self.cooldown_until = now + 15
+            if self.query_embeddings and now >= self.query_cooldown:
+                try:
+                    async with asyncio.timeout(0.8):
+                        vector = await self._query_vector(self.query_embeddings, query)
+                    return self._cache_embedding(key, vector, now)
+                except httpx.HTTPStatusError as error:
+                    if error.response.status_code == 400:
+                        return None  # Invalid input is not grounds for failover or cooldown.
+                    self.query_cooldown = now + 15
+                except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError, TimeoutError):
+                    self.query_cooldown = now + 15
+            if self.fallback_lock.locked() or now < self.cooldown_until:
                 return None
-            except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError):
+            async with self.fallback_lock:
+                return await self._fallback_embedding(query, key, now)
+
+    async def _query_vector(self, client, query):
+        # The primary and Vulkan fallback must return the same complete model
+        # space. Bound response bytes as well as transport time.
+        async with client.stream('POST', 'v1/embeddings', json={
+            'input': [('task: search result | query: ' if self.settings.model == 'embeddinggemma-2-768-v1'
+                       else 'search_query: ') + query], 'model': self.settings.model}) as response:
+            response.raise_for_status()
+            raw = bytearray()
+            async for part in response.aiter_bytes():
+                raw.extend(part)
+                if len(raw) > 65536:
+                    raise ValueError('Oversized query embedding')
+        data = json.loads(raw)
+        rows = data['data']
+        if len(rows) != 1 or rows[0].get('index', 0) != 0 or data.get('model', self.settings.model) != self.settings.model:
+            raise ValueError('Embedding response identity differs')
+        vector = rows[0]['embedding']
+        if (not isinstance(vector, list) or len(vector) != 768 or
+                not all(type(x) in (int, float) and math.isfinite(x) and abs(x) <= 1 for x in vector) or
+                not 0.9 < sum(x*x for x in vector) < 1.1):
+            raise ValueError('Invalid query vector')
+        return vector
+
+    def _cache_embedding(self, key, vector, now):
+        self.cache[key] = (now + 300, vector)
+        self.cache.move_to_end(key)
+        while len(self.cache) > 128:
+            self.cache.popitem(last=False)
+        return vector
+
+    async def _fallback_embedding(self, query, key, now):
+        try:
+            async with asyncio.timeout(3):
+                vector = await self._query_vector(self.embeddings, query)
+        except httpx.HTTPStatusError as error:
+            if error.response.status_code in (401, 403, 408, 429) or error.response.status_code >= 500:
                 self.cooldown_until = now + 15
-                return None
-            self.cache[key] = (now + 300, vector)
-            self.cache.move_to_end(key)
-            while len(self.cache) > 128:
-                self.cache.popitem(last=False)
-            return vector
+            return None
+        except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError, TimeoutError):
+            self.cooldown_until = now + 15
+            return None
+        return self._cache_embedding(key, vector, now)
 
     async def execute(self, body: dict, stable_order: bool = False) -> dict:
         try:

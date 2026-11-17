@@ -5,7 +5,7 @@ on the RTX host's loopback `127.0.0.1:8084`, with the existing dedicated API key
 The previous llama.cpp service remains on `127.0.0.1:8083` for rollback and
 comparison. Public search and MCP use the bounded top-60 API described in the
 [MCP guide](../../elastic-indexer-stack/mcp/README.md). The PN50 test service is
-stopped; live query embeddings retain its Vulkan GPU. The optional Vulkan/CPU
+stopped; live query embeddings prefer reserved CUDA capacity and retain Vulkan as fallback. The optional Vulkan/CPU
 profiles remain available for isolated experiments.
 
 On eqvm, `eqarchives-reranker-tunnel.service` maintains an SSH forward bound only
@@ -13,7 +13,7 @@ to the CNI bridge `10.42.0.1:8083`. It connects to the GPU host's loopback port 
 using verified SSH host keys and an operator-owned identity. Only the search API
 gets the dedicated reranker key; the static frontend receives no credentials.
 The API egress policy adds only this exact host/port. No public model ingress exists.
-Both clients share two search slots and four concurrent 20-passage HTTP batches;
+Both clients share two search slots and eight concurrent 20-passage HTTP batches;
 the GPU scheduler can combine work across searches. The three-second deadline,
 fallback caching, response validation and admission limits remain unchanged.
 The previous CUDA embedding and vision containers retain their configuration.

@@ -420,3 +420,14 @@ Browser tests verify compact result requests, direct reader navigation, capture
 history previews, and semantic
 search and keyword-only behavior at mobile and desktop widths. Jest covers
 preview retries/cancellation, obsolete input, embedding deadlines and cache bounds.
+## Search congestion and recovery
+
+The same-origin search transport retries a 429/502/503/504 response at most once,
+honoring numeric or HTTP-date `Retry-After` values within a 12-second overall
+deadline. Longer waits fail visibly instead of retrying early. The deadline
+includes response bodies. Optional reranking falls back promptly; busy embedding
+requests use keyword results for that search without disabling subsequent queries.
+Superseded hybrid searches stop before further retrieval/facet/ranking stages.
+Errors show a safe explanation and a retry button; upstream response bodies are
+never displayed. Browser HTTP admission is eight requests, retained through body
+delivery, while MCP has an equal independent eight exchanges and existing bounds.
