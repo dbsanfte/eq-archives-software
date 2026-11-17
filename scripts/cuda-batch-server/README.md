@@ -89,7 +89,7 @@ Interactive reranking gets bursts of up to 500 ms before another embedding GPU
 batch starts. Already running forwards can overlap on independent streams. The
 bounded burst prevents embedding starvation under continuous searches; there is
 no intentional delay when reranking is idle. This protects the public client's
-five-second deadline from continuous bulk traffic. The API-only reranker key can
+eight-second deadline from continuous bulk traffic. The API-only reranker key can
 also submit one prefixed search query to `/v1/embeddings`, with eight reserved
 HTTP slots that bulk embedding clients cannot consume. Query and rerank requests
 are coequal. Query embeddings run ahead of bulk embedding batches; after a
@@ -122,7 +122,7 @@ with eight inputs per request, avoiding nested concurrency.
 
 Portal and MCP share the same reranker client: eight concurrent searches, eight shared
 HTTP batches of at most 20 passages, complete response validation and the existing
-five-second deadline. They submit batches concurrently, allowing requests to
+eight-second deadline. They submit batches concurrently, allowing requests to
 share GPU work. Duplicate searches coalesce; cached fallback orders and pagination
 remain stable. Query embeddings use reserved CUDA admission through the same private bridge,
 with Vulkan retained as the bounded fallback.

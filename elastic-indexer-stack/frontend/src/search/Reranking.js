@@ -13,7 +13,7 @@ export async function rerankResults(query, results, index) {
   const ids = results.map(result => result._meta?.id);
   if (ids.length < 2 || ids.some(id => typeof id !== 'string' || !id) || new Set(ids).size !== ids.length) return results;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 6500);
+  const timer = setTimeout(() => controller.abort(), 10000);
   try {
     const response = await fetch(`/elasticsearch/${index}/_rerank`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },

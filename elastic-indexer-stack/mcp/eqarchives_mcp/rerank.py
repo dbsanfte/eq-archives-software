@@ -82,7 +82,7 @@ class Reranker:
         self.pending = {}
         self.cache = OrderedDict()
         self.cooldown = 0.0
-        self.deadline = 5.0
+        self.deadline = 8.0
         self.passage_mode = PASSAGE_MODE
 
     @classmethod
@@ -99,7 +99,7 @@ class Reranker:
         if not key:
             raise ValueError("Reranker credential is empty")
         return cls(httpx.AsyncClient(base_url=url.rstrip("/") + "/", headers={"Authorization": "Bearer " + key},
-                   trust_env=False, follow_redirects=False, timeout=4.5, limits=httpx.Limits(max_connections=8)),
+                   trust_env=False, follow_redirects=False, timeout=7.5, limits=httpx.Limits(max_connections=8)),
                    Tokenizer.from_file(str(tokenizer_path)))
 
     async def close(self):
