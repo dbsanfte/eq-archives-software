@@ -101,8 +101,10 @@ The existing Compose file is a deployment reference with environment-specific
 addresses and zero replicas for the backend services. Adapt the addresses,
 secrets, index names, and replica counts before using it for your own stack.
 Elasticsearch and enrichment model servers must be provisioned separately.
-Production live query embeddings use the Vulkan service described in the
-[deployment guide](../k8s-manifests/README.md). Current curation imports and policy
-maintenance use the [CUDA batch service](../../scripts/cuda-batch-server/README.md).
+Production live query embeddings prefer reserved capacity on the
+[CUDA batch service](../../scripts/cuda-batch-server/README.md), with bounded
+Vulkan fallback described in the [deployment guide](../k8s-manifests/README.md).
+Current curation imports and policy maintenance use the CUDA batch service's
+bulk queue, behind coequal browser and MCP work.
 
 For the project overview, see the [root README](../../README.md).

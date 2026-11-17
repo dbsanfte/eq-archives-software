@@ -68,7 +68,7 @@ An 8,192-character preparation bound applies to scoring excerpts; readers retain
 full text. Images without text keep their slots.
 
 Scoring permits eight concurrent searches and eight shared concurrent scoring requests,
-with a eight-second total deadline per search, a 15-second
+with an eight-second total deadline per search, a 15-second
 outage cooldown, 128 KiB request / 32 KiB response bounds and strict model/score/index
 validation. Production selects one matching passage per candidate. The internal
 evaluation path permits at most two passages per candidate and 120 prompts;

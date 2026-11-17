@@ -404,7 +404,7 @@ retry and cancellation states.
 Embedding preparation and query construction share their eligibility rules in
 `src/search/QueryPolicy.js`. Quoted/operator searches, disabled semantic search,
 empty input, absent vector fields and an active service cooldown skip embedding
-requests. New input and navigation abort obsolete requests. A five-second deadline
+requests. New input and navigation abort obsolete requests. A ten-second deadline
 covers both headers and the body; failures fall back to keyword search. Completed
 embeddings are retained in a bounded 50-entry browser cache. This cache is local
 to the browser; MCP retains its own bounded cache.
