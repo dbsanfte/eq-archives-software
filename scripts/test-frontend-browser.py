@@ -123,9 +123,11 @@ class FrontendBrowserTests(unittest.TestCase):
                         self.mock_elasticsearch(route)
                     embedding_reply = {'data': [{'embedding': [1.0] + [0.0] * 767}]}
                     def embed(route):
-                        if route.request.post_data_json['input'][0].endswith(' Kunark'):
-                            return route.fulfill(json=embedding_reply)
-                        embeddings.append(route)
+                        query = route.request.post_data_json['input'][0]
+                        if query.endswith(('cleric healing', 'wizard epic quest')):
+                            embeddings.append(route)
+                        else:
+                            route.fulfill(json=embedding_reply)
                     page.route('**/elasticsearch/**', archive)
                     page.route('**/openai/v1/embeddings', embed)
                     page.goto(self.base_url, wait_until='networkidle')
@@ -145,9 +147,22 @@ class FrontendBrowserTests(unittest.TestCase):
                         expect(page.locator('.sui-search-error')).to_have_count(0)
                     # A later edit still searches automatically: no Enter key or
                     # Search button may be needed after results have arrived.
+                    field.press('End')
                     with page.expect_request('**/openai/v1/embeddings'):
                         field.press_sequentially(' Kunark', delay=40)
                     page.wait_for_url(lambda url: parse_qs(urlparse(url).query).get('q') == ['wizard epic quest Kunark'])
+                    # Android keyboards can deliver a composed word rather than
+                    # desktop key events. The committed text must also search.
+                    field.evaluate('''el => {
+                        el.focus();
+                        el.dispatchEvent(new CompositionEvent('compositionstart', {bubbles: true}));
+                        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(el, 'cleric resurrection');
+                        el.dispatchEvent(new InputEvent('input', {bubbles: true, data: 'cleric resurrection',
+                            inputType: 'insertCompositionText', isComposing: true}));
+                        el.dispatchEvent(new CompositionEvent('compositionend', {bubbles: true, data: 'cleric resurrection'}));
+                    }''')
+                    page.wait_for_url(lambda url: parse_qs(urlparse(url).query).get('q') == ['cleric resurrection'])
+                    expect(field).to_have_value('cleric resurrection')
                     self.assertEqual(errors, [])
                 finally:
                     for route in embeddings:
