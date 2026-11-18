@@ -9,7 +9,7 @@ RUN CI=true yarn test:ci --runInBand
 ARG GIT_SHA
 RUN REACT_APP_GIT_SHA="$GIT_SHA" yarn build
 
-FROM nginx:1.30.6-alpine@sha256:583b7f2fce1cdb8da5ad5c39ebd3c33b98b87d493190e548bdee1fa8c619c311
+FROM nginx:1.31.9-alpine@sha256:90b6bd2aec278b16b98221d64deb1d6d35d164567f507ab0716e6053878315aa
 COPY nginx-main.conf /etc/nginx/frontend-main.conf
 COPY security-headers.conf /etc/nginx/security-headers.conf
 COPY nginx.conf.template /etc/nginx/frontend.conf.template
