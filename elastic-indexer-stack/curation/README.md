@@ -1235,7 +1235,7 @@ renews it after 32 successful responses. Retry cooldowns continue across renewal
 
 The Azure VM and static addresses are in `eqarchives-wayback-relay-rg`. Its
 HAProxy listener is bound to VM loopback and distributes new TCP connections to
-four Azure NIC IP configurations. The relay only connects to `web.archive.org:443`.
+eight Azure NIC IP configurations. The relay only connects to `web.archive.org:443`.
 The SSH tunnel account can open only the relay listener. Azure allows SSH to
 the primary address from `eqvm`'s public IPv4 address. If that public source
 changes, update `relay-nsg` rule `eqvm-ssh` and verify the tunnel has reconnected.
