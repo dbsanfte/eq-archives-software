@@ -13,6 +13,8 @@ require_relative 'vendor/wayback-machine-downloader/lib/wayback_machine_download
 class CaptureFailure < StandardError; end
 
 class PersistentWayback
+  RELAY_RESPONSES_PER_CONNECTION = 32
+
   attr_reader :requests, :bytes, :connections
 
   def initialize(config)
@@ -20,6 +22,13 @@ class PersistentWayback
     unless @origin.to_s == 'https://web.archive.org' ||
            (@origin.scheme == 'http' && ['127.0.0.1', 'localhost'].include?(@origin.host))
       raise CaptureFailure, 'Only Wayback or a loopback test fixture is allowed'
+    end
+    relay_port = ENV['EQARCHIVES_WAYBACK_RELAY_PORT']
+    if @origin.scheme == 'https' && relay_port && !relay_port.empty?
+      unless relay_port.match?(/\A[0-9]{1,5}\z/) && relay_port.to_i.between?(1, 65535)
+        raise CaptureFailure, 'Invalid Wayback relay port'
+      end
+      @relay_port = relay_port.to_i
     end
     limits(config)
     @last = nil
@@ -57,13 +66,17 @@ class PersistentWayback
 
   def connection
     return @http if @http && @http.started?
-    @http = Net::HTTP.new(@origin.host, @origin.port, nil)
+    @http = Net::HTTP.new(@origin.host, @relay_port || @origin.port, nil)
+    # The SSH tunnel forwards TLS without terminating it. Retain the Wayback
+    # hostname for SNI and certificate checks, and connect to loopback only.
+    @http.ipaddr = '127.0.0.1' if @relay_port
     @http.use_ssl = @origin.scheme == 'https'
     @http.open_timeout = [12, @deadline - clock].min
     @http.read_timeout = [20, @deadline - clock].min
     @http.keep_alive_timeout = 60
     @http.max_retries = 0
     @http.start
+    @relay_responses = 0
     @connections += 1
     @http
   end
@@ -95,6 +108,7 @@ class PersistentWayback
       started = clock
       begin
         request = Net::HTTP::Get.new(path)
+        request['Host'] = @origin.host if @relay_port
         request['User-Agent'] = 'EQArchivesCandidateCrawler/1.0 (+https://search.eqarchives.org)'
         request['Accept-Encoding'] = 'identity'
         http = connection
@@ -177,6 +191,12 @@ class PersistentWayback
       if !sink && response['content-encoding'].to_s.downcase == 'gzip'
         body = Zlib::GzipReader.wrap(StringIO.new(body)) { |reader| reader.read(response_limit + 1) }
         raise CaptureFailure, 'Expanded response exceeds byte limit' if body.bytesize > response_limit
+      end
+      if @relay_port
+        @relay_responses += 1
+        # Share successful traffic across the relay's addresses while keeping
+        # one persistent connection and the same pacing and cooldown state.
+        close if @relay_responses >= RELAY_RESPONSES_PER_CONNECTION
       end
       return { 'body' => body, 'path' => path, 'content_type' => response['content-type'],
                'bytes' => written, 'sha256' => checksum.hexdigest,

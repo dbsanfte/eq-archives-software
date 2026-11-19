@@ -1,6 +1,8 @@
 """Real HTTP/Ruby regressions for independent workers sharing one connection."""
 import io
 from pathlib import Path
+import ssl
+import subprocess
 import tempfile
 import threading
 import time
@@ -12,6 +14,46 @@ from acquisition import Downloader
 from common import CrawlError, Store
 from test_downloader import FixtureServer
 from wayback_transport import SharedWayback, current_transport
+
+
+class RelayTransportTests(unittest.TestCase):
+    def test_loopback_relay_rotates_shared_connection_and_preserves_wayback_tls(self):
+        with tempfile.TemporaryDirectory() as temporary, FixtureServer() as server:
+            root = Path(temporary)
+            key, cert = root / 'key.pem', root / 'cert.pem'
+            subprocess.run(['openssl', 'req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256',
+                            '-nodes', '-subj', '/CN=web.archive.org', '-addext', 'subjectAltName=DNS:web.archive.org',
+                            '-keyout', str(key), '-out', str(cert), '-days', '1'], check=True, capture_output=True)
+            names = []
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(cert, key)
+            context.set_servername_callback(lambda sock, name, context: names.append(name))
+            server.socket = context.wrap_socket(server.socket, server_side=True)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            shared = SharedWayback(threading.Event())
+            store = Store(root / 'capture')
+            try:
+                args = SimpleNamespace(delay=0, bytes_per_second=0, max_requests=33,
+                                       max_page_bytes=4096, max_bytes=8192, max_seconds=20)
+                job = {'op': 'capture_file', 'url': 'http://guild.example/', 'timestamp': '20000101000000',
+                       'from': '19990101000000', 'to': '20061231235959', 'destination': str(root / 'capture.html')}
+                with patch.dict('os.environ', {'EQARCHIVES_WAYBACK_RELAY_PORT': str(server.server_port),
+                                               'SSL_CERT_FILE': str(cert)}), shared.bind():
+                    client = Downloader(store, args)
+                    for _ in range(33):
+                        client.call(job)
+                    client.close()
+                self.assertEqual((root / 'capture.html').read_bytes(), server.body)
+                self.assertEqual(store.get('wayback_transport')['requests'], 33)
+                self.assertEqual(store.get('wayback_transport')['connections'], 2)
+                self.assertEqual(names, ['web.archive.org'] * 2)
+                self.assertEqual(server.hosts, ['web.archive.org'] * 33)
+            finally:
+                store.close()
+                shared.close()
+                server.shutdown()
+                thread.join(2)
 
 
 class SharedTransportTests(unittest.TestCase):

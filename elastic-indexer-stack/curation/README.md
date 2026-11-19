@@ -1223,3 +1223,29 @@ and removes structurally proven image toolbars from auxiliary forum pages.
 Maintenance continues the unfinished older-policy frontier, retries scoped gaps
 and then sweeps the earlier prefix, reusing vectors only with exact proof.
 Existing broad Jobs and old checkpoints remain retained.
+
+### Optional Wayback relay
+
+The operator-owned `eqarchives-wayback-relay` ConfigMap in `eqarchives-es`
+enables the relay when its `port` key is set to `18442`. The curation pod uses
+its host network to reach the `eqarchives-wayback-tunnel.service` listener on
+`eqvm` loopback. Ruby retains Wayback's HTTPS hostname, certificate checks and
+request budgets. The shared transport keeps one connection open at a time and
+renews it after 32 successful responses. Retry cooldowns continue across renewals.
+
+The Azure VM and static addresses are in `eqarchives-wayback-relay-rg`. Its
+HAProxy listener is bound to VM loopback and distributes new TCP connections to
+four Azure NIC IP configurations. The relay only connects to `web.archive.org:443`.
+The SSH tunnel account can open only the relay listener. Azure allows SSH to
+the primary address from `eqvm`'s public IPv4 address. If that public source
+changes, update `relay-nsg` rule `eqvm-ssh` and verify the tunnel has reconnected.
+The host service loads its dedicated SSH key, pinned host key and endpoint from
+`/etc/eqarchives-wayback-relay`. Keep those files outside source control.
+
+Relay configuration templates are in
+[`scripts/archive-crawler/wayback-relay`](../../scripts/archive-crawler/wayback-relay).
+Check `journalctl -u eqarchives-wayback-tunnel` on `eqvm` and
+`journalctl -u haproxy` on Azure. Verify a bounded CDX lookup and dated replay
+through local TCP port 18442 while retaining `web.archive.org` as the TLS name.
+To return to direct access, remove the relay ConfigMap and restart only the
+curation Deployment. The ConfigMap and host tunnel are independent of CI.
