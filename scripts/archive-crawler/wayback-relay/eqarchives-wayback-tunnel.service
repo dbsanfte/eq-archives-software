@@ -1,0 +1,21 @@
+[Unit]
+Description=Private EQ Archives Wayback relay tunnel
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+DynamicUser=yes
+EnvironmentFile=/etc/eqarchives-wayback-relay/endpoint.env
+LoadCredential=key:/etc/eqarchives-wayback-relay/tunnel-key
+LoadCredential=known-hosts:/etc/eqarchives-wayback-relay/known-hosts
+ExecStart=/usr/bin/ssh -F /dev/null -nNT -o BatchMode=yes -o ExitOnForwardFailure=yes -o ConnectTimeout=12 -o ServerAliveInterval=15 -o ServerAliveCountMax=2 -o StrictHostKeyChecking=yes -o GlobalKnownHostsFile=/dev/null -o UserKnownHostsFile=${CREDENTIALS_DIRECTORY}/known-hosts -o IdentitiesOnly=yes -i ${CREDENTIALS_DIRECTORY}/key -L 127.0.0.1:18442:127.0.0.1:18442 wayback-tunnel@${WAYBACK_RELAY_HOST}
+Restart=always
+RestartSec=10s
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -135,6 +135,12 @@ spec:
                 secretKeyRef:
                   name: eqarchives-policy-indexer-secrets
                   key: es_index
+            - name: EQARCHIVES_WAYBACK_RELAY_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: eqarchives-wayback-relay
+                  key: port
+                  optional: true
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

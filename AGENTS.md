@@ -698,6 +698,11 @@ to resumed portal work without rewriting saved source manifests or cumulative
 limits. Waiting counts toward the original deadline; closing a session
 must not close another worker’s connection. Keep serial publication with the
 foreground-import serialization guard.
+The optional operator-owned `eqarchives-wayback-relay` ConfigMap routes only
+Wayback through the authenticated host loopback tunnel. Keep TLS verification,
+serial transport and shared cooldowns intact. For relay traffic, renew the connection
+after 32 successful responses so the relay can distribute connections across its
+eight IPv4 addresses. Host credentials and Azure resources are operator-managed.
 Run the sole import Job reconciler independently of publication under that same
 lease, with a ten-second idle interval and publication-completion wake. Long
 Git work must not delay completed Job reconciliation or approved imports. Include

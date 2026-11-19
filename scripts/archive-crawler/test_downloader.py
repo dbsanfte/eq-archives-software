@@ -19,6 +19,7 @@ class FixtureServer(ThreadingHTTPServer):
     def __init__(self):
         self.connections = 0
         self.requests = []
+        self.hosts = []
         self.statuses = []
         self.catalog = [["timestamp", "original", "mimetype", "statuscode", "digest", "length"],
                         ["20000101000000", "http://guild.example/Guide%2FOne?a=1&b=2", "text/html", "200", "ABCD", "80"]]
@@ -51,6 +52,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         server = self.server
         server.requests.append((self.path, time.monotonic()))
+        server.hosts.append(self.headers.get('Host'))
         status = server.statuses.pop(0) if server.statuses else 200
         is_catalog = self.path.startswith("/cdx/")
         if server.redirect and not is_catalog:
