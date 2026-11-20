@@ -3,7 +3,7 @@ import json
 import re
 from urllib.parse import urlsplit
 
-from common import (CrawlError, Page, TIERS, capture_scope, decode, digest,
+from common import (CrawlError, Page, SOURCE_DECODE_ERROR, TIERS, capture_scope, decode, digest,
                     in_capture_window, now, original_url, site_scope, within_capture_scope)
 from selection_policy import VERSION, home_source
 from wayback_transport import TransportUnavailable
@@ -30,11 +30,16 @@ def context(store, candidate, captures, downloader):
     key = 'selection_context:' + candidate['id']
     if store.get(key, {}).get('version') == VERSION:
         return
-    used, parents, entries = 0, set(), []
+    used, parents, entries, errors = 0, set(), [], []
     current = capture_scope(candidate['url'], 'directory')
     for capture in captures:
         page = EvidencePage(capture['url'])
-        page.feed(decode((store.root/capture['path']).read_bytes(), capture.get('content_type') or '')[0])
+        try:
+            text, _ = decode((store.root/capture['path']).read_bytes(), capture.get('content_type') or '')
+        except UnicodeError:
+            errors.append(SOURCE_DECODE_ERROR)
+            continue
+        page.feed(text)
         size = len('\n'.join(page.text))
         used += size
         # Follow at most two same-scope frame/entry targets. This is evidence
@@ -59,7 +64,7 @@ def context(store, candidate, captures, downloader):
     requests = [(url, None) for url in entries] + [(url, url) for url in homes]
     level = captures[0]['tier']
     start, end = TIERS[level]
-    added, errors = 0, []
+    added = 0
     for url, boundary in requests:
         try:
             listing = downloader.call({'op':'list', 'url':url, 'from':start, 'to':end})
@@ -82,7 +87,12 @@ def context(store, candidate, captures, downloader):
                 raw = destination.read_bytes()
                 if digest(raw) != result['sha256'] or len(raw) != result['bytes']:
                     raise CrawlError('Homepage source hash changed')
-                text, encoding = decode(raw, result.get('content_type') or '')
+                try:
+                    text, encoding = decode(raw, result.get('content_type') or '')
+                except UnicodeError:
+                    # Preserve the raw file and try the remaining dated context.
+                    errors.append(SOURCE_DECODE_ERROR)
+                    continue
                 page = Page(result['url']);page.feed(text)
                 size = len('\n'.join(page.text))
                 # Optional context cannot push useful candidate text over the

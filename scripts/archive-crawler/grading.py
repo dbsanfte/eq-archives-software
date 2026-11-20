@@ -163,7 +163,11 @@ def sources(store, candidate, maximum):
             raise CrawlError("Staged source file unavailable; leave candidate unjudged") from None
         if digest(data) != capture["sha256"]:
             raise CrawlError("Source changed since staging; approval and grading need fresh evidence")
-        text, _ = decode(data, capture.get("content_type") or "")
+        try:
+            text, _ = decode(data, capture.get("content_type") or "")
+        except UnicodeError:
+            # A saved evidence set is bound in full. Never grade a subset of it.
+            raise CrawlError('Staged source exceeds decoding limits; leave candidate unjudged') from None
         page = Page(capture["url"])
         page.feed(text)
         result.append({"slot": len(result), "url": capture["url"], "timestamp": capture["timestamp"],

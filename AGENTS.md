@@ -1391,6 +1391,9 @@ New same-model maintenance keys inherit the unfinished older-policy cursor,
 retain old ledgers/Jobs, retry scoped failures and sweep the completed prefix
 after the tail. Exact source/view/request proof still gates vector reuse.
 Compact portal reads page in SQL; only visible records decode full manifests.
+Activity timestamps use covering batch metadata. Candidate and optional homepage
+sampling retain undecodable bytes without using them as grading evidence or
+aborting discovery. Keep the decoder's existing damage limits.
 Bulk action tokens are fetched explicitly at confirmation preparation and
 revalidated transactionally. Keep stage/filter/search/order/count parity.
 Luna schema array bounds retain known pre-bounds source-grade compatibility;

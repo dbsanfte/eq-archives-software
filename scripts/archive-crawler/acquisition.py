@@ -5,7 +5,8 @@ from pathlib import Path
 import subprocess
 import time
 
-from common import CrawlError, Page, TIERS, decode, digest, in_capture_window, now, original_url, site_scope, tier, within_capture_scope
+from common import (CrawlError, Page, SOURCE_DECODE_ERROR, TIERS, decode, digest,
+                    in_capture_window, now, original_url, site_scope, tier, within_capture_scope)
 from wayback_transport import TransportUnavailable, current_transport
 
 
@@ -160,6 +161,7 @@ def sample(args, store, *, candidates=None, downloader=None):
                 continue
             attempts += 1
             captures, listings = [], []
+            decode_failures = 0
             mode = json.loads(candidate['coverage'] or '{}').get('scope_mode', 'directory')
             board = mode == 'sitepowerup'
             try:
@@ -196,15 +198,19 @@ def sample(args, store, *, candidates=None, downloader=None):
                         data = destination.read_bytes()
                         if digest(data) != result["sha256"]:
                             raise CrawlError("Capture hash mismatch")
-                        text, encoding = decode(data, result.get("content_type") or "")
-                        if board:
-                            from sitepowerup import board_name, belongs, source_page
-                            page, encoding = source_page(data, result['url'], result.get('content_type') or '')
-                            if not belongs(page, result['url'], board_name(candidate['url'])):
-                                raise CrawlError('SitePowerUp source does not verify the requested board; no grade requested')
-                        else:
-                            page = Page(result["url"])
-                            page.feed(text)
+                        try:
+                            if board:
+                                from sitepowerup import board_name, belongs, source_page
+                                page, encoding = source_page(data, result['url'], result.get('content_type') or '')
+                                if not belongs(page, result['url'], board_name(candidate['url'])):
+                                    raise CrawlError('SitePowerUp source does not verify the requested board; no grade requested')
+                            else:
+                                text, encoding = decode(data, result.get("content_type") or "")
+                                page = Page(result["url"])
+                                page.feed(text)
+                        except UnicodeError:
+                            decode_failures += 1
+                            continue
                         if not " ".join(page.text).strip():
                             raise CrawlError("Capture contains no readable source text")
                         result.update({"path": str(destination.relative_to(store.root)), "tier": level,
@@ -218,7 +224,8 @@ def sample(args, store, *, candidates=None, downloader=None):
                         store.db.execute("UPDATE candidates SET captures=?,state='sampled',error=NULL WHERE id=?",
                                          (json.dumps(captures), candidate["id"]))
                         store.db.commit()
-                    break  # Prefer tier 1; use tier 2 when tier 1 has no captures.
+                    if captures:
+                        break  # Prefer tier 1; fall back if none were usable.
                 if captures and getattr(args, 'selection_context', False):
                     from selection_samples import context
                     context(store, candidate, captures, downloader)
@@ -229,9 +236,12 @@ def sample(args, store, *, candidates=None, downloader=None):
                 responses = sorted({code for listing in listings for code, _ in listing['response_types']})
                 if not captures and not variants and responses:
                     error = 'Wayback has archived responses for this URL, but no usable HTML source was recovered (HTTP ' + ', '.join(responses) + ').'
+                if not captures and decode_failures:
+                    state, error = 'sample_error', SOURCE_DECODE_ERROR
                 store.db.execute("UPDATE candidates SET state=?,error=? WHERE id=?",
                                  (state, error, candidate["id"]))
-                store.event(candidate["id"], "sample", {"listings": listings, "captures": len(captures)})
+                store.event(candidate["id"], "sample", {"listings": listings, "captures": len(captures),
+                                                        "decode_failures": decode_failures})
                 successes += bool(captures)
             except TransportUnavailable:
                 raise

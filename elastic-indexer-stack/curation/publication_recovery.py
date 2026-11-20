@@ -87,7 +87,9 @@ def summary(store):
         AND o.rowid=(SELECT MAX(n.rowid) FROM operations n WHERE n.kind='publish'
             AND json_extract(n.payload,'$.batch_id')=b.id) ORDER BY o.updated DESC''').fetchall()
     retries=[r for r in rows if r['retry_at'] and not r['paused']]
-    latest=store.db.execute("SELECT MAX(updated) FROM batches WHERE state='indexed'").fetchone()[0]
+    # The state-only index requires a table lookup for every indexed batch.
+    # Batch rows can contain large manifests, so poll the covering index instead.
+    latest=store.db.execute("SELECT MAX(updated) FROM batches INDEXED BY batch_metadata WHERE state='indexed'").fetchone()[0]
     return {'waiting':len(rows),'retrying':len(retries),'attention':len(rows)-len(retries),
             'next_retry':min((r['retry_at'] for r in retries),default=None),
             'error':rows[0]['error'] if rows else None,'last_indexed':latest,

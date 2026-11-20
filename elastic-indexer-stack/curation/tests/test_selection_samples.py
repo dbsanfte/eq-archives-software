@@ -22,8 +22,9 @@ def run_context(root,row,*,listing=None,body=b'<p>An EverQuest guild on Fennin R
         if job['op']=='list':
             return listing if listing is not None else {'captures':[
                 {'url':'http://guild.example/','timestamp':'20000101000000','digest':'H','length':'100'}]}
-        Path(job['destination']).write_bytes(body)
-        return {**{'url':job['url'],'timestamp':job['timestamp'],'sha256':digest(body),'bytes':len(body),
+        content = body[job['timestamp']] if isinstance(body, dict) else body
+        Path(job['destination']).write_bytes(content)
+        return {**{'url':job['url'],'timestamp':job['timestamp'],'sha256':digest(content),'bytes':len(content),
                    'content_type':'text/html'},**(returned or {})}
     with connect(root) as store:
         raw=store.db.execute('SELECT * FROM candidates WHERE id=?',(row['id'],)).fetchone()
@@ -56,6 +57,25 @@ def test_context_prefers_candidate_era_and_checks_later_home_for_topic_changes(t
     calls,updated,result=run_context(root,row,listing=listing)
     assert [c['timestamp'] for c in calls if c['op']=='capture']==['20000101000000','20011101000000']
     assert len(updated['captures'])==3 and result['captures']==2
+
+
+def test_damaged_homepage_remains_raw_and_later_readable_context_is_kept(tmp_path):
+    root = tmp_path / 'state'
+    row = add_candidate(root)
+    damaged = 'こんにちは世界。'.encode('iso2022_jp') + b'\x1b$B~~\x1b(B' * 20
+    listing = {'captures': [{'url': 'http://guild.example/', 'timestamp': stamp, 'digest': 'H', 'length': '100'}
+                            for stamp in ('20000101000000', '20011101000000')]}
+    calls, updated, result = run_context(root, row, listing=listing,
+        body={'20000101000000': damaged, '20011101000000': b'<p>Our guild on Fennin Ro.</p>'})
+    fetched = [call for call in calls if call['op'] == 'capture']
+    assert [call['timestamp'] for call in fetched] == ['20000101000000', '20011101000000']
+    assert Path(fetched[0]['destination']).read_bytes() == damaged
+    assert updated['captures'][0] == row['captures'][0]
+    assert [capture['timestamp'] for capture in updated['captures'][1:]] == ['20011101000000']
+    assert result['status'] == 'sampled' and result['captures'] == 1
+    assert 'decod' in result['reason'].lower()
+    with connect(root) as store:
+        assert 'Fennin Ro' in sources(store, updated, 120000)[1]['complete_extracted_text']
 
 
 @pytest.mark.parametrize('listing',[{'captures':[]},{'captures':[{'url':'http://other.example/','timestamp':'20000101000000','digest':'H','length':'1'}]},

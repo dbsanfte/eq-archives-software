@@ -22,7 +22,7 @@ def mapping(column, values, fallback):
 CANDIDATE=mapping('c.state',CANDIDATE_STAGES,"'candidates'")
 STAGE="CASE WHEN json_extract(c.coverage,'$.capture.continuation') IS NOT NULL AND c.state IN ('approved_waiting_batch','capture_resume_queued','capturing') THEN "+CANDIDATE+' ELSE '+mapping('b.state',REVIEW_STAGES,CANDIDATE)+' END'
 BASE="""WITH sites AS (SELECT c.id,c.url,c.scope,c.priority,c.state,c.coverage,c.captures,c.rating,
-    """+STAGE+""" stage FROM candidates c INDEXED BY candidate_metadata LEFT JOIN batches b
+    """+STAGE+""" stage FROM candidates c INDEXED BY candidate_metadata LEFT JOIN batches b INDEXED BY batch_metadata
     ON b.id=COALESCE(json_extract(c.coverage,'$.capture.review_id'),json_extract(c.coverage,'$.capture.batch_id')))
 """
 TIER="COALESCE((SELECT MIN(COALESCE(NULLIF(json_extract(value,'$.tier'),0),3)) FROM json_each(s.captures)),3)"
@@ -46,12 +46,20 @@ def listing(store, request, captured_states):
     db.create_function('curation_grade',2,selected_grade,deterministic=True)
     db.create_function('curation_fold',1,lambda s:(s or '').casefold(),deterministic=True)
     stats={stage.value:0 for stage in Stage}
-    for row in db.execute(BASE+'SELECT stage,COUNT(*) count FROM sites GROUP BY stage'):stats[row['stage']]=row['count']
     grades={str(n):0 for n in range(-1,4)}
-    for row in db.execute(BASE+"SELECT curation_grade(rating,COALESCE(json_array_length(captures),0)>0) grade,COUNT(*) count FROM sites WHERE stage='candidates' GROUP BY grade"):
-        grades[str(row['grade'])]=row['count']
     captured="state IN ("+','.join("'"+s+"'" for s in captured_states)+')'
-    counters=dict(db.execute(BASE+"SELECT COALESCE(SUM(state='capturing'),0) capturing,COALESCE(SUM("+captured+"),0) captured,COALESCE(SUM(state IN ('approval_pending','deferred') AND json_extract(rating,'$.grade')>=2),0) recommended FROM sites").fetchone())
+    counters = dict.fromkeys(('capturing', 'captured', 'recommended'), 0)
+    for row in db.execute(BASE + f"""SELECT stage,
+            CASE WHEN stage='candidates' THEN curation_grade(rating,COALESCE(json_array_length(captures),0)>0) END grade,
+            COUNT(*) count, COALESCE(SUM(state='capturing'),0) capturing,
+            COALESCE(SUM({captured}),0) captured,
+            COALESCE(SUM(state IN ('approval_pending','deferred') AND json_extract(rating,'$.grade')>=2),0) recommended
+            FROM sites GROUP BY stage,grade"""):
+        stats[row['stage']] += row['count']
+        if row['stage'] == 'candidates':
+            grades[str(row['grade'])] = row['count']
+        for key in counters:
+            counters[key] += row[key]
     condition='1';parameters=[]
     if selected in ('approved','queued'):condition="s.stage='queued'"
     elif selected=='recommended':condition="s.state IN ('approval_pending','deferred') AND json_extract(s.rating,'$.grade')>=2"

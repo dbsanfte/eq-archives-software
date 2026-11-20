@@ -17,6 +17,7 @@ TIERS = {1: ("19990101000000", "20011231235959"),
 # window. New acquisition uses TIERS or the explicit complete capture window.
 LEGACY_TIERS = {**TIERS, 2: ("20020101000000", "20071231235959")}
 CAPTURE_WINDOW = {"from": "19990101000000", "to": "20061231235959", "versions": "all_available"}
+SOURCE_DECODE_ERROR = 'Archived source exceeds decoding limits; raw bytes retained'
 CATEGORIES = ["guild", "news", "aggregator", "personal_blog", "forum", "class",
               "independent_information", "other", "unrelated"]
 SHARED_HOSTS = ("geocities.com", "angelfire.com", "members.aol.com", "home.att.net",
