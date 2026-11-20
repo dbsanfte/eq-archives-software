@@ -7,6 +7,7 @@ from pathlib import Path
 import subprocess
 import tempfile
 import shlex
+import tracemalloc
 import unittest
 from unittest.mock import patch
 
@@ -44,6 +45,33 @@ class DiscoveryTests(unittest.TestCase):
         seeds.write_text(json.dumps([{"host": "seed.example", "category": "guild"}]))
         return parser().parse_args(["--work-dir", str(self.store.root), "discover", "--archive-repo", str(self.repo),
                                    "--seeds", str(seeds), "--max-candidates", str(maximum)])
+
+    def test_discovery_does_not_keep_graph_evidence_in_memory(self):
+        self.file('seed.example', '20000101000000', 'index.html', 'seed')
+        self.commit()
+        args = self.args(maximum=1)
+        count = 4000
+        winner = f'http://site-{count - 1:04}.example/'
+        base = {'anchor': 'directory', 'context': 'x' * 2048,
+                'source_url': 'http://seed.example/', 'source_timestamp': '20000101000000'}
+        winning_evidence = {**base, 'anchor': 'EverQuest guild and forum'}
+        normal, special = json.dumps(base), json.dumps(winning_evidence)
+        self.store.db.executemany('INSERT INTO links VALUES(?,?,?)', (
+            (f'http://site-{number:04}.example/', 'seed', special if number == count - 1 else normal)
+            for number in range(count)))
+        self.store.db.commit()
+
+        tracemalloc.start()
+        try:
+            discover(args, self.store, cached_only=True)
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        candidate, = self.store.candidates()
+        self.assertEqual(candidate['url'], winner)
+        self.assertEqual(json.loads(candidate['evidence']), [winning_evidence])
+        self.assertEqual(self.store.get('discovery_result')['distinct_linked_urls'], count)
+        self.assertLess(peak, 4 * 1024**2, f'Discovery allocated {peak} traced bytes')
 
     def test_malformed_unicode_is_rejected_before_url_or_storage_work(self):
         from common import original_url
