@@ -1394,6 +1394,9 @@ Compact portal reads page in SQL; only visible records decode full manifests.
 Activity timestamps use covering batch metadata. Candidate and optional homepage
 sampling retain undecodable bytes without using them as grading evidence or
 aborting discovery. Keep the decoder's existing damage limits.
+Rank sorted discovery links one URL at a time and keep only URL and priority in
+the ranking list. Reload the shortlisted URLs' first eight exact source rows
+without rescanning the graph or changing ordering and provenance.
 Bulk action tokens are fetched explicitly at confirmation preparation and
 revalidated transactionally. Keep stage/filter/search/order/count parity.
 Luna schema array bounds retain known pre-bounds source-grade compatibility;

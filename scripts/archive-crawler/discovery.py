@@ -1,6 +1,8 @@
 """Bounded Git-object reads and a cached link graph; never clone, pull or walk."""
 
 from contextlib import closing
+from functools import lru_cache
+from itertools import groupby, islice
 import json
 import os
 from pathlib import Path
@@ -194,22 +196,22 @@ def discover(args, store, *, cached_only=False, deadline=None):
         by_host[host] = by_host.get(host, 0) + 1
         read_bytes += len(data)
         record_source(store, host, timestamp, path, blob, category, data, archive.sha)
-    grouped = {}
+    # link_rows is ordered by URL and source. Keep only the current URL's
+    # evidence in memory while ranking, then read the original rows for the
+    # shortlist. The graph can contain hundreds of thousands of distinct URLs.
+    ranked = []
+    source_tier = lru_cache(maxsize=8192)(tier)
     with closing(link_rows(store)) as rows:
-        for row in rows:
+        for url, sources in groupby(rows, key=lambda row: row['url']):
             if deadline is not None and time.time() >= deadline:
                 break
-            entry = grouped.setdefault(row["url"], [])
-            if len(entry) < 8:
-                entry.append(json.loads(row["evidence"]))
-    ranked = []
-    for url, evidence in grouped.items():
-        signals = " ".join(e["anchor"] + " " + e["context"] for e in evidence)
-        priority = len(SIGNALS.findall(signals)) * 5 + len(SIGNALS.findall(url)) * 3
-        priority += len({urlsplit(e["source_url"]).netloc for e in evidence}) * 8
-        priority += 10 if any(tier(e["source_timestamp"]) == 1 for e in evidence) else 0
-        ranked.append((priority, url, evidence))
-    ranked.sort(key=lambda row: (-row[0], row[1]))
+            evidence = [json.loads(row['evidence']) for row in islice(sources, 8)]
+            signals = " ".join(e["anchor"] + " " + e["context"] for e in evidence)
+            priority = len(SIGNALS.findall(signals)) * 5 + len(SIGNALS.findall(url)) * 3
+            priority += len({urlsplit(e["source_url"]).netloc for e in evidence}) * 8
+            priority += 10 if any(source_tier(e["source_timestamp"]) == 1 for e in evidence) else 0
+            ranked.append((-priority, url))
+    ranked.sort()
     # Until sampling starts, refresh the shortlist as more local evidence is
     # found. Afterwards freeze it so retries cannot silently widen the pilot.
     if not store.get("acquisition_started"):
@@ -220,7 +222,7 @@ def discover(args, store, *, cached_only=False, deadline=None):
     added = len(existing)
     unresolved = []
     coverage_pending = []
-    for priority, url, evidence in ranked:
+    for negative_priority, url in ranked:
         if added >= args.max_candidates or deadline is not None and time.time() >= deadline:
             break
         if candidate_exclusion(url):
@@ -237,8 +239,6 @@ def discover(args, store, *, cached_only=False, deadline=None):
             if address(linked_url) and not resolution.get('unresolved') and len(unresolved) < 50:
                 unresolved.append(linked_url)
             continue
-        if url != linked_url:
-            evidence = [{**entry, 'linked_url': linked_url, 'resolved_board_url': url} for entry in evidence]
         scope = site_scope(url)
         identity = site_identity(url)
         if identity in scopes:
@@ -261,10 +261,14 @@ def discover(args, store, *, cached_only=False, deadline=None):
         elif sitepowerup_board(url):
             coverage['scope_mode'] = 'sitepowerup'
             scope = sitepowerup_board(url)
+        with closing(link_rows(store, url=linked_url)) as rows:
+            evidence = [json.loads(row['evidence']) for row in islice(rows, 8)]
+        if url != linked_url:
+            evidence = [{**entry, 'linked_url': linked_url, 'resolved_board_url': url} for entry in evidence]
         scopes.add(identity)
         identifier = digest(url)[:24]
         store.db.execute("INSERT OR IGNORE INTO candidates(id,url,scope,priority,coverage,evidence) VALUES (?,?,?,?,?,?)",
-                         (identifier, url, scope, priority, json.dumps(coverage), json.dumps(evidence)))
+                         (identifier, url, scope, -negative_priority, json.dumps(coverage), json.dumps(evidence)))
         if board_url(url):
             from ezboard_discovery import evidence as parent_evidence
             captures = parent_evidence(store, linked_url, url)
@@ -276,7 +280,7 @@ def discover(args, store, *, cached_only=False, deadline=None):
     store.set('ezboard_coverage_pending', coverage_pending)
     store.set("discovery_limits", vars(args) | {"handler": None})
     store.set("discovery_result", {"seed_reads": reads, "seed_bytes": read_bytes, "seed_failures": failures, "seed_probes": probes,
-                                   "distinct_linked_urls": len(grouped), "candidates": len(store.candidates())})
+                                   "distinct_linked_urls": len(ranked), "candidates": len(store.candidates())})
     print(json.dumps(store.get("discovery_result")), flush=True)
 
 

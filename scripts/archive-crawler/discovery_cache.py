@@ -17,12 +17,17 @@ def shared_graph_root(store):
     return store.root.parent.parent
 
 
-def link_rows(store):
+def link_rows(store, *, url=None):
     """Stream the shared graph and this run's additions, retaining exact sources."""
-    query = 'SELECT url,source,evidence FROM links ORDER BY url,source'
+    query = 'SELECT url,source,evidence FROM links'
+    parameters = ()
+    if url is not None:
+        query += ' WHERE url=?'
+        parameters = (url,)
+    query += ' ORDER BY url,source'
     root = shared_graph_root(store)
     if root is None:
-        yield from store.db.execute(query)
+        yield from store.db.execute(query, parameters)
         return
     try:
         # mode=ro refuses to create an empty graph after a missing volume/move.
@@ -32,7 +37,7 @@ def link_rows(store):
             previous = None
             # Local evidence wins on an identical URL/source pair; independent
             # sources still contribute separately to a candidate's provenance.
-            for row in heapq.merge(store.db.execute(query), shared.execute(query),
+            for row in heapq.merge(store.db.execute(query, parameters), shared.execute(query, parameters),
                                   key=lambda item: (item['url'], item['source'])):
                 identity = (row['url'], row['source'])
                 if identity != previous:
