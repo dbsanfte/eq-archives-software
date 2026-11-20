@@ -4,23 +4,28 @@ SQLite checkpoints each catalog page and each exact URL/date. No archive walk,
 HTML-only spider, digest collapse, file-count ceiling or growing JSON rewrite.
 Runtime limits pause acquisition; only an exhausted inventory reaches Indexing.
 """
+from collections import defaultdict, deque
 import json
 from pathlib import Path, PurePosixPath
 import shutil
 import sqlite3
+from time import monotonic
 from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 from archive_layout import archive_path, ArchiveLayoutError
 from capture_failures import FileRetries
+from capture_progress import initialize_inventory_counts
 from common import CAPTURE_WINDOW, CrawlError, Store, capture_exclusion, digest, in_capture_window, now, original_url, save, within_capture_scope
 from indexer.capture_enrichment import policy_for_sites
+from source_assets import PARKING_DEPENDENCY, asset_references
 
 POLICY = 'complete-files-v1'
 # Cumulative transport safeguards, deliberately large enough for thousands of
 # files. Explicit resume can extend an exhausted allowance, retaining all usage.
 ALLOWANCE = {'requests': 100000, 'bytes': 50 * 1024**3, 'seconds': 7 * 86400}
 DISK_RESERVE = 256 * 1024**2
+PROGRESS_INTERVAL = 3
 
 
 def seed_retry(root, store, retained):
@@ -106,6 +111,87 @@ def verify_board_file(root, capture, site, retained):
     return not platform.source_problem(page) and platform.belongs(page, capture['url'], board, forums)
 
 
+def record_key(site, url, stamp):
+    return digest([site, original_url(url), stamp])
+
+
+def asset_parent(capture):
+    return {key: capture[key] for key in ('url', 'timestamp', 'sha256')}
+
+
+def reconcile_parking_dependencies(root, store, dependencies):
+    """Recheck old single-parent evidence before pruning any staged work."""
+    db = store.db
+    if store.get('parking_dependency_policy'):
+        return
+    try:
+        blocked, reachable = legacy_parking_dependencies(root, db, dependencies)
+    except (CrawlError, OSError, UnicodeError):
+        # Keep legacy work when the saved evidence cannot prove an exclusion.
+        return
+    for url, site in blocked:
+        db.execute('INSERT OR IGNORE INTO full_exclusions VALUES (?,?,?)', (site, url, PARKING_DEPENDENCY))
+        db.execute("UPDATE full_queries SET done=1,note=NULL WHERE site=? AND url=? AND match='exact'", (site, url))
+    for key, parent in reachable.items():
+        if parent != dependencies[key]:
+            db.execute('UPDATE full_dependencies SET parent=? WHERE url=? AND site=?', (json.dumps(parent), *key))
+            dependencies[key] = parent
+    if blocked:
+        for row in db.execute("""SELECT id,site,url FROM full_records WHERE state IN ('pending','retry','unavailable')
+                                 AND json_type(record,'$.supporting_source') IS NOT NULL"""):
+            if (original_url(row['url']), row['site']) in blocked:
+                db.execute("UPDATE full_records SET state='excluded',note=? WHERE id=?", (PARKING_DEPENDENCY, row['id']))
+    store.set('parking_dependency_policy', True)
+
+
+def legacy_parking_dependencies(root, db, dependencies):
+    legacy_children, checked, parked = defaultdict(set), {}, set()
+    for (_, site), parent in dependencies.items():
+        identifier = record_key(site, parent['url'], parent['timestamp'])
+        if identifier not in checked:
+            row = db.execute("SELECT capture FROM full_records WHERE id=? AND state='captured'", (identifier,)).fetchone()
+            capture = json.loads(row[0]) if row else None
+            checked[identifier] = asset_parent(capture) if capture and asset_references(root, capture, classify=True)[1] else None
+    for key, parent in dependencies.items():
+        site = key[1]
+        legacy_children[(original_url(parent['url']), site)].add(key)
+        if checked[record_key(site, parent['url'], parent['timestamp'])] == parent:
+            parked.add(key)
+    if not parked:
+        return set(), {}
+    candidates = deque(parked)
+    while candidates:
+        children = legacy_children[candidates.popleft()] - parked
+        parked.update(children)
+        candidates.extend(children)
+
+    # A legacy dependency remembers only its first parent. A real page may
+    # also refer to it. Walk every saved primary source and the reachable
+    # supporting files before marking a dependency as parking-only.
+    assets, reachable, pending = defaultdict(list), {}, deque()
+    def visit(capture):
+        urls, parked = asset_references(root, capture, classify=True)
+        if not parked:
+            for url in sorted(urls):
+                key = (url, capture['candidate_id'])
+                if key in dependencies and key not in reachable:
+                    reachable[key] = asset_parent(capture)
+                    pending.append(key)
+
+    for row in db.execute("SELECT id,capture FROM full_records WHERE state='captured'"):
+        capture = json.loads(row['capture'])
+        if capture.get('supporting_source'):
+            assets[(original_url(capture['url']), capture['candidate_id'])].append(row['id'])
+        else:
+            visit(capture)
+    while pending:
+        for identifier in assets.get(pending.popleft(), ()):
+            capture = db.execute('SELECT capture FROM full_records WHERE id=?', (identifier,)).fetchone()
+            visit(json.loads(capture[0]))
+
+    return parked - reachable.keys(), {key: reachable[key] for key in parked & reachable.keys()}
+
+
 def capture(root, batch_id, sites, downloader_factory, progress=None, base_manifest=None):
     from captures import check_manifest, describe_source, verified_path
     retained = None
@@ -121,6 +207,7 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
     downloader = None
     retries = FileRetries(store)
     signature = digest(sites)
+    last_progress = None
     try:
         db.executescript('''
           CREATE TABLE IF NOT EXISTS full_queries (
@@ -170,6 +257,7 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
             result = json.loads(result_path.read_text())
             check_manifest(root, result)
             return result
+        initialize_inventory_counts(db)
         # A later worker turn retries deferred URLs, retaining attempts and all
         # successful sources. Never reopen a completed immutable manifest.
         db.execute("UPDATE full_records SET state='pending' WHERE state='retry'")
@@ -201,8 +289,6 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
             if reason := excluded(record['url'], record['site']):
                 db.execute("UPDATE full_records SET state='excluded',note=? WHERE id=?", (reason, record['id']))
         db.commit()
-        def record_key(site, url, stamp):
-            return digest([site, original_url(url), stamp])
         def commit_capture(capture, record_id):
             verified_path(root, capture)
             kind = 'archive_path_unavailable'
@@ -254,11 +340,25 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
                         VALUES (?,?,?,?,?,?,?)''', (record_key(site['id'], note['url'], stamp), site['id'], note['url'], stamp,
                         json.dumps({'board_gap': True}), 'pending' if retained else 'unavailable', note.get('note') or note.get('reason')))
                 db.commit()
-        def report(phase, url=None):
+        reconcile_parking_dependencies(root, store, dependencies)
+        parked_dependencies = {(r['url'], r['site']) for r in db.execute(
+            'SELECT url,site FROM full_exclusions WHERE reason=?', (PARKING_DEPENDENCY,))}
+        scan_queue = deque(row['id'] for row in db.execute("""SELECT id FROM full_records WHERE state='captured'
+                            AND id NOT IN (SELECT id FROM full_scanned) ORDER BY rowid"""))
+        reported_phase, reported_at = None, 0
+
+        def report(phase, url=None, *, force=False):
+            nonlocal last_progress, reported_phase, reported_at
+            last_progress = phase, url
             if progress:
-                counts = {row['state']: row['n'] for row in db.execute('SELECT state,COUNT(*) n FROM full_records GROUP BY state')}
+                instant = monotonic()
+                if not force and phase == reported_phase and instant - reported_at < PROGRESS_INTERVAL:
+                    return
+                summary = {row['state']: (row['files'], row['bytes']) for row in db.execute('SELECT * FROM full_record_counts')}
+                counts = {state: value[0] for state, value in summary.items()}
                 catalogs = db.execute('SELECT COUNT(*),COALESCE(SUM(done=1),0) FROM full_queries').fetchone()
-                size = db.execute("SELECT COALESCE(SUM(json_extract(capture,'$.bytes')),0) FROM full_records WHERE state='captured'").fetchone()[0]
+                size = summary.get('captured', (0, 0))[1]
+                last_progress = None
                 progress({'phase': phase, 'files': counts.get('captured', 0), 'bytes': size,
                           'versions_found': sum(counts.values()), 'versions_pending': counts.get('pending', 0) + counts.get('retry', 0),
                           'retry_pending': counts.get('retry', 0),
@@ -271,6 +371,8 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
                           'sites_total': len(sites), 'sites_done': len(sites) if phase == 'ready_for_review' else 0,
                           'site_url': sites[0]['url'], 'current_url': url, 'capture_window': dict(CAPTURE_WINDOW),
                           'capture_policy': POLICY, 'transport': store.get('wayback_transport', {})})
+                last_progress = phase, url
+                reported_phase, reported_at = phase, instant
         def acquire(job):
             nonlocal downloader
             if shutil.disk_usage(directory).free <= DISK_RESERVE:
@@ -285,18 +387,48 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
                 job = {**job, 'max_file_bytes': shutil.disk_usage(directory).free - DISK_RESERVE}
             return downloader.call(job)
         def discover_assets():
-            from source_assets import references
-            for row in db.execute("SELECT id,site,capture FROM full_records WHERE state='captured' AND id NOT IN (SELECT id FROM full_scanned)").fetchall():
+            while scan_queue:
+                row = db.execute("""SELECT id,site,capture FROM full_records WHERE id=? AND state='captured'
+                    AND id NOT IN (SELECT id FROM full_scanned)""", (scan_queue.popleft(),)).fetchone()
+                if not row:
+                    continue
                 parent = json.loads(row['capture'])
-                evidence = {key: parent[key] for key in ('url', 'timestamp', 'sha256')}
-                for url in references(root, parent):
+                parent_key = (original_url(parent['url']), row['site'])
+                urls, parked = (set(), False) if parent.get('supporting_source') and parent_key in parked_dependencies else asset_references(root, parent, classify=True)
+                evidence = asset_parent(parent)
+                for url in sorted(urls):
                     if excluded(url, row['site']):
                         continue
                     if allowed(url, site_map[row['site']]):
                         continue  # the whole-scope inventory already covers this file
-                    db.execute('INSERT OR IGNORE INTO full_dependencies(url,site,parent) VALUES (?,?,?)',
-                               (url, row['site'], json.dumps(evidence)))
-                    dependencies.setdefault((url, row['site']), evidence)
+                    key = (url, row['site'])
+                    if parked:
+                        if key not in dependencies:
+                            db.execute('INSERT OR IGNORE INTO full_exclusions VALUES (?,?,?)', (row['site'], url, PARKING_DEPENDENCY))
+                            parked_dependencies.add(key)
+                        continue
+                    if key in parked_dependencies:
+                        # Later real evidence can restore staged URLs without
+                        # discarding existing payloads or their source receipts.
+                        db.execute('DELETE FROM full_exclusions WHERE url=? AND site=? AND reason=?', (*key, PARKING_DEPENDENCY))
+                        db.execute("""UPDATE full_queries SET done=0 WHERE url=? AND site=? AND match='exact'
+                            AND (found=0 OR resume IS NOT NULL)""", key)
+                        for old in db.execute("""SELECT id,url,state FROM full_records WHERE site=?
+                            AND (note=? OR state='captured' AND json_type(capture,'$.supporting_source') IS NOT NULL)""",
+                                              (row['site'], PARKING_DEPENDENCY)).fetchall():
+                            if original_url(old['url']) != url:
+                                continue
+                            if old['state'] == 'captured':
+                                db.execute('DELETE FROM full_scanned WHERE id=?', (old['id'],))
+                                scan_queue.append(old['id'])
+                            else:
+                                db.execute("UPDATE full_records SET state='pending',note=NULL WHERE id=?", (old['id'],))
+                        db.execute('INSERT OR REPLACE INTO full_dependencies VALUES (?,?,?)', (*key, json.dumps(evidence)))
+                        dependencies[key] = evidence
+                        parked_dependencies.remove(key)
+                    else:
+                        db.execute('INSERT OR IGNORE INTO full_dependencies(url,site,parent) VALUES (?,?,?)', (*key, json.dumps(evidence)))
+                        dependencies.setdefault(key, evidence)
                     db.execute('INSERT OR IGNORE INTO full_queries(id,site,url,match) VALUES (?,?,?,?)',
                                (digest([row['site'], url]), row['site'], url, 'exact'))
                 db.execute('INSERT INTO full_scanned VALUES (?)', (row['id'],))
@@ -306,7 +438,8 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
         # provides an honest total even when acquisition later pauses.
         def catalogs():
             for query in db.execute('SELECT * FROM full_queries WHERE done=0 ORDER BY rowid').fetchall():
-                if excluded(query['url'], query['site']):
+                if (query['match'] == 'exact' and (query['url'], query['site']) in parked_dependencies
+                        or excluded(query['url'], query['site'])):
                     db.execute('UPDATE full_queries SET done=1,note=NULL WHERE id=?', (query['id'],))
                     db.commit()
                     continue
@@ -386,7 +519,7 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
                                     cdx_digest=record.get('digest'), cdx_length=record.get('length'),
                                     mimetype=record.get('mimetype'), retrieved_at=now(), site_coverage=POLICY)
                     if record.get('supporting_source'):
-                        captured['supporting_source'] = record['supporting_source']
+                        captured['supporting_source'] = dependencies.get((original_url(row['url']), row['site']), record['supporting_source'])
                     save(receipt, captured)
                 if captured['url'] != row['url'] or captured['timestamp'] != row['timestamp']:
                     raise CrawlError('Downloaded file did not retain its exact catalog URL and date')
@@ -396,6 +529,7 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
                     db.commit()
                     continue
                 commit_capture(captured, row['id'])
+                scan_queue.append(row['id'])
                 retries.succeeded()
             except CrawlError as error:
                 state = retries.failed(row['id'], error)
@@ -444,7 +578,7 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
             coverage[site['id']] = {'state': 'complete_with_gaps' if gaps else 'complete', 'unavailable': gaps, 'retry': retry,
                 'excluded_urls': excluded_urls,
                 'reason': 'The site inventory and listed versions were processed for 1999–2006. ' +
-                          (f'{excluded_urls} advertising-subdomain URLs were intentionally excluded. ' if excluded_urls else '') +
+                          (f'{excluded_urls} URLs were intentionally excluded. ' if excluded_urls else '') +
                           (f'{gaps} file versions or supporting-file lookups remain unavailable; see the URLs, known dates and reasons below.' if gaps else 'Wayback may not have archived every original file.')}
         manifest = {**(board_manifest or {}), 'schema': 1, 'batch_id': batch_id, 'created_at': config['created_at'], 'capture_policy': POLICY,
                     'capture_window': dict(CAPTURE_WINDOW), 'sites': sites, 'captures': captures,
@@ -466,6 +600,8 @@ def capture(root, batch_id, sites, downloader_factory, progress=None, base_manif
         report('ready_for_review')
         return manifest
     except CrawlError as error:
+        if last_progress:
+            report(*last_progress, force=True)
         if 'budget' in str(error).lower():
             store.set('extend_transport_on_resume', True)
         raise

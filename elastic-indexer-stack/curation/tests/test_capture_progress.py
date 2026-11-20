@@ -1,4 +1,38 @@
-from capture_progress import CaptureProgress
+import sqlite3
+
+from capture_progress import CaptureProgress, initialize_inventory_counts
+
+
+def test_inventory_counts_migrate_and_follow_file_transactions(tmp_path):
+    path = tmp_path / 'crawl.sqlite3'
+    db = sqlite3.connect(path)
+    db.executescript('''
+        CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE full_records(id TEXT PRIMARY KEY, state TEXT NOT NULL, capture TEXT);
+        INSERT INTO full_records VALUES ('saved','captured','{"bytes":17}'), ('waiting','pending',NULL);
+    ''')
+    initialize_inventory_counts(db)
+
+    def counts():
+        return {state: (files, size) for state, files, size in db.execute(
+            'SELECT state,files,bytes FROM full_record_counts WHERE files>0')}
+
+    assert counts() == {'captured': (1, 17), 'pending': (1, 0)}
+    db.execute("UPDATE full_records SET state='captured',capture='{\"bytes\":29}' WHERE id='waiting'")
+    assert counts() == {'captured': (2, 46)}
+    db.rollback()
+    assert counts() == {'captured': (1, 17), 'pending': (1, 0)}
+    with db:
+        db.execute("UPDATE full_records SET capture='{\"bytes\":5}' WHERE id='saved'")
+        db.execute("UPDATE full_records SET state='retry' WHERE id='waiting'")
+        db.execute("INSERT INTO full_records VALUES ('gap','unavailable','{\"bytes\":999}')")
+        db.execute("INSERT INTO full_records VALUES ('parked','excluded',NULL)")
+        db.execute("DELETE FROM full_records WHERE id='waiting'")
+    db.close()
+    db = sqlite3.connect(path)
+    initialize_inventory_counts(db)
+    assert counts() == {'captured': (1, 5), 'unavailable': (1, 0), 'excluded': (1, 0)}
+    db.close()
 
 
 def test_eta_uses_newly_processed_records_and_updates_as_inventory_grows():

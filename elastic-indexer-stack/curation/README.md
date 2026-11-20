@@ -458,6 +458,11 @@ an existing capture resumes. Exclusions appear in progress and coverage notes,
 separately from retryable failures. Saved files and completed review manifests
 are preserved. Names such as `adventure.example` and paths such as `/ads/` remain
 eligible; discovery and manual submissions also skip advertising subdomains.
+Captured domain-parking pages remain in the archive. Their external assets are
+skipped when the saved markup proves a parking template and no other verified
+source requires the file. In-scope inventories and assets shared with historical
+site pages remain eligible. File checkpoints are saved individually, with progress
+updates at phase changes and up to once every three seconds within a phase.
 All available dated versions in inclusive UTC **1999-01-01
 through 2006-12-31** are requested, including identical-content versions and
 previously sampled URLs. Actual replays must match the requested URL and date;

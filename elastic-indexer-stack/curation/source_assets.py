@@ -2,11 +2,13 @@
 import codecs
 from html.parser import HTMLParser
 import re
+from urllib.parse import urlsplit
 
 from common import decode, original_url
 
 DOWNLOAD = re.compile(r'\.(?:png|jpe?g|gif|svg|webp|ico|bmp|css|js|pdf|zip|gz|tar|rar|7z|exe|docx?|xlsx?|pptx?|rtf|txt|xml|mp3|wav|ogg|mid|midi|mp4|avi|mov|swf|fla|woff2?|ttf)(?:[?;]|$)', re.I)
 CSS_URL = re.compile(r'''url\(\s*['"]?([^'"\s)]+)|@import\s+['"]([^'"]+)''', re.I)
+PARKING_DEPENDENCY = 'Third-party asset referenced only by an archived domain-parking template'
 
 
 def binary_source(raw):
@@ -71,11 +73,48 @@ class Resources(HTMLParser):
             self.css(text)
 
 
-def references(root, capture):
+def parking_template(text, url):
+    """Recognize an entire generated search lander before suppressing its assets."""
+    if not re.search(r'Try\s+these\s+related\s+searches', text, re.I):
+        return False
+    from bs4 import BeautifulSoup
+    from indexer.passage_forums import words
+    from indexer.passage_scaffolding import PROTECTED
+
+    soup = BeautifulSoup(text, 'html.parser')
+    title = words(soup.title) if soup.title else ''
+    host = urlsplit(url).hostname
+    if (not host or title.casefold().rstrip('.') != host.casefold().rstrip('.')
+            or soup.select_one(PROTECTED) or any(words(node) for node in soup.find_all('textarea'))):
+        return False
+    keywords = [link for link in soup.find_all('a', href=True)
+                if re.search(r'[?&]keywords=[^&#]+', link['href'], re.I)
+                and re.search(r'[?&]addargs=', link['href'], re.I)]
+    forms = [form for form in soup.find_all('form')
+             if {'keywords', 'addargs'} <= {field['name'].casefold() for field in form.select('input[name]')}
+             and words(form).casefold() in ('', 'search the web:')]
+    if len(keywords) < 8 or not forms:
+        return False
+    for link in soup.find_all('a', href=True):
+        label, target = words(link).casefold(), link['href'].casefold()
+        if (label == host.casefold() and target in (f'http://{host}/', f'https://{host}/')
+                or target == f'mailto:{label}' and re.fullmatch(r'[\w.+-]+@[\w.-]+', label)):
+            link.decompose()
+    for node in [*keywords, *forms, *soup.select('script,style,head,title')]:
+        if node.parent:
+            node.decompose()
+    residue = words(soup.body or soup)
+    return bool(re.fullmatch(r'Try these related searches[:.]?\s*'
+                             r'(?:This site planned for development[.]?\s*)?'
+                             rf'For information regarding {re.escape(host)}, please contact:\s*'
+                             r'(?:[\w.+-]+@[\w.-]+)?', residue, re.I))
+
+
+def asset_references(root, capture, *, classify=False):
     from captures import TEXT_LIMIT, verified_source
     mime = (capture.get('content_type') or capture.get('mimetype') or 'text/html').split(';')[0].strip().lower()
     if mime not in ('text/html', 'application/xhtml+xml', 'text/css'):
-        return set()
+        return set(), False
     if capture['bytes'] > TEXT_LIMIT:
         from common import CrawlError
         raise CrawlError('Supporting-file reference extraction exceeds its safe text size; capture remains incomplete')
@@ -85,4 +124,9 @@ def references(root, capture):
         parser.css(text)
     else:
         parser.feed(text)
-    return parser.urls
+    return parser.urls, classify and mime != 'text/css' and parking_template(text, capture['url'])
+
+
+def references(root, capture):
+    # Manifest validation uses original references, including older saved assets.
+    return asset_references(root, capture)[0]

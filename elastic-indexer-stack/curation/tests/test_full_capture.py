@@ -11,11 +11,13 @@ from full_capture import allowed
 POLICY = 'complete-files-v1'
 
 
-def test_full_inventory_keeps_thousands_of_versions_and_every_file_type(candidate):
+def test_full_inventory_keeps_thousands_of_versions_and_every_file_type(candidate, monkeypatch):
     root, row = candidate
     site = manifest_for(row)['sites'][0]
     site['capture_policy'] = POLICY
     calls = []
+    reports = []
+    monkeypatch.setattr('full_capture.monotonic', lambda: 60)
     entries = [{'url': site['scope'] + f'orphan/{index}.{extension}', 'timestamp': stamp,
                 'digest': 'SAME', 'length': '30', 'mimetype': mime}
                for index in range(220)
@@ -37,11 +39,15 @@ def test_full_inventory_keeps_thousands_of_versions_and_every_file_type(candidat
             return {'url': job['url'], 'timestamp': job['timestamp'], 'bytes': len(data),
                     'sha256': digest(data), 'content_type': next(r['mimetype'] for r in entries if r['url'] == job['url'])}
         def close(self): calls.append(('close',))
-    result = capture_sites(root, 'a' * 32, [site], Downloader)
+    result = capture_sites(root, 'a' * 32, [site], Downloader, progress=reports.append)
     assert len(result['captures']) == 3301
     assert {c['timestamp'] for c in result['captures']} >= {'19990101000000', '20061231235959'}
     assert sum(c['kind'] == 'file' for c in result['captures']) == 2640
     assert result['capture_coverage'][site['id']]['state'] == 'complete'
+    assert [report['phase'] for report in reports] == ['preparing', 'checking_wayback', 'downloading', 'ready_for_review']
+    assert reports[-1]['versions_pending'] == 0
+    assert reports[-1]['files'] == len(result['captures'])
+    assert reports[-1]['bytes'] == sum(capture['bytes'] for capture in result['captures'])
     assert calls.count(('open', 0, 0)) == 1
     check_manifest(root, result)
     # Completion and retry are metadata-based; no redownload of any file.
@@ -185,6 +191,88 @@ def test_external_supporting_files_follow_verified_html_and_css_only(candidate):
     asset['supporting_source'] = {'url': asset['url'], 'timestamp': asset['timestamp'], 'sha256': asset['sha256']}
     with pytest.raises(CrawlError, match='no verified source'):
         check_manifest(root, result)
+
+
+@pytest.mark.parametrize('legacy_checkpoint', [False, True])
+def test_parking_assets_skip_expansion_and_real_links_can_restore_saved_css(candidate, monkeypatch, legacy_checkpoint):
+    from urllib.parse import urlsplit
+    from common import Store
+    from source_assets import PARKING_DEPENDENCY
+
+    root, row = candidate
+    site = {**manifest_for(row)['sites'][0], 'capture_policy': POLICY}
+    seed = site['captures'][0]
+    host = urlsplit(seed['url']).hostname
+    authored_url = site['scope'] + 'guild.html'
+    orphan = site['scope'] + 'maps.zip'
+    park_css = 'https://resources.example/park.css'
+    shared_css = 'https://resources.example/shared.css'
+    park_image = 'https://resources.example/park.png'
+    shared_image = 'https://resources.example/shared.png'
+    links = ''.join(f'<a href="/search?Keywords=term{i}&amp;addargs=1">Term {i}</a>' for i in range(8))
+    lander = f'''<html><head><title>{host}</title><link rel="stylesheet" href="{park_css}">
+        <link rel="stylesheet" href="{shared_css}"></head><body>Try these related searches {links}
+        <form><input name="Keywords"><input name="addargs"></form>
+        For information regarding {host}, please contact: curator@example.org</body></html>'''.encode()
+    (root / seed['path']).write_bytes(lander)
+    seed.update(bytes=len(lander), sha256=digest(lander))
+    # A shared template around an actual guild note must keep its references.
+    authored = lander.replace(f'<link rel="stylesheet" href="{park_css}">'.encode(), b'').replace(
+        b'</body>', b'<a href="/raids.html">Our guild raids Veeshan in two hours.</a></body>')
+    sources = {authored_url: ('text/html', authored), orphan: ('application/zip', b'PK\x03\x04'),
+               park_css: ('text/css', b'body {background: url(park.png)}'),
+               shared_css: ('text/css', b'body {background: url(shared.png)}'),
+               park_image: ('image/png', b'park-asset'), shared_image: ('image/png', b'guild-asset')}
+    calls = []
+    legacy = legacy_checkpoint
+
+    class Downloader:
+        def __init__(self, *args): pass
+        def call(self, job):
+            url = job['url']
+            calls.append((job['op'], url))
+            if job['op'] == 'scope_list':
+                urls = (authored_url, orphan) if job['match'] == 'prefix' else (url,)
+                return {'captures': [{'url': entry, 'timestamp': '20061231235959', 'mimetype': sources[entry][0]}
+                                     for entry in urls]}
+            if legacy and url == authored_url:
+                raise CrawlError('Wayback HTTP 404')
+            if legacy and url == park_image:
+                raise CrawlError('Wayback request budget reached')
+            mime, data = sources[url]
+            Path(job['destination']).write_bytes(data)
+            return {'url': url, 'timestamp': job['timestamp'], 'sha256': digest(data), 'bytes': len(data), 'content_type': mime}
+        def close(self): pass
+
+    batch_id = 'd' * 32
+    if legacy_checkpoint:
+        with monkeypatch.context() as previous:
+            previous.setattr('source_assets.parking_template', lambda *args: False)
+            with pytest.raises(CrawlError, match='budget'):
+                capture_sites(root, batch_id, [site], Downloader)
+        checkpoint = Store(root / 'batches' / batch_id / 'complete')
+        checkpoint.db.execute("DELETE FROM meta WHERE key='parking_dependency_policy'")
+        checkpoint.db.execute("UPDATE full_records SET state='pending',note=NULL WHERE url=?", (authored_url,))
+        saved_css = json.loads(checkpoint.db.execute('SELECT capture FROM full_records WHERE url=?', (shared_css,)).fetchone()[0])
+        checkpoint.db.commit()
+        checkpoint.close()
+        legacy = False
+        calls.clear()
+
+    result = capture_sites(root, batch_id, [site], Downloader)
+    urls = {capture['url'] for capture in result['captures']}
+    assert {seed['url'], authored_url, orphan, shared_css, shared_image} <= urls
+    assert park_image not in urls
+    if legacy_checkpoint:
+        assert saved_css in result['captures'] and park_css in urls
+        assert ('capture_file', shared_css) not in calls
+    else:
+        assert park_css not in urls
+    assert not {url for _, url in calls} & {park_css, park_image}
+    expected = {park_css, park_image} if legacy_checkpoint else {park_css}
+    assert {note['url'] for note in result['notes'] if note['note'] == PARKING_DEPENDENCY} == expected
+    assert result['capture_retry'] == {'files': 0, 'lookups': 0}
+    check_manifest(root, result)
 
 
 def test_ad_subdomains_are_skipped_without_losing_normal_assets_or_creating_retries(candidate):

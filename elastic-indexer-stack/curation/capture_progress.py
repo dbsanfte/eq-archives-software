@@ -10,6 +10,40 @@ from time import monotonic
 from common import now
 
 
+def initialize_inventory_counts(db):
+    """Materialize state counts once and maintain them with the file transaction."""
+    if db.execute("SELECT 1 FROM meta WHERE key='full_record_counts_v1'").fetchone():
+        return
+    db.executescript('''
+        BEGIN;
+        CREATE TABLE IF NOT EXISTS full_record_counts (
+            state TEXT PRIMARY KEY, files INTEGER NOT NULL, bytes INTEGER NOT NULL);
+        INSERT INTO full_record_counts(state,files,bytes)
+            SELECT state,COUNT(*),SUM(CASE WHEN state='captured'
+                THEN COALESCE(json_extract(capture,'$.bytes'),0) ELSE 0 END)
+            FROM full_records
+            GROUP BY state;
+        INSERT OR IGNORE INTO meta VALUES ('full_record_counts_v1','true');
+        CREATE TRIGGER IF NOT EXISTS full_record_count_insert AFTER INSERT ON full_records BEGIN
+            INSERT INTO full_record_counts VALUES (new.state,1,COALESCE(
+                CASE WHEN new.state='captured' THEN json_extract(new.capture,'$.bytes') END,0))
+            ON CONFLICT(state) DO UPDATE SET files=files+1,bytes=bytes+excluded.bytes;
+        END;
+        CREATE TRIGGER IF NOT EXISTS full_record_count_update AFTER UPDATE OF state,capture ON full_records BEGIN
+            UPDATE full_record_counts SET files=files-1,bytes=bytes-COALESCE(
+                CASE WHEN old.state='captured' THEN json_extract(old.capture,'$.bytes') END,0) WHERE state=old.state;
+            INSERT INTO full_record_counts VALUES (new.state,1,COALESCE(
+                CASE WHEN new.state='captured' THEN json_extract(new.capture,'$.bytes') END,0))
+            ON CONFLICT(state) DO UPDATE SET files=files+1,bytes=bytes+excluded.bytes;
+        END;
+        CREATE TRIGGER IF NOT EXISTS full_record_count_delete AFTER DELETE ON full_records BEGIN
+            UPDATE full_record_counts SET files=files-1,bytes=bytes-COALESCE(
+                CASE WHEN old.state='captured' THEN json_extract(old.capture,'$.bytes') END,0) WHERE state=old.state;
+        END;
+        COMMIT;
+    ''')
+
+
 class CaptureProgress:
     def __init__(self, clock=monotonic):
         self.clock = clock
