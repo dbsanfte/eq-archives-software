@@ -91,3 +91,23 @@ def test_empty_activity_and_per_worker_health(tmp_path):
     assert listing['activity']['next_capture'] is None
     assert listing['activity']['discovery'] is None
     assert listing['activity']['runtime'] == {'candidates': True, 'capture': False, 'indexing': True, 'wayback': False}
+
+
+def test_last_indexed_activity_reads_metadata_without_loading_manifests(tmp_path):
+    from publication_recovery import summary
+
+    with connect(tmp_path / 'state') as store:
+        store.db.executemany('INSERT INTO batches(id,state,manifest,updated) VALUES(?,?,?,?)', [
+            ('first', 'indexed', 'a' * 262144, '2026-11-18'),
+            ('last', 'indexed', 'b' * 262144, '2026-11-19'),
+            ('pending', 'indexing', 'c' * 262144, '2026-11-20'),
+        ])
+        statements = []
+        store.db.set_trace_callback(statements.append)
+        try:
+            assert summary(store)['last_indexed'] == '2026-11-19'
+        finally:
+            store.db.set_trace_callback(None)
+        latest_read = next(sql for sql in statements if 'MAX(updated)' in sql)
+        plan = store.db.execute('EXPLAIN QUERY PLAN ' + latest_read).fetchall()
+        assert any('COVERING INDEX' in row[3] for row in plan)

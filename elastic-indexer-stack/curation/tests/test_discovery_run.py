@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from unittest.mock import Mock
 
 import pytest
@@ -485,3 +486,43 @@ def test_one_forbidden_site_does_not_stop_discovery_of_other_sites(run_fixture,m
     assert result['stop_reason']=='target_reached' and result['accepted']==1
     assert len(calls)==2
     assert client.request.call_count==1
+
+
+@pytest.mark.parametrize('later_sample_readable', [False, True])
+def test_discovery_keeps_moving_after_undecodable_primary_sample(run_fixture, monkeypatch, later_sample_readable):
+    from acquisition import sample
+    from common import digest
+
+    root, _, client, downloader, settings, operation, _, _ = run_fixture
+    settings['available'] = 2
+    active = operation(target=1)
+    first = 'http://guild-0.example/'
+    damaged = 'こんにちは世界。'.encode('iso2022_jp') + b'\x1b$B~~\x1b(B' * 20
+    monkeypatch.setattr('discovery_run.sample', sample)
+
+    def fetch(job):
+        if job['op'] == 'list':
+            timestamp = '20000101000000' if job['from'].startswith('1999') else '20030101000000'
+            return {'captures': [{'url': job['url'], 'timestamp': timestamp, 'digest': 'D', 'length': '200'}],
+                    'listing_limited': False, 'available_rows': 1, 'identity_variants': 0}
+        bad = job['url'] == first and (job['timestamp'].startswith('2000') or not later_sample_readable)
+        raw = damaged if bad else b'<p>EverQuest guild history.</p>'
+        Path(job['destination']).write_bytes(raw)
+        return {'url': job['url'], 'timestamp': job['timestamp'], 'bytes': len(raw),
+                'sha256': digest(raw), 'content_type': 'text/html', 'source': 'wayback'}
+
+    downloader.call.side_effect = fetch
+    result = campaign(root, active)['progress']
+    assert result['stop_reason'] == 'target_reached' and result['accepted'] == 1
+    assert result['checked'] == (1 if later_sample_readable else 2)
+    client.request.assert_called_once()
+    with connect(root) as store:
+        candidate = store.db.execute('SELECT * FROM candidates WHERE url=?', (first,)).fetchone()
+    rejected_file = root / 'runs' / active['id'] / 'captures' / candidate['id'] / '20000101000000.html'
+    assert rejected_file.read_bytes() == damaged
+    if later_sample_readable:
+        assert [item['tier'] for item in json.loads(candidate['captures'])] == [2]
+    else:
+        assert candidate['state'] == 'sample_error'
+        assert 'decod' in candidate['error'].lower()
+        assert candidate['captures'] == '[]' and candidate['rating'] is None
