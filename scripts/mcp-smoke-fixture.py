@@ -12,7 +12,8 @@ DOCUMENTS = [{"_id": f"test/ancient-cyclops-{i:02d}.txt", "_source": {
     "id": f"test/ancient-cyclops-{i:02d}.txt", "title": f"Ancient Cyclops account {i}",
     "url": f"https://example.org/archive/ancient-cyclops-{i}",
     "text_full": "An archived EverQuest account about camping the ancient cyclops.",
-    "domain_name": "alpha.example.org" if i < 12 else "beta.example.org",
+    # A retained legacy hostname can be listed without a safe scope link.
+    "domain_name": "alpha.example.org" if i < 12 else "beta_guild.example.org",
     "mailing_list_name": "eq_wizards", "file_type": "text",
     "capture_date": "1999-11-05T19:21:11.000Z" if i < 12 else "2000-01-01T00:00:00.000Z",
     "llm_guessed_date": "1999-11-05", "last_indexed": "2026-11-10T12:00:00.000Z",
