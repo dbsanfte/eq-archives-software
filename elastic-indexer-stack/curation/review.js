@@ -719,7 +719,7 @@ function captureMeter(op,compact=false) {
     if (Number.isFinite(progress?.bytes)) meter.append(node('p',`${(progress.bytes/1048576).toFixed(2)} MiB ${board ? 'transferred from Wayback' : 'saved'} · ${Number(progress.urls_checked || 0).toLocaleString()} records checked`,'meta'));
     if (progress?.unavailable>0) meter.append(node('p',`${progress.unavailable.toLocaleString()} unavailable captures will be listed as coverage gaps.`,'meta'));
     if (progress?.failed_lookups>0) meter.append(node('p',`${progress.failed_lookups.toLocaleString()} supporting-file lookups failed. Other files continue downloading; retry missing files from Indexing or History after publication.`,'meta'));
-    if (progress?.excluded_urls>0) meter.append(node('p',`${progress.excluded_urls.toLocaleString()} advertising URLs intentionally skipped (ad.* and ads.*).`,'meta'));
+    if (progress?.excluded_urls>0) meter.append(node('p',`${progress.excluded_urls.toLocaleString()} URLs intentionally skipped.`,'meta'));
   }
   return meter;
 }

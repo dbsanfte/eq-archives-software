@@ -884,6 +884,10 @@ pending/failed work on resume; do not match similar names or URL paths. Keep
 intentional exclusions visible and separate from retryable failures. Preserve
 already saved sources and immutable completed manifests, including their source
 reference verification. Apply the same host filter to discovery/manual candidates.
+Keep confirmed domain-parking pages and in-scope files. Skip external assets
+referenced solely by a proven parking template, including on checkpoint resume.
+Restore assets when another verified source refers to them. Maintain file/byte
+progress counts in the checkpoint transaction and coalesce repeated UI updates.
 A transport/storage/ownership bound keeps
 new work paused in Capturing; only exhausted catalogs and pending records reach
 Indexing, with missing/substituted replays explicitly listed as gaps. Individual
