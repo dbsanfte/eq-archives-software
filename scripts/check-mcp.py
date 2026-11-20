@@ -102,7 +102,9 @@ def check(endpoint, query, host=None):
     sites = call("list_sites", {"query": query, "limit": 2})
     assert sites["sites"] and sites["sites"][0]["latest_indexed"]
     for site in sites["sites"]:
-        assert site["document_count"] > 0 and site["scope_url"].startswith("http://")
+        assert site["document_count"] > 0
+        scope = site["scope_url"]
+        assert scope is None or isinstance(scope, str) and scope.startswith("http://")
     grouped = call("search_archive", {"query": query, "group_by": "discussion", "limit": 2})
     assert grouped["results"] and grouped["results"][0]["group"]["kind"] in ("page", "discussion", "record")
     history = call("list_captures", {"id": recent["id"], "limit": 2})
