@@ -876,7 +876,7 @@ async def capture_progress_flow(browser,base,width):
     await expect(meter.get_by_role('progressbar')).to_have_attribute('max','20000')
     await expect(meter).to_contain_text('2 archive listings still being checked.')
     await expect(meter).to_contain_text('1 supporting-file lookups failed. Other files continue downloading')
-    await expect(meter).to_contain_text('3 advertising URLs intentionally skipped (ad.* and ads.*).')
+    await expect(meter).to_contain_text('3 URLs intentionally skipped.')
     await page.reload();await settled(page)
     await expect(meter).to_contain_text('15,000 captures left')
     await expect(meter.locator('.capture-eta')).to_contain_text('ETA for listed captures: about')
