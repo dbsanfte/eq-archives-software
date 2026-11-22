@@ -60,16 +60,13 @@ def original_url(value, base=None):
     value = value.strip()
     try:
         value.encode('utf-8')
-    except UnicodeError:
-        return None
-    if base:
-        value = urljoin(base, value)
-    replay = re.match(r"^https?://web\.archive\.org/web/\d{1,14}(?:[a-z]+_)?/(.+)$", value, re.I)
-    if replay:
-        value = replay[1]
-        if not value.startswith(("http://", "https://")):
-            value = "http://" + value
-    try:
+        if base:
+            value = urljoin(base, value)
+        replay = re.match(r"^https?://web\.archive\.org/web/\d{1,14}(?:[a-z]+_)?/(.+)$", value, re.I)
+        if replay:
+            value = replay[1]
+            if not value.startswith(("http://", "https://")):
+                value = "http://" + value
         parsed = urlsplit(value)
         host = parsed.hostname
         if (parsed.scheme not in ("http", "https") or not host or parsed.username or parsed.password

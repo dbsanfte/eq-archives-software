@@ -35,6 +35,7 @@ from indexer.source_encoding import decode_source, repaired_title
 from indexer.capture_enrichment import Enricher, policy
 from import_status import EnrichmentError, describe, write_status
 from daily_budget import DailyBudget, DailyBudgetPause
+from publication_files import indexed_captures
 
 
 def read_batch(root, relative, expected):
@@ -53,6 +54,7 @@ def read_batch(root, relative, expected):
     if batch.get("manifest_sha256") != expected or digest(manifest) != expected or not re.fullmatch(r"[a-f0-9]{40}", commit):
         raise CrawlError("Batch does not match the published and approved manifest")
     check_manifest(root, manifest)  # Verify the entire file set before any ES writes.
+    indexed_captures(batch)  # Also bind the public subset to the original approval.
     return batch
 
 
@@ -251,16 +253,17 @@ def index_batch(root, batch, services, chunker=chunk_source):
     manifest = batch["manifest"]
     check_manifest(root, manifest)
     policy(manifest)
+    captures = indexed_captures(batch)
     # Learn source-bound reply membership before any print views are indexed.
     # Only RSS candidates are reread; existing archive documents remain create-only.
     catalog = getattr(services, 'discussions', None)
     if catalog:
-        for capture in manifest['captures']:
+        for capture in captures:
             if urlsplit(capture['url']).path == '/rss/message':
                 catalog.learn_safe(lithium_feed(archive_path(capture), verified_source(root, capture),
                                           f"https://web.archive.org/web/{capture['timestamp']}/{capture['url']}"))
     created = skipped = preserved = 0
-    for capture in manifest["captures"]:
+    for capture in captures:
         record_id = archive_path(capture)
         image = media_type(capture) in (
             'image/png','image/jpeg','image/gif','image/webp','image/bmp','image/tiff')
@@ -331,7 +334,9 @@ def index_batch(root, batch, services, chunker=chunk_source):
             created += 1
         else:
             skipped += 1
+    retained = len(manifest['captures']) - len(captures)
     return {"created": created, "existing": skipped, "captures": len(manifest["captures"]),
+            **({'retained_private': retained} if retained else {}),
             **({'preserved_files': preserved} if preserved else {})}
 
 

@@ -892,6 +892,14 @@ Keep confirmed domain-parking pages and in-scope files. Skip external assets
 referenced solely by a proven parking template, including on checkpoint resume.
 Restore assets when another verified source refers to them. Maintain file/byte
 progress counts in the checkpoint transaction and coalesce repeated UI updates.
+Ignore malformed individual URL references during extraction. Preserve binary
+files with misleading text content types and verified original receipts.
+Flatten deeply nested invalid table cells while retaining their text and links.
+Normalize long generated whitespace outside preformatted blocks and gate
+forum metadata work on the structural evidence required by the detector.
+For GitHub publication retain any blob over 100 MiB in private staging, with a
+URL/date/hash receipt in the marker and portal. Import only the published subset
+under the original manifest approval; marker recovery verifies that same subset.
 A transport/storage/ownership bound keeps
 new work paused in Capturing; only exhausted catalogs and pending records reach
 Indexing, with missing/substituted replays explicitly listed as gaps. Individual

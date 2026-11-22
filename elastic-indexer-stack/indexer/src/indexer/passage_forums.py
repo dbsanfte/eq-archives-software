@@ -209,6 +209,10 @@ def snitz_review(soup, raw):
 
 
 def phpbb(soup):
+    # Some ordinary site skins use .postbody for layout. A verified phpBB row
+    # requires both metadata roles, so check for them before walking ancestors.
+    if not soup.select_one('.name') or not any(words(node).startswith('Posted:') for node in soup.select('.postdetails')):
+        return None
     posts=[];seen=set();recognized=False
     for node in soup.select('.postbody'):
         if any('postbody' in p.get('class',[]) for p in node.parents):continue

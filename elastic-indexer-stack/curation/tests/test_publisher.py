@@ -83,8 +83,8 @@ def test_git_command_uses_safe_stage_error_on_failure(tmp_path,monkeypatch):
     assert publisher.git('fetch','origin','master',optional=True) is None
 
 
-@pytest.mark.parametrize('layout', ['normal', 'embedded_url', 'legacy_embedded_url', 'existing_executable'])
-def test_one_batch_commit_keeps_unrelated_files_and_recovers_repeat_publication(candidate,tmp_path,layout):
+@pytest.mark.parametrize('layout', ['normal', 'embedded_url', 'legacy_embedded_url', 'existing_executable', 'oversized'])
+def test_one_batch_commit_keeps_unrelated_files_and_recovers_repeat_publication(candidate,tmp_path,layout,monkeypatch):
     root,row=candidate
     if layout in ('embedded_url', 'legacy_embedded_url'):
         row['captures'][0]['url'] = 'http://guild.example/eq/news.php?next=http://guild.example/guide.html'
@@ -127,6 +127,16 @@ def test_one_batch_commit_keeps_unrelated_files_and_recovers_repeat_publication(
         if layout == 'legacy_embedded_url':
             from archive_layout import legacy_archive_path
             manifest['captures'][0]['archive_path'] = legacy_archive_path(manifest['captures'][0])
+        if layout == 'oversized':
+            from captures import archive_path
+            first = manifest['captures'][0]
+            monkeypatch.setattr('publication_files.GITHUB_BLOB_LIMIT', first['bytes'])
+            oversized = b'fixture-only private data' * 40
+            (root / 'large.txt').write_bytes(oversized)
+            second = {**first, 'url': row['scope'] + 'large.txt', 'path': 'large.txt',
+                      'bytes': len(oversized), 'sha256': digest(oversized)}
+            second['archive_path'] = archive_path(second)
+            manifest['captures'].append(second)
         expected=digest(manifest)
         result=publisher.publish(manifest,expected)
         assert len(pushes)==2 and result['recovered'] is False
@@ -137,10 +147,22 @@ def test_one_batch_commit_keeps_unrelated_files_and_recovers_repeat_publication(
         assert git(remote,'show','master:'+stored_path).encode() == (root/row['captures'][0]['path']).read_bytes()
         if layout == 'existing_executable':
             assert git(remote, 'ls-tree', 'master', stored_path).startswith('100755 blob ')
-        assert json.loads(git(remote,'show','master:crawl-manifests/'+manifest['batch_id']+'.json'))['manifest_sha256'] == expected
+        marker = json.loads(git(remote,'show','master:crawl-manifests/'+manifest['batch_id']+'.json'))
+        assert marker['manifest_sha256'] == expected
+        if layout == 'oversized':
+            from publication_files import indexed_captures
+            assert [item['archive_path'] for item in marker['captures']] == [stored_path]
+            assert result['retained_private'] == marker['retained_private'] == [
+                {key: second[key] for key in ('url', 'timestamp', 'bytes', 'sha256', 'archive_path')}]
+            assert indexed_captures({'manifest': manifest, 'publication': result}) == [first]
+            with pytest.raises(CrawlError, match='exclusions do not match'):
+                indexed_captures({'manifest': manifest, 'publication': {**result, 'retained_private': []}})
+            assert not git(remote, 'ls-tree', 'master', second['archive_path'])
+            assert (root / 'large.txt').read_bytes() == oversized
         repeated=publisher.publish(manifest,expected)
         assert repeated['recovered'] is True
         assert repeated['commit'] == result['commit']
+        assert repeated.get('retained_private') == result.get('retained_private')
         assert git(remote,'rev-list','--count','master') == '2'
         assert not (publisher.repo/'index').exists()
         # Verify local packs directly: cat-file would lazily fetch a missing

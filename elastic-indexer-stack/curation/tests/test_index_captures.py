@@ -16,6 +16,52 @@ def published(row):
     return {'manifest':manifest,'manifest_sha256':digest(manifest),'publication':{'commit':'b'*40}}
 
 
+def test_deep_malformed_tables_keep_content_in_reader_enrichment_and_passages(candidate):
+    from indexer import passages
+    from indexer.html_extraction import website_markdown
+    root, row = candidate
+    capture = row['captures'][0]
+    raw = ('<table><tr><th>Guild roster</th><td>First cell'
+           + ''.join(f'<td>Member {i:04}' for i in range(650))
+           + '<a href="logs.html">Raid log</a><img src="loot.gif" alt="Loot">'
+           + '</table><p>After the roster</p>').encode()
+    (root / capture['path']).write_bytes(raw)
+    capture.update(bytes=len(raw), sha256=digest(raw))
+    _, reader = text_document(root, capture)
+    enrichment = website_markdown(raw.decode())
+    plan = passages.prepare(reader, 'websites/guild.example/20000101000000/roster.html',
+                            html_source=raw.decode(), mime_type='text/html')
+    assert 'flattened_deep_table_markup' in plan.exclusions
+    assert all(f'Member {i:04}' in plan.view for i in range(650))
+    for view in (reader, enrichment):
+        assert all(f'Member {i:04}' in view for i in range(650))
+        assert view.index('Member 0000') < view.index('Member 0649') < view.index('After the roster')
+        assert '[Raid log](logs.html)' in view and '![Loot](loot.gif)' in view
+
+
+def test_rar_labeled_text_stays_a_file_in_capture_metadata(candidate):
+    from captures import describe_source, readable, indexable
+    root, row = candidate
+    capture = row['captures'][0]
+    raw = b'Rar!\x1a\x07\x00' + b'payload'
+    (root / capture['path']).write_bytes(raw)
+    capture.update(bytes=len(raw), sha256=digest(raw), content_type='text/plain')
+    capture.update(describe_source(root, capture))
+    assert capture['kind'] == 'file' and capture['content_type'] == 'text/plain'
+    assert not readable(capture) and not indexable(capture)
+    assert (root / capture['path']).read_bytes() == raw
+
+
+def test_generated_padding_is_normalized_without_changing_preformatted_source():
+    from indexer.html_extraction import website_markdown
+    spaces = ' ' * 150_000
+    code = 'start' + ' ' * 300 + 'finish'
+    regular = '<p>Early text here</p><p>Later\nparagraph</p>'
+    padded = f'<p>Early{spaces}text here</p><p>Later{spaces}\n\t{spaces}paragraph</p>'
+    assert website_markdown(padded + f'<pre>{code}</pre>') == website_markdown(regular + f'<pre>{code}</pre>')
+    assert code in website_markdown(f'<pre>{code}</pre>')
+
+
 @pytest.mark.parametrize('content_type', [None, '', 'text/html', 'TEXT/HTML; charset=utf-8'])
 def test_missing_or_normalized_content_type_keeps_readable_html(candidate, content_type):
     root, row = candidate

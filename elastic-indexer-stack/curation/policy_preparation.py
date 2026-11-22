@@ -31,7 +31,8 @@ READER_CHECKPOINTS={'html-2026-11-05-regional-decoding','html-2026-11-05-script-
 @lru_cache(maxsize=1)
 def renderer_identity():
     parts=[inspect.getsource(value) for value in (html_extraction.is_layout_table,
-        html_extraction.website_markdown,html_extraction.SourceMarkdownConverter,
+        html_extraction.website_markdown,html_extraction.flatten_deep_markup,
+        html_extraction.collapse_long_whitespace,html_extraction.SourceMarkdownConverter,
         ArchiveHandler.__init__,ArchiveHandler._convert_to_archive_url,ArchiveHandler._strip_index_html_from_url,
         website_reader,html.escape)]
     versions={name:importlib.metadata.version(name) for name in ('beautifulsoup4','markdownify')}

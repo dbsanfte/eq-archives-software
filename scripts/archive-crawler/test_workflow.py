@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from common import CrawlError, Store, digest
+from common import CrawlError, Store, digest, original_url
 from acquisition import Downloader, sample
 from crawler import parser
 from grading import SIGNATURE, Luna, grade, reserve, sources, validate
@@ -32,6 +32,16 @@ class WorkflowTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.store = Store(self.root / "state")
         self.addCleanup(self.store.close)
+
+    def test_malformed_joined_urls_do_not_abort_archive_link_extraction(self):
+        from common import Page
+        base = 'http://guild.example/old/news.html'
+        page = Page(base)
+        page.feed('<a href="http://[broken">Old broken link</a><a href="guide.html">Raid guide</a>')
+        self.assertIsNone(original_url('//[not-an-ip]/image.jpg', base))
+        self.assertIsNone(original_url('\udcff', base))
+        self.assertEqual([link['url'] for link in page.links], ['http://guild.example/old/guide.html'])
+        self.assertIn('Old broken link', page.text)
         self.output = contextlib.redirect_stdout(io.StringIO())
         self.output.__enter__()
         self.addCleanup(self.output.__exit__, None, None, None)

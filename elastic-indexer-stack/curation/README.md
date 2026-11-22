@@ -463,6 +463,8 @@ skipped when the saved markup proves a parking template and no other verified
 source requires the file. In-scope inventories and assets shared with historical
 site pages remain eligible. File checkpoints are saved individually, with progress
 updates at phase changes and up to once every three seconds within a phase.
+Malformed embedded URLs are ignored individually. Binary downloads with a
+misleading text content type use a file view and keep the original bytes.
 All available dated versions in inclusive UTC **1999-01-01
 through 2006-12-31** are requested, including identical-content versions and
 previously sampled URLs. Actual replays must match the requested URL and date;
@@ -733,6 +735,10 @@ Mislabeled binary downloads (for example DWF maps served as `text/plain`) remain
 preserved source files, without paid text enrichment or blocking later pages.
 Classification uses known binary signatures or dense control-byte evidence,
 preserving Unicode BOMs, Japanese encodings and uncertain text layouts.
+GitHub limits individual Git blobs to 100 MiB. Oversized downloads remain in
+private staging, with exact URL, date, size, and hash in the publication receipt.
+The remaining files publish and index under the original approval. The portal
+lists retained downloads alongside the published archive commit.
 Kubernetes retries twice. A terminal failure shows **Retry indexing** on the
 affected site's review. It verifies the saved publication approval and all source
 hashes, then queues a new numbered import Job under the original site budget.

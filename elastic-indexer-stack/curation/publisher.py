@@ -14,6 +14,7 @@ import tempfile
 from common import CrawlError, digest
 from captures import check_manifest, verified_path, archive_path
 from publication_git import PublicationError, lease, recover, run as run_git, category
+from publication_files import split as split_publication_files
 
 REMOTE = "git@github.com:dbsanfte/eq-archives.git"
 
@@ -199,16 +200,21 @@ class Publisher:
         if digest(manifest) != expected:
             raise CrawlError("Batch changed since publication approval")
         check_manifest(self.root, manifest)
+        captures, private = split_publication_files(manifest['captures'])
+        if not captures:
+            raise PublicationError('Every approved file exceeds the 100 MiB GitHub file limit. Original files remain in staging.',
+                                   'blob_limit', False)
+        exclusions = {'retained_private': private} if private else {}
         batch_id = manifest["batch_id"]
         marker_path = f"crawl-manifests/{batch_id}.json"
         marker = {"schema": 1, "batch_id": batch_id, "manifest_sha256": expected,
                   "sites": [{key: site[key] for key in ("id", "url", "scope", "manifest_sha256")} for site in manifest["sites"]],
                   "captures": [{key: capture[key] for key in ("url", "timestamp", "sha256", "bytes", "archive_path", "source")}
-                               for capture in manifest["captures"]]}
+                               for capture in captures], **exclusions}
         # Git streams verified files in bounded path batches, avoiding one Git
         # startup/object-store scan per tiny file. Source bytes stay off Python's
         # heap; retain the single site-level commit/push and recovery marker.
-        changes = self.hash_sources(manifest['captures'])
+        changes = self.hash_sources(captures)
         changes[marker_path] = self.git('hash-object', '-w', '--stdin',
             data=(json.dumps(marker, ensure_ascii=False, sort_keys=True, indent=2) + '\n').encode()).decode().strip()
         for attempt in range(3):
@@ -221,13 +227,15 @@ class Publisher:
                 if marker_entry[1] != "blob":
                     raise CrawlError("Remote publication marker is not a file")
                 existing = self.object("blob", marker_entry[2])
-                if json.loads(existing).get("manifest_sha256") != expected:
+                existing_marker = json.loads(existing)
+                if (existing_marker.get("manifest_sha256") != expected
+                        or existing_marker.get('retained_private', []) != private):
                     raise CrawlError("Remote publication marker belongs to a different approved manifest")
                 for path, oid in changes.items():
                     entry = self.lookup(tree, path)
                     if path != marker_path and (not entry or entry[1:] != ("blob", oid)):
                         raise CrawlError("Published source changed after its marker; indexing paused")
-                return {"commit": parent, "marker": marker_path, "recovered": True}
+                return {"commit": parent, "marker": marker_path, "recovered": True, **exclusions}
             updated = self.overlay(tree, changes)
             commit = self.git("commit-tree", updated, "-p", parent,
                               data=f"Archive approved capture batch {batch_id}\n\nManifest SHA256: {expected}\n".encode()).decode().strip()
@@ -235,7 +243,7 @@ class Publisher:
             # fetching the marker before another commit/push is attempted.
             result = self.git("push", "origin", commit + ":refs/heads/master", optional=True)
             if result is not None:
-                return {"commit": commit, "marker": marker_path, "recovered": False}
+                return {"commit": commit, "marker": marker_path, "recovered": False, **exclusions}
         raise PublicationError("Archive publication could not be confirmed; a retry will check the remote marker first.",'uncertain')
 
 

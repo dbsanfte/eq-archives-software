@@ -21,7 +21,7 @@ def binary_source(raw):
     if raw.startswith((codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE,
                        codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE, codecs.BOM_UTF8)):
         return False
-    if raw.startswith((b'(DWF V', b'PK\x03\x04', b'PK\x05\x06', b'\x1f\x8b', b'%PDF-',
+    if raw.startswith((b'(DWF V', b'PK\x03\x04', b'PK\x05\x06', b'Rar!\x1a\x07', b'7z\xbc\xaf\x27\x1c', b'\x1f\x8b', b'%PDF-',
                        b'\x7fELF', b'\x89PNG\r\n\x1a\n', b'\xff\xd8\xff', b'GIF87a', b'GIF89a')):
         return True
     sample = raw[:8192]
@@ -118,7 +118,10 @@ def asset_references(root, capture, *, classify=False):
     if capture['bytes'] > TEXT_LIMIT:
         from common import CrawlError
         raise CrawlError('Supporting-file reference extraction exceeds its safe text size; capture remains incomplete')
-    text, _ = decode(verified_source(root, capture), capture.get('content_type') or '')
+    raw = verified_source(root, capture)
+    if binary_source(raw):
+        return set(), False
+    text, _ = decode(raw, capture.get('content_type') or '')
     parser = Resources(capture['url'])
     if mime == 'text/css':
         parser.css(text)
