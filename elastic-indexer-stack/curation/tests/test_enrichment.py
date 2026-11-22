@@ -1,9 +1,11 @@
 import copy
 import json
+from unittest.mock import Mock
 
 import pytest
 
 from common import CrawlError, digest
+from import_status import EnrichmentError
 from indexer.capture_enrichment import Enricher, instructions, policy, validate
 
 
@@ -46,6 +48,59 @@ def test_enrichment_uses_existing_prompts_and_enums_and_reuses_paid_source_bound
         assert retry.enrich(capture,SOURCE+' A new paragraph.')['llm_enrichment_signature']!=result['llm_enrichment_signature']
         assert len(calls)==2
     finally:retry.close()
+
+
+def test_large_enrichment_counts_complete_requests_before_reserving_initial_and_correction_spend(candidate, tmp_path):
+    _, row = candidate
+    capture = {**row['captures'][0], 'archive_path': 'websites/guild.example/20000101000000/raid.txt'}
+    source = SOURCE + '\nComplete source line.' * 50_000
+    factory = Mock()
+    luna = factory.return_value
+    # Allow the exact model boundary, including the requested output allowance.
+    luna.count_input_tokens.side_effect = [400_000, 1_050_000 - 32_768]
+    client = Enricher(tmp_path/'enrichment', 'unused', client_factory=factory)
+    rejected = response({**RESULT, 'llm_summary': 'x' * 501})
+    luna.request.side_effect = [rejected, response()]
+    try:
+        assert client.enrich(capture, source)['llm_summary'] == RESULT['llm_summary']
+        assert client.enrich(capture, source)['llm_summary'] == RESULT['llm_summary']
+        assert [call[0] for call in luna.mock_calls] == [
+            'count_input_tokens', 'request', 'count_input_tokens', 'request']
+        for counted, submitted in zip(luna.count_input_tokens.call_args_list, luna.request.call_args_list, strict=True):
+            assert counted.args == submitted.args
+            assert json.loads(counted.args[0]['input'])['complete_source_markdown'] == source
+        assert json.loads(luna.request.call_args.args[0]['input'])['rejected_response'] == rejected
+        reservations = client.store.db.execute('SELECT reserved FROM attempts ORDER BY id').fetchall()
+        assert [record[0] for record in reservations] == [
+            (tokens * .20 + 32_768 * .75) / 1_000_000 for tokens in (400_000, 1_050_000 - 32_768)]
+    finally:
+        client.close()
+
+
+@pytest.mark.parametrize(('copies', 'token_result', 'expected_code', 'counted'), [
+    (50_000, 1_050_000 - 32_768 + 1, 'context', True),
+    (50_000, CrawlError('Invalid Luna input token count'), 'context_check', True),
+    (100_000, None, 'context', False),
+])
+def test_large_enrichment_rejection_creates_no_paid_attempt(candidate, tmp_path, copies, token_result, expected_code, counted):
+    _, row = candidate
+    capture = {**row['captures'][0], 'archive_path': 'websites/guild.example/20000101000000/raid.txt'}
+    factory = Mock()
+    check = factory.return_value.count_input_tokens
+    if isinstance(token_result, Exception):
+        check.side_effect = token_result
+    else:
+        check.return_value = token_result
+    client = Enricher(tmp_path/'enrichment', 'unused', client_factory=factory)
+    try:
+        with pytest.raises(EnrichmentError) as result:
+            client.enrich(capture, SOURCE + '\nComplete source line.' * copies)
+        assert result.value.code == expected_code
+        assert check.called is counted
+        factory.return_value.request.assert_not_called()
+        assert client.store.db.execute('SELECT COUNT(*) FROM attempts').fetchone()[0] == 0
+    finally:
+        client.close()
 
 
 def test_missing_date_remains_null_and_capture_timestamp_cannot_replace_it():
@@ -121,7 +176,9 @@ def test_budget_is_reserved_before_unknown_failure_and_survives_retry(candidate,
         client.store.db.execute('UPDATE attempts SET reserved=1')
         client.store.db.commit()
         with pytest.raises(CrawlError,match='dollar budget'):client.enrich(capture,SOURCE+' New source.')
-        with pytest.raises(CrawlError,match='no text truncated'):client.enrich(capture,'x'*900001)
+        with pytest.raises(EnrichmentError) as error:
+            client.enrich(capture, 'x' * 2_000_001)
+        assert error.value.code == 'context'
     finally:client.close()
 
 

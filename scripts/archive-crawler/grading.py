@@ -249,23 +249,34 @@ class Luna:
             self.connection.sock.settimeout(remaining)
 
     def request(self, payload):
+        return self._post("/v1/responses", payload, 1_048_576)
+
+    def count_input_tokens(self, payload):
+        request = {key: payload[key] for key in ("model", "input", "instructions", "reasoning", "text") if key in payload}
+        result = self._post("/v1/responses/input_tokens", request, 4096)
+        if (not isinstance(result, dict) or result.get("object") != "response.input_tokens"
+                or type(result.get("input_tokens")) is not int or result["input_tokens"] <= 0):
+            raise CrawlError("Invalid Luna input token count")
+        return result["input_tokens"]
+
+    def _post(self, path, payload, response_limit):
         try:
             self.time_left()
-            self.connection.request("POST", "/v1/responses", json.dumps(payload, ensure_ascii=False).encode(),
+            self.connection.request("POST", path, json.dumps(payload, ensure_ascii=False).encode(),
                                     {"Authorization": "Bearer " + self.key, "Content-Type": "application/json"})
             self.time_left()
             response = self.connection.getresponse()
             if self.deadline is None:
-                data = response.read(1048577)
+                data = response.read(response_limit + 1)
             else:
                 data = b""
-                while len(data) <= 1048576:
+                while len(data) <= response_limit:
                     self.time_left()
-                    block = response.read1(min(65536, 1048577 - len(data)))
+                    block = response.read1(min(65536, response_limit + 1 - len(data)))
                     if not block:
                         break
                     data += block
-            if len(data) > 1048576:
+            if len(data) > response_limit:
                 raise CrawlError("Luna response exceeds the response limit")
             if response.status != 200:
                 raise CrawlError(f"Luna HTTP {response.status}; upstream details omitted")

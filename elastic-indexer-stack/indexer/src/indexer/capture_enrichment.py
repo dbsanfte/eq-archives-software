@@ -39,6 +39,9 @@ MAX_CORRECTIONS = 2
 MAX_DATE_ITEMS = 1024
 MAX_OUTPUT_TOKENS = 32768
 PREVIOUS_OUTPUT_TOKENS = 4096
+INPUT_PREFLIGHT_BYTES = 900_000
+MAX_REQUEST_BYTES = 2_000_000
+LUNA_CONTEXT_TOKENS = 1_050_000
 DATE_VALIDATION_VERSION = 'date-evidence-v2'
 LOG = logging.getLogger(__name__)
 MISSING_RESPONSE = object()
@@ -202,15 +205,25 @@ class Enricher:
         return payload
 
     def exchange(self, capture, payload, signature, correction=False, parent=None, initial_signatures=()):
-        encoded = json.dumps(payload, ensure_ascii=False).encode()
-        if len(encoded) > 900000:
-            raise EnrichmentError('context')
         cached = self.store.get('enrichment:' + signature)
         if cached:
             return cached['response']
+        size = len(json.dumps(payload, ensure_ascii=False).encode())
+        if size > MAX_REQUEST_BYTES:
+            raise EnrichmentError('context')
+        input_tokens = size + 8192  # Existing conservative budget for small requests.
+        if size > INPUT_PREFLIGHT_BYTES:
+            # Count the complete prompt and schema without holding a ledger lock.
+            try:
+                self.client = self.client or self.client_factory(self.key_file)
+                input_tokens = self.client.count_input_tokens(payload)
+            except (CrawlError, OSError):
+                raise EnrichmentError('context_check') from None
+            if input_tokens + payload['max_output_tokens'] > LUNA_CONTEXT_TOKENS:
+                raise EnrichmentError('context')
         # Reserve every request, including corrections and ambiguous failures.
         # Each correction slot may spend only once across all Job/pod retries.
-        amount = ((len(encoded) + 8192) * .20 + payload['max_output_tokens'] * .75) / 1_000_000
+        amount = (input_tokens * .20 + payload['max_output_tokens'] * .75) / 1_000_000
         self.store.db.execute('BEGIN IMMEDIATE')
         cached = self.store.get('enrichment:' + signature)
         if cached:
