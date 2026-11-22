@@ -113,22 +113,40 @@ def website_markdown(html):
             if element.find_parent("table") is table:
                 element.name = "div"
         table.name = "div"
+    flatten_deep_markup(soup)
+    return SourceMarkdownConverter().convert_soup(soup)
+
+
+def flatten_deep_markup(soup, *, formatting=True):
     # Damaged old HTML can nest hundreds of formatting tags. Bound converter
     # stack depth without raising Python's process-wide recursion limit or
     # discarding text, image links, code or data cells. Only deep containers
     # lose redundant nesting; explicit line breaks retain block boundaries.
-    stack=[(soup,0)]
+    stack=[(soup,0,None,None)]
     protected={'table','tr','td','th','thead','tbody','tfoot','a','img','pre','code','kbd','samp'}
     blocks={'div','p','blockquote','section','article','center','ul','ol','li'}
+    repaired=False
     while stack:
-        node,depth=stack.pop()
+        node,depth,row,cell=stack.pop()
         children=list(node.children)
-        if depth>=48 and node.name not in protected and node.parent:
-            if node.name in blocks:
+        # Missing </td> and </tr> tags can create hundreds of nested cells
+        # inside the same table. Keep the outer row/cell and use line breaks
+        # for its invalid descendants. A real nested table has its own cells.
+        if node.name=='table':
+            row=cell=None
+        nested_cell=node.name in ('td','th') and cell is not None
+        nested_row=node.name=='tr' and row is not None
+        if depth>=48 and (nested_cell or nested_row or formatting and node.name not in protected) and node.parent:
+            if node.name in blocks or nested_cell or nested_row:
                 node.insert_before(soup.new_tag('br'));node.insert_after(soup.new_tag('br'))
             node.unwrap();depth-=1
-        stack.extend((child,depth+1) for child in reversed(children) if isinstance(child,Tag))
-    return SourceMarkdownConverter().convert_soup(soup)
+            repaired=True
+        elif node.name=='tr':
+            row=node
+        elif node.name in ('td','th'):
+            cell=node
+        stack.extend((child,depth+1,row,cell) for child in reversed(children) if isinstance(child,Tag))
+    return repaired
 
 
 class SourceMarkdownConverter(MarkdownConverter):

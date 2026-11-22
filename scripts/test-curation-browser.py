@@ -2162,7 +2162,7 @@ async def complete_file_review(browser,base,width):
     row=copy.deepcopy(snapshot['candidates'][0]);row.update(stage='indexing',state='captured_awaiting_review',review_state='awaiting_review')
     page_capture={**row['captures'][0],'kind':'page','candidate_id':row['id']}
     files=[{**page_capture,'url':row['scope']+f'images/sword-{i}.png','kind':'file','title':'',
-            'content_type':'image/png','timestamp':'20061231235959','bytes':1234} for i in range(1100)]
+            'content_type':'image/png','timestamp':'20061231235959','bytes':1234 if i<1099 else 101*1048576} for i in range(1100)]
     captures=[page_capture,*files]
     review={'id':'d'*32,'state':'awaiting_review','manifest_sha256':'e'*64,
             'source_slots':list(range(len(captures))),'page_identities':[c['url'] for c in captures],
@@ -2205,6 +2205,13 @@ async def complete_file_review(browser,base,width):
     await expect(page.locator('.document-text')).to_contain_text('Original file preserved')
     await safe_layout(page,width)
     await page.screenshot(path=f'/tmp/curation-complete-files-{width}.png',full_page=True)
+    row.update(stage='history',state='indexed',review_state='indexed')
+    review.update(state='indexed',publication={'commit':'a'*40,'retained_private':[
+        {key:files[-1][key] for key in ('url','timestamp','bytes','sha256')}]})
+    await page.goto(base+'/?view=history&candidate='+row['id']);await settled(page)
+    await expect(page.get_by_text('Files retained in staging',exact=True)).to_be_visible()
+    await page.get_by_text('Show retained files (1)',exact=True).click()
+    await expect(page.get_by_text('sword-1099.png',exact=False)).to_contain_text('101.0 MiB')
     assert any('known_manifest' in query for path,query in requests if path=='/api/candidate')
     assert not errors,errors
     await context.close()

@@ -13,6 +13,7 @@ from archive_layout import archive_path, legacy_archive_path
 from common import CAPTURE_WINDOW, CrawlError, Page, Store, decode, digest, in_capture_window, now, original_url, save, tier, within_scope, within_capture_scope
 from discovery import SKIP
 from indexer.capture_enrichment import DEFAULT_POLICY, policy_for_sites
+from source_assets import binary_source
 
 LIMITS = {"sites": 5, "pages_per_site": 20, "files": 100, "bytes": 64 * 1024 * 1024,
           "requests": 500, "seconds": 1800, "page_bytes": 1024 * 1024}
@@ -65,7 +66,7 @@ def media_type(capture):
 
 
 def readable(capture):
-    return media_type(capture) in (
+    return capture.get('kind') != 'file' and media_type(capture) in (
         'text/html', 'application/xhtml+xml', 'text/plain')
 
 
@@ -77,13 +78,19 @@ def indexable(capture):
 def describe_source(root, capture):
     result = {'kind': 'page' if readable(capture) else 'file'}
     if readable(capture) and capture['bytes'] <= TEXT_LIMIT:
-        page, encoding = document(root, capture)
+        raw = verified_source(root, capture)
+        if binary_source(raw):
+            return {'kind': 'file', 'has_text': False}
+        page, encoding = parse_document(capture, raw)
         result.update(title=' '.join(page.title), encoding=encoding, has_text=bool(' '.join(page.text).strip()))
     return result
 
 
 def document(root, capture):
-    raw = verified_source(root, capture)
+    return parse_document(capture, verified_source(root, capture))
+
+
+def parse_document(capture, raw):
     text, encoding = decode(raw, source_type(capture))
     page = Page(capture["url"])
     if media_type(capture) == 'text/plain':

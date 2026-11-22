@@ -641,6 +641,13 @@ function needsRegeneration(review) {
 function renderCapturedSite(root,row,review) {
   if (!review) {root.append(panel('Capture details unavailable','Refresh to reload the saved capture.'));return;}
   root.append(captureSummary(row,review));
+  const retained=review.publication?.retained_private || [];
+  if (retained.length) {
+    const notice=panel('Files retained in staging','These files exceed GitHub’s 100 MiB limit. The remaining captures were published.','attention');
+    const files=node('details');files.append(node('summary',`Show retained files (${retained.length})`));
+    for (const file of retained) files.append(node('p',`${file.url} · ${captureDate(file.timestamp)} · ${(file.bytes/1048576).toFixed(1)} MiB`,'meta'));
+    notice.append(files);root.append(notice);
+  }
   if (needsRegeneration(review)) {
     root.append(panel('Full capture needed','This older download used an HTML-only, 100-file batch limit. It has not checked the complete site inventory. Regenerate this approved scope to collect all available pages, images and files from 1999–2006. Verified downloads will be reused; the original files are retained.','attention'));
   }

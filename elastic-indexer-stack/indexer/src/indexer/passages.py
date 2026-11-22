@@ -18,7 +18,7 @@ from bs4 import BeautifulSoup, Comment
 
 from . import gemma
 from .chunking import SourceChunk, chunk_source
-from .html_extraction import website_markdown, repair_script_markup
+from .html_extraction import flatten_deep_markup, website_markdown, repair_script_markup
 from . import passage_forums, passage_sites, passage_scaffolding, passage_catalogs
 
 VERSION = "eq-passages-480-v13"
@@ -350,12 +350,16 @@ def _structured_navigation(soup,excluded):
                       r'contact(?: us)?',r'(?:home|main)',r'screenshots'))
         linked=sum(len(passage_forums.words(a)) for a in links)
         menu_roles=(len(node.select('a.menuItem'))>=3 and node.select_one('.menuSection') is not None)
+        # Require multiple exact UI roles and negligible authored descriptions.
+        unlinked=len(text)-linked
+        if not ((signals>=3 or menu_roles or extended>=5 and not node.find(['h1','h2','h3']))
+                and linked/max(1,len(text))>(.65 if menu_roles else .78)
+                and unlinked<max(80,len(links)*(8 if menu_roles else 5))):
+            continue
         data=any(len(cells:=passage_forums.row_cells(row))>1 and
                  any(re.fullmatch(r'[+\-]?\d[\d,.]*',passage_forums.words(c)) for c in cells)
                  for row in node.find_all('tr'))
-        # Require multiple exact UI roles and negligible authored descriptions.
-        unlinked=len(text)-linked
-        if (signals>=3 or menu_roles or extended>=5 and not node.find(['h1','h2','h3'])) and linked/max(1,len(text))>(.65 if menu_roles else .78) and unlinked<max(80,len(links)*(8 if menu_roles else 5)) and not data:
+        if not data:
             node.decompose();excluded.append('structured_navigation')
 
 
@@ -466,6 +470,7 @@ def _html_view(raw, host, _preserve_layout=False, path=""):
     soup = BeautifulSoup(projection, "html.parser")
     excluded = []
     if repaired:excluded.append('repaired_script_boundaries')
+    if flatten_deep_markup(soup, formatting=False):excluded.append('flattened_deep_table_markup')
     title = soup.title.get_text(" ", strip=True) if soup.title else ""
     source_title = title
     # Damaged generators can append <body> elements without closing <head>.
