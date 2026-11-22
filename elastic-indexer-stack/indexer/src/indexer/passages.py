@@ -583,11 +583,12 @@ def _html_view(raw, host, _preserve_layout=False, path=""):
     if site:title,site_method=site
     # Modern forum engines and many Ezboard mirrors expose the message body.
     # Replace a single-post presentation table, retaining its source author/date.
-    for node in ([] if thread else list(soup.select("[id^=post_message_],.postbody,.post-content,.postText"))):
+    message_selector="[id^=post_message_],.postbody,.post-content,.postText"
+    for node in ([] if thread else list(soup.select(message_selector))):
         if not node.parent:
             continue
         parent=node.find_parent("table")
-        container=parent if parent and len(parent.select("[id^=post_message_],.postbody,.post-content,.postText"))==1 else node
+        container=parent if parent and len(parent.select(message_selector,limit=2))==1 else node
         author=container.select_one(".bigusername,.username,[rel=author]")
         metadata=container.get_text(" ",strip=True)
         date=re.search(r"\b\d{1,2}[-/]\d{1,2}[-/]\d{2,4}(?:,?\s+\d{1,2}:\d{2}(?:\s*[AP]M)?)?",metadata,re.I)

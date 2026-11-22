@@ -8,6 +8,7 @@ from markdownify import MarkdownConverter
 
 TEXT_EXTRACTION_VERSION = "html-2026-10-05"
 WEBSITE_EXTRACTION_VERSION = "html-2026-11-12-jis-extensions"
+LONG_WHITESPACE = re.compile(r"[\t \r\n]{256,}")
 
 
 def extraction_version(record_id):
@@ -114,7 +115,19 @@ def website_markdown(html):
                 element.name = "div"
         table.name = "div"
     flatten_deep_markup(soup)
+    collapse_long_whitespace(soup)
     return SourceMarkdownConverter().convert_soup(soup)
+
+
+def collapse_long_whitespace(soup):
+    # Markdownify normalizes such runs anyway. Its newline search repeatedly
+    # scans long runs made entirely of spaces when a generated page adds padding.
+    for node in soup.find_all(string=lambda value: len(value) >= 256):
+        if node.find_parent('pre'):
+            continue
+        normalized = LONG_WHITESPACE.sub(lambda match: '\n' if '\n' in match[0] or '\r' in match[0] else ' ', node)
+        if normalized != node:
+            node.replace_with(type(node)(normalized))
 
 
 def flatten_deep_markup(soup, *, formatting=True):

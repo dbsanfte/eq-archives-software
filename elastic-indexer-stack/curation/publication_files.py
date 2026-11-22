@@ -17,7 +17,7 @@ def split(captures):
 
 def indexed_captures(batch):
     captures = batch['manifest']['captures']
-    publication = batch['publication']
+    publication = batch.get('publication', {})
     if 'retained_private' not in publication:
         return captures  # Earlier confirmed publications include their entire manifest.
     public, private = split(captures)

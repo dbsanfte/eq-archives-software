@@ -52,6 +52,16 @@ def test_rar_labeled_text_stays_a_file_in_capture_metadata(candidate):
     assert (root / capture['path']).read_bytes() == raw
 
 
+def test_generated_padding_is_normalized_without_changing_preformatted_source():
+    from indexer.html_extraction import website_markdown
+    spaces = ' ' * 150_000
+    code = 'start' + ' ' * 300 + 'finish'
+    regular = '<p>Early text here</p><p>Later\nparagraph</p>'
+    padded = f'<p>Early{spaces}text here</p><p>Later{spaces}\n\t{spaces}paragraph</p>'
+    assert website_markdown(padded + f'<pre>{code}</pre>') == website_markdown(regular + f'<pre>{code}</pre>')
+    assert code in website_markdown(f'<pre>{code}</pre>')
+
+
 @pytest.mark.parametrize('content_type', [None, '', 'text/html', 'TEXT/HTML; charset=utf-8'])
 def test_missing_or_normalized_content_type_keeps_readable_html(candidate, content_type):
     root, row = candidate

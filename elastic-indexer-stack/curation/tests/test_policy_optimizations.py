@@ -76,12 +76,16 @@ def test_changed_record_between_preparation_and_vector_read_cannot_write(tmp_pat
     sources.close()
 
 
-def test_source_bound_compatible_reader_is_not_reextracted(tmp_path,monkeypatch):
+@pytest.mark.parametrize('legacy', [False, True])
+def test_source_bound_compatible_reader_is_not_reextracted(tmp_path,monkeypatch,legacy):
     hit,sources=many(tmp_path);source=hit['_source']
     raw=sources.read(source);decoded=decode_source(raw,'text/html')
     source['text_extraction_version']='html-2026-11-05-script-evidence'
     source['text_passage_provenance']['decoding']={**decoded.provenance(),'version':'source-decoding-v3'}
-    assert preparation.renderer_identity()==preparation.LEGACY_RENDERER
+    if legacy:
+        monkeypatch.setattr(preparation, 'renderer_identity', lambda: preparation.LEGACY_RENDERER)
+    else:
+        source['text_passage_provenance']['reader']=preparation.reader_proof(source['text_full'], decoded.text, decoded.provenance())
     monkeypatch.setattr(preparation.html_extraction,'website_markdown',lambda _:pytest.fail('Unchanged reader was reextracted'))
     monkeypatch.setattr(preparation,'BeautifulSoup',lambda *a,**k:pytest.fail('Unneeded title DOM parse'))
     result=preparation.prepare(hit,sources)
