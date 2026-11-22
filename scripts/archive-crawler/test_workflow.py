@@ -303,6 +303,27 @@ class WorkflowTests(unittest.TestCase):
             self.assertEqual(connection.request.call_count, requests)
             client.close()
 
+    def test_luna_counts_complete_model_input_with_bounded_response(self):
+        key = self.root / 'dummy-key'
+        key.write_text('fixture-only')
+        model_inputs = {'model': 'gpt-6-luna', 'input': 'Complete page', 'instructions': 'Use the page',
+                        'reasoning': {'effort': 'low'}, 'text': {'format': {'type': 'json_schema'}}}
+        payload = {**model_inputs, 'max_output_tokens': 32768, 'store': False, 'service_tier': 'default'}
+        with patch('grading.http.client.HTTPSConnection') as connection:
+            client = Luna(key)
+            reply = connection.return_value.getresponse.return_value
+            reply.status = 200
+            reply.read.return_value = b'{"object":"response.input_tokens","input_tokens":250000}'
+            self.assertEqual(client.count_input_tokens(payload), 250000)
+            method, path, body, _ = connection.return_value.request.call_args.args
+            self.assertEqual((method, path, json.loads(body)), ('POST', '/v1/responses/input_tokens', model_inputs))
+            reply.read.assert_called_with(4097)
+            for malformed in (b'{}', b'{"object":"response.input_tokens","input_tokens":true}', b'x' * 4097):
+                reply.read.return_value = malformed
+                with self.assertRaises(CrawlError):
+                    client.count_input_tokens(payload)
+            client.close()
+
     def test_cdx_identity_variants_are_unresolved_and_never_relabelled_absent(self):
         self.candidate()
         self.store.db.execute("UPDATE candidates SET captures='[]'")

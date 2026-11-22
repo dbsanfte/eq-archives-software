@@ -666,8 +666,12 @@ signature, and embeds its short summary with Gemma. The complete original body
 is retained separately; model estimates never replace capture dates. Date
 extraction receives no synthetic capture header and requires source evidence.
 Evidence matching allows only whitespace changes (wrapped lines and NBSPs),
-then retains the original verbatim excerpt. Sources exceeding the 900 KB
-serialized enrichment bound remain pending rather than being truncated.
+then retains the original verbatim excerpt. Serialized enrichment requests up to
+2,000,000 bytes can use the complete source. Above 900,000 bytes, count the full
+model input (including prompt and schema) and require it to fit within Luna's
+1,050,000-token context alongside the requested output. Use the measured count
+to reserve spend at the long-context rate. Sources that exceed either bound or
+cannot be counted stay pending with their original text intact.
 Date prompts require one contiguous excerpt: a table's date cell must not be
 joined to its column heading. A received response that fails field, completeness
 or source validation gets at most two correction requests with the complete

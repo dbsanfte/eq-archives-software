@@ -860,7 +860,11 @@ correction responses against that durable limit. Refusals remain pending. Surfac
 safe predefined failure reasons through Job/manifest-bound diagnostic files; never
 expose model output or let a previous attempt's status override the current Job.
 Enrichment uses 32,768 output tokens for initial/correction requests; reserve the
-full allowance before sending. Reuse exact source-bound 4K paid caches and retain
+full allowance before sending. Requests above 900,000 serialized bytes require a
+complete Luna input token count before spend reservation. Bound requests to
+2,000,000 bytes and enforce input plus requested output within 1,050,000 tokens.
+Keep the source intact and retain per-site and calendar spend controls.
+Reuse exact source-bound 4K paid caches and retain
 their correction identities. The operator-authorized 32K migration has one durable
 single-use recovery slot only for a received old 4K `max_output_tokens` failure
 after its correction chain is exhausted. Keep old costs/history and unknown
