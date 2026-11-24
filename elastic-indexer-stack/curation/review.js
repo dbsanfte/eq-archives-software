@@ -1081,7 +1081,7 @@ function renderPipelineActivity() {
   const discovery=activeOperation('candidates'),capture=activeOperation('capture'),publication=activeOperation('indexing');
   const unavailable=Object.values(info.runtime || {}).some(healthy=>healthy===false);
   $('pipeline-overview').dataset.attention=String(unavailable);
-  $('pipeline-overview').textContent=`${unavailable ? 'Worker needs attention' : `${[discovery,capture,publication || info.indexing?.state==='indexing',info.maintenance?.phase==='running'].filter(Boolean).length} workers active`} · ${data.stage_counts.queued || 0} sites queued${data.capture_attention?.retrying ? ` · ${data.capture_attention.retrying} retries scheduled` : ''}${info.publications?.waiting ? ` · ${info.publications.waiting} publications waiting` : ''}`;
+  $('pipeline-overview').textContent=`${unavailable ? 'Worker needs attention' : `${[discovery,capture,publication || info.indexing?.state==='indexing',info.maintenance?.phase==='running',info.reenrichment?.phase==='running'].filter(Boolean).length} workers active`} · ${data.stage_counts.queued || 0} sites queued${data.capture_attention?.retrying ? ` · ${data.capture_attention.retrying} retries scheduled` : ''}${info.publications?.waiting ? ` · ${info.publications.waiting} publications waiting` : ''}`;
   for (const [lane,title] of [['candidates','Discovery'],['capture','Capture'],['indexing','Indexing']]) {
     let card=$(`activity-${lane}`);
     if (!card) {
@@ -1176,18 +1176,21 @@ function renderPipelineActivity() {
         if (!publication && !index && maintenance.phase==='running') {status='Updating older archive chunks';tone='running';}
         body.append(node('p',`${phases[maintenance.phase] || 'Chunk maintenance'} · ${maintenance.policy}`,'meta'));
         if (maintenance.progress) {const p=maintenance.progress;body.append(node('p',`${Number(p.updated || 0).toLocaleString()} upgraded · ${Number(p.reused || 0).toLocaleString()} reused vectors · ${Number(p.unresolved || 0).toLocaleString()} records awaiting retry`,'activity-counts'));}
-        const enrichment=maintenance.progress?.enrichment;
-        if (enrichment) {
-          const phases={waiting_budget:'Waiting for the Luna budget',waiting_configuration:'Waiting for Luna budget configuration',waiting_imports:'Waiting for approved imports',sweep_waiting:'Will check for more records',retry_wait:'Will retry'};
-          body.append(node('p',`Re-enrichment · ${Number(enrichment.updated || 0).toLocaleString()} refreshed · ${Number(enrichment.reused || 0).toLocaleString()} reused${phases[enrichment.phase] ? ` · ${phases[enrichment.phase]}` : ''}`,'activity-counts'));
-          if (enrichment.last_reason) body.append(node('p',`Last re-enrichment issue: ${enrichment.last_reason.replaceAll('_',' ')}`,'meta'));
-        }
         if (maintenance.progress?.issues?.length) {
           const issues=node('details');issues.append(node('summary','Recent repair issues'));
           for (const issue of maintenance.progress.issues) {const item=node('p',undefined,'address');item.append(node('strong',issue.reason.replaceAll('_',' ')),node('br'),node('span',issue.id));issues.append(item);}
           body.append(issues);
         }
         if (maintenance.error) body.append(node('p',maintenance.error,'activity-warning'));
+      }
+      const enrichmentLane=info.reenrichment;
+      const enrichment=enrichmentLane?.progress?.enrichment || maintenance?.progress?.enrichment;
+      const enrichmentPhase=enrichmentLane?.phase || enrichment?.phase;
+      if (enrichment || enrichmentPhase) {
+        const phases={running:'Refreshing archive metadata',waiting_budget:'Waiting for the Luna budget',waiting_configuration:'Waiting for Luna budget configuration',waiting_imports:'Waiting for approved imports',waiting_jobs:'Waiting for existing indexing work',sweep_waiting:'Will check for more records',retry_wait:'Will retry'};
+        body.append(node('p',`Re-enrichment · ${Number(enrichment?.updated || 0).toLocaleString()} refreshed · ${Number(enrichment?.reused || 0).toLocaleString()} reused${phases[enrichmentPhase] ? ` · ${phases[enrichmentPhase]}` : ''}`,'activity-counts'));
+        if (enrichment?.last_reason) body.append(node('p',`Last re-enrichment issue: ${enrichment.last_reason.replaceAll('_',' ')}`,'meta'));
+        if (enrichmentLane?.error) body.append(node('p',enrichmentLane.error,'activity-warning'));
       }
     }
     if (info.runtime?.[lane]===false || lane!=='indexing' && info.runtime?.wayback===false) {

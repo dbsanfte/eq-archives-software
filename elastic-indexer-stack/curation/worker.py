@@ -368,9 +368,10 @@ class Worker:
             batches = [unpack(row) for row in store.db.execute("SELECT id,state,manifest_sha256,job,publication FROM batches INDEXED BY batch_metadata WHERE state IN ('published_waiting_index','indexing','index_budget_waiting') ORDER BY created")]
         self.daily_budget.prioritize('portal',bool(batches))
         maintenance=os.environ.get('PASSAGE_MAINTENANCE_ENABLED')=='1'
+        reenrichment=os.environ.get('PASSAGE_REENRICHMENT_ENABLED')=='1'
         from policy_scheduler import write_control
         write_control(self.root,maintenance)
-        if not batches and not maintenance:
+        if not batches and not (maintenance or reenrichment):
             return
         self.kube = self.kube or Kubernetes()
         jobs = self.kube.jobs()
@@ -393,15 +394,16 @@ class Worker:
                     store.db.commit()
         # Reconcile before declaring demand: one failed site cannot starve
         # grading or background work after its import moves to attention.
-        from policy_scheduler import import_pending, schedule
+        from policy_scheduler import ENRICHMENT_STATE, import_pending, schedule
         self.daily_budget.prioritize('portal',import_pending(self.root,budget_wait=True))
-        if maintenance:
-            try:schedule(self.root,self.kube,jobs,os.environ.get('IMPORT_IMAGE',''))
+        for enabled, state_key, paid in ((maintenance,'policy_maintenance',False),(reenrichment,ENRICHMENT_STATE,True)):
+            if not enabled:continue
+            try:schedule(self.root,self.kube,jobs,os.environ.get('IMPORT_IMAGE',''),enrichment=paid)
             except Exception as error:
                 if database_busy(error):raise
                 with connect(self.root) as store:
-                    saved=store.get('policy_maintenance',{})
-                    store.set('policy_maintenance',{**saved,'phase':'retry_wait',
+                    saved=store.get(state_key,{})
+                    store.set(state_key,{**saved,'phase':'retry_wait',
                               'error':'Background policy scheduling is unavailable; imports continue.'})
 
     def index_batch(self, batch, jobs):

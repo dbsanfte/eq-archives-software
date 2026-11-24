@@ -1356,13 +1356,18 @@ explicit skip-CI request should finish without launching a deployment.
 
 Routine same-model chunk updates use `curation/policy_maintenance.py` and
 `policy_scheduler.py`: one 2,000-record/ten-minute slice, CUDA only, cooperative
-yield between batches and a 15-minute hard deadline. A paid sub-slice uses its
-own durable cursor, at most eight attempted records and 75 seconds per slice.
-Its write requires verified current source/passages and an exact optimistic
+yield between batches and a 15-minute hard deadline. Separate historical
+enrichment Jobs use a bounded durable queue and per-collection cursors, rotate
+websites, mailing lists and newsgroups, and process up to 512 records or eight
+minutes with four concurrent paid requests and batched summary embeddings.
+Drain each wave before releasing its shared priority claim. Preserve the old
+paid totals, matching cursor, and cache after the old combined slice exits.
+Each write requires verified current source/passages and an exact optimistic
 revision. Replace the summary and validated Gemma vector atomically with the
 grounded labels; keep publication date evidence, readers, body/OCR vectors and
-index timestamps. Skip current metadata and reuse labels on identical bounded
-evidence. Preserve paid responses across retries. Use the same configured UTC
+index timestamps. Request grounded summaries and labels without regenerating
+dates. Skip current metadata and reuse labels on identical bounded evidence.
+Preserve paid responses across retries. Use the same configured UTC
 limits and a $50 lifetime maintenance allowance per website host, mailing list
 or newsgroup. Retain earlier charges and the separate import budget. Approved
 imports have first priority, with discovery yielding to an active paid request.

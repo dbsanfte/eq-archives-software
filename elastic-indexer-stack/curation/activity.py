@@ -73,6 +73,7 @@ def snapshot(store, worker=None):
     from publication_recovery import summary
     return {'publications':summary(store),'discovery': discovery, 'next_capture': dict(next_capture) if next_capture else None,
             'maintenance':store.get('policy_maintenance',{}),
+            'reenrichment':store.get('enrichment_maintenance',{}),
             'next_retry': dict(retry) if retry else None,
             'indexing': index, 'runtime': runtime,
             'recent': sorted(recent, key=lambda event: event['at'], reverse=True)[:8]}
