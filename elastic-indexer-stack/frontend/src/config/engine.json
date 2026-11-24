@@ -33,13 +33,16 @@
     "llm_guessed_date",
     "last_indexed"
   ],
+  "valueFacetSizes": {"llm_topics": 20, "llm_entities": 20},
   "valueFacets": [
     "domain_name",
     "llm_content_flavour",
     "file_type",
     "mime_type",
     "mailing_list_name",
-    "llm_tags"
+    "llm_tags",
+    "llm_topics",
+    "llm_entities"
   ],
   "datePickerFacets": [
     "capture_date",

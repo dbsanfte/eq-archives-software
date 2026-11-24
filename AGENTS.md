@@ -844,6 +844,12 @@ retain their configured daily policy). Preserve full source,
 model provenance and supported date evidence; capture dates are not publication
 estimates. Enrichment failures leave the new document pending. Skip existing
 IDs without paying for enrichment or overwriting their metadata.
+New enrichment requests derive bounded, excerpt-backed free-form topics and
+typed entities from the indexed passage projection. Keep broad tags, original
+readers, date evidence and previous paid-response identities. Do not index
+unsupported labels or expose private excerpts. Navigation, directories and
+off-topic sources contribute no specific labels. Browser/MCP may expose the
+additive exact facets; scoring changes require separate retrieval evidence.
 Cache paid responses before validation, including rejected evidence, to prevent
 repeated charges on retries. Date evidence may vary only in whitespace; retain
 the matched verbatim source excerpt. Omit unsupported/invalid optional date claims

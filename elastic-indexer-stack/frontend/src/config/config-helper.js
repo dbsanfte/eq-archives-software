@@ -183,7 +183,7 @@ export function buildStandardFacetConfigFromConfig() {
     acc = acc || {};
     acc[n] = { 
       type: "value", 
-      size: 100 
+      size: config.valueFacetSizes?.[n] ?? 100
     };
     return acc;
   }, undefined);

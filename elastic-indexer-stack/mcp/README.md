@@ -121,11 +121,16 @@ accept `last_indexed_asc` and `last_indexed_desc`; missing dates sort last.
 ```
 
 Exact-value lists (at most ten per category) include `domains`, `mailing_lists`,
-`file_types`, `mime_types`, `themes` and `tags`. Values within one category are OR;
+`file_types`, `mime_types`, `themes`, `tags`, `topics`, `entities` and
+`content_roles`. Values within one category are OR;
 categories are AND. `list_sources` supports `domain`, `mailing_list`, `file_type`,
-`mime_type`, `theme`, `tag` and `collection`. Themes/content flavours and tags are
-model-generated, not verified classifications. `metadata.llm_tags` is a JSON array
-encoded as a string, retaining the existing string-valued metadata contract.
+`mime_type`, `theme`, `tag`, `topic`, `entity`, `content_role` and `collection`.
+Copy exact values into filters, for example `"entities": ["zone: Temple of Veeshan"]`.
+Newer Luna-enriched captures can supply free-form topics, typed entities and a
+content role. Topics and entities require a matching excerpt from the indexed
+passages. The classification is model-generated, and readers can check it against
+the fetched source. `metadata.llm_tags`, `metadata.llm_topics` and
+`metadata.llm_entities` are JSON arrays encoded as strings.
 Collections are `websites`, `mailing_lists` and `newsgroups`; website counts include
 supporting assets. Facet counts are matching documents, not unique pages.
 

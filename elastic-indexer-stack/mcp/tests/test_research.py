@@ -146,7 +146,8 @@ def test_source_paging_uses_es_after_key_instead_of_last_bucket():
     assert seen == [None, {"value": "bravo.org"}]
 
 
-@pytest.mark.parametrize("kind,field", [("mailing_list", "mailing_list_name"), ("file_type", "file_type")])
+@pytest.mark.parametrize("kind,field", [("mailing_list", "mailing_list_name"), ("file_type", "file_type"),
+    ("topic", "llm_topics"), ("entity", "llm_entities"), ("content_role", "llm_content_role")])
 def test_other_source_directories_are_scoped_to_fixed_keyword_fields(kind, field):
     def es(request):
         body = json.loads(request.content)
@@ -154,6 +155,26 @@ def test_other_source_directories_are_scoped_to_fixed_keyword_fields(kind, field
         return search_response(aggregations={"sources": {"buckets": [{"key": {"value": "value"}, "doc_count": 2}]}})
     page = run(make_archive(es, never_embed).list_sources(kind))
     assert page.source_type == kind and page.next_after is None
+
+
+def test_source_backed_filters_and_result_metadata_use_exact_values():
+    labels = {"llm_topics": ["raid strategy"], "llm_entities": ["zone: Temple of Veeshan"],
+              "llm_content_role": "article"}
+    document = {**HIT, "_source": {**HIT["_source"], **labels}}
+
+    def es(request):
+        body = json.loads(request.content)
+        assert set(labels) <= set(body["_source"])
+        assert body["query"]["bool"]["filter"] == [{"terms": {"llm_topics": ["raid strategy", "tanking"]}},
+             {"terms": {"llm_entities": ["zone: Temple of Veeshan"]}}, {"terms": {"llm_content_role": ["article"]}}]
+        return search_response([document], 1)
+
+    filters = ResearchFilters(topics=["raid strategy", "tanking"], entities=["zone: Temple of Veeshan"],
+                              content_roles=["article"])
+    metadata = run(make_archive(es, never_embed).search_archive("", filters)).results[0].metadata
+    assert json.loads(metadata["llm_topics"]) == labels["llm_topics"]
+    assert json.loads(metadata["llm_entities"]) == labels["llm_entities"]
+    assert metadata["llm_content_role"] == "article"
 
 
 @pytest.mark.parametrize("method", ["search_archive", "list_sources"])

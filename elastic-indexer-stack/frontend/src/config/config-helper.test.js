@@ -80,11 +80,12 @@ test('omits metadata and displayed identity fields from additional result detail
 
 test('builds value, date, recent-date, and nested-date facets plus sort choices', () => {
   configure({
-    indexName: 'archives', valueFacets: ['domain'], recentFacets: ['last_indexed'],
+    indexName: 'archives', valueFacets: ['domain', 'llm_topics'], recentFacets: ['last_indexed'],
+    valueFacetSizes: {llm_topics: 20},
     datePickerFacets: ['capture_date'], nestedDatePickerFacets: ['extracted_dates'],
     sortFields: ['capture_date', 'title']
   });
-  expect(helpers.getStandardFacetFields()).toEqual(['domain', 'last_indexed']);
+  expect(helpers.getStandardFacetFields()).toEqual(['domain', 'llm_topics', 'last_indexed']);
   expect(helpers.getDatePickerFacetFields()).toEqual(['capture_date']);
   expect(helpers.getNestedDatePickerFacetFields()).toEqual(['extracted_dates']);
   expect(helpers.buildDatePickerFacetConfigFromConfig()).toEqual({
@@ -92,6 +93,7 @@ test('builds value, date, recent-date, and nested-date facets plus sort choices'
   });
   const facets = helpers.buildStandardFacetConfigFromConfig();
   expect(facets.domain).toEqual({ type: 'value', size: 100 });
+  expect(facets.llm_topics).toEqual({ type: 'value', size: 20 });
   expect(facets.last_indexed.ranges).toHaveLength(5);
   for (const range of facets.last_indexed.ranges) {
     expect(Date.parse(range.from)).toBeLessThan(Date.parse(range.to));

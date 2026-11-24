@@ -130,7 +130,8 @@ def test_manifest_indexing_creates_missing_ids_preserves_source_and_skips_existi
     class FakeServices:
         def __init__(self): self.docs={}; self.inputs=[]; self.enrichments=[]
         def exists(self,identifier): return identifier in self.docs
-        def enrich(self,capture,source):
+        def enrich(self,capture,source,search_view):
+            assert 'EverQuest guild history.' in search_view
             self.enrichments.append(source)
             return {'llm_summary':'An EverQuest guild history and guide.', 'llm_content_flavour':'Guild Achievements',
                     'llm_tags':['raid'],'llm_guessed_date':None,'llm_extracted_dates':[],
@@ -202,8 +203,8 @@ def test_new_capture_uses_same_japanese_decoder_for_reader_enrichment_and_embedd
     (root/capture['path']).write_bytes(raw);capture.update(content_type='text/html',bytes=len(raw),sha256=digest(raw))
     class Services:
         def exists(self,*a):return False
-        def enrich(self,capture,text):
-            assert phrase in text
+        def enrich(self,capture,text,search_view):
+            assert phrase in text and phrase in search_view
             return {'llm_summary':'An EverQuest guild adventure.'}
         def embeddings(self,inputs):return [[1.]+[0.]*767 for _ in inputs]
         def create(self,key,document):
@@ -259,7 +260,7 @@ def test_mislabeled_binary_download_does_not_enrich_or_block_later_pages(candida
     class Import:
         def __init__(self):self.docs={};self.paid=[]
         def exists(self,key):return key in self.docs
-        def enrich(self,capture,source):
+        def enrich(self,capture,source,search_view):
             self.paid.append(capture['url']);return {'llm_summary':'An EverQuest guild page.'}
         def embeddings(self,inputs):return [[1.]+[0.]*767 for _ in inputs]
         def create(self,key,doc):self.docs[key]=doc;return True

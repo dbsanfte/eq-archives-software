@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir --require-hashes -r /app/requirements.txt
 COPY scripts/archive-crawler /app/scripts/archive-crawler
 COPY elastic-indexer-stack/curation /app/curation
 COPY elastic-indexer-stack/indexer/src/indexer/__init__.py elastic-indexer-stack/indexer/src/indexer/chunking.py elastic-indexer-stack/indexer/src/indexer/gemma.py elastic-indexer-stack/indexer/src/indexer/html_extraction.py /app/indexer/
-COPY elastic-indexer-stack/indexer/src/indexer/capture_enrichment.py /app/indexer/
+COPY elastic-indexer-stack/indexer/src/indexer/capture_enrichment.py elastic-indexer-stack/indexer/src/indexer/search_enrichment.py /app/indexer/
 COPY elastic-indexer-stack/indexer/src/indexer/source_encoding.py elastic-indexer-stack/indexer/src/indexer/source_files.py /app/indexer/
 COPY elastic-indexer-stack/indexer/src/indexer/discussions.py elastic-indexer-stack/indexer/src/indexer/archive_images.py /app/indexer/
 COPY elastic-indexer-stack/indexer/src/index_discussions.py /app/index_discussions.py
