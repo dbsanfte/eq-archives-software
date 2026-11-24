@@ -336,6 +336,7 @@ class Publisher:
     def publish_many(self, sites, progress=lambda *_: None):
         """Build one commit per site and send one fast-forward ref update."""
         outcomes = {}
+        sent_parent, sent_commits = None, {}
         for site in sites:
             self.install(site)
         for _ in range(3):
@@ -361,7 +362,8 @@ class Publisher:
                         # A recovered receipt proves the exact marker and every
                         # prepared path in the remote base, in one tree walk.
                         self.verify_tree(base_tree, site.changes)
-                        outcomes[site.identifier] = self.receipt(site, base, recovered=True)
+                        commit = sent_commits.get(site.identifier, base) if base == sent_parent else base
+                        outcomes[site.identifier] = self.receipt(site, commit, recovered=True)
                         continue
                     progress(site, 'merging_trees')
                     with TreePack(lambda data: self.git('index-pack', '--stdin', data=data)) as pack:
@@ -386,6 +388,7 @@ class Publisher:
                     if site.identifier in commits:
                         outcomes[site.identifier] = self.receipt(site, commits[site.identifier], recovered=False)
                 return outcomes
+            sent_parent, sent_commits = parent, commits
         raise PublicationError("Archive publication could not be confirmed; a retry will check the remote marker first.",'uncertain')
 
     def receipt(self, site, commit, *, recovered):

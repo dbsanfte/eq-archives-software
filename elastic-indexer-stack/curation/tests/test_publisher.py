@@ -107,8 +107,7 @@ def test_shared_push_preserves_site_commits_and_marks_only_successful_sites(cand
                 assert destination.read_text() == 'other content'
                 continue
             assert result['recovered'] == (delivery == 'response_lost')
-            if delivery != 'response_lost':
-                assert result['commit'] == commit
+            assert result['commit'] == commit
             marker = json.loads(git(archive_server, 'show', f'{commit}:{site.marker}'))
             assert marker['manifest_sha256'] == site.expected
             capture = site.manifest['captures'][0]
