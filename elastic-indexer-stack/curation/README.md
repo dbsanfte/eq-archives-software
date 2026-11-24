@@ -1062,10 +1062,11 @@ revision. Original publication evidence, readers, capture/index timestamps
 and body/OCR vectors stay with their existing owners.
 
 Approved imports have first priority. The paid pass uses the configured UTC
-daily/monthly Luna ledger and a durable maintenance cap per canonical website
-host, mailing list or newsgroup, using the configured site allowance ($5
-by default). Import approvals retain their original separate ledgers. The
-maintenance cache under `indexing-state/policy-enrichment/` preserves prior paid
+daily/monthly Luna ledger and a $50 lifetime maintenance cap per canonical
+website host, mailing list or newsgroup. Settled usage and unresolved
+reservations count against that cap. Import approvals use their own per-site
+allowance and ledgers. The maintenance cache under
+`indexing-state/policy-enrichment/` preserves prior paid
 responses, including when an embedding outage prevents a write. Budget waits
 and paid service failures leave the free body pass eligible to run. The paid
 profile projects only the Luna item and mounts the shared budget directory.
