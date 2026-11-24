@@ -17,6 +17,7 @@ import uuid
 from common import CrawlError, now
 
 SCALE = 1_000_000_000
+MAINTENANCE_SCOPE_LIMIT_USD = 50
 DEFAULT = {'enabled': False, 'configured': False, 'daily_usd': 2.0, 'monthly_usd': 500.0, 'site_usd': None,
            'min_grade': 2, 'grading_criteria': '', 'revision': 0}
 current_budget = ContextVar('luna_daily_budget', default=None)
@@ -225,8 +226,11 @@ class DailyBudget:
             if automatic_request.get() and not config['enabled']:
                 raise AutomaticStopped()
             if site_spent_units is not None:
-                maximum = config.get('site_usd') if config['configured'] else None
-                maximum = site_maximum if maximum is None else maximum
+                if purpose == 'maintenance':
+                    maximum = MAINTENANCE_SCOPE_LIMIT_USD
+                else:
+                    maximum = config.get('site_usd') if config['configured'] else None
+                    maximum = site_maximum if maximum is None else maximum
                 if site_spent_units + reserved > units(maximum):
                     raise SiteBudgetExceeded('Site Luna budget reached; paid results are retained')
             limits=self.limits(db,when,config)

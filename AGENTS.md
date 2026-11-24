@@ -1363,9 +1363,11 @@ revision. Replace the summary and validated Gemma vector atomically with the
 grounded labels; keep publication date evidence, readers, body/OCR vectors and
 index timestamps. Skip current metadata and reuse labels on identical bounded
 evidence. Preserve paid responses across retries. Use the same configured UTC
-limits and per-scope maintenance allowance, with approved imports first and
-discovery yielding to an active paid request. A budget or paid service pause
-must let the body pass continue. Only paid slices receive the Luna item and
+limits and a $50 lifetime maintenance allowance per website host, mailing list
+or newsgroup. Retain earlier charges and the separate import budget. Approved
+imports have first priority, with discovery yielding to an active paid request.
+A budget or paid service pause must let the body pass continue. Only paid
+slices receive the Luna item and
 shared ledger mount. All source access remains exact, bounded and remote-free.
 Wait for legacy broad writers to finish naturally; leave their specs/pods/sources
 untouched. Scope durable cursors/diagnostics and the least-privileged read/index

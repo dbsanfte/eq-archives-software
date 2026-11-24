@@ -8,7 +8,7 @@ import json
 import pytest
 
 from common import CrawlError,Store
-from daily_budget import DailyBudget,SiteBudgetExceeded,reserve_attempt,units
+from daily_budget import DailyBudget,DailyBudgetPause,SiteBudgetExceeded,reserve_attempt,units
 from indexer.capture_enrichment import Enricher,LEGACY_POLICY,LEGACY_AUTO_POLICY,DEFAULT_POLICY,AUTO_POLICY,policy
 from test_enrichment import SOURCE,response
 
@@ -104,6 +104,43 @@ def test_reservation_uses_current_site_setting_under_the_shared_admission_lock(t
     assert account.reserve(.1,site_spent_units=units(4.8),site_maximum=2)
     configure(account,site_usd=4)
     with pytest.raises(SiteBudgetExceeded):account.reserve(.1,site_spent_units=units(4),site_maximum=5)
+
+
+def test_rolling_maintenance_raises_the_lifetime_cap_without_resetting_charges(tmp_path):
+    account = DailyBudget(tmp_path / 'budget')
+    configure(account, site_usd=5, daily_usd=20, monthly_usd=500)
+    with closing(Store(tmp_path / 'existing-scope')) as store:
+        store.db.execute("INSERT INTO attempts(reserved,actual,status) VALUES (49,44,'completed')")
+        store.db.execute("INSERT INTO attempts(reserved,status) VALUES (5,'reserved')")
+        store.db.commit()
+
+        def reserve(amount):
+            store.db.execute('BEGIN IMMEDIATE')
+            attempt = store.db.execute("INSERT INTO attempts(reserved,status) VALUES (?,'reserved')", (amount,)).lastrowid
+            reserve_attempt(store, attempt, amount, site_maximum=5)
+            store.db.commit()
+
+        with account.bind(purpose='maintenance'):
+            reserve(1)
+            with pytest.raises(SiteBudgetExceeded):
+                reserve(0.01)
+        assert store.db.execute('SELECT COUNT(*) FROM attempts').fetchone()[0] == 3
+        assert account.snapshot()['unresolved_usd'] == 1
+    with account.bind(purpose='enrichment'):
+        with pytest.raises(SiteBudgetExceeded):
+            account.reserve(0.01, site_spent_units=units(5), site_maximum=5)
+
+
+@pytest.mark.parametrize(('daily','monthly','period'), [(20, 500, 'daily'), (20, 10, 'monthly')])
+def test_rolling_maintenance_still_obeys_shared_caps(tmp_path, daily, monthly, period):
+    account = DailyBudget(tmp_path / 'budget')
+    configure(account, site_usd=5, daily_usd=daily, monthly_usd=monthly)
+    with account.bind(purpose='maintenance'):
+        account.reserve(min(daily, monthly), site_spent_units=0, site_maximum=5)
+        with pytest.raises(DailyBudgetPause) as denied:
+            account.reserve(0.01, site_spent_units=units(min(daily, monthly)), site_maximum=5)
+    assert denied.value.period == period
+    assert account.snapshot()['unresolved_usd'] == min(daily, monthly)
 
 
 def test_unconfigured_account_and_standalone_import_keep_original_finite_limits(tmp_path):
