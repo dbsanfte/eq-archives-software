@@ -7,7 +7,7 @@ import threading
 import pytest
 
 from common import CrawlError,digest
-from conftest import manifest_for
+from conftest import manifest_for, mock_publication
 from state import Lane, connect, database_busy, enqueue
 from worker import Worker
 
@@ -28,7 +28,7 @@ def test_worker_survives_a_real_claim_lock_and_claims_once_after_release(candida
     monkeypatch.setattr('worker.automation.resume_owned',lambda *a:None)
     monkeypatch.setattr('worker.automation.promote',lambda *a:None)
     monkeypatch.setattr('worker.automation.schedule',lambda *a:None)
-    monkeypatch.setattr('worker.prepare_next',lambda *a:None)
+    monkeypatch.setattr('worker.prepare_next',lambda *a,**kw:None)
     monkeypatch.setattr(worker,'capture_queue',lambda:None)
     monkeypatch.setattr(worker,'indexing',lambda:None)
     # A failed preclaim must leave the operation queued; avoid invoking a real
@@ -69,7 +69,7 @@ def test_worker_survives_a_real_claim_lock_and_claims_once_after_release(candida
 def test_non_contention_database_errors_remain_visible(candidate,monkeypatch):
     root,_=candidate;worker=Worker(root)
     monkeypatch.setattr('worker.automation.resume_owned',lambda *a:None)
-    monkeypatch.setattr('worker.prepare_next',lambda *a:None)
+    monkeypatch.setattr('worker.prepare_next',lambda *a,**kw:None)
     monkeypatch.setattr(worker,'operation',lambda _:(_ for _ in ()).throw(sqlite3.OperationalError('no such table: operations')))
     try:
         with pytest.raises(sqlite3.OperationalError,match='no such table'):
@@ -133,7 +133,11 @@ def test_result_write_lock_does_not_replay_capture_or_publication(candidate,monk
         calls.append(kind);lock_thread.start();assert locked.wait(3)
         if fails:raise CrawlError('Fixture acquisition/publication paused')
         return manifest if kind=='capture' else {'commit':'b'*40}
-    monkeypatch.setattr('worker.capture_sites' if kind=='capture' else 'worker.publish',external)
+    if kind == 'capture':
+        monkeypatch.setattr('worker.capture_sites', external)
+    else:
+        mock_publication(monkeypatch, external)
+        worker.prepare_publication_turn(True)
     monkeypatch.setattr('worker.LOG.warning',lambda *a:waiting.set())
     original_wait=worker.stop.wait
     monkeypatch.setattr(worker.stop,'wait',lambda _:original_wait(.01))
@@ -198,7 +202,7 @@ def test_all_worker_threads_and_http_health_survive_contention(candidate,monkeyp
     monkeypatch.setattr('worker.automation.resume_owned',lambda *a:None)
     monkeypatch.setattr('worker.automation.promote',lambda *a:None)
     monkeypatch.setattr('worker.automation.schedule',lambda *a:None)
-    monkeypatch.setattr('worker.prepare_next',lambda *a:None)
+    monkeypatch.setattr('worker.prepare_next',lambda *a,**kw:None)
     monkeypatch.setattr(worker,'capture_queue',lambda:None)
     monkeypatch.setattr(worker,'indexing',lambda:None)
     @contextmanager

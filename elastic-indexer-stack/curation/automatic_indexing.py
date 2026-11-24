@@ -33,10 +33,14 @@ def approved_site(store, captured):
     return site, approval
 
 
-def prepare_next(root):
+def prepare_next(root, *, small=None):
     """Preflight one complete site outside the write lock; failures need retry."""
     with connect(root) as store:
-        pending = store.db.execute("SELECT id,manifest_sha256 FROM batches WHERE state='awaiting_review' ORDER BY created,rowid LIMIT 1").fetchone()
+        from publication_queue import SMALL
+        size_filter = '' if small is None else f'AND ({SMALL})=?'
+        pending = store.db.execute(f"""SELECT b.id,b.manifest_sha256 FROM batches b
+            LEFT JOIN publication_sizes s ON s.batch=b.id WHERE b.state='awaiting_review' {size_filter}
+            ORDER BY b.created,b.rowid LIMIT 1""", () if small is None else (small,)).fetchone()
         if not pending:
             return
         identifier, expected = pending['id'], pending['manifest_sha256']

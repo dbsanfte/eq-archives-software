@@ -1,3 +1,4 @@
+from conftest import mock_publication
 import copy
 import json
 from unittest.mock import patch
@@ -76,9 +77,10 @@ def test_finished_site_queues_once_under_original_approval_and_keeps_full_reinde
         def jobs(self): return [reindex]+created
         def create(self, job):created.append(job)
     monkeypatch.setenv('IMPORT_IMAGE','dbsanfte/frontend@sha256:'+'1'*64)
-    monkeypatch.setattr('worker.publish', lambda *args: {'commit': 'c' * 40})
+    mock_publication(monkeypatch, lambda *args: {'commit': 'c' * 40})
     worker = Worker(root, kube=Kube())
     try:
+        worker.prepare_publication_turn(True)
         worker.operation(Lane.INDEXING)
         worker.indexing()
     finally:

@@ -1140,8 +1140,26 @@ Verified files are hashed in 512-path batches through Git's `--stdin-paths`, wit
 Git C quoting, disabled content filters and exact output count/object-ID checks.
 Git streams source bytes directly; Python retains only paths/object IDs. This
 avoids tens of thousands of Git startups for large sites without adding commits
-or walking the archive. Source verification, the single site commit/push and
-recovery marker remain mandatory.
+or walking the archive. Each site retains source verification, its own commit
+and a recovery marker.
+The publisher checks every blob ID against the bytes accepted by source
+verification. Two independent preparation workers handle small and large
+sites. They verify sources, pack blobs and build the new subtrees in private
+scratch repositories before taking the publisher lease. A small site has at
+most 2,048 files and 128 MiB of raw data. The sender can combine up to four
+ready small sites into one fast-forward push. Each site has its own commit,
+manifest marker and import receipt. A ready large site gets a solo turn.
+
+Preparation writes canonical tree packs in groups of up to 4,096 objects or
+approximately 16 MiB, with large individual trees handled as single objects.
+The publisher installs the ready packs under its exclusive lease and merges
+affected paths against the fetched archive head. It reuses whole subtrees when
+their destination is new or identical. Existing paths still get collision
+checks and final merged ancestors use the same bounded pack writer. A retry
+after a lost push response verifies the exact marker and the affected trees
+without replaying a confirmed commit. The portal reports publication phases
+and file counts, and records phase timings per operation. Disposable prep
+files are released after use or recovered on controller restart.
 An existing regular file with identical bytes is retained even if its historic
 mode is executable; mode alone is not a data collision. Different content,
 symlinks and file/directory conflicts still require attention.

@@ -7,7 +7,7 @@ import pytest
 
 import automation
 from common import CrawlError, digest, now
-from conftest import add_candidate
+from conftest import add_candidate, mock_publication
 from daily_budget import DailyBudgetPause, AutomaticStopped
 from review import record
 from server import create_app
@@ -257,7 +257,7 @@ def test_auto_approved_site_passes_full_capture_publication_and_retirement_witho
     automation.promote(root, account)
     make_due(root)
     monkeypatch.setattr('worker.capture_sites', lambda root, batch, sites, **kwargs: capture_sites(root, batch, sites, EmptyCatalog, **kwargs))
-    monkeypatch.setattr('worker.publish', lambda *args: {'commit': 'c'*40})
+    mock_publication(monkeypatch, lambda *args: {'commit': 'c'*40})
     monkeypatch.setenv('IMPORT_IMAGE', IMAGE)
     class Kube:
         def __init__(self): self.items = []
@@ -273,6 +273,7 @@ def test_auto_approved_site_passes_full_capture_publication_and_retirement_witho
         assert batch['manifest']['indexing'] == AUTO_POLICY
         assert batch['state'] == 'awaiting_review'
         assert prepare_next(root)['operation']
+        worker.prepare_publication_turn(True)
         worker.operation(Lane.INDEXING)
         worker.indexing()
         assert len(kube.items) == 1

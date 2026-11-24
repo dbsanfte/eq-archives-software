@@ -2310,6 +2310,13 @@ async def pipeline_activity_flow(browser,base,width):
     await page.evaluate('refresh()');await settled(page)
     await expect(page.locator('#activity-indexing > summary')).to_contain_text('Waiting for archive reindex')
     await expect(page.locator('#activity-indexing')).to_contain_text(job)
+    workers['indexing']={'id':'b'*32,'kind':'publish','state':'running','updated':stamp,
+                         'result':{'progress':{'phase':'building_trees','files':64099,'total':64099}}}
+    await page.evaluate('refresh()');await settled(page)
+    await expect(page.locator('#activity-indexing > summary')).to_contain_text('Building Git trees')
+    await expect(page.locator('#activity-indexing')).to_contain_text('64,099 files')
+    workers['indexing']=None
+    await page.evaluate('refresh()');await settled(page)
     await page.locator('#activity-indexing > summary').click()
     await page.locator('#activity-indexing details > summary').click()
     await expect(page.locator('#activity-indexing')).to_contain_text('<script>alert(1)</script>')

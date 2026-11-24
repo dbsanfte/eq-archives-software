@@ -1400,9 +1400,17 @@ Head fetches also require `--refetch` so locally authored remote heads are prese
 in a bounded promisor pack; trace a repeated/uncertain successful publication and
 reject archive-wide `--exclude-promisor-objects` connectivity walks.
 Hash verified source files with `hash-object --stdin-paths --no-filters` in
-512-path batches, using Git C quoting and checking every returned object ID/count.
-Avoid per-file Git startups, archive traversal or buffering source bytes in Python;
-retain the single site commit/push, ownership lease and immutable approval marker.
+512-path batches, using Git C quoting and comparing each returned object ID to
+the exact verified source bytes. Two preparation workers isolate small and
+large sites in private scratch repositories. Batch canonical tree objects in
+bounded packs and install complete prep packs under the existing exclusive
+lease. Reuse prepared subtrees on new paths and merge against the latest base
+with the original collision checks. Push up to four ready small site commits
+together, each with its own approval marker and receipt. A large ready site
+gets a solo turn. Recover uncertain pushes per site, isolate preflight and
+collision failures, and count shared transport backoff once per failed push.
+Expose phase timings without archive walks, per-file or per-tree Git startups
+or buffering source file bodies.
 `publication_recovery.py` retries only the latest still-approved manifest and
 shares transport backoff across the backlog. Permanent credentials/integrity
 failures and explicit retry pauses stay visible for correction while other work

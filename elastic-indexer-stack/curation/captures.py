@@ -23,7 +23,7 @@ class CaptureBound(CrawlError):
     pass
 
 
-def verified_path(root, capture):
+def verified_path(root, capture, *, observe=None):
     relative = Path(capture['path'])
     base = Path(root).resolve()
     path = base / relative
@@ -40,6 +40,8 @@ def verified_path(root, capture):
         with path.open('rb') as source:
             while chunk := source.read(1024 * 1024):
                 checksum.update(chunk)
+                if observe is not None:
+                    observe(chunk)
     except OSError:
         raise CrawlError("Staged source is unavailable") from None
     if checksum.hexdigest() != capture["sha256"] or not original_url(capture["url"]) or not tier(capture["timestamp"]):

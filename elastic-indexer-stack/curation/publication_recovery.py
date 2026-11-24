@@ -4,12 +4,12 @@ import json
 
 from common import CrawlError,now
 from publication_git import PublicationError
-from state import connect,unpack,Lane,active_operation
+from state import connect,unpack
 
 DELAYS=(300,900,3600)
 
 
-def register(store,operation,error,*,initial=False):
+def register(store,operation,error,*,initial=False,shared_backoff=True):
     previous=store.db.execute('SELECT * FROM publication_retries WHERE operation=?',(operation['id'],)).fetchone()
     if previous and previous['paused']:return
     legacy=initial and (str(error).startswith(('Archive Git fetch failed.','Archive Git operation timed out','Archive publication could not be confirmed','Worker stopped; resume explicitly')))
@@ -24,7 +24,7 @@ def register(store,operation,error,*,initial=False):
     store.db.execute('''INSERT INTO publication_retries VALUES (?,?,?,0)
         ON CONFLICT(operation) DO UPDATE SET attempts=excluded.attempts,retry_at=excluded.retry_at''',
         (operation['id'],attempts,retry_at))
-    if not initial:
+    if not initial and shared_backoff:
         old=store.get('publication_backoff',{})
         streak=old.get('attempts',0)+1
         until=(datetime.fromisoformat(now())+timedelta(seconds=DELAYS[min(streak-1,2)])).isoformat()
@@ -44,8 +44,6 @@ def schedule(root):
             AND o.rowid=(SELECT MAX(n.rowid) FROM operations n WHERE n.kind='publish'
                 AND json_extract(n.payload,'$.batch_id')=b.id)''').fetchall():
             register(store,unpack(row),row['error'],initial=True)
-        if active_operation(store,Lane.INDEXING):
-            store.db.commit();return
         backoff=store.get('publication_backoff',{})
         if backoff.get('retry_at','')>now():
             store.db.commit();return

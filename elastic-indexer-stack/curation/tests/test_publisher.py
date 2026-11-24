@@ -5,8 +5,8 @@ from unittest.mock import Mock
 import pytest
 
 from common import CrawlError, digest
-from publisher import Publisher, git_failure
-from conftest import manifest_for
+from publisher import Publisher, cleanup_preparations, git_failure, prepare
+from conftest import add_candidate, manifest_for
 
 
 def test_many_small_sources_use_bounded_git_batches_and_keep_exact_bytes(candidate, tmp_path):
@@ -54,6 +54,106 @@ def test_partial_or_malformed_git_batch_cannot_become_a_publication(candidate, o
 
 def git(path,*args):
     return subprocess.check_output(['git','-C',str(path),*args],stderr=subprocess.DEVNULL).decode().strip()
+
+
+@pytest.fixture
+def archive_server(tmp_path):
+    repository = tmp_path / 'archive.git'
+    repository.mkdir()
+    git(repository, 'init', '-q', '-b', 'master')
+    git(repository, 'config', 'user.email', 'fixture@example.org')
+    git(repository, 'config', 'user.name', 'Fixture')
+    (repository/'unrelated.txt').write_text('untouched')
+    git(repository, 'add', 'unrelated.txt')
+    git(repository, 'commit', '-qm', 'Existing archive')
+    git(repository, 'config', 'receive.denyCurrentBranch', 'ignore')
+    git(repository, 'config', 'uploadpack.allowFilter', 'true')
+    git(repository, 'config', 'uploadpack.allowAnySHA1InWant', 'true')
+    return repository
+
+
+@pytest.mark.parametrize('delivery', ['confirmed', 'response_lost', 'conflict'])
+def test_shared_push_preserves_site_commits_and_marks_only_successful_sites(candidate, archive_server, delivery):
+    root, row = candidate
+    first = manifest_for(row)
+    second = manifest_for(add_candidate(root, 'http://second.example/'), 'b'*32)
+    if delivery == 'conflict':
+        destination = archive_server/first['captures'][0]['archive_path']
+        destination.parent.mkdir(parents=True)
+        destination.write_text('other content')
+        git(archive_server, 'add', 'websites')
+        git(archive_server, 'commit', '-qm', 'Preserve previously archived content')
+    before = git(archive_server, 'rev-list', '--count', 'master')
+    sites = [prepare(root, manifest, digest(manifest)) for manifest in (first, second)]
+    publisher = Publisher(root, remote='file://' + str(archive_server))
+    commands = []
+    real_git = publisher.git
+
+    def traced_git(*args, **kwargs):
+        commands.append(args)
+        result = real_git(*args, **kwargs)
+        return None if args[0] == 'push' and delivery == 'response_lost' else result
+
+    publisher.git = traced_git
+    try:
+        results = publisher.publish_many(sites)
+        assert sum(args[0] == 'push' for args in commands) == 1
+        assert not any(args[:3] == ('hash-object', '-w', '-t') for args in commands)
+        site_commits = git(archive_server, 'log', '--format=%H', 'master', '-2').splitlines()
+        for site, commit in zip(reversed(sites), site_commits):
+            result = results[site.identifier]
+            if delivery == 'conflict' and site.identifier == first['batch_id']:
+                assert isinstance(result, CrawlError)
+                assert destination.read_text() == 'other content'
+                continue
+            assert result['recovered'] == (delivery == 'response_lost')
+            if delivery != 'response_lost':
+                assert result['commit'] == commit
+            marker = json.loads(git(archive_server, 'show', f'{commit}:{site.marker}'))
+            assert marker['manifest_sha256'] == site.expected
+            capture = site.manifest['captures'][0]
+            assert publisher.git('cat-file', 'blob', git(archive_server, 'rev-parse', f'{commit}:{capture["archive_path"]}'),
+                                 local=True) == (root/capture['path']).read_bytes()
+        assert git(archive_server, 'rev-list', '--count', 'master') == str(int(before)+(1 if delivery == 'conflict' else 2))
+        git(archive_server, 'fsck', '--full')
+    finally:
+        publisher.close()
+        for site in sites:
+            site.close()
+
+
+def test_git_bytes_must_match_the_verified_source_even_if_length_is_unchanged(candidate, tmp_path):
+    root, row = candidate
+    captures = manifest_for(row)['captures']
+    publisher = Publisher(root, remote='file://' + str(tmp_path/'unused.git'))
+    real_git = publisher.git
+
+    def change_before_hash(*args, **kwargs):
+        capture = captures[0]
+        (root/capture['path']).write_bytes(b'?' * capture['bytes'])
+        return real_git(*args, **kwargs)
+
+    publisher.git = change_before_hash
+    try:
+        with pytest.raises(CrawlError, match='blob batch'):
+            publisher.hash_sources(captures)
+    finally:
+        publisher.close()
+
+
+def test_only_disposable_preparation_directories_are_cleaned(tmp_path):
+    import tempfile
+    from publisher import PREPARATION, PREPARATION_ROOT
+    directory = tmp_path/PREPARATION_ROOT
+    directory.mkdir()
+    scratch = tempfile.mkdtemp(prefix=PREPARATION, dir=directory)
+    original = tmp_path/(PREPARATION+'captures')
+    original.mkdir()
+    link = directory/(PREPARATION+'wwwwwwww')
+    link.symlink_to(original, target_is_directory=True)
+    cleanup_preparations(tmp_path)
+    from pathlib import Path
+    assert not Path(scratch).exists() and original.is_dir() and link.is_symlink()
 
 
 @pytest.mark.parametrize('stderr,hint',[

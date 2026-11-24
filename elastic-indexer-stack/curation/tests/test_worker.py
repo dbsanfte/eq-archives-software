@@ -9,7 +9,7 @@ from graph import staged_links
 from review import checked_sources, record
 from state import Lane, connect, enqueue
 from worker import Worker, campaign
-from conftest import add_candidate, manifest_for
+from conftest import add_candidate, manifest_for, mock_publication
 
 
 def test_campaign_reuses_cached_graph_merges_artifacts_and_retains_paid_reservations(candidate,monkeypatch):
@@ -83,7 +83,8 @@ def test_capture_then_publication_operation_is_durable_without_any_index_write(c
             store.db.execute("UPDATE batches SET state='publication_requested'")
             store.db.commit()
             enqueue(store,'publish',{'batch_id':manifest['batch_id'],'manifest_sha256':digest(manifest)})
-        monkeypatch.setattr('worker.publish',lambda *args:{'commit':'b'*40,'marker':'crawl-manifests/test.json'})
+        mock_publication(monkeypatch, lambda *args:{'commit':'b'*40,'marker':'crawl-manifests/test.json'})
+        worker.prepare_publication_turn(True)
         worker.operation(Lane.INDEXING)
         with connect(root) as store:
             assert store.db.execute('SELECT state FROM batches').fetchone()[0]=='published_waiting_index'
