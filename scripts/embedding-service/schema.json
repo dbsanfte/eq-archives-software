@@ -14,6 +14,8 @@
     "image_embedding_provenance": {"type": "object", "enabled": false},
     "text_passage_provenance": {"type": "object", "enabled": false},
     "llm_search_enrichment_version": {"type": "keyword"},
+    "llm_enrichment_passage_version": {"type": "keyword"},
+    "llm_enrichment_view_sha256": {"type": "keyword"},
     "llm_content_role": {"type": "keyword"},
     "llm_topics": {"type": "keyword", "fields": {"search": {"type": "text"}}},
     "llm_entities": {"type": "keyword", "fields": {"search": {"type": "text"}}},

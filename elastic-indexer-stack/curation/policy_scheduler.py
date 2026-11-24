@@ -9,6 +9,7 @@ import threading
 
 from common import CrawlError,save
 from jobs import finished, import_job
+from policy_enrichment import COUNTERS as ENRICHMENT_COUNTERS
 from policy_maintenance import APP, identity
 from indexer import gemma, passages
 from state import connect
@@ -34,7 +35,7 @@ def import_pending(root,*,budget_wait=False):
         return store.db.execute(f"SELECT 1 FROM batches WHERE state IN ({','.join('?' for _ in states)}) LIMIT 1",states).fetchone() is not None
 
 
-def job_for(name,image):
+def job_for(name,image,*,enrichment=False):
     if not re.fullmatch(r'eqarchives-policy-[a-f0-9]{16}-[1-9][0-9]{0,8}',name):
         raise CrawlError('Invalid policy maintenance identity')
     job=import_job({'id':'0'*32,'manifest_sha256':'0'*64},image)
@@ -60,6 +61,11 @@ def job_for(name,image):
     credentials['projected']['sources']=[
         {'secret':{'name':'eqarchives-policy-indexer-secrets','items':[{'key':'es_username','path':'es_username'},{'key':'es_password','path':'es_password'}]}},
         {'secret':{'name':'search-eqarchives-secrets','items':[{'key':'openai_api_key','path':'openai_api_key'}]}}]
+    if enrichment:
+        credentials['projected']['sources'].append(
+            {'secret':{'name':'eqarchives-curation-secrets','items':[{'key':'luna_api_key','path':'luna_api_key'}]}})
+        container['env'].append({'name':'LUNA_DAILY_BUDGET_ROOT','value':'/luna-budget'})
+        container['volumeMounts'].append({'name':'staging','mountPath':'/luna-budget','subPath':'luna-budget'})
     pod['volumes']+=[{'name':'sources','hostPath':{'path':'/mnt/samsung/eq-archives-html-reindex','type':'Directory'}},
                      {'name':'archive','hostPath':{'path':'/mnt/samsung/eq-archives','type':'Directory'}},
                      {'name':'temporary','emptyDir':{'sizeLimit':'64Mi'}}]
@@ -86,7 +92,20 @@ def receipt(root,state):
         if (not isinstance(execution,dict) or set(execution)-{'preparation_workers','documents','stored_vectors_reused','submitted_inputs'}
                 or any(type(v) is not int or not 0<=v<=10**12 for v in execution.values())
                 or execution.get('preparation_workers',0)>4):return None
+        enrichment=result.get('enrichment')
+        if enrichment is not None:
+            if (not isinstance(enrichment,dict)
+                    or set(enrichment)!={*ENRICHMENT_COUNTERS,'phase','next_at','last_reason'}
+                    or any(type(enrichment[k]) is not int or not 0<=enrichment[k]<=10**12 for k in ENRICHMENT_COUNTERS)
+                    or enrichment['phase'] not in ('bounded','waiting_configuration','waiting_budget',
+                                                    'waiting_imports','sweep_waiting','retry_wait')
+                    or type(enrichment['next_at']) not in (int,float) or not 0<=enrichment['next_at']<10**12
+                    or (enrichment['last_reason'] is not None and
+                        (not isinstance(enrichment['last_reason'],str)
+                         or not re.fullmatch('[a-z_]{1,64}',enrichment['last_reason'])))):
+                return None
         return {**{k:result[k] for k in ('scanned','updated','reused','failed','skipped','unresolved','next_at','phase','terminal','updated_at')},
+                **({'enrichment':enrichment} if enrichment is not None else {}),
                 'issues':[{k:row[k] for k in ('id','reason')} for row in issues],'execution':execution}
     except (OSError,ValueError,KeyError,TypeError):return None
 
@@ -137,10 +156,12 @@ def schedule(root,kube,jobs,image):
         if sequence>=10**9:raise CrawlError('Policy maintenance attempt limit reached')
         name=f'eqarchives-policy-{identity()}-{sequence}'
         saved(name=name,key=identity(),sequence=sequence,policy=passages.VERSION,image=image,
-              submitted=False,phase='submitting',error=None,waiting_for=[])
-    try:kube.create(job_for(name,state['image']))
+              submitted=False,phase='submitting',error=None,waiting_for=[],
+              enrichment_enabled=os.environ.get('PASSAGE_REENRICHMENT_ENABLED')=='1')
+    job=job_for(name,state['image'],enrichment=state.get('enrichment_enabled') is True)
+    try:kube.create(job)
     except Exception:
         saved(phase='checking_submission',error='Policy submission outcome is uncertain; retrying this identity.')
         return state
-    jobs.append(job_for(name,state['image']))
+    jobs.append(job)
     return saved(submitted=True,phase='running',error=None)

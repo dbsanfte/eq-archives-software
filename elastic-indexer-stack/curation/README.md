@@ -1043,13 +1043,33 @@ Subsequent slices upgrade stale policies without downgrading newer checkpoints.
 Durable cursors, rejection history and an exclusive process lease live in
 `indexing-state/policy-maintenance.sqlite` and its lock file. Identity includes the
 physical Elasticsearch index, embedding model, passage and extraction versions.
-Readers, enrichment, dates, source identity and unrelated vectors are preserved;
-source-bound reader repairs and body-vector replacements use optimistic atomic
+Body repair preserves enrichment, dates, source identity and unrelated vectors.
+Source-bound reader repairs and body-vector replacements use optimistic atomic
 updates. Exact source/view/request matches reuse vectors; otherwise all vectors
-are validated before saving. No Luna requests occur. The dedicated
+are validated before saving. The dedicated
 `eqarchives-policy-indexer-secrets` account has read/index privileges only on the
 resolved physical index, with no delete, cluster, mapping or security privilege.
-It never receives the publisher key, paid Luna key or Kubernetes token.
+
+`PASSAGE_REENRICHMENT_ENABLED=1` adds a paid pass in the same rolling Job. It
+checks up to eight eligible records with a 75-second time budget before the body
+pass, with a separate durable cursor. It considers website text, mailing lists
+and newsgroups with the current passage and extraction checks. Already-current
+enrichment is skipped. If the exact bounded evidence matches after a passage
+upgrade, only the enrichment checkpoint advances. Otherwise Luna regenerates
+the summary, content flavour, tags and source-backed labels. The summary and
+its validated Gemma vector are committed together using the read document
+revision. Original publication evidence, readers, capture/index timestamps
+and body/OCR vectors stay with their existing owners.
+
+Approved imports have first priority. The paid pass uses the configured UTC
+daily/monthly Luna ledger and a durable maintenance cap per canonical website
+host, mailing list or newsgroup, using the configured site allowance ($5
+by default). Import approvals retain their original separate ledgers. The
+maintenance cache under `indexing-state/policy-enrichment/` preserves prior paid
+responses, including when an embedding outage prevents a write. Budget waits
+and paid service failures leave the free body pass eligible to run. The paid
+profile projects only the Luna item and mounts the shared budget directory.
+Both profiles run without the publisher key or Kubernetes token.
 
 Source reads are exact, bounded and remote-free, from the preserved source cache,
 archive checkout or local Git objects. No checkout walk, clone, fetch or source

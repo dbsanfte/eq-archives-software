@@ -9,7 +9,6 @@ from contextlib import ExitStack
 from datetime import datetime, timezone
 import html
 import json
-import math
 from bs4 import BeautifulSoup
 import os
 from pathlib import Path
@@ -25,14 +24,14 @@ from captures import check_manifest, indexable, verified_source, verified_path, 
 from source_assets import binary_source
 from capture_budget import budget_identity
 from indexer.gemma import CHUNKING_VERSION, DOCUMENT_PREFIX, MODEL, chunk_source
-from indexer import passages
+from indexer import gemma, passages
 from indexer.embedding_cache import optional_cache
 from indexer.embedding_batches import embed_batches, decode_vectors
 from indexer.discussions import optional_catalog, metadata as discussion_metadata, lithium_feed
 from indexer.image_embeddings import ImageUnavailable, MAX_BYTES, VERSION as IMAGE_VERSION, prepare_image, response_vector
 from indexer.html_extraction import WEBSITE_EXTRACTION_VERSION, website_markdown
 from indexer.source_encoding import decode_source, repaired_title
-from indexer.capture_enrichment import Enricher, policy
+from indexer.capture_enrichment import Enricher, policy, summary_requests
 from import_status import EnrichmentError, describe, write_status
 from daily_budget import DailyBudget, DailyBudgetPause
 from publication_files import indexed_captures
@@ -298,11 +297,12 @@ def index_batch(root, batch, services, chunker=chunk_source):
             preserved += 1
             continue
         metadata = services.enrich(capture, source if media_type(capture) == 'text/plain' else website_markdown(source), plan.view)
+        if metadata.get('llm_search_enrichment_version'):
+            metadata['llm_enrichment_passage_version'] = passages.VERSION
         unique, positions = passages.embedding_inputs(plan)
-        summary_chunks = list(chunker(metadata["llm_summary"]))
         # Body and summary share one bounded inference operation, retaining their
         # complete, distinct prefixes/context and all original passage offsets.
-        requests = [p.request for p in unique] + [passages.document_prefix('')+p.text for p in summary_chunks]
+        requests = [p.request for p in unique] + summary_requests(metadata["llm_summary"], chunker)
         all_vectors = services.embeddings(requests)
         if len(all_vectors) != len(requests):
             raise CrawlError('Incomplete source/summary embeddings; document remains pending')
@@ -314,11 +314,10 @@ def index_batch(root, batch, services, chunker=chunk_source):
             raise CrawlError("Capture has no source chunks")
         if not summary_vectors:
             raise CrawlError("Summary has no usable embedding chunks; enriched result retained for retry")
-        summary_vector = [sum(vector[index] for vector in summary_vectors) / len(summary_vectors) for index in range(768)]
-        magnitude = math.sqrt(sum(value * value for value in summary_vector))
-        if not magnitude:
-            raise CrawlError("Summary embedding is empty; enriched result retained for retry")
-        summary_vector = [value / magnitude for value in summary_vector]
+        try:
+            summary_vector = gemma.mean_vector(summary_vectors)
+        except ValueError:
+            raise CrawlError("Summary embedding is invalid; enriched result retained for retry") from None
         timestamp = datetime.strptime(capture["timestamp"], "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc).isoformat()
         document = {"id": record_id, "title": title or urlsplit(capture["url"]).path or "Archived page",
                     "domain_name": urlsplit(capture["url"]).netloc, "capture_date": timestamp, "last_indexed": now(),

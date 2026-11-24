@@ -130,6 +130,8 @@ spec:
               value: /run/kubernetes
             - name: PASSAGE_MAINTENANCE_ENABLED
               value: '1'
+            - name: PASSAGE_REENRICHMENT_ENABLED
+              value: '1'
             - name: POLICY_INDEX
               valueFrom:
                 secretKeyRef:

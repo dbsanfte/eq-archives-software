@@ -113,6 +113,7 @@ class Prepared:
     requests:tuple=()
     positions:tuple=()
     reusable:tuple=()
+    enrichment_source:tuple[str,str] | None=None
 
 
 def old_requests(source,reader,plan):
@@ -149,10 +150,10 @@ def old_requests(source,reader,plan):
     return tuple(requests)
 
 
-def prepare(hit,sources):
+def prepare(hit,sources,*,enrichment=False):
     """Return a complete source-bound plan without inference or writes."""
     source=hit['_source'];identifier=hit['_id'];reader=source.get('text_full') or ''
-    try:return _prepare(source,identifier,reader,sources)
+    try:return _prepare(source,identifier,reader,sources,enrichment)
     except SourceError as error:
         if not error.source_sha256:
             error.source_sha256=((source.get('text_passage_provenance') or {}).get('decoding') or {}).get('source_sha256') or source.get('archive_source_sha256')
@@ -162,7 +163,7 @@ def prepare(hit,sources):
         raise SourceError(getattr(error,'reason','source_validation'),hashed) from None
 
 
-def _prepare(source,identifier,reader,sources):
+def _prepare(source,identifier,reader,sources,enrichment):
     previous=source.get('text_passage_provenance') or {};version=source.get('text_chunking_version') or ''
     if source.get('embedding_model')!=gemma.MODEL or source.get('file_type')!='text':
         return Prepared(identifier,reader,None,{},result='different_model')
@@ -195,6 +196,20 @@ def _prepare(source,identifier,reader,sources):
     plan=passages.prepare(reader,identifier,patch.get('title',source.get('title')) or '',html_source=raw,mime_type=mime)
     reuse=not legacy_reader and plan_reusable(source,reader,plan)
     if complete and not patch:
+        if enrichment:
+            # Paid work needs the stored projection and reader to agree. It
+            # does not claim the existing vectors are reusable after inference
+            # runtime changes, since it never writes the body vectors.
+            if len(bound)!=1 or bound[0].get('view_sha256')!=passages.digest(plan.view):
+                raise SourceError('checkpoint_integrity')
+            if not plan.passages or (website and not textual):
+                return Prepared(identifier,reader,plan,{},result='external_current')
+            if raw is not None:
+                body=raw if mime=='text/plain' else html_extraction.website_markdown(raw)
+                source_hash=decoding['source_sha256']
+            else:
+                body,source_hash=reader,plan.source_sha256
+            return Prepared(identifier,reader,plan,{},result='external_current',enrichment_source=(body,source_hash))
         if not reuse:raise SourceError('checkpoint_integrity')
         return Prepared(identifier,reader,plan,{},reuse=True,result='external_current')
     provenance={'version':passages.VERSION,'sources':[plan.provenance()],'request_profile':request_identity()}

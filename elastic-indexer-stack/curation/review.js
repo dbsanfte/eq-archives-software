@@ -1176,6 +1176,12 @@ function renderPipelineActivity() {
         if (!publication && !index && maintenance.phase==='running') {status='Updating older archive chunks';tone='running';}
         body.append(node('p',`${phases[maintenance.phase] || 'Chunk maintenance'} · ${maintenance.policy}`,'meta'));
         if (maintenance.progress) {const p=maintenance.progress;body.append(node('p',`${Number(p.updated || 0).toLocaleString()} upgraded · ${Number(p.reused || 0).toLocaleString()} reused vectors · ${Number(p.unresolved || 0).toLocaleString()} records awaiting retry`,'activity-counts'));}
+        const enrichment=maintenance.progress?.enrichment;
+        if (enrichment) {
+          const phases={waiting_budget:'Waiting for the Luna budget',waiting_configuration:'Waiting for Luna budget configuration',waiting_imports:'Waiting for approved imports',sweep_waiting:'Will check for more records',retry_wait:'Will retry'};
+          body.append(node('p',`Re-enrichment · ${Number(enrichment.updated || 0).toLocaleString()} refreshed · ${Number(enrichment.reused || 0).toLocaleString()} reused${phases[enrichment.phase] ? ` · ${phases[enrichment.phase]}` : ''}`,'activity-counts'));
+          if (enrichment.last_reason) body.append(node('p',`Last re-enrichment issue: ${enrichment.last_reason.replaceAll('_',' ')}`,'meta'));
+        }
         if (maintenance.progress?.issues?.length) {
           const issues=node('details');issues.append(node('summary','Recent repair issues'));
           for (const issue of maintenance.progress.issues) {const item=node('p',undefined,'address');item.append(node('strong',issue.reason.replaceAll('_',' ')),node('br'),node('span',issue.id));issues.append(item);}
