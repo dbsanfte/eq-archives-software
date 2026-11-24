@@ -97,7 +97,9 @@ def test_filters_facets_recent_sites_reader_and_capture_history_remain_available
     q=body['query']['bool']['should'][0]['simple_query_string']
     assert 'PREFIX' not in q['flags'] and q['query']=='"ancient cyclops" + rings | -cleric'
     assert body['post_filter']=={'term':{'file_type':'text'}}
-    assert len(body['aggs']['facet_bucket_all']['aggs'])==7
+    assert len(body['aggs']['facet_bucket_all']['aggs']) == 9
+    assert body['aggs']['facet_bucket_all']['aggs']['llm_entities']['terms']['field'] == 'llm_entities'
+    assert Builder().query({'terms': {'llm_topics': ['drake farming']}}) == {'terms': {'llm_topics': ['drake farming']}}
     assert Builder().search({'size':1,'query':{'ids':{'values':['a']}},'_source':['text_full','discussion']},'model')['_source']==['text_full','discussion']
     assert Builder().search({'size':0,'_source':False},'model')['_source'] is False
     capture={'regexp':{'id':r'websites/example\.org/[0-9]{14}/a\?b=1'}}

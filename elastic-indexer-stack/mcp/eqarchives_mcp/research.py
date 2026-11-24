@@ -14,7 +14,7 @@ from .limits import TextBudget
 MAX_RESEARCH_RESULTS = 1000
 FilterValue = Annotated[str, StringConstraints(strict=True, strip_whitespace=True, min_length=1, max_length=255)]
 CalendarDate = Annotated[str, Field(strict=True, pattern=r"^\d{4}-\d{2}-\d{2}$")]
-SourceType = Literal["domain", "mailing_list", "file_type", "mime_type", "theme", "tag", "collection"]
+SourceType = Literal["domain", "mailing_list", "file_type", "mime_type", "theme", "tag", "topic", "entity", "content_role", "collection"]
 Collection = Literal["websites", "mailing_lists", "newsgroups"]
 COLLECTION_PREFIXES = {"websites": "websites/", "mailing_lists": "mailing-lists/", "newsgroups": "newsgroups/"}
 GroupBy = Literal["documents", "page", "discussion"]
@@ -22,7 +22,8 @@ SortOrder = Literal["relevance", "capture_date_asc", "capture_date_desc",
                     "estimated_publication_date_asc", "estimated_publication_date_desc",
                     "last_indexed_asc", "last_indexed_desc"]
 SOURCE_KEYS = {"domain": "domain_name", "mailing_list": "mailing_list_name", "file_type": "file_type",
-               "mime_type": "mime_type", "theme": "llm_content_flavour", "tag": "llm_tags"}
+               "mime_type": "mime_type", "theme": "llm_content_flavour", "tag": "llm_tags",
+               "topic": "llm_topics", "entity": "llm_entities", "content_role": "llm_content_role"}
 DATE_KEYS = {"capture_date": "capture_date", "estimated_publication_date": "llm_guessed_date", "last_indexed": "last_indexed"}
 
 
@@ -49,6 +50,9 @@ class ResearchFilters(BaseModel):
     mime_types: list[FilterValue] = Field(default_factory=list, max_length=10)
     themes: list[FilterValue] = Field(default_factory=list, max_length=10, description="Model-generated content flavours; not human classifications.")
     tags: list[FilterValue] = Field(default_factory=list, max_length=10, description="Model-generated tags; not human classifications.")
+    topics: list[FilterValue] = Field(default_factory=list, max_length=10, description="Exact source-backed topic labels from list_sources.")
+    entities: list[FilterValue] = Field(default_factory=list, max_length=10, description="Exact typed entity labels from list_sources, e.g. zone: Temple of Veeshan.")
+    content_roles: list[FilterValue] = Field(default_factory=list, max_length=10, description="Exact page roles from list_sources, e.g. roster or directory.")
     collections: list[Collection] = Field(default_factory=list, max_length=3)
     url_scopes: list[URLScope] = Field(default_factory=list, max_length=3, description="Literal host, directory/account, page or source-backed Ezboard board scopes. Never fetches remote URLs.")
     has_text: Annotated[bool, Field(strict=True)] | None = Field(default=None, description="Indexed extracted-text field presence. Legacy empty fields may still match.")
@@ -154,7 +158,8 @@ def filtered_query(query: str, filters: ResearchFilters) -> dict:
     clauses = []
     for attribute, field in (("domains", "domain_name"), ("mailing_lists", "mailing_list_name"),
                              ("file_types", "file_type"), ("mime_types", "mime_type"),
-                             ("themes", "llm_content_flavour"), ("tags", "llm_tags")):
+                             ("themes", "llm_content_flavour"), ("tags", "llm_tags"),
+                             ("topics", "llm_topics"), ("entities", "llm_entities"), ("content_roles", "llm_content_role")):
         values = getattr(filters, attribute)
         if values:
             clauses.append({"terms": {field: values}})

@@ -667,6 +667,17 @@ archive text prompts/schema enums. It stores the actual model and enrichment
 signature, and embeds its short summary with Gemma. The complete original body
 is retained separately; model estimates never replace capture dates. Date
 extraction receives no synthetic capture header and requires source evidence.
+New Luna requests also receive up to 24,000 UTF-8 bytes from the existing search
+passage view. The model uses those passages to distinguish authored articles,
+discussions, rosters and reference pages from directories and navigation. It
+returns up to six free-form topics and twelve typed entities. Each indexed label
+requires the label and its quoted excerpt to occur in the supplied passages.
+Common zone aliases such as ToV resolve to the same canonical facet value.
+Directories, navigation and off-topic pages contribute no topics or entities.
+Evidence excerpts and the passage-view digest stay in the private enrichment
+receipt. The browser and MCP expose the resulting labels as exact filters.
+Existing records and already-paid responses are reused, and search keeps its
+existing ranking policy. Unsupported labels are dropped individually.
 Evidence matching allows only whitespace changes (wrapped lines and NBSPs),
 then retains the original verbatim excerpt. Serialized enrichment requests up to
 2,000,000 bytes can use the complete source. Above 900,000 bytes, count the full

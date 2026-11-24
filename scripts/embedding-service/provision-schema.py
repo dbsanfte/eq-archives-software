@@ -1,4 +1,4 @@
-"""Apply additive embedding fields before rolling out image-aware queries.
+"""Apply additive mappings before rolling out archive readers and writers.
 
 Read the existing admin Kubernetes Secret from stdin. Never print its contents.
 No archive documents, existing mappings, source checkouts or Jobs are modified.
@@ -24,7 +24,7 @@ def main():
                 raise ValueError('Unacknowledged additive mapping')
     except (OSError,ValueError):
         raise SystemExit('Embedding schema provisioning failed; upstream details omitted') from None
-    print('Verified additive visual-vector and passage-provenance mappings.')
+    print('Verified additive visual-vector, passage-provenance and enrichment mappings.')
 
 
 if __name__=='__main__':

@@ -50,6 +50,58 @@ def test_enrichment_uses_existing_prompts_and_enums_and_reuses_paid_source_bound
     finally:retry.close()
 
 
+def test_new_search_labels_require_passage_evidence_and_share_the_paid_checkpoint(candidate, tmp_path):
+    _, row = candidate
+    capture = {**row['captures'][0], 'archive_path': 'websites/guild.example/20000101000000/raid.txt'}
+    source = SOURCE + '\nFreeport travel index.'
+    projection = ('# Guild news\n\nRaid strategy for Temple of Veeshan.\n'
+                  'Our ToV event ended on Sunday.\n\n[Member news](https://somewhere.example/Luclin)')
+    generated = {**RESULT, 'content_role': 'article',
+                 'topics': [{'name': 'Raid strategy', 'excerpt': 'Raid   strategy for Temple of Veeshan.'},
+                            {'name': 'Freeport travel', 'excerpt': 'Freeport travel index.'},
+                            {'name': 'Raid rewards', 'excerpt': 'Raid strategy for Temple of Veeshan.'}],
+                 'entities': [{'kind': 'zone', 'name': 'ToV', 'excerpt': 'Our ToV event ended on Sunday.'},
+                              {'kind': 'zone', 'name': 'Temple of Veeshan', 'excerpt': 'Raid strategy for Temple of Veeshan.'},
+                              {'kind': 'zone', 'name': 'Luclin', 'excerpt': 'https://somewhere.example/Luclin'}]}
+    factory = Mock()
+    luna = factory.return_value
+    luna.request.return_value = response(generated)
+    client = Enricher(tmp_path / 'enrichment', 'unused', client_factory=factory)
+    try:
+        result = client.enrich(capture, source, projection)
+        assert result['llm_topics'] == ['raid strategy']
+        assert result['llm_entities'] == ['zone: Temple of Veeshan']
+        assert result['llm_content_role'] == 'article'
+        assert result['llm_guessed_date'] == '2000-01-02'
+        assert 'search_evidence' not in result
+        request = luna.request.call_args.args[0]
+        supplied = json.loads(request['input'])
+        assert supplied['complete_source_markdown'] == source
+        assert 'https://' not in supplied['search_passages'][0]
+        receipt = client.store.get('enrichment_validation:' + result['llm_enrichment_signature'])
+        assert receipt['search_evidence'][0]['excerpt'] == 'Raid strategy for Temple of Veeshan.'
+        assert receipt['search_view_sha256'] == digest(tuple(supplied['search_passages']))
+        assert client.enrich(capture, source, projection) == result
+        luna.request.assert_called_once()
+    finally:
+        client.close()
+
+
+def test_already_paid_legacy_record_needs_no_second_model_call_for_a_passage_view(candidate, tmp_path):
+    _, row = candidate
+    capture = {**row['captures'][0], 'archive_path': 'websites/guild.example/20000101000000/raid.txt'}
+    factory = Mock()
+    factory.return_value.request.return_value = response()
+    client = Enricher(tmp_path / 'enrichment', 'unused', client_factory=factory)
+    try:
+        old = client.enrich(capture, SOURCE)
+        assert client.enrich(capture, SOURCE, 'EverQuest guild raid report.') == old
+        assert 'llm_topics' not in old
+        factory.return_value.request.assert_called_once()
+    finally:
+        client.close()
+
+
 def test_large_enrichment_counts_complete_requests_before_reserving_initial_and_correction_spend(candidate, tmp_path):
     _, row = candidate
     capture = {**row['captures'][0], 'archive_path': 'websites/guild.example/20000101000000/raid.txt'}

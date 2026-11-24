@@ -104,10 +104,10 @@ class Services:
         if self.enricher:
             self.enricher.close()
 
-    def enrich(self, capture, source):
+    def enrich(self, capture, source, search_view=''):
         if not self.enricher:
             raise CrawlError("Default enrichment is not configured; document remains pending")
-        return self.enricher.enrich(capture, source)
+        return self.enricher.enrich(capture, source, search_view)
 
     def exists(self, record_id):
         response = self.client.head(f"{self.es_url}/{quote(self.index, safe='')}/_doc/{quote(record_id, safe='')}")
@@ -297,7 +297,7 @@ def index_batch(root, batch, services, chunker=chunk_source):
         if not plan.passages:
             preserved += 1
             continue
-        metadata = services.enrich(capture, source if media_type(capture) == 'text/plain' else website_markdown(source))
+        metadata = services.enrich(capture, source if media_type(capture) == 'text/plain' else website_markdown(source), plan.view)
         unique, positions = passages.embedding_inputs(plan)
         summary_chunks = list(chunker(metadata["llm_summary"]))
         # Body and summary share one bounded inference operation, retaining their

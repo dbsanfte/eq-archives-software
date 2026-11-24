@@ -85,7 +85,9 @@ def create_app(archive: Archive | None = None):
         total.relation=gte means a lower bound, not an exact count.
         Filter capture_from/to, indexed_from/to and publication_from/to independently.
         last_indexed is search-index time, preserved during backfills, not capture time.
-        Themes/tags are model-generated. has_text/has_ocr filter indexed field presence;
+        Themes, tags, topics, entities and content roles are model-generated.
+        Topics and entities require an excerpt from the indexed search passages.
+        has_text/has_ocr filter indexed field presence;
         legacy empty fields can match. fetch reports actual nonempty source availability.
         group_by=page groups exact original URLs; discussion uses source-verified thread
         metadata and otherwise falls back to pages. Grouping scans at most 1,000 matches;
@@ -103,14 +105,15 @@ def create_app(archive: Archive | None = None):
         after: Annotated[str, Field(min_length=1, max_length=255, strict=True)] | None = None,
         limit: Annotated[int, Field(ge=1, le=100, strict=True)] = 20,
     ) -> SourcePage:
-        """List exact domain, mailing-list, file-type, MIME, theme, tag or collection values with matching document counts.
+        """List exact domain, mailing-list, file-type, MIME, theme, tag, topic, entity,
+        content_role or collection values with matching document counts.
 
         Optionally narrow the directory with a keyword query and the same filters accepted
         by search_archive. Values are alphabetically ordered. Pass next_after as after with
         the same source_type/query/filters to continue; the final page may be empty.
         Use returned values verbatim in filters; domains such as www.example.org and
         example.org are distinct. Missing/empty source fields are omitted.
-        Themes and tags are model-generated, not human classifications; verify sources.
+        Enrichment metadata is model-generated; verify it against fetched sources.
         """
         return await archive.list_sources(source_type, query, filters, after, limit)
 

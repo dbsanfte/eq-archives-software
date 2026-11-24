@@ -7,6 +7,8 @@ const fieldLabels = {
   mime_type: "Format",
   mailing_list_name: "Mailing list",
   llm_tags: "Topics",
+  llm_topics: "Specific topics",
+  llm_entities: "Named entities",
   last_indexed: "Added to archive"
 };
 

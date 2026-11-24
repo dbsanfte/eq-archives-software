@@ -13,6 +13,17 @@ import unittest
 from playwright.sync_api import expect, sync_playwright
 
 
+VALUE_FACETS = (
+    "domain_name", "llm_content_flavour", "file_type", "mime_type",
+    "mailing_list_name", "llm_tags", "llm_topics", "llm_entities",
+)
+
+
+def empty_facets():
+    return {**{field: {"buckets": []} for field in VALUE_FACETS},
+            "last_indexed": {"buckets": {}}}
+
+
 class FrontendBrowserTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -31,14 +42,7 @@ class FrontendBrowserTests(unittest.TestCase):
         if route.request.url.endswith("/_count"):
             route.fulfill(json={"count": 0})
         else:
-            facets = {
-                field: {"buckets": []}
-                for field in (
-                    "domain_name", "llm_content_flavour", "file_type",
-                    "mime_type", "mailing_list_name", "llm_tags",
-                )
-            }
-            facets["last_indexed"] = {"buckets": {}}
+            facets = empty_facets()
             route.fulfill(json={
                 "took": 1,
                 "timed_out": False,
@@ -46,6 +50,48 @@ class FrontendBrowserTests(unittest.TestCase):
                 **({"aggregations": {"facet_bucket_all": {"doc_count": 0, **facets}}}
                    if 'aggs' in route.request.post_data_json else {}),
             })
+
+    def test_source_backed_topic_and_entity_facets_are_selectable_on_mobile(self):
+        context = self.browser.new_context(viewport={"width": 390, "height": 900}, is_mobile=True, has_touch=True)
+        try:
+            page = context.new_page()
+            requests = []
+            selections = {"llm_topics": "the lifts", "llm_entities": "zone: kelethin"}
+
+            def archive(route):
+                if route.request.url.endswith("/_count"):
+                    return route.fulfill(json={"count": 1})
+                if route.request.url.endswith("/_rerank"):
+                    return route.fulfill(json={"ids": route.request.post_data_json["ids"], "status": "fixture"})
+                body = route.request.post_data_json
+                requests.append(body)
+                facets = empty_facets()
+                for field, label in selections.items():
+                    facets[field]["buckets"] = [{"key": label, "doc_count": 1}]
+                buckets = {name: {"doc_count": 1, **{f: facets[f] for f in agg["aggs"]}}
+                           for name, agg in body.get("aggs", {}).items()}
+                route.fulfill(json={"hits": {"total": {"value": 1, "relation": "eq"}, "hits": [{
+                    "_id": "newsgroups/kelethin-example", "_score": 1,
+                    "_source": {"title": "Kelethin guide", "url": "https://example.org/kelethin"},
+                }]}, "aggregations": buckets})
+
+            page.route("**/elasticsearch/**", archive)
+            page.goto(self.base_url + '/?q=%22kelethin%22', wait_until="networkidle")
+            expect(page.get_by_role("link", name="Kelethin guide")).to_be_visible()
+            show_filters = page.get_by_role("button", name="Show Filters", exact=True)
+            if show_filters.is_visible():
+                show_filters.click()
+            for label in selections.values():
+                with page.expect_response("**/elasticsearch/**/_search"):
+                    page.get_by_role("checkbox", name=re.compile(re.escape(label))).check()
+            page.wait_for_load_state("networkidle")
+            request = requests[-1]
+            filter_values = json.dumps([request.get("query"), request.get("post_filter")])
+            for field, label in selections.items():
+                self.assertIn(json.dumps({"term": {field: label}}), filter_values)
+            expect(page.locator(".sui-search-error")).to_have_count(0)
+        finally:
+            context.close()
 
     def test_search_congestion_retries_and_errors_offer_safe_mobile_recovery(self):
         for width in (390, 1280):
@@ -71,8 +117,7 @@ class FrontendBrowserTests(unittest.TestCase):
                         if len(searches) == 1 or failed[0]:
                             return route.fulfill(status=503, headers={'Retry-After': '0'},
                                 json={'error': {'code': 'busy', 'message': 'private diagnostic'}})
-                        facets = {f: {'buckets': []} for f in ('domain_name', 'llm_content_flavour', 'file_type', 'mime_type', 'mailing_list_name', 'llm_tags')}
-                        facets['last_indexed'] = {'buckets': {}}
+                        facets = empty_facets()
                         route.fulfill(json={'hits': {'total': {'value': 2, 'relation': 'eq'}, 'hits': [
                             {'_id': f'newsgroups/{n}', '_score': 2-n, '_source': {
                                 'title': f'Recovered search result {n}', 'url': f'https://example.com/{n}'}}
@@ -183,8 +228,7 @@ class FrontendBrowserTests(unittest.TestCase):
                         hits = [] if name == 'empty' else [{'_id': f'newsgroups/{name}-{n}', '_score': 2-n,
                             '_source': {'title': f'{name} result {n}', 'url': f'https://example.org/{name}/{n}'}}
                             for n in range(2)]
-                        facets = {f: {'buckets': []} for f in ('domain_name', 'llm_content_flavour', 'file_type', 'mime_type', 'mailing_list_name', 'llm_tags')}
-                        facets['last_indexed'] = {'buckets': {}}
+                        facets = empty_facets()
                         route.fulfill(json={'hits': {'total': {'value': len(hits), 'relation': 'eq'}, 'hits': hits},
                             'aggregations': {'facet_bucket_all': {'doc_count': len(hits), **facets}}})
                     def archive(route):
@@ -297,8 +341,7 @@ class FrontendBrowserTests(unittest.TestCase):
                     return route.fulfill(json={'ids': route.request.post_data_json['ids'], 'status': 'fixture'})
                 if route.request.url.endswith('/_count'):
                     return route.fulfill(json={'count': 1})
-                facets = {f: {'buckets': []} for f in ('domain_name', 'llm_content_flavour', 'file_type', 'mime_type', 'mailing_list_name', 'llm_tags')}
-                facets['last_indexed'] = {'buckets': {}}
+                facets = empty_facets()
                 route.fulfill(json={'hits': {'total': {'value': 1, 'relation': 'eq'}, 'hits': [{
                     '_id': 'isolated-security-fixture', '_score': 1,
                     '_source': {'title': 'Untrusted source test', 'url': 'javascript:window.securityMarker=3', 'llm_summary': payload},
@@ -622,11 +665,8 @@ class FrontendBrowserTests(unittest.TestCase):
                                     'url': f'https://web.archive.org/web/20000101000000/http://{domain}/page{i}.html',
                                     'text_full': '# Original guild page\n\nCleric and paladin spells.',
                                     'capture_date': '2000-01-01T00:00:00Z'}} for i in range(26)]
-                    facets = {field: {'buckets': []} for field in (
-                        'domain_name', 'llm_content_flavour', 'file_type', 'mime_type', 'mailing_list_name', 'llm_tags'
-                    )}
+                    facets = empty_facets()
                     facets['domain_name'] = {'buckets': [{'key': domain, 'doc_count': len(records)}]}
-                    facets['last_indexed'] = {'buckets': {}}
 
                     def archive(route):
                         if route.request.url.endswith('/_rerank'):
@@ -933,11 +973,7 @@ class FrontendBrowserTests(unittest.TestCase):
                     context.close()
 
     def test_results_per_page_keeps_its_selected_value_visible_on_mobile(self):
-        facets = {field: {"buckets": []} for field in (
-            "domain_name", "llm_content_flavour", "file_type", "mime_type",
-            "mailing_list_name", "llm_tags"
-        )}
-        facets["last_indexed"] = {"buckets": {}}
+        facets = empty_facets()
 
         def archive(route):
             if route.request.url.endswith('/_rerank'):
@@ -1065,11 +1101,8 @@ class FrontendBrowserTests(unittest.TestCase):
                         self.assertEqual(body['highlight']['encoder'], 'html')
                         self.assertEqual(body['highlight']['fields']['text_full']['number_of_fragments'], 1)
                         self.assertTrue(all('inner_hits' not in query for query in body.get('knn', [])))
-                        facets = {field: {"buckets": []} for field in (
-                            "domain_name", "llm_content_flavour", "file_type", "mime_type", "mailing_list_name", "llm_tags"
-                        )}
+                        facets = empty_facets()
                         facets["domain_name"] = {"buckets": [{"key": "example.org", "doc_count": 1}]}
-                        facets["last_indexed"] = {"buckets": {}}
                         route.fulfill(json={
                             "hits": {"total": {"value": 1, "relation": "eq"}, "hits": [{
                                 "_id": doc_id, "_score": 1, "_source": fields,
@@ -1210,9 +1243,7 @@ class FrontendBrowserTests(unittest.TestCase):
                         start = body.get('from', 0)
                         route.fulfill(json={"hits": {"total": {"value": len(rows), "relation": "eq"},
                             "hits": rows[start:start+body['size']]}, "aggregations": {"facet_bucket_all": {
-                                "doc_count": len(rows), **{name: {"buckets": []} for name in
-                                ("domain_name", "llm_content_flavour", "file_type", "mime_type", "mailing_list_name", "llm_tags")},
-                                "last_indexed": {"buckets": {}}}}})
+                                "doc_count": len(rows), **empty_facets()}}})
                     page.route('**/elasticsearch/**', archive)
                     page.route('**/openai/**', lambda route: route.fulfill(json={"data": [{"embedding": [0.1]*768}]}))
                     page.goto(self.base_url+'/?q=bard', wait_until='networkidle')
@@ -1267,8 +1298,7 @@ class FrontendBrowserTests(unittest.TestCase):
                         start=body.get('from',0)
                         route.fulfill(json={"hits":{"total":{"value":65,"relation":"eq"},
                             "hits":records[start:start+body['size']]}, "aggregations": {"facet_bucket_all": {
-                                "doc_count":65, **{name:{"buckets":[]} for name in ("domain_name","llm_content_flavour","file_type","mime_type","mailing_list_name","llm_tags")},
-                                "last_indexed":{"buckets":{}}}}})
+                                "doc_count":65, **empty_facets()}}})
                     page.route('**/elasticsearch/**', archive)
                     page.route('**/openai/**', lambda route: route.fulfill(status=503,json={"error":"fixture"}))
                     page.goto(self.base_url+'/?q=bard', wait_until='networkidle')
@@ -1308,10 +1338,7 @@ class FrontendBrowserTests(unittest.TestCase):
                     duplicate = [hit('thread?id=1', day, 'Repeated page') for day in range(60)]
                     records = duplicate[:50] + [hit(f'thread?id={i}', 1, f'Distinct page {i}') for i in range(2, 26)] + duplicate[50:]
                     # Duplicate captures straddle raw batches; query-string pages remain distinct.
-                    facets = {field: {"buckets": []} for field in (
-                        "domain_name", "llm_content_flavour", "file_type", "mime_type", "mailing_list_name", "llm_tags"
-                    )}
-                    facets["last_indexed"] = {"buckets": {}}
+                    facets = empty_facets()
 
                     def archive(route):
                         if route.request.url.endswith('/_rerank'):
@@ -1411,8 +1438,7 @@ class FrontendBrowserTests(unittest.TestCase):
                     documents[older]={**documents[selected],'capture_date':'2005-01-01T12:00:00Z',
                                       'url':documents[selected]['url'].replace('/20061213163803/','/20050101120000/'),
                                       'text_full':'# Earlier capture\n\n'+texts[1]+' paw'}
-                    facets={field:{'buckets':[]} for field in ('domain_name','llm_content_flavour','file_type','mime_type','mailing_list_name','llm_tags')}
-                    facets['last_indexed']={'buckets':{}}
+                    facets = empty_facets()
                     def archive(route):
                         if route.request.url.endswith('/_rerank'):
                             return route.fulfill(json={'ids': route.request.post_data_json['ids'], 'status': 'fixture'})
@@ -1492,10 +1518,7 @@ class FrontendBrowserTests(unittest.TestCase):
                         first_id: {"title": "Cyclops research guide", "url": "https://web.archive.org/web/20000101000000/http://example.org/guide?a=1&b=2", "capture_date": "2000-01-01T00:00:00Z", "llm_guessed_date": "1999-01-01", "domain_name": "example.org", "text_full": text, "llm_image_text_full": "Old OCR"},
                         second_id: {"title": "Cyclops research guide, revised", "url": "https://web.archive.org/web/20010101000000/http://example.org/guide?a=1&b=2", "capture_date": "2001-01-01T00:00:00Z", "domain_name": "example.org", "text_full": later, "llm_image_text_full": "New OCR"},
                     }
-                    facets = {field: {"buckets": []} for field in (
-                        "domain_name", "llm_content_flavour", "file_type", "mime_type", "mailing_list_name", "llm_tags"
-                    )}
-                    facets["last_indexed"] = {"buckets": {}}
+                    facets = empty_facets()
 
                     def archive(route):
                         if route.request.url.endswith('/_rerank'):

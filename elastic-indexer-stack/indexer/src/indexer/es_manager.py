@@ -108,6 +108,22 @@ ES_FIELDS = {
         "mapping": {"type": "keyword"},
         "default": None
     },
+    "llm_search_enrichment_version": {
+        "mapping": {"type": "keyword"},
+        "default": None
+    },
+    "llm_content_role": {
+        "mapping": {"type": "keyword"},
+        "default": None
+    },
+    "llm_topics": {
+        "mapping": {"type": "keyword", "fields": {"search": {"type": "text"}}},
+        "default": None
+    },
+    "llm_entities": {
+        "mapping": {"type": "keyword", "fields": {"search": {"type": "text"}}},
+        "default": None
+    },
     "llm_guessed_date": {
         "mapping": {"type": "date"},
         "default": None

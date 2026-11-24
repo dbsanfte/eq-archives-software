@@ -19,7 +19,7 @@ from .http_limits import send_body
 from .ranking_policy import BROWSER_VECTOR_BOOST
 from .capacity import HTTP_SLOTS
 
-FACETS = {"domain_name", "llm_content_flavour", "file_type", "mime_type", "mailing_list_name", "llm_tags"}
+FACETS = {"domain_name", "llm_content_flavour", "file_type", "mime_type", "mailing_list_name", "llm_tags", "llm_topics", "llm_entities"}
 DATES = {"capture_date", "llm_guessed_date", "last_indexed", "llm_extracted_dates.date"}
 TEXT = ["text_full", "llm_summary", "llm_image_text"]
 LIST_FIELDS = ["id", "discussion", "title", "llm_summary", "llm_content_flavour", "llm_tags",
@@ -191,7 +191,7 @@ class Builder:
         raise ValueError("Unsupported query")
 
     def aggs(self, value):
-        check(isinstance(value, dict) and len(value) <= 8)
+        check(isinstance(value, dict) and len(value) <= len(FACETS) + 2)
         if set(value) == {"sites"}:
             expected = {"sites": {"terms": {"field": "domain_name", "size": 50,
                 "order": [{"latest_indexed": "desc"}, {"_key": "asc"}]}, "aggs": {
