@@ -1363,6 +1363,7 @@ websites, mailing lists and newsgroups, and process up to 512 records or eight
 minutes with four concurrent paid requests and batched summary embeddings.
 Drain each wave before releasing its shared priority claim. Preserve the old
 paid totals, matching cursor, and cache after the old combined slice exits.
+Serialize per-scope cache initialization while keeping Luna calls concurrent.
 Each write requires verified current source/passages and an exact optimistic
 revision. Replace the summary and validated Gemma vector atomically with the
 grounded labels; keep publication date evidence, readers, body/OCR vectors and

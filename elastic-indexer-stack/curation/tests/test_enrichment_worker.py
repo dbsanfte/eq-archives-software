@@ -1,6 +1,6 @@
 import json
 from itertools import cycle
-from threading import Barrier, Lock
+from threading import Barrier, Event, Lock
 
 import pytest
 
@@ -91,9 +91,25 @@ def test_four_paid_requests_overlap_and_share_one_embedding_wave(tmp_path):
     account = budget(tmp_path)
     state = State(tmp_path / 'state',identity())
     calls = []
+    opener = Lock()
+    competing_open = Event()
+    create_enricher = factory(calls, Barrier(4))
+
+    def open_enricher(*args, **kwargs):
+        # Give the sibling pool threads a chance to enter while the first
+        # connection sets up WAL, which can fail on concurrent initialization.
+        if not opener.acquire(blocking=False):
+            competing_open.set()
+            raise AssertionError('Overlapping enrichment cache initialization')
+        try:
+            competing_open.wait(.1)
+            return create_enricher(*args, **kwargs)
+        finally:
+            opener.release()
+
     try:
         result = run(tmp_path,state,service,sources,'fixture',account,maximum=4,should_yield=lambda:False,
-                     enricher_factory=factory(calls,Barrier(4)))
+                     enricher_factory=open_enricher)
         assert result['enrichment']['updated'] == 4
         assert len(calls) == 4 and len(service.waves) == 1 and len(service.waves[0]) == 4
         assert account.snapshot()['estimated_usd'] > 0

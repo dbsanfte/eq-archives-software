@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+from threading import Lock
 import time
 
 from common import CrawlError, digest, save
@@ -179,6 +180,7 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
     counters = {'luna_workers': WORKERS, 'embedding_waves': 0, 'examined': 0}
     rotation, capped = cycle(COLLECTIONS), set()
     started = []
+    opening_cache = Lock()
 
     def check():
         if time.monotonic() >= deadline or should_yield():
@@ -197,8 +199,12 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
     def grade(prepared, scope):
         def client(path):
             return Luna(path, deadline=time.time() + max(0, min(45, deadline - time.monotonic())))
-        with closing(enricher_factory(state.root / 'policy-enrichment' / digest(scope), '/run/secrets/luna_api_key',
-                                     client_factory=client, check=check)) as enricher:
+        # Cold records from one scope may share a database. Serialize WAL
+        # initialization only, then let the request threads run independently.
+        with opening_cache:
+            enricher = enricher_factory(state.root / 'policy-enrichment' / digest(scope), '/run/secrets/luna_api_key',
+                                        client_factory=client, check=check)
+        with closing(enricher):
             return metadata_patch(enricher.enrich_for_maintenance(prepared.capture, prepared.source, prepared.grounding))
 
     def request_key(prepared, scope):
