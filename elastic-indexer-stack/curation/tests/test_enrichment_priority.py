@@ -25,6 +25,26 @@ def test_discovery_never_queues_while_approved_enrichment_needs_funds(candidate)
     with connect(root) as store:assert store.db.execute('SELECT COUNT(*) FROM operations').fetchone()[0]==1
 
 
+def test_reenrichment_can_reserve_ahead_of_queued_imports_and_discovery(candidate):
+    root, _ = candidate
+    account = automation.budget(root)
+    account.configure(settings(account, enabled=True, daily_usd=20))
+    account.prioritize('portal', True)
+    assert account.snapshot()['enrichment_pending']
+    assert not account.snapshot(maintenance=True)['enrichment_pending']
+    with account.bind(purpose='maintenance', owner='repair'):
+        receipt = account.reserve(.02)
+        account.settle(receipt, .01)
+        account.prioritize('active-import', True)
+        assert account.snapshot(maintenance=True)['enrichment_pending']
+        with pytest.raises(EnrichmentPriorityPause):
+            account.reserve(.02)
+    with pytest.raises(EnrichmentPriorityPause):
+        account.reserve(.02)
+    assert account.snapshot()['estimated_usd'] == .01
+    assert account.snapshot()['unresolved_usd'] == 0
+
+
 def test_manual_grading_preserves_evidence_and_has_no_paid_attempt_when_enrichment_has_priority(candidate):
     root,_=candidate;account=automation.budget(root)
     account.configure(settings(account,enabled=True,daily_usd=20));account.prioritize('portal',True)

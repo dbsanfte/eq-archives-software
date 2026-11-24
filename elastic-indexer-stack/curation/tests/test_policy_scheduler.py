@@ -8,7 +8,7 @@ from common import CrawlError,save
 from indexer import gemma,passages
 from jobs import blockers
 from policy_maintenance import APP,identity
-from policy_scheduler import import_pending,job_for,receipt,schedule
+from policy_scheduler import job_for,receipt,schedule
 from state import connect
 
 IMAGE='dbsanfte/frontend@sha256:'+'1'*64
@@ -16,6 +16,7 @@ IMAGE='dbsanfte/frontend@sha256:'+'1'*64
 
 class Kube:
     def __init__(self,items=()):self.items=list(items);self.created=[]
+    def jobs(self):return self.items.copy()
     def create(self,job):
         self.created.append(deepcopy(job));self.items.append(deepcopy(job))
         return deepcopy(job)
@@ -128,13 +129,10 @@ def test_dedicated_budget_receipt_persists_pause_without_blocking_body_jobs(tmp_
     assert background(tmp_path,kube)['phase']=='running' and len(kube.created)==2
 
 
-def test_ready_imports_have_priority_but_unfunded_or_failed_imports_do_not_block_free_repairs(tmp_path):
+def test_waiting_imports_never_hold_the_reindex_slot(tmp_path):
     with connect(tmp_path) as store:
         store.db.execute("INSERT INTO batches VALUES ('site','published_waiting_index','{}','',NULL,NULL,NULL,'now','now')");store.db.commit()
-    kube=Kube();assert background(tmp_path,kube)['phase']=='waiting_imports' and not kube.created
-    with connect(tmp_path) as store:
-        store.db.execute("UPDATE batches SET state='index_budget_waiting'");store.db.commit()
-    assert import_pending(tmp_path,budget_wait=True) and not import_pending(tmp_path)
+    kube=Kube()
     assert background(tmp_path,kube)['phase']=='running'
 
 

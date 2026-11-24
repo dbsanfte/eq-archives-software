@@ -1741,7 +1741,7 @@ async def continuous_mode_flow(browser,base,width):
     auto.update(remaining_usd=2,activity={'phase':'enrichment_priority'},enrichment_pending=True)
     await page.evaluate('refresh()');await settled(page)
     await expect(page.locator('#automation-state')).to_have_text('Enrichment first')
-    await expect(page.locator('#automation-status')).to_contain_text('Approved-site enrichment has first use')
+    await expect(page.locator('#automation-status')).to_contain_text('Archive enrichment has first use')
     await expect(page.locator('#discover')).to_be_disabled()
     await safe_layout(page,width)
     # Another operator's revision cannot be overwritten by polling or a stale tab.
@@ -2302,8 +2302,14 @@ async def pipeline_activity_flow(browser,base,width):
     info['maintenance']={'policy':'eq-passages-480-v11','phase':'waiting_imports','progress':{
         'updated':2000,'reused':100,'unresolved':1,'issues':[{'id':'websites/large.example/'+200*'x'+'/<script>alert(1)</script>', 'reason':'source_unavailable'}]}}
     await page.evaluate('refresh()');await settled(page)
-    await expect(page.locator('#activity-indexing')).to_contain_text('Chunk maintenance yields to approved imports')
+    await expect(page.locator('#activity-indexing')).to_contain_text('Chunk maintenance starts after the active import')
     await expect(page.locator('#activity-indexing')).to_contain_text('2,000 upgraded · 100 reused vectors · 1 records awaiting retry')
+    job = 'eqarchives-policy-0123456789abcdef-3'
+    info['indexing']['job']={'waiting_for_reindex':[job]}
+    info['maintenance']['phase']='running'
+    await page.evaluate('refresh()');await settled(page)
+    await expect(page.locator('#activity-indexing > summary')).to_contain_text('Waiting for archive reindex')
+    await expect(page.locator('#activity-indexing')).to_contain_text(job)
     await page.locator('#activity-indexing > summary').click()
     await page.locator('#activity-indexing details > summary').click()
     await expect(page.locator('#activity-indexing')).to_contain_text('<script>alert(1)</script>')

@@ -1,4 +1,4 @@
-"""Read existing Jobs; serialize foreground imports independently of maintenance."""
+"""Read existing Jobs and identify which work holds an indexing slot."""
 
 import json
 import os
@@ -72,13 +72,20 @@ def finished(job):
 
 
 def blockers(jobs, own_name):
-    # Only other foreground imports share this slot. Pending/retrying imports
-    # count too; legacy reindex and bounded maintenance Jobs never hold it.
+    # Pending and retrying imports count as admitted work too.
     return sorted(job["metadata"]["name"] for job in jobs
                   if job["metadata"]["name"] != own_name
                   and (job['metadata'].get('labels',{}).get('app')=='eqarchives-capture-import'
                        or re.fullmatch(r'eqarchives-captures-[a-f0-9]{32}(?:-r[1-9][0-9]{0,5})?',job['metadata']['name']))
                   and not finished(job) and not job["spec"].get("suspend", False))
+
+
+def reindex_blockers(jobs):
+    return sorted(job['metadata']['name'] for job in jobs
+                  if not finished(job) and not job['spec'].get('suspend', False)
+                  and (job['metadata']['name'].startswith(('reindex-', 'eqarchives-policy-', 'eqarchives-enrichment-'))
+                       or job['metadata'].get('labels', {}).get('app') in
+                       ('eqarchives-text-reindex', 'eqarchives-policy-maintenance', 'eqarchives-rolling-enrichment')))
 
 
 def import_attempt(batch):

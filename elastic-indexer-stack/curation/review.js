@@ -804,7 +804,9 @@ function renderLive() {
     if (review.job) {
       const diagnostics=node('details');diagnostics.dataset.key='indexing';diagnostics.append(node('summary','Indexing details'));
       if (review.job.name) diagnostics.append(node('p',`Job: ${review.job.name}`,'meta'));
-      if (review.job.waiting_for?.length) diagnostics.append(node('p',`Waiting for: ${review.job.waiting_for.join(', ')}`,'meta'));box.append(diagnostics);
+      if (review.job.waiting_for_reindex?.length) diagnostics.append(node('p',`Archive reindex has priority · ${review.job.waiting_for_reindex.join(', ')}`,'meta'));
+      else if (review.job.waiting_for?.length) diagnostics.append(node('p',`Waiting for: ${review.job.waiting_for.join(', ')}`,'meta'));
+      box.append(diagnostics);
     }
     if (review.publication?.commit) box.append(external(`https://github.com/dbsanfte/eq-archives/commit/${review.publication.commit}`,'View archive commit'));host.append(box);
   }
@@ -1109,7 +1111,7 @@ function renderPipelineActivity() {
           if (auto.activity.required_usd>auto.settings.daily_usd) body.append(node('p','The next request exceeds the daily limit. Raise the limit in automatic settings to continue.','activity-warning'));
         } else if (phase==='enrichment_priority') {
           status='Enrichment has priority';tone='waiting';
-          body.append(node('p','Approved-site enrichment has first use of Luna funds. Discovery grading resumes automatically afterward.'));
+          body.append(node('p','Archive enrichment has first use of Luna funds. Discovery grading resumes automatically afterward.'));
         } else if (phase==='links_exhausted' || phase==='archive_unavailable' || phase==='retry_wait') {
           status=phase==='links_exhausted' ? 'Waiting for new links' : phase==='archive_unavailable' ? 'Archive sources unavailable' : 'Waiting to retry';tone='waiting';
           body.append(node('p',phase==='links_exhausted' ? 'The available archive pages and new links have been checked. New captures can supply more links; remembered sites are kept.' : phase==='archive_unavailable' ? 'Readable archive pages have been checked. Some files or metadata are missing locally or exceed the scan limits. Completed source passes with gaps are retried after a day; new staged links are checked below.' : auto.activity.error || 'Saved progress is retained.'));
@@ -1154,7 +1156,8 @@ function renderPipelineActivity() {
       else if (index) {
         status=labels[index.state] || 'Preparing indexing';tone=index.state==='indexing' ? 'running' : 'waiting';
         activitySite(body,index.site);
-        if (index.job?.waiting_for?.length) {status='Waiting for another approved site';body.append(node('p',`Waiting for: ${index.job.waiting_for.join(', ')}`,'address'));}
+        if (index.job?.waiting_for_reindex?.length) {status='Waiting for archive reindex';body.append(node('p',`Waiting for: ${index.job.waiting_for_reindex.join(', ')}`,'address'));}
+        else if (index.job?.waiting_for?.length) {status='Waiting for another approved site';body.append(node('p',`Waiting for: ${index.job.waiting_for.join(', ')}`,'address'));}
         else if (index.state==='index_budget_waiting') activityDeadline(body,auto?.resets_at || index.job?.retry_at,index.job?.budget_period==='monthly' ? 'Monthly budget reset' : 'Daily budget reset');
         else body.append(node('p',index.state==='indexing' ? 'AI enrichment and import are running. Completed sites retire to History.' : 'The indexing worker checks approved work every 10 seconds.'));
         if (index.job?.name) body.append(node('p',`Job: ${index.job.name}`,'address'));
@@ -1172,7 +1175,7 @@ function renderPipelineActivity() {
       }
       const maintenance=info.maintenance;
       if (maintenance?.policy) {
-        const phases={running:'Updating older archive chunks',waiting_imports:'Chunk maintenance yields to approved imports',waiting_jobs:'Chunk maintenance waits for the existing reindex',sweep_waiting:'Chunk maintenance will check again later',retry_wait:'Chunk maintenance is waiting to retry',attention:'Chunk maintenance needs attention',checking_submission:'Checking maintenance worker submission'};
+        const phases={running:'Updating older archive chunks',waiting_imports:'Chunk maintenance starts after the active import',waiting_jobs:'Chunk maintenance waits for the existing reindex',sweep_waiting:'Chunk maintenance will check again later',retry_wait:'Chunk maintenance is waiting to retry',attention:'Chunk maintenance needs attention',checking_submission:'Checking maintenance worker submission'};
         if (!publication && !index && maintenance.phase==='running') {status='Updating older archive chunks';tone='running';}
         body.append(node('p',`${phases[maintenance.phase] || 'Chunk maintenance'} · ${maintenance.policy}`,'meta'));
         if (maintenance.progress) {const p=maintenance.progress;body.append(node('p',`${Number(p.updated || 0).toLocaleString()} upgraded · ${Number(p.reused || 0).toLocaleString()} reused vectors · ${Number(p.unresolved || 0).toLocaleString()} records awaiting retry`,'activity-counts'));}
@@ -1187,7 +1190,7 @@ function renderPipelineActivity() {
       const enrichment=enrichmentLane?.progress?.enrichment || maintenance?.progress?.enrichment;
       const enrichmentPhase=enrichmentLane?.phase || enrichment?.phase;
       if (enrichment || enrichmentPhase) {
-        const phases={running:'Refreshing archive metadata',waiting_budget:'Waiting for the Luna budget',waiting_configuration:'Waiting for Luna budget configuration',waiting_imports:'Waiting for approved imports',waiting_jobs:'Waiting for existing indexing work',sweep_waiting:'Will check for more records',retry_wait:'Will retry'};
+        const phases={running:'Refreshing archive metadata',waiting_budget:'Waiting for the Luna budget',waiting_configuration:'Waiting for Luna budget configuration',waiting_imports:'Starts after the active import',waiting_jobs:'Waiting for existing indexing work',sweep_waiting:'Will check for more records',retry_wait:'Will retry'};
         body.append(node('p',`Re-enrichment · ${Number(enrichment?.updated || 0).toLocaleString()} refreshed · ${Number(enrichment?.reused || 0).toLocaleString()} reused${phases[enrichmentPhase] ? ` · ${phases[enrichmentPhase]}` : ''}`,'activity-counts'));
         if (enrichment?.last_reason) body.append(node('p',`Last re-enrichment issue: ${enrichment.last_reason.replaceAll('_',' ')}`,'meta'));
         if (enrichmentLane?.error) body.append(node('p',enrichmentLane.error,'activity-warning'));
@@ -1234,7 +1237,7 @@ function renderAutomation() {
   const reset=new Date(auto.resets_at).toUTCString();
   let status=settings.enabled ? `Continuously discovering and grading. Sites at Grade ${settings.min_grade}+ are automatically captured and indexed; lower grades are saved for later.` : 'Off. Turn on automatic mode to keep discovering, grading, capturing and indexing sites.';
   if (settings.enabled && waiting) status=`Waiting for ${period.toLowerCase()} Luna funds. Discovery resumes automatically after the reset at ${reset}. Captures and approved work retain their progress.`;
-  if (settings.enabled && auto.activity?.phase==='enrichment_priority') status='Approved-site enrichment has first use of Luna funds. Discovery grading resumes automatically when that work clears; capture and publication continue.';
+  if (settings.enabled && auto.activity?.phase==='enrichment_priority') status='Archive enrichment has first use of Luna funds. Discovery grading resumes automatically when that work clears; capture and publication continue.';
   if (settings.enabled && waiting && auto.activity.required_usd>settings.daily_usd) status=`The next grading request needs a $${auto.activity.required_usd.toFixed(4)} reservation, exceeding the daily limit. Raise the limit below to continue. Progress is retained.`;
   if (settings.enabled && auto.activity?.phase==='links_exhausted') status='All currently known new links have been checked. Discovery checks again in five minutes; remembered sites are kept.';
   if (settings.enabled && auto.activity?.phase==='archive_unavailable') status='Available source pages have been checked; some archive sources are unavailable locally. See Pipeline activity for scan progress and the next check.';

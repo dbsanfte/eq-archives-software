@@ -276,17 +276,20 @@ def test_index_changes_have_separate_cursors_and_cannot_resolve_another_indexs_f
     original.close()
 
 
-def test_foreground_detection_ignores_budget_waits_and_human_attention_but_obeys_new_policy(tmp_path):
+def test_maintenance_hints_respect_active_imports_and_current_policy(tmp_path):
     from policy_scheduler import write_control
-    with connect(tmp_path) as store:
-        store.db.execute("INSERT INTO batches VALUES ('site','index_budget_waiting','{}','',NULL,NULL,NULL,'now','now')");store.db.commit()
-        write_control(tmp_path,True)
-        assert foreground(tmp_path) is False
-        store.db.execute("UPDATE batches SET state='indexing'");store.db.commit();write_control(tmp_path,True);assert foreground(tmp_path)
-        store.db.execute("UPDATE batches SET state='index_failed'");store.db.commit();write_control(tmp_path,True);assert not foreground(tmp_path)
-        control=tmp_path/'indexing-state/policy-control.json'
-        data=json.loads(control.read_text());data['key']='future';control.write_text(json.dumps(data));assert foreground(tmp_path)
-        write_control(tmp_path,False);assert foreground(tmp_path)
+    write_control(tmp_path, True)
+    assert not foreground(tmp_path)
+    write_control(tmp_path, True, import_running=True)
+    assert foreground(tmp_path)
+    write_control(tmp_path, True, import_running=False)
+    assert not foreground(tmp_path)
+    control = tmp_path/'indexing-state/policy-control.json'
+    data = json.loads(control.read_text())
+    control.write_text(json.dumps({**data,'key':'future'}))
+    assert foreground(tmp_path)
+    write_control(tmp_path, False)
+    assert foreground(tmp_path)
     with pytest.raises(ServiceError):foreground(tmp_path/'absent')
 
 

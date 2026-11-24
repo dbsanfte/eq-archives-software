@@ -21,7 +21,7 @@ from grading import grade
 from graph import staged_links
 from captures import capture_sites
 from capture_progress import CaptureProgress
-from jobs import Kubernetes, blockers, finished, import_attempt, import_job, import_name
+from jobs import Kubernetes, blockers, finished, import_attempt, import_job, import_name, reindex_blockers
 from publisher import publish
 from state import Lane, OPERATION_KINDS, active_operation, connect, database_busy, unpack, worker_lease
 from coverage_check import refresh
@@ -34,7 +34,7 @@ from automatic_indexing import prepare_next
 from capture_budget import budget_identity
 from capture_continuation import require_eligible
 import automation
-from daily_budget import automatic_request, require_automatic
+from daily_budget import PORTAL_PRIORITY, automatic_request, require_automatic
 
 LOG=logging.getLogger(__name__)
 
@@ -366,18 +366,41 @@ class Worker:
     def indexing(self):
         with connect(self.root) as store:
             batches = [unpack(row) for row in store.db.execute("SELECT id,state,manifest_sha256,job,publication FROM batches INDEXED BY batch_metadata WHERE state IN ('published_waiting_index','indexing','index_budget_waiting') ORDER BY created")]
-        self.daily_budget.prioritize('portal',bool(batches))
-        maintenance=os.environ.get('PASSAGE_MAINTENANCE_ENABLED')=='1'
-        reenrichment=os.environ.get('PASSAGE_REENRICHMENT_ENABLED')=='1'
-        from policy_scheduler import write_control
-        write_control(self.root,maintenance)
+        maintenance = os.environ.get('PASSAGE_MAINTENANCE_ENABLED') == '1'
+        reenrichment = os.environ.get('PASSAGE_REENRICHMENT_ENABLED') == '1'
+        from policy_scheduler import ENRICHMENT_STATE, import_pending, schedule, write_control
         if not batches and not (maintenance or reenrichment):
+            write_control(self.root, False)
+            self.daily_budget.prioritize(PORTAL_PRIORITY, False)
             return
         self.kube = self.kube or Kubernetes()
         jobs = self.kube.jobs()
+        write_control(self.root, maintenance, import_running=bool(blockers(jobs, '')))
+        # Reconcile and admit the next archive slice before admitting any new
+        # import. The same snapshot includes jobs submitted earlier in this turn.
+        uncertain = []
+        paid_pending = False
+        for enabled, state_key, paid in ((maintenance, 'policy_maintenance', False),
+                                        (reenrichment, ENRICHMENT_STATE, True)):
+            if not enabled:
+                continue
+            try:
+                state = schedule(self.root, self.kube, jobs, os.environ.get('IMPORT_IMAGE', ''), enrichment=paid)
+                if state['phase'] == 'checking_submission':
+                    uncertain.append(state['name'])
+                if paid:
+                    paid_pending = state['phase'] in ('running', 'checking_submission')
+            except Exception as error:
+                if database_busy(error):
+                    raise
+                with connect(self.root) as store:
+                    saved = store.get(state_key, {})
+                    store.set(state_key, {**saved, 'phase': 'retry_wait',
+                              'error': 'Archive maintenance scheduling is unavailable. It will retry.'})
+        reindexing = sorted(set(reindex_blockers(jobs)) | set(uncertain))
         for batch in batches:
             try:
-                self.index_batch(batch, jobs)
+                self.index_batch(batch, jobs, reindexing=reindexing)
             except ImportQueueUnavailable:
                 raise
             except Exception as error:
@@ -392,21 +415,9 @@ class Worker:
                     store.db.execute("UPDATE batches SET state='index_failed',job=?,error=?,updated=? WHERE id=?",
                                      (json.dumps(job), detail, now(), batch['id']))
                     store.db.commit()
-        # Reconcile before declaring demand: one failed site cannot starve
-        # grading or background work after its import moves to attention.
-        from policy_scheduler import ENRICHMENT_STATE, import_pending, schedule
-        self.daily_budget.prioritize('portal',import_pending(self.root,budget_wait=True))
-        for enabled, state_key, paid in ((maintenance,'policy_maintenance',False),(reenrichment,ENRICHMENT_STATE,True)):
-            if not enabled:continue
-            try:schedule(self.root,self.kube,jobs,os.environ.get('IMPORT_IMAGE',''),enrichment=paid)
-            except Exception as error:
-                if database_busy(error):raise
-                with connect(self.root) as store:
-                    saved=store.get(state_key,{})
-                    store.set(state_key,{**saved,'phase':'retry_wait',
-                              'error':'Background policy scheduling is unavailable; imports continue.'})
+        self.daily_budget.prioritize(PORTAL_PRIORITY, paid_pending or import_pending(self.root))
 
-    def index_batch(self, batch, jobs):
+    def index_batch(self, batch, jobs, *, reindexing=()):
         import_error = None
         name = import_name(batch)
         attempt_detail = {"attempt": import_attempt(batch)}
@@ -457,7 +468,9 @@ class Worker:
             if batch['state'] == 'index_budget_waiting':
                 raise CrawlError('Budget-paused import Job is unavailable; automatic continuation is paused')
             waiting = blockers(jobs, name)
-            if waiting:
+            if reindexing:
+                state, detail = "published_waiting_index", {**attempt_detail, "waiting_for_reindex": reindexing}
+            elif waiting:
                 state, detail = "published_waiting_index", {**attempt_detail, "waiting_for": waiting}
             else:
                 (self.root / "enrichment").mkdir(exist_ok=True, mode=0o700)
@@ -478,8 +491,10 @@ class Worker:
                 if not any(item['metadata']['name'] == name for item in jobs):
                     jobs.append({"metadata": {"name": name,"labels":{"app":"eqarchives-capture-import"}}, "spec": {}, "status": {}})
         with connect(self.root) as store:
-            store.db.execute("UPDATE batches SET state=?,job=?,error=?,updated=? WHERE id=?",
-                             (state, json.dumps(detail), import_error, now(), batch["id"]))
+            job_json = json.dumps(detail)
+            store.db.execute("""UPDATE batches SET state=?,job=?,error=?,updated=? WHERE id=?
+                AND (state IS NOT ? OR job IS NOT ? OR error IS NOT ?)""",
+                (state, job_json, import_error, now(), batch["id"], state, job_json, import_error))
             if state == "indexed":
                 for site in batch["manifest"]["sites"]:
                     row = store.db.execute('SELECT state,coverage FROM candidates WHERE id=?', (site['id'],)).fetchone()
@@ -538,10 +553,6 @@ class Worker:
     def run_turn(self, lane):
         from storage_recovery import schedule as retry_storage
         retry_storage(self.root, lane)
-        if lane==Lane.CANDIDATES:
-            from policy_scheduler import import_pending,write_control
-            self.daily_budget.prioritize('portal',import_pending(self.root,budget_wait=True))
-            write_control(self.root,os.environ.get('PASSAGE_MAINTENANCE_ENABLED')=='1')
         try:
             automation.resume_owned(self.root, lane, self.daily_budget)
             if lane == Lane.CANDIDATES:
