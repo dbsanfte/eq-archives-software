@@ -346,7 +346,7 @@ attribution to its own first body block without merging entries. Bold first-row
 data alone is not evidence of table headers. Preserve v10 checkpoints; only exact
 source/view/request matches may reuse vectors. Ordinary delivery does not change
 the active broad reindex Job. Routine same-model policy updates run in bounded
-curation maintenance slices after legacy broad writers finish, yielding to imports.
+curation maintenance slices after legacy broad writers and already-admitted imports finish.
 Model/image migrations retain operator handoffs; do not restart broad Jobs for
 ordinary chunking delivery.
 Unclosed empty table rows must unwrap rather than delete their populated
@@ -830,9 +830,10 @@ the real SSH configuration offline in the built-image smoke check.
 
 Do not alter, suspend, delete or restart existing indexing Jobs or their source
 checkouts during curation delivery. Its controller has Jobs get/list/create and read-only pod status list
-permissions for owned import diagnostics, without pod mutation/log/exec access. Foreground imports wait only for other unfinished, unsuspended
-foreground capture imports, including pending/retrying Jobs with active=0. Broad
-reindexes and maintenance never block that slot. The publisher uses its own bare treeless repository
+permissions for owned import diagnostics, without pod mutation/log/exec access.
+Unfinished, unsuspended archive reindex Jobs and due maintenance slices take
+priority at admission. Imports serialize, including pending/retrying Jobs with
+active=0, and admitted imports finish naturally. The publisher uses its own bare treeless repository
 and dedicated archive deploy key, without an archive worktree or force push. Keep
 private state on its PVC. Import Jobs mount approved sources read-only and a
 separate enrichment subdirectory writable. They receive their dedicated
@@ -1369,9 +1370,11 @@ index timestamps. Request grounded summaries and labels without regenerating
 dates. Skip current metadata and reuse labels on identical bounded evidence.
 Preserve paid responses across retries. Use the same configured UTC
 limits and a $50 lifetime maintenance allowance per website host, mailing list
-or newsgroup. Retain earlier charges and the separate import budget. Approved
-imports have first priority, with discovery yielding to an active paid request.
-A budget or paid service pause must let the body pass continue. Only paid
+or newsgroup. Retain earlier charges and the separate import budget. Due
+maintenance gets first admission ahead of waiting imports. Historical
+re-enrichment, approved-site enrichment and discovery receive Luna priority in
+that order. Release import admission when maintenance is idle or paused. A budget
+or paid service pause must let the body pass continue. Only paid
 slices receive the Luna item and
 shared ledger mount. All source access remains exact, bounded and remote-free.
 Wait for legacy broad writers to finish naturally; leave their specs/pods/sources

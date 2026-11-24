@@ -268,7 +268,7 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
             raise pause
 
     try:
-        budget = account.snapshot()
+        budget = account.snapshot(maintenance=True)
         if not budget['complete']:
             phase, next_at = 'waiting_configuration', time.time() + 300
             return report(True)

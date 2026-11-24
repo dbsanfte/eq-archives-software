@@ -149,7 +149,7 @@ def run_enrichment(state, services, sources, owner, budget_root, check, *, secon
 
     try:
         account = DailyBudget(budget_root)
-        budget = account.snapshot()
+        budget = account.snapshot(maintenance=True)
         if not budget['complete']:
             return report('waiting_configuration', next_at=time.time() + 300)
         if budget['remaining_usd'] <= 0:

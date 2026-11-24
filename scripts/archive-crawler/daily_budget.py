@@ -18,6 +18,7 @@ from common import CrawlError, now
 
 SCALE = 1_000_000_000
 MAINTENANCE_SCOPE_LIMIT_USD = 50
+PORTAL_PRIORITY = 'portal'
 DEFAULT = {'enabled': False, 'configured': False, 'daily_usd': 2.0, 'monthly_usd': 500.0, 'site_usd': None,
            'min_grade': 2, 'grading_criteria': '', 'revision': 0}
 current_budget = ContextVar('luna_daily_budget', default=None)
@@ -71,7 +72,7 @@ class SiteBudgetExceeded(CrawlError):
 
 class EnrichmentPriorityPause(CrawlError):
     def __init__(self):
-        super().__init__('Approved-site enrichment has priority; grading resumes automatically afterward')
+        super().__init__('Archive enrichment has priority. Discovery grading resumes automatically afterward.')
 
 
 class AutomaticStopped(CrawlError):
@@ -199,12 +200,20 @@ class DailyBudget:
                 'monthly':{'estimated_usd':month[0]/SCALE,'unresolved_usd':month[1]/SCALE,
                            'remaining_usd':max(0,monthly)/SCALE,'resets_at':month_reset.isoformat()}}
 
-    def snapshot(self):
+    @staticmethod
+    def _enrichment_pending(db, when, *, owner='', maintenance=False):
+        # The portal claim reserves priority over discovery. A committed import
+        # also has its own lease, which historical maintenance must respect.
+        queue = PORTAL_PRIORITY if maintenance else owner
+        return db.execute('SELECT 1 FROM enrichment_priority WHERE expires>? AND owner NOT IN (?,?) LIMIT 1',
+                          (when.isoformat(), owner, queue)).fetchone() is not None
+
+    def snapshot(self, *, maintenance=False):
         when = instant()
         with self.database() as db:
             config = {**DEFAULT,**json.loads(db.execute('SELECT value FROM settings WHERE id=1').fetchone()[0])}
             limits=self.limits(db,when,config)
-            priority=db.execute('SELECT 1 FROM enrichment_priority WHERE expires>? LIMIT 1',(when.isoformat(),)).fetchone() is not None
+            priority = self._enrichment_pending(db, when, maintenance=maintenance)
         return {'settings': config, 'complete': config['configured'], **{k:v for k,v in limits.items() if not k.startswith('_')},
                 'enrichment_pending':priority,'day': when.date().isoformat(), 'timezone': 'UTC'}
 
@@ -236,9 +245,8 @@ class DailyBudget:
             limits=self.limits(db,when,config)
             if config['configured'] and reserved>limits['_remaining_units']:
                 raise DailyBudgetPause(amount, limits['resets_at'], limits['budget_period'])
-            if purpose in ('discovery','maintenance') and db.execute(
-                    'SELECT 1 FROM enrichment_priority WHERE expires>? AND owner<>? LIMIT 1',
-                    (when.isoformat(),priority_owner.get() or '')).fetchone():
+            if purpose in ('discovery','maintenance') and self._enrichment_pending(
+                    db, when, owner=priority_owner.get() or '', maintenance=purpose=='maintenance'):
                 raise EnrichmentPriorityPause()
             if owner:=priority_owner.get():
                 db.execute('INSERT OR REPLACE INTO enrichment_priority VALUES (?,?)',

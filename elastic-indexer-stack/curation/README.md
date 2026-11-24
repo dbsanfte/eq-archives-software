@@ -105,9 +105,9 @@ allowance; only an explicit saved per-site limit change authorizes more spending
 (including enrichment budget or source-validation failure) still requires
 attention. Imports already marked failed can be requeued with **Retry indexing**;
 subsequent execution timeouts continue automatically. A missing or mismatched
-completion diagnostic cannot retire a site. Only another unfinished, unsuspended foreground capture import holds the
-import slot, including pending/retrying Jobs with active=0. Broad reindexes and
-policy maintenance never hold that slot.
+completion diagnostic cannot retire a site. Unfinished, unsuspended archive
+reindex and maintenance Jobs take priority over new imports. One import runs
+at a time, including any pending or retrying Job with active=0.
 Raising the cap can resume work before midnight. If the next single reservation
 exceeds the entire daily limit, the displayed required amount must be funded.
 
@@ -754,8 +754,9 @@ Kubernetes retries twice. A terminal failure shows **Retry indexing** on the
 affected site's review. It verifies the saved publication approval and all source
 hashes, then queues a new numbered import Job under the original site budget.
 Duplicate/stale retry requests are rejected. The controller retains the failed
-Job, waits only for other foreground imports and never republishes or overwrites indexed
-entries. The selected source page stays open during retries and status updates.
+Job and queues the retry behind archive maintenance and any active import.
+Retries use the original publication and create missing entries only. The
+selected source page stays open during retries and status updates.
 New import Jobs write small diagnostic files beside their enrichment cache. These
 bind to the exact Job name and approved manifest hash; the controller displays the
 matching failure on the site's Indexing screen. Only predefined error messages
@@ -1023,22 +1024,26 @@ schedule bounded repairs of older, same-model records. A full corpus reindex is
 no longer needed for each chunking update. Model migrations, missing-source
 recovery and image backfills retain their separate operator workflows.
 
-Foreground imports run independently of legacy broad Jobs. Enrichment has first
-use of the shared Luna allowance: while approved imports are ready, running or
-waiting for funds, discovery grading pauses before reserving or sending a request.
-It resumes its original operation automatically when that demand clears. Capture,
-publication and free local maintenance can continue during a Luna budget wait.
-Per-Job claims expire after five minutes without a heartbeat; one failed site
-moves to attention without keeping other work or grading blocked.
+Archive reindexing has priority at Job boundaries. An already-admitted import
+finishes first. The controller then schedules due chunking and historical
+re-enrichment before admitting another import. Completed and suspended Jobs,
+sweep waits, budget pauses and retry backoffs release their slots. The portal
+shows which reindex Jobs an approved import is waiting for. Wayback capture
+and Git publication continue independently.
+
+Historical re-enrichment has first use of the shared Luna allowance, followed by
+approved-site enrichment and discovery grading. Discovery resumes its original
+operation automatically when enrichment demand clears. Per-Job claims expire
+after five minutes without a heartbeat. A failed site moves to attention and
+releases its claim.
 
 `PASSAGE_MAINTENANCE_ENABLED=1` admits one `eqarchives-policy-*` Job at a time,
 using the deployed immutable curation image and RTX 3080 CUDA service. Each slice
-handles at most 2,000 records or ten minutes, checks for imports between embedding
-batches, and yields cooperatively. A 15-minute Kubernetes deadline bounds hard
-failures. Maintenance waits for existing broad Jobs to finish naturally; rollout
-never modifies their specs, pods, prepared sources or checkpoints. The current
-v10 reindex can finish unchanged; its completion is not a claim of v12 coverage.
-Subsequent slices upgrade stale policies without downgrading newer checkpoints.
+handles at most 2,000 records or ten minutes and checks the controller's
+admission hints between embedding batches. A 15-minute Kubernetes deadline
+bounds hard failures. Maintenance waits for existing broad Jobs to finish
+naturally. Rollout preserves their specs, pods, prepared sources and checkpoints.
+Subsequent slices upgrade stale policies and preserve newer checkpoints.
 
 Durable cursors, rejection history and an exclusive process lease live in
 `indexing-state/policy-maintenance.sqlite` and its lock file. Identity includes the
@@ -1064,7 +1069,7 @@ date extraction. Each summary and its validated Gemma vector are committed
 together using the original read revision. Existing publication date evidence,
 readers, capture/index timestamps and body/OCR vectors retain their provenance.
 
-Approved imports have first priority. The paid pass uses the configured UTC
+The paid pass uses the configured UTC
 daily/monthly Luna ledger and a $50 lifetime maintenance cap per canonical
 website host, mailing list or newsgroup. Settled usage and unresolved
 reservations count against that cap. Import approvals use their own per-site
@@ -1099,8 +1104,8 @@ with a two-record queue, a two-CPU/3-GiB Job limit, 128 tasks per process and a
 embedding/cache access, optimistic writes and cursor acknowledgements. A child
 crash retains the exact inflight ID for the existing three-attempt quarantine;
 timeouts become visible per-record failures while later records continue. A yield
-terminates and reaps speculative preparation promptly. Foreground imports retain
-priority. Setting the worker count to zero keeps serial preparation for diagnosis.
+terminates and reaps speculative preparation promptly. Setting the worker count
+to zero keeps serial preparation for diagnosis.
 
 Exact passage requests can reuse vectors from the original document independently
 of its other passages. Reuse verifies the old selected view, overlaps, offsets,

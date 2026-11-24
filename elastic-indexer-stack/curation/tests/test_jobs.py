@@ -155,6 +155,72 @@ def test_new_imports_wait_for_other_active_pending_and_retrying_foreground_impor
         worker.lease.close()
 
 
+def test_archive_reindex_and_due_maintenance_take_the_next_slot(candidate, monkeypatch):
+    from test_policy_scheduler import Kube, complete
+    from indexer import gemma, passages
+    from common import save
+    from policy_maintenance import identity
+    import time
+
+    root, row = candidate
+    manifest = manifest_for(row)
+    pending = manifest['batch_id']
+    with connect(root) as store:
+        store.db.execute("INSERT INTO batches VALUES (?,'published_waiting_index',?,?,?,NULL,NULL,'now','now')",
+                         (pending, json.dumps(manifest), digest(manifest), json.dumps({'commit':'a'*40})))
+        store.db.commit()
+    active = {'metadata': {'name': 'active-import', 'labels': {'app': 'eqarchives-capture-import'}},
+              'spec': {}, 'status': {'active': 1}}
+    legacy = {'metadata': {'name': 'reindex-source-tail-r2'}, 'spec': {'suspend': True}, 'status': {}}
+    kube = Kube([active, legacy])
+    monkeypatch.setenv('IMPORT_IMAGE', IMAGE)
+    monkeypatch.setenv('PASSAGE_MAINTENANCE_ENABLED', '1')
+    monkeypatch.setenv('PASSAGE_REENRICHMENT_ENABLED', '1')
+
+    def waiting():
+        with connect(root) as store:
+            state, job = store.db.execute('SELECT state,job FROM batches WHERE id=?', (pending,)).fetchone()
+        assert state == 'published_waiting_index'
+        return json.loads(job)
+
+    worker = Worker(root, kube=kube)
+    try:
+        worker.indexing()
+        assert not kube.created
+        assert waiting()['waiting_for'] == ['active-import']
+        active['status'] = {'conditions': [{'type': 'Complete', 'status': 'True'}]}
+        legacy['spec']['suspend'] = False
+        worker.indexing()
+        assert not kube.created
+        assert waiting()['waiting_for_reindex'] == ['reindex-source-tail-r2']
+        legacy['status'] = {'conditions': [{'type': 'Complete', 'status': 'True'}]}
+        worker.indexing()
+        first, paid = (j['metadata']['name'] for j in kube.created)
+        assert first.startswith('eqarchives-policy-') and paid.startswith('eqarchives-enrichment-')
+        assert waiting()['waiting_for_reindex'] == [paid, first]
+        complete(root, kube)
+        worker.indexing()
+        second = kube.created[-1]['metadata']['name']
+        assert second.startswith('eqarchives-policy-') and second != first
+        assert waiting()['waiting_for_reindex'] == [paid, second]
+        complete(root, kube, phase='sweep_waiting', next_at=time.time()+300)
+        worker.indexing()
+        assert waiting()['waiting_for_reindex'] == [paid]
+        next(j for j in kube.items if j['metadata']['name'] == paid)['status'] = {
+            'conditions': [{'type': 'Complete', 'status': 'True'}]}
+        counts = dict(updated=10, reused=2, failed=0, skipped=0)
+        next_at = time.time()+300
+        save(root/'indexing-state'/f'{paid}.json',
+             dict(job=paid, policy=passages.VERSION, model=gemma.MODEL, image=IMAGE, key=identity(),
+                  scanned=12, unresolved=0, terminal=True, phase='waiting_budget', updated_at=time.time(),
+                  next_at=next_at, enrichment={**counts, 'last_reason': None, 'phase': 'waiting_budget',
+                                               'next_at': next_at}, **counts))
+        worker.indexing()
+        assert len(kube.created) == 4 and kube.created[-1]['metadata']['name'] == 'eqarchives-captures-'+pending
+    finally:
+        worker.lease.close()
+
+
 def test_import_job_only_mounts_staging_readonly_and_separate_indexing_secrets():
     batch={'id':'a'*32,'manifest_sha256':'b'*64}
     spec=import_job(batch,IMAGE)['spec']['template']['spec']

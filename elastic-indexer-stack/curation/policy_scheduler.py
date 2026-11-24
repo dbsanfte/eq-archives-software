@@ -1,42 +1,40 @@
-"""Admit one disposable policy slice, yielding to imports and legacy writers."""
+"""Admit bounded archive maintenance between previously started Jobs."""
 import json
 import os
 from pathlib import Path
 import re
 import time
 import math
-import threading
 
 from common import CrawlError,save
-from jobs import finished, import_job
+from jobs import blockers, finished, import_job
 from policy_enrichment import APP as ENRICHMENT_APP, COUNTERS as ENRICHMENT_COUNTERS
 from policy_maintenance import APP, identity
 from indexer import gemma, passages
 from state import connect
 
-CONTROL_LOCK=threading.Lock()
 ENRICHMENT_STATE='enrichment_maintenance'
 ENRICHMENT_PHASES=('bounded','yielded','waiting_configuration','waiting_budget','waiting_imports',
                    'sweep_waiting','retry_wait')
 
 
-def write_control(root,enabled):
+def write_control(root,enabled,*,import_running=False):
     """Atomic, infrequently rewritten hints; workers never open portal SQLite."""
-    with CONTROL_LOCK:
-        value={'key':identity(),'enabled':enabled,'foreground':import_pending(root),'updated_at':time.time(),
-               'enrichment_enabled':os.environ.get('PASSAGE_REENRICHMENT_ENABLED')=='1'}
-        path=Path(root)/'indexing-state/policy-control.json'
-        try:
-            old=json.loads(path.read_text())
-            if all(old.get(k)==value[k] for k in ('key','enabled','foreground','enrichment_enabled')) and old.get('updated_at',0)>time.time()-60:return
-        except (OSError,ValueError,TypeError):pass
-        path.parent.mkdir(mode=0o770,parents=True,exist_ok=True)
-        save(path,value);path.chmod(0o660)
+    value={'key':identity(),'enabled':enabled,'foreground':import_running,'updated_at':time.time(),
+           'enrichment_enabled':os.environ.get('PASSAGE_REENRICHMENT_ENABLED')=='1'}
+    path=Path(root)/'indexing-state/policy-control.json'
+    try:
+        old=json.loads(path.read_text())
+        if all(old.get(k)==value[k] for k in ('key','enabled','foreground','enrichment_enabled')) and old.get('updated_at',0)>time.time()-60:return
+    except (OSError,ValueError,TypeError):pass
+    path.parent.mkdir(mode=0o770,parents=True,exist_ok=True)
+    save(path,value);path.chmod(0o660)
 
-def import_pending(root,*,budget_wait=False):
+
+def import_pending(root):
     with connect(root) as store:
-        states=('published_waiting_index','indexing')+(('index_budget_waiting',) if budget_wait else ())
-        return store.db.execute(f"SELECT 1 FROM batches WHERE state IN ({','.join('?' for _ in states)}) LIMIT 1",states).fetchone() is not None
+        return store.db.execute("""SELECT 1 FROM batches
+            WHERE state IN ('published_waiting_index','indexing','index_budget_waiting') LIMIT 1""").fetchone() is not None
 
 
 def job_for(name,image,*,enrichment=False):
@@ -135,7 +133,6 @@ def blocks(job, *, enrichment):
 
 
 def schedule(root,kube,jobs,image,*,enrichment=False):
-    if not enrichment:write_control(root,True)
     state_key=ENRICHMENT_STATE if enrichment else 'policy_maintenance'
     lane,app=('enrichment',ENRICHMENT_APP) if enrichment else ('policy',APP)
     with connect(root) as store:state=store.get(state_key,{})
@@ -167,7 +164,8 @@ def schedule(root,kube,jobs,image,*,enrichment=False):
             saved(reconciled=state['name'],progress=progress,next_at=progress['next_at'])
         else:saved(reconciled=state['name'],next_at=time.time()+300,
                    error='The policy Job disappeared; a numbered retry will use its committed checkpoints.')
-    if import_pending(root):return saved(phase='waiting_imports')
+    importing=blockers(jobs,'')
+    if importing:return saved(phase='waiting_imports',waiting_for=importing)
     waiting=sorted(j['metadata']['name'] for j in jobs if not finished(j) and not j['spec'].get('suspend',False)
                    and blocks(j,enrichment=enrichment))
     if waiting:return saved(phase='waiting_jobs',waiting_for=waiting)
