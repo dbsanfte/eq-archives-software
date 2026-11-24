@@ -1355,8 +1355,18 @@ explicit skip-CI request should finish without launching a deployment.
 
 
 Routine same-model chunk updates use `curation/policy_maintenance.py` and
-`policy_scheduler.py`: one 2,000-record/ten-minute slice, CUDA only, no Luna or
-source preparation, cooperative yield between batches, 15-minute hard deadline.
+`policy_scheduler.py`: one 2,000-record/ten-minute slice, CUDA only, cooperative
+yield between batches and a 15-minute hard deadline. A paid sub-slice uses its
+own durable cursor, at most eight attempted records and 75 seconds per slice.
+Its write requires verified current source/passages and an exact optimistic
+revision. Replace the summary and validated Gemma vector atomically with the
+grounded labels; keep publication date evidence, readers, body/OCR vectors and
+index timestamps. Skip current metadata and reuse labels on identical bounded
+evidence. Preserve paid responses across retries. Use the same configured UTC
+limits and per-scope maintenance allowance, with approved imports first and
+discovery yielding to an active paid request. A budget or paid service pause
+must let the body pass continue. Only paid slices receive the Luna item and
+shared ledger mount. All source access remains exact, bounded and remote-free.
 Wait for legacy broad writers to finish naturally; leave their specs/pods/sources
 untouched. Scope durable cursors/diagnostics and the least-privileged read/index
 account to the physical ES index plus model/policy/extraction checkpoints. Use

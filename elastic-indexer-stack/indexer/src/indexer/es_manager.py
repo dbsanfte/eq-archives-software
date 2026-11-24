@@ -108,6 +108,8 @@ ES_FIELDS = {
         "mapping": {"type": "keyword"},
         "default": None
     },
+    "llm_enrichment_passage_version": {"type": "keyword"},
+    "llm_enrichment_view_sha256": {"type": "keyword"},
     "llm_search_enrichment_version": {
         "mapping": {"type": "keyword"},
         "default": None

@@ -1,6 +1,6 @@
-"""Bounded policy-only repair, checkpointed between foreground curation imports.
+"""Bounded rolling policy updates, checkpointed between foreground imports.
 
-Same model, no paid enrichment, no source preparation, no create/upsert/delete.
+Body repairs and budgeted enrichment have independent cursors and writes.
 Only acknowledged optimistic updates advance repair counts and resolve failures.
 """
 import argparse
@@ -19,12 +19,13 @@ import httpx
 
 from common import save
 from index_captures import Services
-from indexer import gemma, passages
+from indexer import gemma, passages, search_enrichment
 from indexer.html_extraction import WEBSITE_EXTRACTION_VERSION
 from indexer.sqlite_state import SQLiteState
 from indexer.embedding_batches import embed_batches, decode_vectors
 from indexer.vector_json import dumps as vector_json
-from policy_sources import Sources, SourceError
+from policy_sources import Sources, SourceError, ServiceError
+from policy_enrichment import COUNTERS, current_enrichment, run_enrichment
 from policy_preparation import (LEGACY_POLICY, FIELDS as PASSAGE_FIELDS, newer, prepare,
                                 verify_prepared,renderer_identity,request_identity)
 from policy_pool import PreparationPool, WorkerLost
@@ -32,7 +33,8 @@ from policy_pool import PreparationPool, WorkerLost
 APP='eqarchives-policy-maintenance'
 FIELDS=['id','file_type','mime_type','title','text_full','text.text_chunk','text.title','text.context',
         'text.kind','text.source_start','text.source_end','embedding_model','text_chunking_version',
-        'text_extraction_version','text_passage_provenance','archive_source_sha256','archive_commit']
+        'text_extraction_version','text_passage_provenance','archive_source_sha256','archive_commit',
+        'llm_search_enrichment_version','llm_enrichment_passage_version','llm_enrichment_view_sha256']
 
 
 def index_identity():
@@ -41,10 +43,6 @@ def index_identity():
 
 def identity():
     return hashlib.sha256(json.dumps([index_identity(),gemma.MODEL,passages.VERSION,WEBSITE_EXTRACTION_VERSION]).encode()).hexdigest()[:16]
-
-
-class ServiceError(ValueError):
-    pass
 
 
 class YieldWork(Exception):
@@ -79,7 +77,11 @@ class State:
                 CREATE TABLE IF NOT EXISTS policy_inflight (
                 key TEXT PRIMARY KEY,id TEXT NOT NULL,job TEXT NOT NULL,attempts INTEGER NOT NULL);
                 CREATE TABLE IF NOT EXISTS policy_scopes (
-                key TEXT PRIMARY KEY,index_name TEXT NOT NULL,model TEXT NOT NULL,policy TEXT NOT NULL);'''
+                key TEXT PRIMARY KEY,index_name TEXT NOT NULL,model TEXT NOT NULL,policy TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS policy_enrichment (
+                key TEXT PRIMARY KEY,cursor TEXT NOT NULL DEFAULT '',updated INTEGER NOT NULL DEFAULT 0,
+                reused INTEGER NOT NULL DEFAULT 0,failed INTEGER NOT NULL DEFAULT 0,skipped INTEGER NOT NULL DEFAULT 0,
+                phase TEXT NOT NULL DEFAULT 'bounded',next_at REAL NOT NULL DEFAULT 0,last_reason TEXT);'''
             for statement in schema.split(';'):
                 if statement.strip():db.execute(statement)
         with self.db.transaction(attempts=6) as db:
@@ -163,6 +165,22 @@ class State:
         with self.db.transaction(attempts=6) as db:
             db.execute("UPDATE policy_cursors SET cursor='',next_at=? WHERE key=?",(time.time()+3600,identity()))
 
+    def enrichment_progress(self, version, *, cursor=None, phase=None, next_at=0, result=None, reason=None):
+        key=identity()+':'+version
+        with self.db.transaction(attempts=6) as db:
+            db.execute('INSERT OR IGNORE INTO policy_enrichment(key) VALUES (?)',(key,))
+            if result:
+                db.execute('''UPDATE policy_enrichment SET cursor=?,
+                    updated=updated+?,reused=reused+?,failed=failed+?,skipped=skipped+?,
+                    last_reason=COALESCE(?,last_reason) WHERE key=?''',
+                    (cursor,*(result==counter for counter in COUNTERS),reason,key))
+            if phase:
+                db.execute('''UPDATE policy_enrichment SET phase=?,next_at=?,cursor=COALESCE(?,cursor)
+                    WHERE key=?''',(phase,next_at,cursor,key))
+            row=db.execute('''SELECT cursor,updated,reused,failed,skipped,phase,next_at,last_reason
+                FROM policy_enrichment WHERE key=?''',(key,)).fetchone()
+            return dict(zip(('cursor',*COUNTERS,'phase','next_at','last_reason'),row,strict=True))
+
 
 class MaintenanceServices(Services):
     def request(self,method,path,body=None,limit=32*1024*1024):
@@ -182,25 +200,42 @@ class MaintenanceServices(Services):
                 return value
         except (httpx.HTTPError,json.JSONDecodeError):raise ServiceError('elasticsearch_unavailable') from None
 
-    def select(self,cursor):
+    @staticmethod
+    def current_policy():
         website={'bool':{'filter':[{'prefix':{'id':'websites/'}}],
             'should':[{'bool':{'must_not':[{'exists':{'field':'mime_type'}}]}},{'term':{'mime_type':''}},
                       {'prefix':{'mime_type':'text/'}},{'terms':{'mime_type':['application/xhtml+xml','application/xml','application/json']}}],
             'minimum_should_match':1}}
-        query={'bool':{'filter':[{'term':{'embedding_model':gemma.MODEL}},{'term':{'file_type':'text'}},{'exists':{'field':'id'}}],
-                       'must_not':[{'bool':{'filter':[{'term':{'text_chunking_version':passages.VERSION}},
+        return {'bool':{'filter':[{'term':{'text_chunking_version':passages.VERSION}},
                          {'bool':{'should':[{'bool':{'must_not':[website]}},
-                          {'term':{'text_extraction_version':WEBSITE_EXTRACTION_VERSION}}],'minimum_should_match':1}}]}}]}}
+                          {'term':{'text_extraction_version':WEBSITE_EXTRACTION_VERSION}}],'minimum_should_match':1}}]}}
+
+    def select(self,cursor):
+        return self.select_ids(cursor, filter_by=[], exclude=[self.current_policy()])
+
+    def select_enrichment(self,cursor):
+        acceptable={'bool':{'should':[{'bool':{'must_not':[{'exists':{'field':'llm_search_enrichment_version'}}]}},
+                    {'term':{'llm_search_enrichment_version':search_enrichment.VERSION}}], 'minimum_should_match':1}}
+        return self.select_ids(cursor, filter_by=[self.current_policy(),acceptable,
+            {'nested':{'path':'text','query':{'exists':{'field':'text.text_chunk'}},'score_mode':'none'}}],
+            exclude=[current_enrichment()])
+
+    def select_ids(self,cursor,*,filter_by,exclude):
+        query={'bool':{'filter':[{'term':{'embedding_model':gemma.MODEL}},{'term':{'file_type':'text'}},
+            {'exists':{'field':'id'}},*filter_by], 'must_not':exclude}}
         if cursor:query['bool']['filter'].append({'range':{'id':{'gt':cursor}}})
         result=self.request('POST','/'+quote(self.index,safe='')+'/_search',
                             {'size':100,'_source':False,'sort':[{'id':'asc'}],'query':query},limit=1024*1024)
         try:
+            if result.get('timed_out') or result.get('_shards',{}).get('failed'):
+                raise ServiceError('elasticsearch_unavailable')
             hits=result['hits']['hits'];identifiers=[hit['_id'] for hit in hits]
             if (not isinstance(hits,list) or len(hits)>100 or any(not isinstance(value,str) or value<=cursor for value in identifiers)
                     or any(hit.get('_index')!=self.index for hit in hits)
                     or identifiers!=sorted(set(identifiers))):raise ValueError()
             return identifiers
-        except (KeyError,TypeError,ValueError):raise ServiceError('response_identity') from None
+        except ServiceError:raise
+        except (AttributeError,KeyError,TypeError,ValueError):raise ServiceError('response_identity') from None
 
     def get(self,identifier):
         result=self.request('GET','/'+quote(self.index,safe='')+'/_doc/'+quote(identifier,safe='')+'?'+
@@ -319,10 +354,12 @@ def foreground(root):
     except (OSError,ValueError,KeyError,TypeError):raise ServiceError('portal_state_unavailable') from None
 
 
-def run(root,state,services,sources,job,*,maximum=2000,seconds=600,should_yield=None,clock=time.monotonic,pool=None):
+def run(root,state,services,sources,job,*,maximum=2000,seconds=600,should_yield=None,clock=time.monotonic,
+        pool=None,budget_root=None):
     if not re.fullmatch(r'eqarchives-policy-'+identity()+r'-[1-9][0-9]{0,8}',job) or not 1<=maximum<=2000 or not 1<=seconds<=600:
         raise ValueError('Invalid maintenance bounds')
     deadline=clock()+seconds;processed=0;phase='bounded';error=None;last_report=float('-inf')
+    paid=None
     should_yield=should_yield or (lambda:foreground(root))
     def check():
         if clock()>=deadline or should_yield():raise YieldWork()
@@ -330,6 +367,9 @@ def run(root,state,services,sources,job,*,maximum=2000,seconds=600,should_yield=
         record={**state.snapshot(),'job':job,'policy':passages.VERSION,'model':gemma.MODEL,
                 'image':os.environ.get('IMPORT_IMAGE',''),'phase':phase,'error':error,'updated_at':time.time(),'terminal':terminal,
                 'execution':{'preparation_workers':pool.workers if pool else 0,**getattr(services,'policy_stats',{})}}
+        if paid is not None:
+            record['next_at']=min(record['next_at'],paid['next_at'])
+            record['enrichment']={k:v for k,v in paid.items() if k!='cursor'}
         save(state.root/(job+'.json'),record)
         return record
     def dispatch(identifier):
@@ -365,6 +405,8 @@ def run(root,state,services,sources,job,*,maximum=2000,seconds=600,should_yield=
             receipt();last_report=clock()
     try:
         interrupted=state.inflight()
+        if budget_root and not interrupted:
+            paid=run_enrichment(state,services,sources,job,budget_root,check,seconds=min(75,seconds/4))
         due=list(dict.fromkeys(([interrupted] if interrupted else [])+state.due(min(100,maximum))))[:maximum]
         if not due and state.snapshot()['next_at']>time.time():
             phase='sweep_waiting';return receipt(True)
@@ -416,7 +458,10 @@ def main():
             gemma.load_tokenizer()
             renderer_identity();request_identity()
             pool=PreparationPool(sources.roots,sources.publication,workers)
-        result=run(args.root,state,services,sources,os.environ['POLICY_JOB_NAME'],**({'pool':pool} if pool else {}))
+        options={'pool':pool} if pool else {}
+        if budget_root:=os.environ.get('LUNA_DAILY_BUDGET_ROOT'):
+            options['budget_root']=budget_root
+        result=run(args.root,state,services,sources,os.environ['POLICY_JOB_NAME'],**options)
         print(json.dumps(result),flush=True)
         return 1 if result['phase']=='retry_wait' else 0
     finally:

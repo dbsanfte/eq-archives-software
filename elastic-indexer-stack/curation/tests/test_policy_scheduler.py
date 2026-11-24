@@ -79,6 +79,23 @@ def test_legacy_jobs_delay_only_policy_sweeps_and_existing_jobs_are_never_modifi
     assert background(tmp_path,kube)['phase']=='running' and len(kube.created)==1
 
 
+def test_paid_policy_slice_mounts_only_the_luna_item_and_shared_account(tmp_path, monkeypatch):
+    monkeypatch.setenv('PASSAGE_REENRICHMENT_ENABLED', '1')
+    kube=Kube()
+    result=background(tmp_path,kube)
+    assert result['enrichment_enabled']
+    pod=kube.created[0]['spec']['template']['spec']
+    container=pod['containers'][0]
+    secrets={s['secret']['name']:s['secret']['items']
+             for v in pod['volumes'] if v['name']=='credentials' for s in v['projected']['sources']}
+    assert secrets['eqarchives-curation-secrets']==[{'key':'luna_api_key','path':'luna_api_key'}]
+    assert not pod['automountServiceAccountToken']
+    assert {'name':'LUNA_DAILY_BUDGET_ROOT','value':'/luna-budget'} in container['env']
+    assert {'name':'staging','mountPath':'/luna-budget','subPath':'luna-budget'} in container['volumeMounts']
+    assert all(m['readOnly'] for m in container['volumeMounts']
+               if m['mountPath'] in ('/data','/archive-sources','/archive'))
+
+
 def test_ready_imports_have_priority_but_unfunded_or_failed_imports_do_not_block_free_repairs(tmp_path):
     with connect(tmp_path) as store:
         store.db.execute("INSERT INTO batches VALUES ('site','published_waiting_index','{}','',NULL,NULL,NULL,'now','now')");store.db.commit()

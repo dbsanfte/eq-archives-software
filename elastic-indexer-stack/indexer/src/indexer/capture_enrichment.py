@@ -14,7 +14,7 @@ from common import CrawlError, Store, digest, now
 from grading import Luna, MODEL, PRICING
 from import_status import EnrichmentError
 from daily_budget import SiteBudgetExceeded, current_budget, reserve_attempt, settle_attempt, units
-from . import search_enrichment
+from . import gemma, passages, search_enrichment
 
 RESOURCES = Path(__file__).with_name("resources")
 TASKS = ("classification", "summary", "tagging", "date")
@@ -56,6 +56,10 @@ EVIDENCE_INSTRUCTIONS = (
     "and a separate cell says '10/13/99 2:54:01 am', quote only '10/13/99 2:54:01 am'. "
     "Include only dates supported by the quoted source; unsupported dates must be omitted."
 )
+
+
+def summary_requests(summary, chunker=gemma.chunk_source):
+    return [passages.document_prefix('') + piece.text for piece in chunker(summary)]
 
 
 def policy_for_sites(sites):
@@ -186,13 +190,14 @@ def validate(response, source, *, audit=None, grounding=()):
 
 
 class Enricher:
-    def __init__(self, directory, key_file, maximum=5, client_factory=Luna):
+    def __init__(self, directory, key_file, maximum=5, client_factory=Luna, check=None):
         daily = current_budget.get()
         if maximum not in (LEGACY_POLICY['max_enrichment_usd'], DEFAULT_POLICY['max_enrichment_usd']) and not (maximum is None and daily and daily.settings()['configured']):
             raise CrawlError("Enrichment requires the reviewed batch budget")
         self.store, self.client = Store(directory), None
         self.maximum = DEFAULT_POLICY['max_enrichment_usd'] if maximum is None else maximum
         self.client_factory, self.key_file = client_factory, key_file
+        self.check = check
 
     def close(self):
         if self.client:
@@ -216,6 +221,8 @@ class Enricher:
         cached = self.store.get('enrichment:' + signature)
         if cached:
             return cached['response']
+        if self.check:
+            self.check()
         size = len(json.dumps(payload, ensure_ascii=False).encode())
         if size > MAX_REQUEST_BYTES:
             raise EnrichmentError('context')
@@ -231,6 +238,8 @@ class Enricher:
                 raise EnrichmentError('context')
         # Reserve every request, including corrections and ambiguous failures.
         # Each correction slot may spend only once across all Job/pod retries.
+        if self.check:
+            self.check()
         amount = (input_tokens * .20 + payload['max_output_tokens'] * .75) / 1_000_000
         self.store.db.execute('BEGIN IMMEDIATE')
         cached = self.store.get('enrichment:' + signature)
@@ -301,6 +310,7 @@ class Enricher:
             metadata, evidence = search_enrichment.verified_metadata(result, grounding)
             receipt.update(search_evidence=evidence, search_view_sha256=digest(grounding),
                            search_enrichment_version=search_enrichment.VERSION)
+            metadata.update(llm_enrichment_view_sha256=receipt['search_view_sha256'])
         self.store.set('enrichment_validation:' + signature, receipt)
         if audit['omitted_dates'] or audit['invalid_date_items'] or audit['discarded_evidence'] or audit['guessed_date_cleared']:
             LOG.info('Enrichment date normalization: supported=%d omitted=%d invalid=%d discarded_evidence=%d guess_cleared=%s',

@@ -107,19 +107,19 @@ class DailyBudget:
 
     @contextmanager
     def bind(self, *, automatic=False, purpose='discovery', owner=None):
-        if purpose not in ('discovery','enrichment'):
+        if purpose not in ('discovery','enrichment','maintenance'):
             raise ValueError('Invalid Luna request purpose')
         token = current_budget.set(self)
         auto = automatic_request.set(automatic)
         scope = request_purpose.set(purpose)
         owner = owner or 'import-' + uuid.uuid4().hex
-        claim=priority_owner.set(owner if purpose=='enrichment' else None)
+        claim=priority_owner.set(owner if purpose!='discovery' else None)
         try:
             if purpose == 'enrichment':self.prioritize(owner, True)
             yield self
         finally:
             try:
-                if purpose == 'enrichment':self.prioritize(owner, False)
+                if purpose != 'discovery':self.prioritize(owner, False)
             finally:
                 priority_owner.reset(claim);request_purpose.reset(scope)
                 automatic_request.reset(auto);current_budget.reset(token)
@@ -219,6 +219,9 @@ class DailyBudget:
             when = instant()
             day = when.date().isoformat()
             config = json.loads(db.execute('SELECT value FROM settings WHERE id=1').fetchone()[0])
+            purpose = request_purpose.get()
+            if purpose == 'maintenance' and not config.get('configured'):
+                raise AutomaticStopped()
             if automatic_request.get() and not config['enabled']:
                 raise AutomaticStopped()
             if site_spent_units is not None:
@@ -229,8 +232,9 @@ class DailyBudget:
             limits=self.limits(db,when,config)
             if config['configured'] and reserved>limits['_remaining_units']:
                 raise DailyBudgetPause(amount, limits['resets_at'], limits['budget_period'])
-            if request_purpose.get()=='discovery' and db.execute(
-                    'SELECT 1 FROM enrichment_priority WHERE expires>? LIMIT 1',(when.isoformat(),)).fetchone():
+            if purpose in ('discovery','maintenance') and db.execute(
+                    'SELECT 1 FROM enrichment_priority WHERE expires>? AND owner<>? LIMIT 1',
+                    (when.isoformat(),priority_owner.get() or '')).fetchone():
                 raise EnrichmentPriorityPause()
             if owner:=priority_owner.get():
                 db.execute('INSERT OR REPLACE INTO enrichment_priority VALUES (?,?)',
