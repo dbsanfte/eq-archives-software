@@ -9,22 +9,26 @@ import threading
 
 from common import CrawlError,save
 from jobs import finished, import_job
-from policy_enrichment import COUNTERS as ENRICHMENT_COUNTERS
+from policy_enrichment import APP as ENRICHMENT_APP, COUNTERS as ENRICHMENT_COUNTERS
 from policy_maintenance import APP, identity
 from indexer import gemma, passages
 from state import connect
 
 CONTROL_LOCK=threading.Lock()
+ENRICHMENT_STATE='enrichment_maintenance'
+ENRICHMENT_PHASES=('bounded','yielded','waiting_configuration','waiting_budget','waiting_imports',
+                   'sweep_waiting','retry_wait')
 
 
 def write_control(root,enabled):
     """Atomic, infrequently rewritten hints; workers never open portal SQLite."""
     with CONTROL_LOCK:
-        value={'key':identity(),'enabled':enabled,'foreground':import_pending(root),'updated_at':time.time()}
+        value={'key':identity(),'enabled':enabled,'foreground':import_pending(root),'updated_at':time.time(),
+               'enrichment_enabled':os.environ.get('PASSAGE_REENRICHMENT_ENABLED')=='1'}
         path=Path(root)/'indexing-state/policy-control.json'
         try:
             old=json.loads(path.read_text())
-            if all(old.get(k)==value[k] for k in ('key','enabled','foreground')) and old.get('updated_at',0)>time.time()-60:return
+            if all(old.get(k)==value[k] for k in ('key','enabled','foreground','enrichment_enabled')) and old.get('updated_at',0)>time.time()-60:return
         except (OSError,ValueError,TypeError):pass
         path.parent.mkdir(mode=0o770,parents=True,exist_ok=True)
         save(path,value);path.chmod(0o660)
@@ -36,22 +40,26 @@ def import_pending(root,*,budget_wait=False):
 
 
 def job_for(name,image,*,enrichment=False):
-    if not re.fullmatch(r'eqarchives-policy-[a-f0-9]{16}-[1-9][0-9]{0,8}',name):
+    if not re.fullmatch(r'eqarchives-(?:policy|enrichment)-[a-f0-9]{16}-[1-9][0-9]{0,8}',name):
         raise CrawlError('Invalid policy maintenance identity')
+    dedicated=name.startswith('eqarchives-enrichment-')
+    app=ENRICHMENT_APP if dedicated else APP
     job=import_job({'id':'0'*32,'manifest_sha256':'0'*64},image)
-    job['metadata']={'name':name,'namespace':'eqarchives-es','labels':{'app':APP},
+    job['metadata']={'name':name,'namespace':'eqarchives-es','labels':{'app':app},
                      'annotations':{'eqarchives.org/policy':passages.VERSION,'eqarchives.org/model':gemma.MODEL}}
     job['spec'].update(backoffLimit=0,activeDeadlineSeconds=900,ttlSecondsAfterFinished=86400)
-    pod=job['spec']['template']['spec'];job['spec']['template']['metadata']['labels']={'app':APP}
+    pod=job['spec']['template']['spec'];job['spec']['template']['metadata']['labels']={'app':app}
     pod['nodeSelector']={'kubernetes.io/hostname':'eqvm'}
     container=pod['containers'][0]
-    container.update(name='policy',command=['python','/app/curation/policy_maintenance.py','--root','/data'],
+    entrypoint='enrichment_worker.py' if dedicated else 'policy_maintenance.py'
+    container.update(name='enrichment' if dedicated else 'policy',command=['python','/app/curation/'+entrypoint,'--root','/data'],
         resources={'requests':{'cpu':'100m','memory':'512Mi'},'limits':{'cpu':'2','memory':'3Gi'}})
     container['env']=[e for e in container['env'] if e['name'] in ('ELASTICSEARCH_URL','SSL_CERT_FILE','EMBEDDING_URL','EMBEDDING_MODEL','EMBEDDING_CACHE_PATH','EMBEDDING_BATCH_SIZE','EMBEDDING_BATCH_CONCURRENCY')]+[
         {'name':'ELASTICSEARCH_INDEX','valueFrom':{'secretKeyRef':{'name':'eqarchives-policy-indexer-secrets','key':'es_index'}}},
         {'name':'POLICY_INDEX','valueFrom':{'secretKeyRef':{'name':'eqarchives-policy-indexer-secrets','key':'es_index'}}},
-        {'name':'POLICY_JOB_NAME','value':name},{'name':'IMPORT_IMAGE','value':image},
-        {'name':'POLICY_PREPARATION_WORKERS','value':'2'}]
+        {'name':'POLICY_JOB_NAME','value':name},{'name':'IMPORT_IMAGE','value':image}]
+    if not dedicated:
+        container['env'].append({'name':'POLICY_PREPARATION_WORKERS','value':'2'})
     container['volumeMounts']=[m for m in container['volumeMounts'] if m['mountPath'] in
                              ('/data','/run/secrets','/indexing-state','/usr/local/lib/python3.13/site-packages/certifi/cacert.pem')]+[
         {'name':'sources','mountPath':'/archive-sources','readOnly':True},
@@ -61,7 +69,7 @@ def job_for(name,image,*,enrichment=False):
     credentials['projected']['sources']=[
         {'secret':{'name':'eqarchives-policy-indexer-secrets','items':[{'key':'es_username','path':'es_username'},{'key':'es_password','path':'es_password'}]}},
         {'secret':{'name':'search-eqarchives-secrets','items':[{'key':'openai_api_key','path':'openai_api_key'}]}}]
-    if enrichment:
+    if enrichment or dedicated:
         credentials['projected']['sources'].append(
             {'secret':{'name':'eqarchives-curation-secrets','items':[{'key':'luna_api_key','path':'luna_api_key'}]}})
         container['env'].append({'name':'LUNA_DAILY_BUDGET_ROOT','value':'/luna-budget'})
@@ -84,21 +92,25 @@ def receipt(root,state):
             if type(result.get(field)) is not int or not 0<=result[field]<=10**12:return None
         for field in ('next_at','updated_at'):
             if type(result.get(field)) not in (int,float) or not math.isfinite(result[field]) or not 0<=result[field]<10**12:return None
-        if type(result.get('terminal')) is not bool or result.get('phase') not in ('bounded','yielded','sweep_waiting','retry_wait'):return None
+        dedicated=state['name'].startswith('eqarchives-enrichment-')
+        phases=ENRICHMENT_PHASES if dedicated else ('bounded','yielded','sweep_waiting','retry_wait')
+        if type(result.get('terminal')) is not bool or result.get('phase') not in phases:return None
         issues=result.get('issues',[])
         if not isinstance(issues,list) or len(issues)>5:return None
         if any(not isinstance(row,dict) or any(not isinstance(row.get(k),str) or len(row[k])>16384 for k in ('id','reason')) for row in issues):return None
         execution=result.get('execution',{})
-        if (not isinstance(execution,dict) or set(execution)-{'preparation_workers','documents','stored_vectors_reused','submitted_inputs'}
+        execution_keys=({'luna_workers','embedding_waves','examined'} if dedicated else
+                        {'preparation_workers','documents','stored_vectors_reused','submitted_inputs'})
+        if (not isinstance(execution,dict) or set(execution)-execution_keys
                 or any(type(v) is not int or not 0<=v<=10**12 for v in execution.values())
-                or execution.get('preparation_workers',0)>4):return None
+                or execution.get('preparation_workers',0)>4 or execution.get('luna_workers',0)>4):return None
         enrichment=result.get('enrichment')
+        if dedicated and enrichment is None:return None
         if enrichment is not None:
             if (not isinstance(enrichment,dict)
                     or set(enrichment)!={*ENRICHMENT_COUNTERS,'phase','next_at','last_reason'}
                     or any(type(enrichment[k]) is not int or not 0<=enrichment[k]<=10**12 for k in ENRICHMENT_COUNTERS)
-                    or enrichment['phase'] not in ('bounded','waiting_configuration','waiting_budget',
-                                                    'waiting_imports','sweep_waiting','retry_wait')
+                    or enrichment['phase'] not in ENRICHMENT_PHASES
                     or type(enrichment['next_at']) not in (int,float) or not 0<=enrichment['next_at']<10**12
                     or (enrichment['last_reason'] is not None and
                         (not isinstance(enrichment['last_reason'],str)
@@ -110,17 +122,31 @@ def receipt(root,state):
     except (OSError,ValueError,KeyError,TypeError):return None
 
 
-def schedule(root,kube,jobs,image):
-    write_control(root,True)
-    with connect(root) as store:state=store.get('policy_maintenance',{})
+def blocks(job, *, enrichment):
+    name=job['metadata']['name']
+    app=job['metadata'].get('labels',{}).get('app')
+    if not enrichment and app==ENRICHMENT_APP and re.fullmatch(r'eqarchives-enrichment-[a-f0-9]{16}-[1-9][0-9]{0,8}',name):
+        return False
+    if enrichment and app==APP and re.fullmatch(r'eqarchives-policy-[a-f0-9]{16}-[1-9][0-9]{0,8}',name):
+        containers=job['spec']['template']['spec']['containers']
+        # An old combined slice retains the shared paid cache until it exits.
+        return any(e['name']=='LUNA_DAILY_BUDGET_ROOT' for e in containers[0].get('env',[]))
+    return True
+
+
+def schedule(root,kube,jobs,image,*,enrichment=False):
+    if not enrichment:write_control(root,True)
+    state_key=ENRICHMENT_STATE if enrichment else 'policy_maintenance'
+    lane,app=('enrichment',ENRICHMENT_APP) if enrichment else ('policy',APP)
+    with connect(root) as store:state=store.get(state_key,{})
     def saved(**changes):
         state.update(changes,requested_policy=passages.VERSION)
         state.setdefault('policy',passages.VERSION)
-        with connect(root) as store:store.set('policy_maintenance',state)
+        with connect(root) as store:store.set(state_key,state)
         return state
     own=next((j for j in jobs if j['metadata']['name']==state.get('name')),None)
     if own:
-        if (own['metadata'].get('labels',{}).get('app')!=APP
+        if (own['metadata'].get('labels',{}).get('app')!=app
                 or own['metadata'].get('annotations',{}).get('eqarchives.org/policy')!=state.get('policy')
                 or own['metadata'].get('annotations',{}).get('eqarchives.org/model')!=gemma.MODEL
                 or own['spec']['template']['spec']['containers'][0]['image']!=state.get('image')):
@@ -130,20 +156,24 @@ def schedule(root,kube,jobs,image):
             return saved(phase='running',progress=progress,error=None,submitted=True)
         if state.get('reconciled')!=state['name']:
             complete=any(c.get('type')=='Complete' and c.get('status')=='True' for c in own.get('status',{}).get('conditions',[]))
-            valid=complete and progress and progress.get('terminal') is True and progress.get('phase') in ('bounded','yielded','sweep_waiting')
+            valid=complete and progress and progress.get('terminal') is True and (
+                enrichment or progress.get('phase') in ('bounded','yielded','sweep_waiting'))
             saved(reconciled=state['name'],progress=progress,submitted=True,
                   next_at=progress['next_at'] if valid else time.time()+300,
                   error=None if valid else 'Background policy worker needs retry; committed checkpoints are retained.')
     elif state.get('name') and state.get('reconciled')!=state['name'] and state.get('submitted'):
         progress=receipt(root,state)
-        if progress and progress.get('terminal') is True and progress.get('phase') in ('bounded','yielded','sweep_waiting'):
+        if progress and progress.get('terminal') is True and (enrichment or progress.get('phase') in ('bounded','yielded','sweep_waiting')):
             saved(reconciled=state['name'],progress=progress,next_at=progress['next_at'])
         else:saved(reconciled=state['name'],next_at=time.time()+300,
                    error='The policy Job disappeared; a numbered retry will use its committed checkpoints.')
     if import_pending(root):return saved(phase='waiting_imports')
-    waiting=sorted(j['metadata']['name'] for j in jobs if not finished(j) and not j['spec'].get('suspend',False))
+    waiting=sorted(j['metadata']['name'] for j in jobs if not finished(j) and not j['spec'].get('suspend',False)
+                   and blocks(j,enrichment=enrichment))
     if waiting:return saved(phase='waiting_jobs',waiting_for=waiting)
     if state.get('key')==identity() and state.get('next_at',0)>time.time():
+        if enrichment and not state.get('error') and state.get('progress'):
+            return saved(phase=state['progress']['phase'])
         return saved(phase='retry_wait' if state.get('error') else 'sweep_waiting')
     if not re.fullmatch(r'dbsanfte/frontend@sha256:[a-f0-9]{64}',image):
         raise CrawlError('Policy maintenance requires the deployed immutable image')
@@ -151,13 +181,13 @@ def schedule(root,kube,jobs,image):
         name=state['name']  # Lost create response: reconcile/retry the same name.
     else:
         with connect(root) as store:
-            sequence=store.get('policy_sequence:'+identity(),0)+1
-            store.set('policy_sequence:'+identity(),sequence)
+            sequence_key=lane+'_sequence:'+identity()
+            sequence=store.get(sequence_key,0)+1
+            store.set(sequence_key,sequence)
         if sequence>=10**9:raise CrawlError('Policy maintenance attempt limit reached')
-        name=f'eqarchives-policy-{identity()}-{sequence}'
+        name=f'eqarchives-{lane}-{identity()}-{sequence}'
         saved(name=name,key=identity(),sequence=sequence,policy=passages.VERSION,image=image,
-              submitted=False,phase='submitting',error=None,waiting_for=[],
-              enrichment_enabled=os.environ.get('PASSAGE_REENRICHMENT_ENABLED')=='1')
+              submitted=False,phase='submitting',error=None,waiting_for=[],enrichment_enabled=enrichment)
     job=job_for(name,state['image'],enrichment=state.get('enrichment_enabled') is True)
     try:kube.create(job)
     except Exception:

@@ -1,6 +1,7 @@
 """An independently checkpointed, budgeted pass within rolling maintenance."""
 
 from contextlib import ExitStack
+from dataclasses import dataclass
 from datetime import datetime
 import re
 import sqlite3
@@ -22,6 +23,8 @@ ORIGINAL_POLICY = 'eq-passages-480-v13'  # First release of eq-topics-v1.
 MAX_ATTEMPTED = 8
 SLICE_SECONDS = 75
 COUNTERS = ('updated', 'reused', 'failed', 'skipped')
+COLLECTIONS = ('websites', 'mailing-lists', 'newsgroups')
+APP = 'eqarchives-rolling-enrichment'
 
 
 class SliceDone(Exception):
@@ -65,32 +68,54 @@ def capture_identity(identifier):
     return ArchiveHandler()._convert_to_archive_url(identifier), (collection, scope)
 
 
-def refresh(services, sources, identifier, url, enricher, check):
+@dataclass(frozen=True)
+class EnrichmentInput:
+    hit: dict
+    capture: dict | None = None
+    source: str = ''
+    view: str = ''
+    grounding: tuple = ()
+
+
+def prepare_refresh(services, sources, identifier, url, check):
     hit = services.get(identifier)
     source = hit['_source']
     if not eligible(source):
-        return 'skipped'
+        return None
     prepared = prepare(hit, sources, enrichment=True)
     if prepared.enrichment_source is None:
-        return 'skipped'
+        return None
     view = prepared.plan.view
     parts = search_enrichment.evidence_parts(view)
     if not parts:
-        return 'skipped'
+        return None
     check()
-    checkpoint = {'llm_enrichment_passage_version': passages.VERSION}
+    revision = {key: hit[key] for key in ('_id', '_seq_no', '_primary_term')}
     if (source.get('llm_search_enrichment_version') == search_enrichment.VERSION
             and source.get('llm_enrichment_view_sha256') == digest(parts)):
-        services.update(hit, checkpoint)
-        return 'reused'
+        return EnrichmentInput(revision)
     body, sha256 = prepared.enrichment_source
-    metadata = enricher.enrich({'url': url, 'archive_path': identifier, 'sha256': sha256}, body, view)
+    return EnrichmentInput(revision, {'url': url, 'archive_path': identifier, 'sha256': sha256}, body, view, parts)
+
+
+def metadata_patch(metadata):
     if metadata.get('llm_search_enrichment_version') != search_enrichment.VERSION:
         raise EnrichmentError('context')
     # Publication estimates and their original provenance remain as indexed.
-    patch = {field: metadata[field] for field in (
+    return {field: metadata[field] for field in (
         'llm_summary', 'llm_tags', 'llm_content_flavour', 'llm_model_name', 'llm_enrichment_signature',
         'llm_content_role', 'llm_topics', 'llm_entities', 'llm_search_enrichment_version', 'llm_enrichment_view_sha256')}
+
+
+def refresh(services, sources, identifier, url, enricher, check):
+    prepared = prepare_refresh(services, sources, identifier, url, check)
+    if prepared is None:
+        return 'skipped'
+    checkpoint = {'llm_enrichment_passage_version': passages.VERSION}
+    if prepared.capture is None:
+        services.update(prepared.hit, checkpoint)
+        return 'reused'
+    patch = metadata_patch(enricher.enrich(prepared.capture, prepared.source, prepared.view))
     check()
     requests = summary_requests(patch['llm_summary'])
     vectors = services.vectors(requests, check) if requests else []
@@ -101,7 +126,7 @@ def refresh(services, sources, identifier, url, enricher, check):
     except (TypeError, ValueError):
         raise EnrichmentError('indexing') from None
     check()
-    services.update(hit, {**patch, **checkpoint, 'llm_summary_vector': vector})
+    services.update(prepared.hit, {**patch, **checkpoint, 'llm_summary_vector': vector})
     return 'updated'
 
 

@@ -1050,27 +1050,33 @@ are validated before saving. The dedicated
 `eqarchives-policy-indexer-secrets` account has read/index privileges only on the
 resolved physical index, with no delete, cluster, mapping or security privilege.
 
-`PASSAGE_REENRICHMENT_ENABLED=1` adds a paid pass in the same rolling Job. It
-checks up to eight eligible records with a 75-second time budget before the body
-pass, with a separate durable cursor. It considers website text, mailing lists
-and newsgroups with the current passage and extraction checks. Already-current
-enrichment is skipped. If the exact bounded evidence matches after a passage
-upgrade, only the enrichment checkpoint advances. Otherwise Luna regenerates
-the summary, content flavour, tags and source-backed labels. The summary and
-its validated Gemma vector are committed together using the read document
-revision. Original publication evidence, readers, capture/index timestamps
-and body/OCR vectors stay with their existing owners.
+`PASSAGE_REENRICHMENT_ENABLED=1` admits a separate `eqarchives-enrichment-*`
+Job alongside the chunk updater. It rotates verified current passages across
+websites, mailing lists and newsgroups. Each Job examines at most 512 records
+or eight minutes, with four concurrent Luna requests and a shared Gemma
+summary embedding batch per wave. A bounded durable queue protects each
+collection's cursor across partial waves, budget waits and restarts.
+Already-current enrichment is skipped. If the same bounded evidence is still
+valid after a passage upgrade, only the enrichment checkpoint advances.
+Otherwise Luna regenerates summaries, content flavour, tags and source-backed
+labels from the bounded search passages. The maintenance prompt contains no
+date extraction. Each summary and its validated Gemma vector are committed
+together using the original read revision. Existing publication date evidence,
+readers, capture/index timestamps and body/OCR vectors retain their provenance.
 
 Approved imports have first priority. The paid pass uses the configured UTC
 daily/monthly Luna ledger and a $50 lifetime maintenance cap per canonical
 website host, mailing list or newsgroup. Settled usage and unresolved
 reservations count against that cap. Import approvals use their own per-site
 allowance and ledgers. The maintenance cache under
-`indexing-state/policy-enrichment/` preserves prior paid
-responses, including when an embedding outage prevents a write. Budget waits
-and paid service failures leave the free body pass eligible to run. The paid
-profile projects only the Luna item and mounts the shared budget directory.
-Both profiles run without the publisher key or Kubernetes token.
+`indexing-state/policy-enrichment/` preserves prior paid responses, including
+responses from combined slices and responses awaiting a successful vector write.
+The dedicated queue at `indexing-state/enrichment-maintenance.sqlite` adopts
+the legacy paid totals and matching collection cursor once the old paid Job
+finishes. Budget waits and paid service failures leave the free body pass
+eligible to run. The paid profile projects only the Luna item and mounts the
+shared budget directory. Both profiles run without the publisher key or
+Kubernetes token.
 
 Source reads are exact, bounded and remote-free, from the preserved source cache,
 archive checkout or local Git objects. No checkout walk, clone, fetch or source

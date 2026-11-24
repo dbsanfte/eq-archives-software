@@ -213,24 +213,29 @@ class MaintenanceServices(Services):
     def select(self,cursor):
         return self.select_ids(cursor, filter_by=[], exclude=[self.current_policy()])
 
-    def select_enrichment(self,cursor):
+    def select_enrichment(self,cursor,*,collection=None,limit=100):
         acceptable={'bool':{'should':[{'bool':{'must_not':[{'exists':{'field':'llm_search_enrichment_version'}}]}},
                     {'term':{'llm_search_enrichment_version':search_enrichment.VERSION}}], 'minimum_should_match':1}}
-        return self.select_ids(cursor, filter_by=[self.current_policy(),acceptable,
-            {'nested':{'path':'text','query':{'exists':{'field':'text.text_chunk'}},'score_mode':'none'}}],
-            exclude=[current_enrichment()])
+        filters=[self.current_policy(),acceptable,
+                 {'nested':{'path':'text','query':{'exists':{'field':'text.text_chunk'}},'score_mode':'none'}}]
+        if collection is not None:
+            from policy_enrichment import COLLECTIONS
+            if collection not in COLLECTIONS:raise ValueError('Unknown enrichment collection')
+            filters.append({'prefix':{'id':collection+'/'}})
+        return self.select_ids(cursor, filter_by=filters, exclude=[current_enrichment()],limit=limit)
 
-    def select_ids(self,cursor,*,filter_by,exclude):
+    def select_ids(self,cursor,*,filter_by,exclude,limit=100):
+        if not 1<=limit<=100:raise ValueError('Invalid policy selection bound')
         query={'bool':{'filter':[{'term':{'embedding_model':gemma.MODEL}},{'term':{'file_type':'text'}},
             {'exists':{'field':'id'}},*filter_by], 'must_not':exclude}}
         if cursor:query['bool']['filter'].append({'range':{'id':{'gt':cursor}}})
         result=self.request('POST','/'+quote(self.index,safe='')+'/_search',
-                            {'size':100,'_source':False,'sort':[{'id':'asc'}],'query':query},limit=1024*1024)
+                            {'size':limit,'_source':False,'sort':[{'id':'asc'}],'query':query},limit=1024*1024)
         try:
             if result.get('timed_out') or result.get('_shards',{}).get('failed'):
                 raise ServiceError('elasticsearch_unavailable')
             hits=result['hits']['hits'];identifiers=[hit['_id'] for hit in hits]
-            if (not isinstance(hits,list) or len(hits)>100 or any(not isinstance(value,str) or value<=cursor for value in identifiers)
+            if (not isinstance(hits,list) or len(hits)>limit or any(not isinstance(value,str) or value<=cursor for value in identifiers)
                     or any(hit.get('_index')!=self.index for hit in hits)
                     or identifiers!=sorted(set(identifiers))):raise ValueError()
             return identifiers
@@ -342,14 +347,16 @@ def apply_prepared(services,hit,prepared,check):
     return 'reused' if prepared.reuse else 'updated'
 
 
-def foreground(root):
+def foreground(root,*,enrichment=False):
     try:
         path=Path(root)/'indexing-state/policy-control.json'
         if path.stat().st_size>4096:raise ValueError()
         control=json.loads(path.read_text())
         if (type(control['foreground']) is not bool or type(control['enabled']) is not bool
                 or type(control['updated_at']) not in (int,float) or not 0<=control['updated_at']<10**12):raise ValueError()
-        return (control['foreground'] or not control['enabled'] or control.get('key')!=identity()
+        enabled=control.get('enrichment_enabled',False) if enrichment else control['enabled']
+        if type(enabled) is not bool:raise ValueError()
+        return (control['foreground'] or not enabled or control.get('key')!=identity()
                 or control['updated_at']<time.time()-180)
     except (OSError,ValueError,KeyError,TypeError):raise ServiceError('portal_state_unavailable') from None
 

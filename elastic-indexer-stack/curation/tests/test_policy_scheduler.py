@@ -82,9 +82,11 @@ def test_legacy_jobs_delay_only_policy_sweeps_and_existing_jobs_are_never_modifi
 def test_paid_policy_slice_mounts_only_the_luna_item_and_shared_account(tmp_path, monkeypatch):
     monkeypatch.setenv('PASSAGE_REENRICHMENT_ENABLED', '1')
     kube=Kube()
-    result=background(tmp_path,kube)
+    body=background(tmp_path,kube)
+    result=schedule(tmp_path,kube,kube.items.copy(),IMAGE,enrichment=True)
     assert result['enrichment_enabled']
-    pod=kube.created[0]['spec']['template']['spec']
+    assert body['name']!=result['name'] and len(kube.created)==2
+    pod=kube.created[1]['spec']['template']['spec']
     container=pod['containers'][0]
     secrets={s['secret']['name']:s['secret']['items']
              for v in pod['volumes'] if v['name']=='credentials' for s in v['projected']['sources']}
@@ -94,6 +96,36 @@ def test_paid_policy_slice_mounts_only_the_luna_item_and_shared_account(tmp_path
     assert {'name':'staging','mountPath':'/luna-budget','subPath':'luna-budget'} in container['volumeMounts']
     assert all(m['readOnly'] for m in container['volumeMounts']
                if m['mountPath'] in ('/data','/archive-sources','/archive'))
+    assert container['command'][1].endswith('/enrichment_worker.py')
+    assert not body['enrichment_enabled']
+
+
+def test_dedicated_lane_waits_for_legacy_paid_job_and_allows_free_chunking(tmp_path):
+    legacy=job_for('eqarchives-policy-'+identity()+'-88',IMAGE,enrichment=True)
+    kube=Kube([legacy]);before=deepcopy(legacy)
+    paid=lambda: schedule(tmp_path,kube,kube.items.copy(),IMAGE,enrichment=True)
+    assert paid()['phase']=='waiting_jobs' and legacy==before and not kube.created
+    legacy['status']={'conditions':[{'type':'Complete','status':'True'}]}
+    assert paid()['phase']=='running' and len(kube.created)==1
+    assert background(tmp_path,kube)['phase']=='running' and len(kube.created)==2
+
+
+def test_dedicated_budget_receipt_persists_pause_without_blocking_body_jobs(tmp_path):
+    kube=Kube()
+    state=schedule(tmp_path,kube,[],IMAGE,enrichment=True)
+    job=kube.items[0]
+    job['status']={'conditions':[{'type':'Complete','status':'True'}]}
+    counts=dict(updated=73,reused=2,failed=1,skipped=0)
+    next_at=time.time()+3600
+    progress=dict(job=state['name'],policy=passages.VERSION,model=gemma.MODEL,image=IMAGE,key=identity(),
+                  scanned=76,unresolved=0,terminal=True,phase='waiting_budget',updated_at=time.time(),next_at=next_at,
+                  execution={'luna_workers':4,'embedding_waves':3,'examined':12},
+                  enrichment={**counts,'last_reason':None,'phase':'waiting_budget','next_at':next_at},**counts)
+    (tmp_path/'indexing-state').mkdir(exist_ok=True)
+    save(tmp_path/'indexing-state'/(state['name']+'.json'),progress)
+    paid=schedule(tmp_path,kube,kube.items.copy(),IMAGE,enrichment=True)
+    assert paid['phase']=='waiting_budget' and paid['next_at']==next_at and len(kube.created)==1
+    assert background(tmp_path,kube)['phase']=='running' and len(kube.created)==2
 
 
 def test_ready_imports_have_priority_but_unfunded_or_failed_imports_do_not_block_free_repairs(tmp_path):
