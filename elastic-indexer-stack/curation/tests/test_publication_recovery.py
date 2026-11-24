@@ -79,8 +79,18 @@ while True:time.sleep(.1)
         return process
     monkeypatch.setattr('publication_git.subprocess.Popen',ready)
     with pytest.raises(subprocess.TimeoutExpired):run([sys.executable,'-c',script,str(marker)],env=os.environ.copy(),timeout=.5)
-    pid=int(marker.read_text());stat=Path('/proc')/str(pid)/'stat'
-    assert not stat.exists() or stat.read_text().split()[2]=='Z'
+    pid = int(marker.read_text())
+    stat = Path('/proc') / str(pid) / 'stat'
+    deadline = time.monotonic() + 2
+    while True:
+        try:
+            state = stat.read_text().rsplit(') ', 1)[1].split()[0]
+        except (FileNotFoundError, ProcessLookupError):
+            break
+        if state == 'Z':
+            break
+        assert time.monotonic() < deadline, 'Timed-out child remained alive'
+        time.sleep(.01)
     result=run([sys.executable,'-c','print("done")'],env=os.environ.copy())
     assert result.returncode==0 and result.stdout==b'done\n'
 

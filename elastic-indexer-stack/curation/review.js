@@ -480,7 +480,7 @@ function renderWorkspace() {
   if (!detail || !route.candidate) { workspaceSignature='';return; }
   const row=detail.candidate,review=detail.review;
   if (route.panel!=='site') { const {groups}=pageGroups(row,review);if (groups.length) { route.page=Math.min(route.page,groups.length-1);if (!groups[route.page].slots.includes(route.slot)) route.slot=groups[route.page].slots[0];writeRoute(true); } }
-  const signature=JSON.stringify([row.id,row.stage,row.state,row.selection_current,row.manifest_sha256,review?.manifest_sha256,data.automation?.settings?.site_usd,route.panel,route.page,route.slot,route.filetype,route.panel==='site' ? [row.coverage?.site_check,row.coverage?.candidate_exclusion,row.error,row.candidate_check,review?.state,hasOperation()] : null]);
+  const signature=JSON.stringify([row.id,row.stage,row.state,row.selection_current,row.manifest_sha256,review?.manifest_sha256,data.automation?.settings?.site_usd,route.panel,route.page,route.slot,route.filetype,route.panel==='site' ? [row.coverage?.site_check,row.coverage?.candidate_exclusion,row.error,row.candidate_check,review?.state,review?.operation?.result?.progress,hasOperation()] : null]);
   if (signature!==workspaceSignature) {
     const root=$('site-workspace');root.replaceChildren();
     const navigation=node('div',undefined,'workspace-nav');
@@ -798,6 +798,7 @@ function renderLive() {
     box.append(node('p','Capture and discovery continue independently of publication and indexing.','meta'));
     box.append(node('p',`AI enrichment: up to $${siteEnrichmentLimit(review)} for this site across all dates, attempts and retries, plus the shared daily and monthly limits.`,'meta'));
     if (publicationRetry) activityDeadline(box,review.operation.retry.retry_at,'Publication retry');
+    if (publishing && review.operation?.state==='running') publicationProgress(box,review.operation);
     if (review.error || review.operation?.error) box.append(node('p',review.error || review.operation.error));
     const step=preparing ? 0 : publishing ? 1 : state==='published_waiting_index' ? 2 : 3,pipeline=node('ol',undefined,'pipeline');
     ['Verify captured files','Publish approved site','Wait for an available worker','AI enrichment & indexing','Complete and retire'].forEach((text,index)=>{const li=node('li',text);li.dataset.progress=index<step ? 'done' : index===step ? 'current' : 'upcoming';pipeline.append(li);});box.append(pipeline);
@@ -936,7 +937,7 @@ function renderDock(force=false) {
     buttons.append(mutation('Retry indexing preparation',()=>request('/api/prepare-indexing',{id:review.id,manifest_sha256:review.manifest_sha256}),'Indexing preparation queued again.',true));
   } else if (row.stage==='indexing' && review?.state==='publication_requested' && review.operation?.state==='interrupted') {
     if (retryPending(review.operation.retry)) buttons.append(mutation('Pause automatic publication retries',()=>request('/api/pause-publication-retry',{id:review.operation.id}),'Automatic publication retries paused.',true));
-    hint='Approval retained · no recapture needed';buttons.append(mutation('Retry publication',()=>request('/api/resume',{id:review.operation.id}),'Publication queued again.',true,hasOperation('indexing')));
+    hint='Approval retained · no recapture needed';buttons.append(mutation('Retry publication',()=>request('/api/resume',{id:review.operation.id}),'Publication queued again.',true));
   } else if (row.stage==='indexing' && review?.state==='index_failed' && review.job?.name) {
     hint='Reuse saved AI results and the original site budget';buttons.append(mutation('Retry indexing',()=>request('/api/index-retry',{id:review.id,manifest_sha256:review.manifest_sha256,job_name:review.job.name}),'Indexing queued again.',true));
   } else if (row.coverage?.candidate_exclusion || row.coverage?.ezboard_parent_required) {
@@ -1054,6 +1055,20 @@ function activitySite(host,site) {
 function activityDeadline(host,stamp,prefix) {
   const text=node('p',undefined,'meta');text.dataset.activityDeadline=stamp;text.dataset.prefix=prefix;host.append(text);
 }
+const publicationPhases={
+  verifying_sources:'Verifying archive sources',hashing_sources:'Hashing archive files',
+  packing_sources:'Packing archive files',building_trees:'Building Git trees',
+  ready:'Ready to publish',checking_head:'Checking the archive head',merging_trees:'Merging with the archive',pushing:'Pushing to GitHub'
+};
+
+function publicationProgress(host,operation) {
+  const progress=operation.result?.progress;
+  if (!progress || !publicationPhases[progress.phase]) return;
+  const count=!Number.isInteger(progress.total) ? '' : progress.phase==='hashing_sources' && Number.isInteger(progress.files) ?
+    ` · ${progress.files.toLocaleString()} / ${progress.total.toLocaleString()} files` : ` · ${progress.total.toLocaleString()} files`;
+  host.append(node('p',publicationPhases[progress.phase]+count,'activity-counts'));
+}
+
 function activityAge(host,stamp) {
   const text=node('p',undefined,'meta');text.dataset.activityUpdated=stamp;host.append(text);
 }
@@ -1152,7 +1167,7 @@ function renderPipelineActivity() {
       if (attention.interrupted || attention.preflight) body.append(node('p',`${attention.interrupted || 0} paused captures · ${attention.preflight || 0} approval errors. These sites wait for your decision while eligible sites continue.`,'activity-warning'));
     } else {
       const index=info.indexing;
-      if (publication) {const wait=publication.state==='queued' && info.publications?.backoff?.retry_at && new Date(info.publications.backoff.retry_at).getTime()>Date.now();status=wait ? 'Waiting to retry publication' : 'Publishing archive files';tone=wait ? 'waiting' : 'running';body.append(node('p',wait ? 'Saved publications share a Git transport cooldown. Capture and active imports continue.' : 'Git publication can take several minutes. Capture and discovery continue.'));activityAge(body,publication.updated);}
+      if (publication) {const wait=publication.state==='queued' && info.publications?.backoff?.retry_at && new Date(info.publications.backoff.retry_at).getTime()>Date.now();status=wait ? 'Waiting to retry publication' : publicationPhases[publication.result?.progress?.phase] || 'Publishing archive files';tone=wait ? 'waiting' : 'running';if (wait) body.append(node('p','Saved publications share a Git transport cooldown. Capture and active imports continue.'));else publicationProgress(body,publication);activityAge(body,publication.updated);}
       else if (index) {
         status=labels[index.state] || 'Preparing indexing';tone=index.state==='indexing' ? 'running' : 'waiting';
         activitySite(body,index.site);

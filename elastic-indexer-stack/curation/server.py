@@ -601,7 +601,7 @@ def create_app(root=None, origin=None, start_worker=True):
                 queue_resume(store, unpack(operation))
                 store.db.commit()
                 return JSONResponse({'resumed': payload['id'], 'state': 'resume_queued'}, status_code=202)
-            if active_operation(store, operation_lane(operation['kind'])):
+            if operation['kind'] != 'publish' and active_operation(store, operation_lane(operation['kind'])):
                 raise CrawlError("Another operation for this worker is queued or running")
             if operation['kind']=='publish':
                 store.db.execute('UPDATE publication_retries SET paused=0,retry_at=NULL WHERE operation=?',(operation['id'],))

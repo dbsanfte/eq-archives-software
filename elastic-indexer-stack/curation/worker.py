@@ -4,6 +4,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from queue import Empty, Queue
 import sqlite3
 import threading
 import time
@@ -22,7 +23,8 @@ from graph import staged_links
 from captures import capture_sites
 from capture_progress import CaptureProgress
 from jobs import Kubernetes, blockers, finished, import_attempt, import_job, import_name, reindex_blockers
-from publisher import publish
+from publisher import cleanup_preparations, prepare, publish
+from publication_queue import SMALL_SLOTS, claim as claim_publication, current as current_publication
 from state import Lane, OPERATION_KINDS, active_operation, connect, database_busy, unpack, worker_lease
 from coverage_check import refresh
 from site_reviews import materialize, migrate
@@ -122,6 +124,7 @@ class Worker:
         self.root, self.kube = Path(root), kube
         self.stop = threading.Event()
         self.lease = worker_lease(self.root)
+        cleanup_preparations(self.root)
         self.transport = SharedWayback(self.stop)
         self.daily_budget = automation.budget(self.root)
         from ezboard_portal import consolidate
@@ -148,27 +151,37 @@ class Worker:
         self.threads = {lane: threading.Thread(target=self.run, args=(lane,),
                         name=f"curation-{lane.value}", daemon=True) for lane in Lane}
         self.index_wake = threading.Event()
+        self.publication_wake = threading.Event()
         self.index_thread = threading.Thread(target=self.run_index_jobs, name='curation-index-jobs', daemon=True)
+        self.prepared = {True: Queue(SMALL_SLOTS), False: Queue(1)}
+        self.preparers = tuple(threading.Thread(target=self.run_publication_preparation, args=(small,),
+                               name=f'curation-publication-{size}', daemon=True)
+                               for small, size in ((True, 'small'), (False, 'large')))
 
     def start(self):
-        for thread in (*self.threads.values(), self.index_thread):
+        for thread in (*self.threads.values(), self.index_thread, *self.preparers):
             thread.start()
 
     def healthy(self):
         return not self.stop.is_set() and self.transport.healthy() and all(
-            thread.is_alive() for thread in (*self.threads.values(), self.index_thread))
+            thread.is_alive() for thread in (*self.threads.values(), self.index_thread, *self.preparers))
 
     def close(self):
         self.stop.set()
         self.transport.wake()
         self.index_wake.set()
+        self.publication_wake.set()
         deadline = time.monotonic() + 100
-        for thread in (*self.threads.values(), self.index_thread):
+        threads = (*self.threads.values(), self.index_thread, *self.preparers)
+        for thread in threads:
             if thread.ident is not None:
                 thread.join(timeout=max(0, deadline - time.monotonic()))
         # Never hand ownership to another process while a download or Git
         # request is still in flight. Process exit releases a retained lease.
-        if not any(thread.is_alive() for thread in (*self.threads.values(), self.index_thread)):
+        if not any(thread.is_alive() for thread in threads):
+            for queue in self.prepared.values():
+                while not queue.empty():
+                    queue.get_nowait()[1].close()
             self.transport.close()
             self.lease.close()
 
@@ -187,7 +200,8 @@ class Worker:
                 LOG.warning('Curation metadata write waiting for SQLite; retrying without replaying external work')
                 if self.stop.wait(1):raise
 
-    def publication_complete(self, batch_id, manifest, result):
+    def publication_complete(self, operation, result, progress, manifest):
+        batch_id = manifest['batch_id']
         with connect(self.root) as store:
             store.db.execute("DELETE FROM meta WHERE key='publication_backoff'")
             store.db.execute("UPDATE batches SET state='published_waiting_index',publication=?,updated=? WHERE id=?",
@@ -195,8 +209,127 @@ class Worker:
             for site in manifest['sites']:
                 row=store.db.execute('SELECT state FROM candidates WHERE id=?',(site['id'],)).fetchone()
                 store.db.execute('UPDATE candidates SET state=? WHERE id=?',(transition(row['state'],Action.PUBLISH),site['id']))
+            store.db.execute("UPDATE operations SET state='completed',result=?,updated=? WHERE id=?",
+                             (json.dumps({**result, 'progress':progress}), now(), operation['id']))
             store.db.commit()
         self.index_wake.set()
+
+    def publication_progress(self, operation, progress):
+        with connect(self.root) as store:
+            store.db.execute("UPDATE operations SET result=?,updated=? WHERE id=? AND state='running'",
+                             (json.dumps({'batch_id':operation['payload']['batch_id'], 'progress':progress}),
+                              now(), operation['id']))
+            store.db.commit()
+
+    def run_publication_preparation(self, small):
+        while not self.stop.is_set():
+            try:
+                if self.prepare_publication_turn(small):
+                    continue
+            except sqlite3.OperationalError as error:
+                if not database_busy(error):
+                    raise
+                LOG.warning('Publication preparation waiting for SQLite')
+            self.stop.wait(3)
+
+    def prepare_publication_turn(self, small):
+        ready = self.prepared[small]
+        if ready.full():
+            return
+        operation = claim_publication(self.root, small)
+        if operation is None:
+            prepare_next(self.root, small=small)
+            operation = claim_publication(self.root, small)
+        if operation is None:
+            return
+        try:
+            batch_id = operation['payload']['batch_id']
+            expected = operation['payload']['manifest_sha256']
+            with connect(self.root) as store:
+                if not current_publication(store, operation):
+                    raise CrawlError('Publication approval is no longer current')
+                manifest = json.loads(store.db.execute('SELECT manifest FROM batches WHERE id=?', (batch_id,)).fetchone()[0])
+                if manifest['batch_id'] != batch_id:
+                    raise CrawlError('Publication batch does not match its manifest')
+                for site in manifest['sites']:
+                    require_eligible(store, site)
+            state = {'total':len(manifest['captures']), 'seconds':{}}
+            previous = time.monotonic()
+
+            def progress(phase, files=None):
+                nonlocal previous
+                when = time.monotonic()
+                if state.get('phase') != phase:
+                    if 'phase' in state:
+                        seconds = state['seconds']
+                        seconds[state['phase']] = round(seconds.get(state['phase'], 0) + when - previous, 2)
+                    previous = when
+                state['phase'] = phase
+                if files is not None:
+                    state['files'] = files
+                if phase != 'completed':
+                    self.save_state(self.publication_progress, operation, state)
+                return state
+
+            budget_identity(self.root, manifest)
+            prepared = prepare(self.root, manifest, expected, progress)
+            try:
+                progress('ready')
+                ready.put_nowait((operation, prepared, progress))
+                self.publication_wake.set()
+            except BaseException:
+                prepared.close()
+                raise
+        except Exception as error:
+            self.save_state(self.operation_interrupted, operation, error)
+        return True
+
+    def push_publications(self):
+        from publication_recovery import paused
+        if paused(self.root):
+            return
+        try:
+            # One large ready site gets a turn ahead of smaller batches.
+            batch = [self.prepared[False].get_nowait()]
+        except Empty:
+            batch = []
+            for _ in range(SMALL_SLOTS):
+                try:
+                    batch.append(self.prepared[True].get_nowait())
+                except Empty:
+                    break
+        eligible = {}
+        try:
+            for operation, site, progress in batch:
+                with connect(self.root) as store:
+                    approved = current_publication(store, operation)
+                if approved:
+                    eligible[site.identifier] = (operation, site, progress)
+                else:
+                    self.save_state(self.operation_interrupted, operation, CrawlError('Publication approval is no longer current'))
+            if not eligible:
+                return
+            shared_failure = False
+            try:
+                receipts = publish(self.root, [site for _, site, _ in eligible.values()],
+                                   lambda site, phase: eligible[site.identifier][2](phase))
+            except Exception as error:
+                shared_failure = True
+                receipts = dict.fromkeys(eligible, error)
+            for batch_id, (operation, site, progress) in eligible.items():
+                try:
+                    result = receipts[batch_id]
+                    if isinstance(result, Exception):
+                        raise result
+                    destination = self.root / 'batches' / batch_id / 'approved.json'
+                    destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+                    save(destination, {'manifest':site.manifest, 'manifest_sha256':site.expected, 'publication':result})
+                    self.save_state(self.publication_complete, operation, result, progress('completed'), site.manifest)
+                except Exception as error:
+                    self.save_state(self.operation_interrupted, operation, error, not shared_failure or batch_id == next(iter(eligible)))
+        finally:
+            for _, site, _ in batch:
+                site.close()
 
     def capture_progress(self, operation, batch_id, snapshot):
         with connect(self.root) as store:
@@ -224,7 +357,7 @@ class Worker:
             store.db.commit()
         automation.finished(self.root,operation,result)
 
-    def operation_interrupted(self, operation, error):
+    def operation_interrupted(self, operation, error, shared_backoff=True):
         from storage_recovery import diagnostic, message, register as register_storage
         failure = diagnostic(error)
         detail = message(failure) if failure else str(error) if isinstance(error,CrawlError) else f'Operation failed ({type(error).__name__}); staged evidence retained'
@@ -246,7 +379,7 @@ class Worker:
                              (detail,json.dumps(result),now(),operation['id']))
             if operation['kind']=='publish':
                 from publication_recovery import register
-                register(store,operation,error)
+                register(store,operation,error,shared_backoff=shared_backoff)
             if operation['kind']=='capture':
                 from capture_recovery import register
                 register(store,operation,detail)
@@ -294,8 +427,8 @@ class Worker:
 
     def operation(self, lane=Lane.CAPTURE):
         if lane==Lane.INDEXING:
-            from publication_recovery import paused
-            if paused(self.root):return
+            self.push_publications()
+            return
         kinds = OPERATION_KINDS[Lane(lane)]
         with connect(self.root) as store:
             store.db.execute("BEGIN IMMEDIATE")
@@ -316,23 +449,6 @@ class Worker:
                 result = campaign(self.root, operation)
             elif operation['kind'] == 'candidate_check':
                 result = check_candidate(self.root, operation)
-            elif operation["kind"] == "publish":
-                batch_id = operation["payload"]["batch_id"]
-                with connect(self.root) as store:
-                    batch = unpack(store.db.execute("SELECT * FROM batches WHERE id=?", (batch_id,)).fetchone())
-                expected = operation["payload"]["manifest_sha256"]
-                if batch["state"] != "publication_requested" or batch["manifest_sha256"] != expected:
-                    raise CrawlError("Publication approval is no longer current")
-                with connect(self.root) as store:
-                    for site in batch['manifest']['sites']:
-                        require_eligible(store, site)
-                budget_identity(self.root, batch['manifest'])
-                result = publish(self.root, batch["manifest"], expected)
-                destination = self.root / "batches" / batch_id / "approved.json"
-                destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-                save(destination,
-                     {"manifest": batch["manifest"], "manifest_sha256": expected, "publication": result})
-                self.save_state(self.publication_complete,batch_id,batch['manifest'],result)
             else:
                 with connect(self.root) as store:
                     for site in operation['payload']['sites']:
@@ -517,7 +633,14 @@ class Worker:
             except sqlite3.OperationalError as error:
                 if not database_busy(error):raise
                 LOG.warning('Curation %s worker waiting for SQLite; queued work retained for next turn',lane.value)
-            self.stop.wait(10)
+                self.stop.wait(1)
+                continue
+            if lane == Lane.INDEXING:
+                if self.publication_wake.wait(10):
+                    self.publication_wake.clear()
+                    self.stop.wait(.5)  # Collect sites that finish preparation together.
+            else:
+                self.stop.wait(10)
 
     def run_index_jobs(self):
         # The same process lease owns this sole Job reconciler. Publication can
@@ -566,7 +689,6 @@ class Worker:
         if lane == Lane.INDEXING:
             from publication_recovery import schedule
             schedule(self.root)
-            prepare_next(self.root)
         if lane == Lane.CAPTURE:
             try:
                 self.capture_queue()

@@ -5,7 +5,7 @@ import pytest
 
 import automation
 from common import CrawlError, digest
-from conftest import add_candidate, manifest_for
+from conftest import add_candidate, manifest_for, mock_publication
 from jobs import import_name
 from review import apply_decisions
 from server import create_app
@@ -272,10 +272,12 @@ def test_failed_publication_site_stays_visible_while_next_site_advances(tmp_path
         if manifest['batch_id'] == first['batch_id']:
             raise CrawlError('Archive Git operation failed; staged sources retained')
         return {'commit': 'c'*40}
-    monkeypatch.setattr('worker.publish', publish)
+    mock_publication(monkeypatch, publish)
     worker = Worker(root)
     try:
+        worker.prepare_publication_turn(True)
         worker.operation(Lane.INDEXING)
+        worker.prepare_publication_turn(True)
         worker.operation(Lane.INDEXING)
         with connect(root) as store:
             failed = unpack(store.db.execute('SELECT * FROM batches WHERE id=?', (first['batch_id'],)).fetchone())

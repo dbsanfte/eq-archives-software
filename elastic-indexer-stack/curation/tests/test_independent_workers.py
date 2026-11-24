@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 from common import CrawlError, digest
-from conftest import add_candidate, manifest_for
+from conftest import add_candidate, manifest_for, mock_publication
 from server import create_app
 from state import Lane, connect, enqueue, operation_lane, worker_lease
 from test_capture_queue import approve, make_due
@@ -146,6 +146,75 @@ def wait_until(check):
     raise AssertionError('Worker did not make progress')
 
 
+def test_small_publications_share_push_while_large_site_is_preparing(candidate, monkeypatch):
+    from publisher import prepare as real_prepare
+    from state import unpack
+    root, large = candidate
+    small = [add_candidate(root, f'http://small{index}.example/') for index in range(2)]
+    pending = [manifest_for(row, digit * 32) for row, digit in zip([large, *small], 'abc', strict=True)]
+    path = root / 'extra.html'
+    path.write_bytes(b'another archive capture')
+    from captures import archive_path
+    extra = {**pending[0]['captures'][0], 'url':large['scope'] + 'extra.html', 'path':path.name,
+             'bytes':path.stat().st_size, 'sha256':digest(path.read_bytes())}
+    extra['archive_path'] = archive_path(extra)
+    pending[0]['captures'].append(extra)
+    monkeypatch.setattr('publication_queue.SMALL', "json_array_length(b.manifest,'$.captures')<=1")
+    with connect(root) as store:
+        for manifest in pending:
+            store.db.execute("INSERT INTO batches VALUES (?,'publication_requested',?,?,NULL,NULL,NULL,'now','now')",
+                             (manifest['batch_id'], json.dumps(manifest), digest(manifest)))
+            store.db.execute("UPDATE candidates SET state='captured_awaiting_review' WHERE id=?",
+                             (manifest['sites'][0]['id'],))
+            enqueue(store, 'publish', {'batch_id':manifest['batch_id'], 'manifest_sha256':digest(manifest)}, commit=False)
+        store.db.commit()
+    entered = threading.Event()
+    release = threading.Event()
+    sent = []
+
+    def prepare(root, manifest, expected, progress):
+        progress('verifying_sources', 0)
+        if manifest['batch_id'] == pending[0]['batch_id']:
+            entered.set()
+            assert release.wait(5)
+        return real_prepare(root, manifest, expected, progress)
+
+    def push(root, sites, progress):
+        group = [site.identifier for site in sites]
+        sent.append(group)
+        for site in sites:
+            progress(site, 'pushing')
+        return {identifier:{'commit':'e'*40} for identifier in group}
+
+    monkeypatch.setattr('worker.prepare', prepare)
+    monkeypatch.setattr('worker.publish', push)
+    worker = Worker(root)
+    large_thread = threading.Thread(target=worker.prepare_publication_turn, args=(False,))
+    try:
+        large_thread.start()
+        assert entered.wait(4)
+        worker.prepare_publication_turn(True)
+        worker.prepare_publication_turn(True)
+        worker.operation(Lane.INDEXING)
+        assert sent == [[m['batch_id'] for m in pending[1:]]]
+        with connect(root) as store:
+            rows = dict(store.db.execute('SELECT id,state FROM batches'))
+            assert rows == {'a'*32:'publication_requested', 'b'*32:'published_waiting_index',
+                            'c'*32:'published_waiting_index'}
+            saved = unpack(store.db.execute("SELECT * FROM operations WHERE state='completed' LIMIT 1").fetchone())
+            assert saved['result']['progress']['phase'] == 'completed'
+            assert 'pushing' in saved['result']['progress']['seconds']
+        release.set()
+        large_thread.join(5)
+        assert not large_thread.is_alive()
+        worker.operation(Lane.INDEXING)
+        assert sent[-1] == [pending[0]['batch_id']]
+    finally:
+        release.set()
+        large_thread.join(5)
+        worker.close()
+
+
 @pytest.mark.parametrize('finishes_first', list(Lane))
 def test_all_three_workers_make_independent_progress_and_keep_reindex_job(candidate, monkeypatch, finishes_first):
     root, capture_row = candidate
@@ -186,7 +255,7 @@ def test_all_three_workers_make_independent_progress_and_keep_reindex_job(candid
         return {'candidates': 1}
 
     monkeypatch.setattr('worker.capture_sites', capture)
-    monkeypatch.setattr('worker.publish', publish)
+    mock_publication(monkeypatch, publish)
     monkeypatch.setattr('worker.campaign', gather)
     worker = Worker(root, kube=FakeKube())
     with connect(root) as store:
@@ -299,6 +368,8 @@ def test_restart_retains_all_queues_and_health_requires_all_workers(candidate, m
             assert all(json.loads(rows[identifier]['result']) == {'retained': True} for identifier in (capture, publication, gathering))
         app = create_app(root, start_worker=True)
         app.state.worker = worker
+        worker.preparers = tuple(SimpleNamespace(is_alive=lambda: True, ident=1, join=lambda timeout: None)
+                                 for _ in worker.preparers)
         worker.index_thread = SimpleNamespace(is_alive=lambda: True, ident=1, join=lambda timeout: None)
         for lane in Lane:
             worker.threads[lane] = SimpleNamespace(is_alive=lambda: True, ident=1, join=lambda timeout: None)
@@ -310,6 +381,10 @@ def test_restart_retains_all_queues_and_health_requires_all_workers(candidate, m
         worker.index_thread.is_alive = lambda: False
         assert call(app, 'GET', '/healthz').status_code == 503
         worker.index_thread.is_alive = lambda: True
+        for preparer in worker.preparers:
+            preparer.is_alive = lambda: False
+            assert call(app, 'GET', '/healthz').status_code == 503
+            preparer.is_alive = lambda: True
         worker.transport.failed = True
         assert call(app, 'GET', '/healthz').status_code == 503
         worker.transport.failed = False
@@ -321,6 +396,8 @@ def test_restart_retains_all_queues_and_health_requires_all_workers(candidate, m
         for lane in Lane:
             worker.threads[lane].is_alive = lambda: False
         worker.index_thread.is_alive = lambda: False
+        for preparer in worker.preparers:
+            preparer.is_alive = lambda: False
         worker.close()
         with worker_lease(root):
             pass

@@ -9,6 +9,7 @@ from capture_continuation import incomplete
 
 def materialize(store, parent):
     """Caller owns the transaction; no sources are copied or downloaded."""
+    from publication_queue import size_receipt
     manifest = parent['manifest']
     if not manifest or digest(manifest) != parent['manifest_sha256']:
         raise CrawlError('Capture manifest changed before site review')
@@ -18,6 +19,7 @@ def materialize(store, parent):
     for site in manifest['sites']:
         captures = [capture for capture in manifest['captures'] if capture['candidate_id'] == site['id']]
         review_id = digest({'capture_batch':parent['id'],'site':site['id']})[:32] if multiple else parent['id']
+        reviewed = manifest
         if multiple:
             reviewed = {**manifest, 'batch_id':review_id, 'review_unit':'site', 'capture_batch_id':parent['id'],
                         'capture_manifest_sha256':parent['manifest_sha256'], 'sites':[site], 'captures':captures,
@@ -31,6 +33,7 @@ def materialize(store, parent):
                 raise CrawlError('Site review identity collides with another manifest')
             store.db.execute("INSERT OR IGNORE INTO batches VALUES (?,'awaiting_review',?,?,NULL,NULL,NULL,?,?)",
                              (review_id,json.dumps(reviewed),digest(reviewed),parent['created'],parent['updated']))
+        size_receipt(store, review_id, digest(reviewed) if multiple else parent['manifest_sha256'], captures)
         row = store.db.execute('SELECT coverage FROM candidates WHERE id=?',(site['id'],)).fetchone()
         if row:
             coverage = json.loads(row['coverage'] or '{}')

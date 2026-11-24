@@ -64,6 +64,9 @@ def active_operation(store, lane=Lane.CAPTURE, *, paused_capture=False, states=(
           AND (state IN ({','.join('?' for _ in states)})
                OR (? AND kind='capture' AND state='interrupted'))
         ORDER BY CASE state WHEN 'interrupted' THEN 0 WHEN 'running' THEN 1 ELSE 2 END,
+                 CASE WHEN kind='publish' THEN CASE json_extract(result,'$.progress.phase')
+                     WHEN 'pushing' THEN 0 WHEN 'merging_trees' THEN 1 WHEN 'checking_head' THEN 1
+                     WHEN 'ready' THEN 2 ELSE 3 END END,
                  created,rowid LIMIT 1""", (*kinds, *states, paused_capture)).fetchone()
 
 
@@ -95,6 +98,8 @@ def connect(directory):
                 recovered_at TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS publication_retries(operation TEXT PRIMARY KEY,
                 attempts INTEGER NOT NULL, retry_at TEXT, paused INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS publication_sizes(batch TEXT PRIMARY KEY,
+                manifest_sha256 TEXT NOT NULL, files INTEGER NOT NULL, bytes INTEGER NOT NULL);
             CREATE TABLE IF NOT EXISTS operation_storage_retries(operation TEXT PRIMARY KEY,
                 attempts INTEGER NOT NULL, retry_at TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS operation_publication_batch ON operations(kind,json_extract(payload,'$.batch_id'));

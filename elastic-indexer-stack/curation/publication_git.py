@@ -61,10 +61,12 @@ def recover(root,repo):
 
 def run(command,*,env,data=None,timeout=180,descriptor=None):
     """Reap Git and its SSH/pack children before releasing publisher ownership."""
-    process=subprocess.Popen(command,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
+    source = data if hasattr(data, 'fileno') else None
+    process=subprocess.Popen(command,stdin=source if source is not None else subprocess.PIPE,
+                             stdout=subprocess.PIPE,stderr=subprocess.PIPE,
                              env=env,start_new_session=True,pass_fds=(() if descriptor is None else (descriptor,)))
     try:
-        stdout,stderr=process.communicate(data,timeout=timeout)
+        stdout,stderr=process.communicate(None if source is not None else data,timeout=timeout)
         return subprocess.CompletedProcess(command,process.returncode,stdout,stderr)
     except BaseException:
         try:os.killpg(process.pid,signal.SIGTERM)

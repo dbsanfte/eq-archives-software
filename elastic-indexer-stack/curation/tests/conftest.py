@@ -51,3 +51,15 @@ def manifest_for(row, batch_id="a" * 32):
     return {"schema": 1, "batch_id": batch_id,
             "sites": [{key: row[key] for key in ("id", "url", "scope", "scope_mode", "captures", "manifest_sha256")}],
             "captures": [{**capture, "candidate_id": row["id"], "archive_path": archive_path(capture)}]}
+
+
+def mock_publication(monkeypatch, publish):
+    def group(root, sites, progress):
+        results = {}
+        for site in sites:
+            try:
+                results[site.identifier] = publish(root, site.manifest, site.expected)
+            except Exception as error:
+                results[site.identifier] = error
+        return results
+    monkeypatch.setattr('worker.publish', group)
