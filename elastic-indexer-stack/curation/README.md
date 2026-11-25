@@ -1069,6 +1069,13 @@ date extraction. Each summary and its validated Gemma vector are committed
 together using the original read revision. Existing publication date evidence,
 readers, capture/index timestamps and body/OCR vectors retain their provenance.
 
+Summaries default to 500 characters. New imports and maintenance requests may
+use up to 1,200 for articles, discussions and reference pages when the selected
+search passages contain at least 3,000 Unicode letters and the extra space
+preserves useful source facts. The model leads with the main takeaway and
+distinguishes advice or disputed claims from reported outcomes. Current
+enrichment checkpoints, paid responses and in-flight attempts are retained.
+
 The paid pass uses the configured UTC
 daily/monthly Luna ledger and a $50 lifetime maintenance cap per canonical
 website host, mailing list or newsgroup. Settled usage and unresolved
