@@ -6,7 +6,9 @@ import pytest
 
 from common import CrawlError, digest
 from import_status import EnrichmentError
-from indexer.capture_enrichment import Enricher, instructions, policy, validate
+from indexer import search_enrichment
+from indexer.capture_enrichment import (MAINTENANCE_SCHEMA, Enricher, adaptive_summary,
+                                       instructions, policy, response_metadata, validate)
 
 
 SOURCE = 'EverQuest guild raid report. Updated January 2, 2000. Final paragraph.'
@@ -20,6 +22,91 @@ def response(result=RESULT):
     return {'status':'completed','model':'gpt-6-luna','id':'dummy-response',
             'usage':{'input_tokens':1000,'output_tokens':200},
             'output':[{'type':'message','content':[{'type':'output_text','text':json.dumps(result)}]}]}
+
+
+PROJECTION = 'Spell and equipment requirements for an EverQuest guild. ' * 120
+
+
+def summary_result(length, role, *, maintenance=False):
+    value = {**RESULT, 'llm_summary': 'x'*length, 'content_role': role, 'topics': [], 'entities': []}
+    return {k: value[k] for k in MAINTENANCE_SCHEMA['required']} if maintenance else value
+
+
+@pytest.mark.parametrize('maintenance', [False, True])
+def test_adaptive_summary_repairs_a_1201_character_answer_and_accepts_1200(candidate, tmp_path, maintenance):
+    _, row = candidate
+    capture = {**row['captures'][0], 'archive_path': 'websites/guild.example/20000101000000/raid.txt'}
+    factory = Mock()
+    luna = factory.return_value
+    luna.request.side_effect = [
+        response(summary_result(n, 'discussion', maintenance=maintenance)) for n in (1201, 1200)]
+    client = Enricher(tmp_path/'enrichment', 'unused', client_factory=factory)
+    try:
+        def enrich():
+            if maintenance:
+                return client.enrich_for_maintenance(capture, SOURCE, search_enrichment.evidence_parts(PROJECTION))
+            return client.enrich(capture, SOURCE, PROJECTION)
+        result = enrich()
+        assert len(result['llm_summary']) == 1200
+        assert result['llm_content_role'] == 'discussion'
+        assert ('llm_guessed_date' in result) == (not maintenance)
+        assert enrich() == result
+        assert luna.request.call_count == 2
+        for call in luna.request.call_args_list:
+            assert 'up to 1200 characters' in call.args[0]['instructions']
+        assert 'rejected_response' in json.loads(luna.request.call_args.args[0]['input'])
+    finally:
+        client.close()
+
+
+@pytest.mark.parametrize('role', ['navigation', 'directory', 'roster', 'off-topic', 'unknown'])
+def test_long_evidence_does_not_expand_utility_summaries(role):
+    for length in (500, 501):
+        result = response(summary_result(length, role, maintenance=True))
+        if length == 500:
+            assert response_metadata(result, MAINTENANCE_SCHEMA, summary_max=1200)['content_role'] == role
+        else:
+            with pytest.raises(EnrichmentError):
+                response_metadata(result, MAINTENANCE_SCHEMA, summary_max=1200)
+
+
+def test_short_and_markup_only_evidence_preserves_the_exact_prompt():
+    payload = {'instructions': 'Keep the summary to 500 characters or less.'}
+    assert adaptive_summary(payload, ()) is payload
+    assert adaptive_summary(payload, ('# Requirements', ' - []()\n' * 1000)) is payload
+    assert adaptive_summary(payload, ('あ' * 2999,)) is payload
+    assert 'up to 1200 characters' in adaptive_summary(payload, ('あ' * 3000,))['instructions']
+
+
+@pytest.mark.parametrize('maintenance', [False, True])
+@pytest.mark.parametrize('prior_paid', [False, True])
+def test_adaptive_summary_keeps_existing_paid_and_ambiguous_attempts(candidate, tmp_path, maintenance, prior_paid):
+    _, row = candidate
+    capture = {**row['captures'][0], 'archive_path': 'websites/guild.example/20000101000000/raid.txt'}
+    factory = Mock()
+    luna = factory.return_value
+    standard = response(summary_result(500, 'article', maintenance=maintenance))
+    luna.request.side_effect = [standard] if prior_paid else [CrawlError('Transport lost'), standard]
+    client = Enricher(tmp_path/'enrichment', 'unused', client_factory=factory)
+    try:
+        evidence = search_enrichment.evidence_parts(PROJECTION)
+        initial = client.payload(capture, SOURCE, grounding=evidence)
+        if maintenance:
+            initial = client.maintenance_payload(capture, initial, evidence)
+        signature = digest({'payload':initial, 'raw_source_sha256':capture['sha256']})
+        if prior_paid:
+            client.exchange(capture, initial, signature)
+        else:
+            with pytest.raises(EnrichmentError):
+                client.exchange(capture, initial, signature)
+        value = (client.enrich_for_maintenance(capture, SOURCE, evidence) if maintenance else
+                 client.enrich(capture, SOURCE, PROJECTION))
+        assert value['llm_enrichment_signature'] == signature
+        assert len(value['llm_summary']) == 500
+        assert luna.request.call_count == (1 if prior_paid else 2)
+        assert luna.request.call_args.args[0] == initial
+    finally:
+        client.close()
 
 
 def test_enrichment_uses_existing_prompts_and_enums_and_reuses_paid_source_bound_result(candidate,tmp_path):

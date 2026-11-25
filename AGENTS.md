@@ -1369,6 +1369,10 @@ revision. Replace the summary and validated Gemma vector atomically with the
 grounded labels; keep publication date evidence, readers, body/OCR vectors and
 index timestamps. Request grounded summaries and labels without regenerating
 dates. Skip current metadata and reuse labels on identical bounded evidence.
+New import and historical summaries default to 500 characters. Allow up to
+1,200 for articles, discussions and reference pages only when bounded search
+evidence contains at least 3,000 Unicode letters. Keep paid or uncertain attempts
+on their original prompt and correction chain. Preserve completed checkpoints.
 Preserve paid responses across retries. Use the same configured UTC
 limits and a $50 lifetime maintenance allowance per website host, mailing list
 or newsgroup. Retain earlier charges and the separate import budget. Due
