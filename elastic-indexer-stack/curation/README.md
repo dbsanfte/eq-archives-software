@@ -200,8 +200,9 @@ external navigation links, with no workflow action or paid work on refresh.
    sites in Queue and available to Undo. The explicit operator batch API still
    accepts up to five sites; existing claimed batches keep their saved work.
    Background Wayback checks count distinct readable URLs in the approved scope
-   during 1999–2006. Each turn fetches up to 1,000 collapsed catalog rows and saves
-   its continuation. Counts are estimates, especially for partial catalogs and
+   during 1999–2006. Each turn requests up to 1,000 collapsed catalog rows. Fresh
+   scopes alternate with saved catalog continuations within each priority tier.
+   Counts are estimates, especially for partial catalogs and
    boards with known forums on one server. The dispatcher uses available evidence
    immediately and keeps unmeasured sites eligible. Checks use no Luna calls.
    Existing approvals receive a one-time grace period on migration;
@@ -1296,6 +1297,10 @@ The response gives a dismissal count with a null token; the portal requests
 explicit action snapshots retain complete tokens, with fresh transactional
 validation before changes. Search, stage counts, grade filters and capture ordering
 share one SQLite read transaction.
+SQLite maintains the compact capture ranking rows transactionally as candidates
+change. A one-time backfill covers existing approvals and resumes. Dispatch
+checks readiness without sorting, then ranks once under its claim lock. Queue
+reads sort the compact projection and load original candidates for the visible page.
 
 Capture retry eligibility is checked by the independent reconciliation loop, so
 a large active download cannot hold its timer. Eligible retries move into Queue

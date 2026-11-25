@@ -195,6 +195,33 @@ def test_capture_rank_respects_grace_holds_and_scope_changes(tmp_path):
         assert next_entry(store, '2099-01-02')['id'] == 'future'
 
 
+def test_existing_queue_is_backfilled_and_reranks_when_metadata_changes(tmp_path):
+    from capture_queue import has_ready_entry, next_entry, queue_order
+    from common import Store
+
+    root = tmp_path / 'state'
+    grant = json.dumps({'capture_after': '2020-01-01'})
+    legacy = Store(root)
+    try:
+        legacy.db.executemany('INSERT INTO candidates(id,url,state,decision,rating) VALUES (?,?,?,?,?)', [
+            ('guild','http://guild.example/','approved_waiting_batch',grant,'{"category":"guild"}'),
+            ('new','http://new.example/','approved_waiting_batch',grant,'{"category":"guild"}')])
+        legacy.db.commit()
+        with connect(root) as store:
+            assert queue_order(store, '2025') == ['guild','new']
+            legacy.db.execute("UPDATE candidates SET rating=? WHERE id='new'", ('{"category":"forum"}',))
+            legacy.db.commit()
+            assert next_entry(store, '2025')['id'] == 'new'
+            legacy.db.execute("INSERT OR REPLACE INTO candidates(id,url,state) VALUES ('new','http://new.example/','approval_pending')")
+            legacy.db.commit()
+            assert next_entry(store, '2025')['id'] == 'guild'
+            legacy.db.execute("DELETE FROM candidates WHERE id='guild'")
+            legacy.db.commit()
+            assert not has_ready_entry(store, '2025')
+    finally:
+        legacy.close()
+
+
 def test_publication_can_queue_during_capture_without_starting_another_download(candidate):
     from state import enqueue
     root,row=candidate

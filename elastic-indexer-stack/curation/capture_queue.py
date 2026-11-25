@@ -2,7 +2,7 @@
 import json
 
 from capture_flow import Action, transition
-from capture_rank import ESTIMATE, PAGES, PRIORITY
+from capture_rank import ESTIMATE, PAGES
 from common import CrawlError, now, original_url, within_capture_scope
 from captures import LIMITS
 from full_capture import POLICY
@@ -29,20 +29,18 @@ def attention(store):
 # Keep the resumed-site expansion before the candidate lookup. SQLite can
 # otherwise scan every queued candidate for each operation, then expand its
 # JSON again; claims hold the write lock for that entire quadratic scan.
-RANK = f"""{PRIORITY} AS priority_tier,{PAGES} AS estimated_pages,
-    COALESCE(NULLIF(json_extract(c.captures,'$[0].tier'),0),3) AS date_tier"""
-QUEUE = f"""SELECT c.id,c.decision,c.rowid ordinal,
-        COALESCE(json_extract(c.decision,'$.capture_after'),json_extract(c.decision,'$.reviewed_at')) ready,
-        (f.candidate IS NOT NULL) held,NULL operation,{RANK} FROM candidates c
+RANK = f"r.priority_tier,{PAGES} estimated_pages,r.date_tier"
+QUEUE = f"""SELECT r.id,r.decision,r.ordinal,r.ready,(f.candidate IS NOT NULL) held,
+        NULL operation,{RANK} FROM capture_queue_ranks r
         {ESTIMATE}
-        LEFT JOIN capture_queue_failures f ON f.candidate=c.id AND f.decision=c.decision
-        WHERE c.state='approved_waiting_batch'
-        UNION ALL SELECT c.id,c.decision,c.rowid,o.updated,0,o.id,{RANK}
-        FROM operations o CROSS JOIN json_each(o.payload,'$.sites') site
-        CROSS JOIN candidates c
+        LEFT JOIN capture_queue_failures f ON f.candidate=r.id AND f.decision=r.decision
+        WHERE r.state='approved_waiting_batch'
+        UNION ALL SELECT r.id,r.decision,r.ordinal,o.updated,0,o.id,{RANK}
+        FROM operations o INDEXED BY capture_resumed_operations CROSS JOIN json_each(o.payload,'$.sites') site
+        CROSS JOIN capture_queue_ranks r
         {ESTIMATE}
-        WHERE c.id=json_extract(site.value,'$.id')
-          AND o.kind='capture' AND o.state='resume_queued' AND c.state='capture_resume_queued'"""
+        WHERE r.id=json_extract(site.value,'$.id')
+          AND o.kind='capture' AND o.state='resume_queued' AND r.state='capture_resume_queued'"""
 RANK_ORDER = 'q.priority_tier DESC,q.estimated_pages DESC,q.date_tier,q.ready,q.ordinal'
 QUEUE_ORDER = 'q.held,(q.ready IS NULL),(q.ready>?),CASE WHEN q.ready>? THEN q.ready END,' + RANK_ORDER
 
@@ -55,6 +53,10 @@ def queue_order(store, at=None):
 
 def next_entry(store, at):
     return store.db.execute(f'SELECT q.* FROM ({QUEUE}) q WHERE q.held=0 AND q.ready<=? ORDER BY {RANK_ORDER} LIMIT 1', (at,)).fetchone()
+
+
+def has_ready_entry(store, at):
+    return store.db.execute(f'SELECT 1 FROM ({QUEUE}) q WHERE q.held=0 AND q.ready<=? LIMIT 1', (at,)).fetchone() is not None
 
 
 def resume_members(store, operation, action):

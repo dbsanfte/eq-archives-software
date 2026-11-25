@@ -1469,6 +1469,11 @@ turn and a durable continuation. They share the persistent transport with captur
 and discovery. Missing estimates and probe failures never prevent a claim, and
 an estimate must match the current approved scope. Keep approval/undo grace,
 held failures, atomic resume ownership and active capture checkpoints intact.
+Maintain the compact capture rank projection within the candidate transaction and
+backfill existing queued rows once. Read held/size metadata at claim time. Check for
+due work without sorting, then rank once under the lock. Keep resume scans on the
+partial operation index. Alternate fresh size probes with catalog continuations
+within each priority tier.
 
 Policy maintenance keeps v13 and its cursor while preparing at most two records
 in spawned CPU processes. Only the parent owns credentials/clients/cache, writes

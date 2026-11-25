@@ -12,6 +12,7 @@ import time
 from functools import wraps
 
 from common import CrawlError, Store, now
+from capture_rank import install_queue_ranks
 
 
 class Lane(str, Enum):
@@ -113,6 +114,7 @@ def connect(directory):
             CREATE INDEX IF NOT EXISTS batch_metadata ON batches(
                 id,state,manifest_sha256,publication,job,error,created,updated);
         """)
+        install_queue_ranks(store.db)
         yield store
     finally:
         store.close()
