@@ -29,7 +29,8 @@ def attention(store):
 # Keep the resumed-site expansion before the candidate lookup. SQLite can
 # otherwise scan every queued candidate for each operation, then expand its
 # JSON again; claims hold the write lock for that entire quadratic scan.
-RANK = f"{PRIORITY} AS priority_tier,{PAGES} AS estimated_pages,COALESCE(json_extract(c.captures,'$[0].tier'),3) AS date_tier"
+RANK = f"""{PRIORITY} AS priority_tier,{PAGES} AS estimated_pages,
+    COALESCE(NULLIF(json_extract(c.captures,'$[0].tier'),0),3) AS date_tier"""
 QUEUE = f"""SELECT c.id,c.decision,c.rowid ordinal,
         COALESCE(json_extract(c.decision,'$.capture_after'),json_extract(c.decision,'$.reviewed_at')) ready,
         (f.candidate IS NOT NULL) held,NULL operation,{RANK} FROM candidates c

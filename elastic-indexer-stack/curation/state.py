@@ -107,6 +107,7 @@ def connect(directory):
                 attempts INTEGER NOT NULL, retry_at TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS operation_publication_batch ON operations(kind,json_extract(payload,'$.batch_id'));
             CREATE INDEX IF NOT EXISTS operation_activity ON operations(updated DESC);
+            CREATE INDEX IF NOT EXISTS capture_candidate_state ON candidates(state);
             CREATE INDEX IF NOT EXISTS batch_activity ON batches(updated DESC);
             CREATE INDEX IF NOT EXISTS batch_work_state ON batches(state,created,id);
             CREATE INDEX IF NOT EXISTS batch_metadata ON batches(
