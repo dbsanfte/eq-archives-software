@@ -14,6 +14,7 @@ from common import CrawlError, Store, capture_scope, digest, now, save
 from campaign_storage import initialize as initialize_campaign
 from capture_flow import Action, UNDO_SECONDS, transition
 from capture_queue import claim, claim_resume, next_entry
+from capture_rank import PROBE_INTERVAL, measure_next
 from crawler import parser
 from discovery import discover
 from acquisition import Downloader, sample
@@ -153,13 +154,14 @@ class Worker:
         self.index_wake = threading.Event()
         self.publication_wake = threading.Event()
         self.index_thread = threading.Thread(target=self.run_index_jobs, name='curation-index-jobs', daemon=True)
+        self.rank_thread = threading.Thread(target=self.run_capture_ranking, name='curation-capture-ranking', daemon=True)
         self.prepared = {True: Queue(SMALL_SLOTS), False: Queue(1)}
         self.preparers = tuple(threading.Thread(target=self.run_publication_preparation, args=(small,),
                                name=f'curation-publication-{size}', daemon=True)
                                for small, size in ((True, 'small'), (False, 'large')))
 
     def start(self):
-        for thread in (*self.threads.values(), self.index_thread, *self.preparers):
+        for thread in (*self.threads.values(), self.index_thread, self.rank_thread, *self.preparers):
             thread.start()
 
     def healthy(self):
@@ -172,7 +174,7 @@ class Worker:
         self.index_wake.set()
         self.publication_wake.set()
         deadline = time.monotonic() + 100
-        threads = (*self.threads.values(), self.index_thread, *self.preparers)
+        threads = (*self.threads.values(), self.index_thread, self.rank_thread, *self.preparers)
         for thread in threads:
             if thread.ident is not None:
                 thread.join(timeout=max(0, deadline - time.monotonic()))
@@ -655,9 +657,16 @@ class Worker:
                 self.index_wake.wait(10)
                 self.index_wake.clear()
 
+    def run_capture_ranking(self):
+        while not self.stop.wait(PROBE_INTERVAL):
+            try:
+                measure_next(self.root, self.transport)
+            except (sqlite3.Error, OSError):
+                LOG.warning('Capture size check paused; current queue ranks are retained')
+
     def indexing_turn(self):
         # This control loop stays free while the capture executor downloads a
-        # large site. A due retry joins the existing FIFO; it never preempts it.
+        # large site. A due retry joins the ranked queue without preempting it.
         from capture_recovery import schedule
         try:
             schedule(self.root)

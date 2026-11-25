@@ -367,12 +367,19 @@ class BoundedDownloader < WaybackMachineDownloader
   end
 
   def paginated_catalog(match, html_only: true)
+    estimate = @job['estimate'] == true
+    limit = estimate ? 1000 : 200
     params = [['url', @base_url], ['matchType', match], ['output', 'json'],
               ['fl', 'timestamp,original,mimetype,statuscode,digest,length'],
               ['filter', 'statuscode:200'],
               ['from', @from_timestamp.to_s], ['to', @to_timestamp.to_s],
-              ['limit', '200'], ['showResumeKey', 'true']]
-    params << ['filter', 'mimetype:text/html'] if html_only
+              ['limit', limit.to_s], ['showResumeKey', 'true']]
+    if estimate
+      params << ['filter', 'mimetype:(text/html|text/plain|application/xhtml\+xml)']
+      params << ['collapse', 'urlkey']
+    elsif html_only
+      params << ['filter', 'mimetype:text/html']
+    end
     if @job['resume_key']
       key = @job['resume_key']
       unless key.is_a?(String) && key.bytesize.between?(1, 4096) && key.match?(/\A[\x21-\x7e]+\z/)
@@ -395,9 +402,10 @@ class BoundedDownloader < WaybackMachineDownloader
       end
       raise CaptureFailure, 'Unexpected CDX continuation' unless rows.pop == []
     end
-    unless rows.length <= 200 && rows.all? { |row| row.is_a?(Array) && row.length == 6 &&
+    unless rows.length <= limit && rows.all? { |row| row.is_a?(Array) && row.length == 6 &&
       row.all? { |field| field.is_a?(String) } && row[0].match?(/\A\d{14}\z/) &&
-      row[0] >= @from_timestamp.to_s && row[0] <= @to_timestamp.to_s && (!html_only || row[2] == 'text/html') && row[3] == '200' }
+      row[0] >= @from_timestamp.to_s && row[0] <= @to_timestamp.to_s &&
+      (estimate ? ['text/html', 'text/plain', 'application/xhtml+xml'].include?(row[2]) : (!html_only || row[2] == 'text/html')) && row[3] == '200' }
       raise CaptureFailure, 'Unexpected CDX record'
     end
     { 'captures' => rows.map { |r| { 'timestamp' => r[0], 'url' => r[1], 'digest' => r[4], 'length' => r[5], 'mimetype' => r[2] } },

@@ -151,10 +151,11 @@ def create_app(root=None, origin=None, start_worker=True):
             # A worker may claim a site while this request is being assembled.
             # WAL readers neither block that claim nor mix two queue revisions.
             store.db.execute('BEGIN')
+            at = now()
             selected=request.query_params.get('filter','recommended')
             fast=compact and selected!='review' and request.query_params.get('action_tokens')!='1'
             if fast:
-                summary=compact_queue.listing(store,request,CAPTURED_STATES)
+                summary=compact_queue.listing(store,request,CAPTURED_STATES,at)
                 page_rows=attach_checks(store,decorate(store,[record(store,store.db.execute('SELECT * FROM candidates WHERE id=?',(identifier,)).fetchone()) for identifier in summary.pop('ids')]))
             else:
                 all_rows = listing_rows(store) if compact else attach_checks(store, decorate(store, queue(store)))
@@ -176,7 +177,7 @@ def create_app(root=None, origin=None, start_worker=True):
                         raise CrawlError('Invalid needs-grading filter')
                     rows = candidate_filter(rows, request.query_params.get('min_grade'), request.query_params.get('needs_grade') == '1')
                 if selected in ('approved', 'queued'):
-                    positions = {candidate: index for index, candidate in enumerate(queue_order(store))}
+                    positions = {candidate: index for index, candidate in enumerate(queue_order(store,at))}
                     rows.sort(key=lambda row: positions[row['id']])
                 elif selected in ('captured', 'review', 'indexing', 'history'):
                     rows.sort(key=lambda row: ((row['coverage'] or {}).get('capture') or {}).get('completed_at', ''), reverse=True)
@@ -202,7 +203,7 @@ def create_app(root=None, origin=None, start_worker=True):
                                  "luna_spend": spending.snapshot(),
                                  "automation": automation.status(root, daily_budget),
                                  "operations": operations, "workers": workers, "batches": batches, "limits": LIMITS, "undo_seconds": UNDO_SECONDS,
-                                 "activity": activity.snapshot(store, getattr(app.state, 'worker', None)),
+                                 "activity": activity.snapshot(store, getattr(app.state, 'worker', None),at),
                                  "awaiting_site_review": store.db.execute("SELECT COUNT(*) FROM batches WHERE state='awaiting_review'").fetchone()[0],
                                  "capture_queue_error": store.get('capture_queue_error'),
                                  "capture_attention": capture_attention(store),

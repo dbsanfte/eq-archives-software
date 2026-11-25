@@ -29,7 +29,7 @@ Automatic polls wait for the previous refresh to finish, including slow response
 explicit navigation can still supersede it. Coverage checks share one archive-host
 snapshot across all Ezboards in a pass, including cached board results.
 Portal lists (`compact=1`) read saved SQLite metadata without running archive
-maintenance. Counts, filtering and FIFO order cover the entire backlog, but only
+maintenance. Counts, filtering and capture order cover the entire backlog, but only
 the visible 50 sites get full review records. Each response uses one database read
 snapshot so concurrent worker claims cannot break queue sorting. Archive coverage
 is still checked by workers, explicit rechecks and action preflights; the original
@@ -123,7 +123,7 @@ Turning automatic mode off stops new automatic discovery and approvals; already
 approved captures and imports continue under both configured limits. Turning
 it back on resumes retained automatic work. Approved captures retry temporary
 Wayback failures and worker interruptions independently of this discovery setting.
-Retries join the same FIFO after 5 minutes, then 15 minutes, then hourly for
+Retries join the same ranked queue after 5 minutes, then 15 minutes, then hourly for
 continued site-wide failures. Saved files, approvals and cumulative usage remain.
 Other sites run during each wait; no failed site holds a worker queue. Unknown/integrity failures require an explicit correction. Publication transport
 failures recover automatically under the rules below.
@@ -191,14 +191,23 @@ external navigation links, with no workflow action or paid work on refresh.
    Shared hosts retain their account boundaries. A scope change clears an
    earlier approval and changes its manifest hash.
    Unidentified shared-host accounts remain exact-page scopes, including roots.
-3. The worker automatically claims the oldest eligible approval just before
-   starting that site's capture. Only one site is claimed at a time, keeping later
+3. The worker ranks eligible approvals each time it claims a site. Forums, news and
+   aggregators, item databases and bestiaries come first. Archived sample titles
+   identify item databases and bestiaries that have a broader saved grade category.
+   Within each tier, larger estimated page counts come first, then sites sampled
+   in 1999–2001, then earlier approvals. While a download runs, new approvals and
+   updated estimates can change which site is next. Only one site is claimed at a time, keeping later
    sites in Queue and available to Undo. The explicit operator batch API still
    accepts up to five sites; existing claimed batches keep their saved work.
+   Background Wayback checks count distinct readable URLs in the approved scope
+   during 1999–2006. Each turn fetches up to 1,000 collapsed catalog rows and saves
+   its continuation. Counts are estimates, especially for partial catalogs and
+   boards with known forums on one server. The dispatcher uses available evidence
+   immediately and keeps unmeasured sites eligible. Checks use no Luna calls.
    Existing approvals receive a one-time grace period on migration;
    restarting does not reset it. Temporary capture failures remain in **Capturing**,
    showing their error, saved progress and the next automatic retry time. The next
-   queued site can start immediately. **Retry now** rejoins the FIFO immediately;
+   queued site can start immediately. **Retry now** rejoins the ranked queue immediately;
    **Pause retries** and cancelling a queued resume prevent automatic restart until
    you explicitly resume. Approval, scope, integrity and unknown failures still
    require correction, rather than silently changing the approved capture. A preflight failure stays
@@ -206,7 +215,7 @@ external navigation links, with no workflow action or paid work on refresh.
    the failed approval to review and approve it again. Items move into **Capturing** when claimed.
    **Resume capture** moves a paused capture back to **Capture queue**, including
    while another capture is running or automatic mode is enabled. It joins the
-   same FIFO as fresh approvals without a new grace period, and retains the original
+   same ranked queue as fresh approvals without a new grace period, and retains the original
    operation, batch, files, scope and cumulative budgets. **Cancel queued resume**
    returns it to its paused state until the worker claims it; it does not revoke the
    original capture approval. Legacy multi-site batches resume together. Queueing,
@@ -1285,7 +1294,7 @@ counts use scalar projections; retired sites do not decode full review manifests
 The response gives a dismissal count with a null token; the portal requests
 `action_tokens=1` when preparing the bulk confirmation. Legacy operator reads and
 explicit action snapshots retain complete tokens, with fresh transactional
-validation before changes. Search, stage counts, grade filters and FIFO ordering
+validation before changes. Search, stage counts, grade filters and capture ordering
 share one SQLite read transaction.
 
 Capture retry eligibility is checked by the independent reconciliation loop, so

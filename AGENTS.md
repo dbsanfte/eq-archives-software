@@ -671,14 +671,14 @@ independently of capped batch inventories. Preserve existing operator API filter
 Confirmation and error notifications have an accessible 44px close button. Closing
 a message never sends an action, undoes a decision or changes the selected route;
 polling must not reopen a dismissed message. Preserve the separate Undo action.
-The queue has no count cap; after a 60-second grace period the automatic worker claims
-one oldest eligible site immediately before starting it. Keep later sites queued
+The queue has no count cap. After the 60-second approval grace period the worker
+claims the highest-ranked eligible site just before starting it. Keep later sites queued
 and undoable until they start; the explicit operator API retains its five-site
 batch limit and existing claimed work remains unchanged. Preserve typed transitions,
 atomic Undo/claim locking and durable progress in the appropriate stage. A temporary
-capture failure automatically rejoins the FIFO when its saved retry time is due;
+capture failure automatically rejoins the ranked queue when its saved retry time is due;
 unknown or integrity failures need explicit resume and never hold the capture queue. Explicit capture
-resume joins the uncapped FIFO queue, even while another capture runs or automatic
+resume joins the uncapped capture queue, even while another capture runs or automatic
 mode is on. Retain the operation, batch, approval, sources and cumulative budgets;
 claim only when the capture worker is free. Cancel queued resume restores the pause
 until atomic claiming wins, and prevents automatic restart recovery from overriding
@@ -729,7 +729,7 @@ SQLite metadata independently of list caps. Report stale or failed polling inste
 of implying fresh progress; status reads never start work or lose browser drafts.
 Portal list polls (`compact=1`) read saved SQLite metadata without archive
 maintenance and prepare full review records only for the visible page. Keep
-counts, filters and FIFO ordering complete and within one read snapshot so a
+counts, filters and capture ordering complete and within one read snapshot so a
 concurrent worker claim cannot invalidate sorting. Workers and action preflights
 retain coverage validation; preserve the original operator API refresh behavior.
 Deployment readiness uses the same compact Queue request; it must not run archive
@@ -1459,7 +1459,16 @@ cache every paid response by request, attempt and response hash. Bound automatic
 validation retries to two received attempts, retain uncertain charges, and let
 explicit retries consume a saved generation under original and shared caps.
 Never truncate invalid citations into approval. Retry scheduling runs on the
-independent control loop; eligible captures join the existing unbounded FIFO.
+independent control loop; eligible captures join the existing unbounded queue.
+Rank at each atomic claim using the latest eligible approvals and saved metadata.
+Forums, news and aggregators, item databases and bestiaries come first. Within
+each tier order by estimated distinct archived pages, early capture tier, then
+queue time. Use the same order for compact and legacy views, position and next up.
+Size checks use one bounded, scope-filtered Wayback catalog page per background
+turn and a durable continuation. They share the persistent transport with capture
+and discovery. Missing estimates and probe failures never prevent a claim, and
+an estimate must match the current approved scope. Keep approval/undo grace,
+held failures, atomic resume ownership and active capture checkpoints intact.
 
 Policy maintenance keeps v13 and its cursor while preparing at most two records
 in spawned CPU processes. Only the parent owns credentials/clients/cache, writes

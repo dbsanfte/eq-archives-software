@@ -1,5 +1,6 @@
 """Bounded, read-only pipeline status, independent of paginated portal lists."""
-from capture_queue import QUEUE
+from capture_queue import QUEUE, QUEUE_ORDER
+from common import now
 from state import unpack
 
 EVENTS = {
@@ -15,7 +16,7 @@ KINDS = {'discover': 'Discovery', 'candidate_check': 'Evidence & grading',
          'capture': 'Capture', 'publish': 'Publication'}
 
 
-def snapshot(store, worker=None):
+def snapshot(store, worker=None, at=None):
     def site(identifier):
         row = store.db.execute('SELECT id,url FROM candidates WHERE id=?', (identifier,)).fetchone()
         return dict(row) if row else None
@@ -35,8 +36,9 @@ def snapshot(store, worker=None):
 
     discovery = operation(store.db.execute("""SELECT * FROM operations
         WHERE kind IN ('discover','candidate_check') ORDER BY updated DESC,rowid DESC LIMIT 1""").fetchone())
+    at = at or now()
     next_capture = store.db.execute(f"""SELECT q.id,c.url,q.ready FROM ({QUEUE}) q
-        JOIN candidates c ON c.id=q.id WHERE q.held=0 ORDER BY ready,ordinal LIMIT 1""").fetchone()
+        JOIN candidates c ON c.id=q.id WHERE q.held=0 ORDER BY {QUEUE_ORDER} LIMIT 1""", (at, at)).fetchone()
     retry = store.db.execute("""SELECT r.operation,r.attempts,r.retry_at,c.id,c.url FROM capture_retries r
         JOIN operations o ON o.id=r.operation JOIN candidates c ON c.id=json_extract(o.payload,'$.sites[0].id')
         WHERE o.state='interrupted' AND r.paused=0 AND r.retry_at IS NOT NULL ORDER BY r.retry_at LIMIT 1""").fetchone()

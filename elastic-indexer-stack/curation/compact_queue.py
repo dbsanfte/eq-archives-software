@@ -2,10 +2,10 @@
 from functools import lru_cache
 import json
 
-from common import CrawlError
+from common import CrawlError, now
 from grading import current_rating
 from portal import Stage, CANDIDATE_STAGES, REVIEW_STAGES
-from capture_queue import QUEUE
+from capture_queue import QUEUE, QUEUE_ORDER
 
 
 @lru_cache(maxsize=65536)
@@ -29,7 +29,7 @@ TIER="COALESCE((SELECT MIN(COALESCE(NULLIF(json_extract(value,'$.tier'),0),3)) F
 ORIGINAL_SORT="(COALESCE(json_extract(s.rating,'$.grade'),-1)<2),"+TIER+",COALESCE(json_extract(s.rating,'$.grade'),-1) DESC,s.priority DESC,s.url"
 
 
-def listing(store, request, captured_states):
+def listing(store, request, captured_states, at=None):
     selected=request.query_params.get('filter','recommended')
     if selected not in ('recommended','pending','approved','captured','review','all',*Stage):
         raise CrawlError('Invalid queue filter')
@@ -77,7 +77,9 @@ def listing(store, request, captured_states):
     total=db.execute(BASE+'SELECT COUNT(*) FROM sites s WHERE '+condition,parameters).fetchone()[0]
     order=ORIGINAL_SORT;join=''
     if selected in ('approved','queued'):
-        join=' JOIN ('+QUEUE+') q ON q.id=s.id';order='q.held,q.ready,q.ordinal'
+        join=' JOIN ('+QUEUE+') q ON q.id=s.id';order=QUEUE_ORDER
+        at = at or now()
+        parameters.extend((at, at))
     elif selected=='candidates':order='curation_grade(s.rating,COALESCE(json_array_length(s.captures),0)>0) DESC,'+TIER+',s.priority DESC,s.url'
     elif selected in ('captured','review','indexing','history'):order="COALESCE(json_extract(s.coverage,'$.capture.completed_at'),'') DESC,"+ORIGINAL_SORT
     ids=[] if offset>=total else [row['id'] for row in db.execute(BASE+'SELECT s.id FROM sites s'+join+' WHERE '+condition+' ORDER BY '+order+' LIMIT 50 OFFSET ?',[*parameters,offset])]
