@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from common import CrawlError, Store, capture_scope, digest, now, save
 from campaign_storage import initialize as initialize_campaign
 from capture_flow import Action, UNDO_SECONDS, transition
-from capture_queue import claim, claim_resume, next_entry
+from capture_queue import claim, claim_resume, has_ready_entry, next_entry
 from capture_rank import PROBE_INTERVAL, measure_next
 from crawler import parser
 from discovery import discover
@@ -391,8 +391,7 @@ class Worker:
         from capture_recovery import schedule
         schedule(self.root)
         with connect(self.root) as store:
-            due = next_entry(store, now())
-            if not due:
+            if not has_ready_entry(store, now()):
                 if store.get('capture_queue_error'):
                     store.set('capture_queue_error', None)
                 return
@@ -658,11 +657,13 @@ class Worker:
                 self.index_wake.clear()
 
     def run_capture_ranking(self):
+        prefer_continuation = False
         while not self.stop.wait(PROBE_INTERVAL):
             try:
-                measure_next(self.root, self.transport)
+                measure_next(self.root, self.transport, prefer_continuation=prefer_continuation)
             except (sqlite3.Error, OSError):
                 LOG.warning('Capture size check paused; current queue ranks are retained')
+            prefer_continuation = not prefer_continuation
 
     def indexing_turn(self):
         # This control loop stays free while the capture executor downloads a

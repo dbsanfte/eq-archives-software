@@ -78,6 +78,34 @@ def test_failed_size_probe_backs_off_and_leaves_the_approval_eligible(tmp_path):
             thread.join(timeout=2)
 
 
+def test_open_catalog_continues_with_fresh_approvals_waiting(tmp_path):
+    from contextlib import nullcontext
+
+    root = tmp_path / 'state'
+    running = add_candidate(root, 'http://earlier.example/')
+    fresh = add_candidate(root, 'http://new.example/')
+    with connect(root) as store:
+        store.db.execute("UPDATE candidates SET state='approved_waiting_batch'")
+        store.db.execute('''INSERT INTO capture_size_estimates(candidate,scope,mode,pages,resume_key,retry_at)
+            VALUES (?,?,?,300,'more','2000-01-01')''', (running['id'],running['scope'],running['scope_mode']))
+        store.db.commit()
+
+    class Transport:
+        jobs = []
+        def turn(self, deadline):
+            return nullcontext()
+        def request(self, job):
+            self.jobs.append((job['url'], job['resume_key']))
+            return {'ok': True, 'result': {'resume_key':None,'captures':[{'url':job['url']+'guide.html'}]}}
+
+    transport = Transport()
+    measure_next(root, transport, prefer_continuation=True)
+    measure_next(root, transport)
+    assert transport.jobs == [(running['scope'],'more'),(fresh['scope'],None)]
+    with connect(root) as store:
+        assert store.db.execute('SELECT pages FROM capture_size_estimates WHERE candidate=?', (running['id'],)).fetchone()[0] == 301
+
+
 @pytest.mark.parametrize('mode,scope,expected,pages', [
     ('ezboard','http://pub3.ezboard.com/beq','http://pub3.ezboard.com/feq',[
         ('http://pub3.ezboard.com/feqmain.showMessage?topicID=2.topic',True),
