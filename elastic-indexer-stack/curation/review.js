@@ -1158,6 +1158,7 @@ function renderPipelineActivity() {
         const site=capture.payload?.sites?.find(site=>site.url===capture.result?.progress?.site_url) || capture.payload?.sites?.[0];
         activitySite(body,site);body.append(captureMeter(capture,true));
         body.append(node('p',`${waiting} sites waiting. The next eligible site starts after this capture finishes or pauses.`, 'meta'));
+        if (next) {body.append(node('p','Next in capture order','meta'));activitySite(body,next);}
       } else if (data.capture_queue_error) {status='Queue needs attention';tone='attention';body.append(node('p',data.capture_queue_error,'activity-warning'));}
       else if (next) {status='Waiting to start next site';tone='waiting';activitySite(body,next);activityDeadline(body,next.ready,'Next capture eligible');}
       else if (info.next_retry) {status='Waiting for automatic retry';tone='waiting';activitySite(body,info.next_retry);activityDeadline(body,info.next_retry.retry_at,'Next capture retry');}

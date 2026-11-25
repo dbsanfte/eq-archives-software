@@ -2298,6 +2298,15 @@ async def pipeline_activity_flow(browser,base,width):
     await expect(page.locator('#activity-capture > summary')).to_contain_text('Checking archive listings')
     await expect(page.locator('#activity-capture')).to_contain_text('451 of 660 archive listings checked · 209 left')
     await expect(page.locator('#activity-capture')).to_contain_text('16 sites waiting')
+    info['next_capture']={'id':'e'*24,'url':'http://earlier-guild.example/','ready':stamp}
+    await page.evaluate('refresh()');await settled(page)
+    await expect(page.locator('#activity-capture')).to_contain_text('Next in capture order')
+    await expect(page.locator('#activity-capture')).to_contain_text('http://earlier-guild.example/')
+    info['next_capture']={'id':'f'*24,'url':'http://larger-forum.example/','ready':stamp}
+    await page.evaluate('refresh()');await settled(page)
+    await expect(page.locator('#activity-capture')).to_contain_text('http://larger-forum.example/')
+    await expect(page.locator('#activity-capture')).not_to_contain_text('http://earlier-guild.example/')
+    info['next_capture']=None
     await expect(page.locator('#activity-indexing > summary')).to_contain_text('Waiting for another approved site')
     info['maintenance']={'policy':'eq-passages-480-v11','phase':'waiting_imports','progress':{
         'updated':2000,'reused':100,'unresolved':1,'issues':[{'id':'websites/large.example/'+200*'x'+'/<script>alert(1)</script>', 'reason':'source_unavailable'}]}}

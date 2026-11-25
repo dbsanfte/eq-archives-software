@@ -2,6 +2,7 @@
 import json
 
 from capture_flow import Action, transition
+from capture_rank import ESTIMATE, PAGES, PRIORITY
 from common import CrawlError, now, original_url, within_capture_scope
 from captures import LIMITS
 from full_capture import POLICY
@@ -28,25 +29,31 @@ def attention(store):
 # Keep the resumed-site expansion before the candidate lookup. SQLite can
 # otherwise scan every queued candidate for each operation, then expand its
 # JSON again; claims hold the write lock for that entire quadratic scan.
-QUEUE = """SELECT c.id,c.decision,c.rowid ordinal,
+RANK = f"{PRIORITY} AS priority_tier,{PAGES} AS estimated_pages,COALESCE(json_extract(c.captures,'$[0].tier'),3) AS date_tier"
+QUEUE = f"""SELECT c.id,c.decision,c.rowid ordinal,
         COALESCE(json_extract(c.decision,'$.capture_after'),json_extract(c.decision,'$.reviewed_at')) ready,
-        (f.candidate IS NOT NULL) held,NULL operation FROM candidates c
+        (f.candidate IS NOT NULL) held,NULL operation,{RANK} FROM candidates c
+        {ESTIMATE}
         LEFT JOIN capture_queue_failures f ON f.candidate=c.id AND f.decision=c.decision
         WHERE c.state='approved_waiting_batch'
-        UNION ALL SELECT c.id,c.decision,c.rowid,o.updated,0,o.id
+        UNION ALL SELECT c.id,c.decision,c.rowid,o.updated,0,o.id,{RANK}
         FROM operations o CROSS JOIN json_each(o.payload,'$.sites') site
         CROSS JOIN candidates c
+        {ESTIMATE}
         WHERE c.id=json_extract(site.value,'$.id')
           AND o.kind='capture' AND o.state='resume_queued' AND c.state='capture_resume_queued'"""
+RANK_ORDER = 'q.priority_tier DESC,q.estimated_pages DESC,q.date_tier,q.ready,q.ordinal'
+QUEUE_ORDER = 'q.held,(q.ready IS NULL),(q.ready>?),CASE WHEN q.ready>? THEN q.ready END,' + RANK_ORDER
 
 
-def queue_order(store):
-    """Fresh approvals and explicit resumes share one uncapped FIFO."""
-    return [row['id'] for row in store.db.execute(f'SELECT * FROM ({QUEUE}) ORDER BY held,ready,ordinal')]
+def queue_order(store, at=None):
+    """Show the same ranked order as dispatch, with grace and holds at the end."""
+    at = at or now()
+    return [row['id'] for row in store.db.execute(f'SELECT q.id FROM ({QUEUE}) q ORDER BY {QUEUE_ORDER}', (at, at))]
 
 
 def next_entry(store, at):
-    return store.db.execute(f'SELECT * FROM ({QUEUE}) WHERE held=0 AND ready<=? ORDER BY ready,ordinal LIMIT 1', (at,)).fetchone()
+    return store.db.execute(f'SELECT q.* FROM ({QUEUE}) q WHERE q.held=0 AND q.ready<=? ORDER BY {RANK_ORDER} LIMIT 1', (at,)).fetchone()
 
 
 def resume_members(store, operation, action):

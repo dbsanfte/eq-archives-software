@@ -9,7 +9,7 @@ from captures import archive_path
 from common import CrawlError
 from conftest import add_candidate, manifest_for
 from common import digest
-from review import apply_decisions
+from review import apply_decisions, record
 from server import create_app
 from state import connect
 from test_server import call
@@ -127,6 +127,74 @@ def test_legacy_approval_grace_is_persistent_across_worker_restart(candidate):
     finally:restarted.lease.close()
 
 
+def test_capture_reranks_approvals_after_active_site_finishes(candidate, monkeypatch):
+    root, current = candidate
+    app = create_app(root, start_worker=False)
+    assert approve(app, current).status_code == 200
+    make_due(root)
+    worker = Worker(root)
+    def complete(root, batch_id, sites, progress):
+        return {'schema': 1, 'batch_id': batch_id, 'sites': sites, 'captures': [
+            {**site['captures'][0], 'candidate_id':site['id'], 'archive_path':archive_path(site['captures'][0])}
+            for site in sites]}
+    monkeypatch.setattr('worker.capture_sites', complete)
+    try:
+        worker.capture_queue()
+        expected = {}
+        for kind, title, pages in [('guild', 'EQ guild', 12000), ('forum', 'EQ forums', 130),
+                                    ('independent_information', 'Illia’s Bestiary', 1500),
+                                    ('aggregator', 'EverQuest News', 5000)]:
+            site = add_candidate(root, f'http://{kind}.example/')
+            with connect(root) as store:
+                captures = [{**site['captures'][0], 'title': title}]
+                store.db.execute('UPDATE candidates SET captures=?,rating=? WHERE id=?',
+                                 (json.dumps(captures),json.dumps({**site['rating'], 'category':kind}),site['id']))
+                store.db.execute('INSERT INTO capture_size_estimates(candidate,scope,mode,pages) VALUES (?,?,?,?)',
+                                 (site['id'],site['scope'],site['scope_mode'],pages))
+                store.db.commit()
+                site = record(store, store.db.execute('SELECT * FROM candidates WHERE id=?', (site['id'],)).fetchone())
+            assert approve(app, site).status_code == 200
+            expected[kind] = site['id']
+        make_due(root)
+        worker.capture_queue()
+        listed = call(app, 'GET', '/api/queue?filter=queued&compact=1').json()
+        assert listed['workers']['capture']['payload']['sites'][0]['id'] == current['id']
+        order = [expected[kind] for kind in ('aggregator','independent_information','forum','guild')]
+        assert [row['id'] for row in listed['candidates']] == order
+        assert listed['activity']['next_capture']['id'] == order[0]
+        assert [row['id'] for row in call(app, 'GET', '/api/queue?filter=approved').json()['candidates']] == order
+        for index, identifier in enumerate(order, 1):
+            assert call(app, 'GET', f'/api/candidate?id={identifier}').json()['queue_position'] == index
+        worker.operation()
+        worker.capture_queue()
+        assert call(app, 'GET', '/api/queue?filter=queued&compact=1').json()['workers']['capture']['payload']['sites'][0]['id'] == order[0]
+    finally:
+        worker.close()
+
+
+def test_capture_rank_respects_grace_holds_and_scope_changes(tmp_path):
+    from capture_queue import next_entry, queue_order
+
+    root = tmp_path / 'state'
+    soon = json.dumps({'capture_after': '2020-01-01'})
+    later = json.dumps({'capture_after': '2099-01-01'})
+    with connect(root) as store:
+        for identifier, grant, mode, category in [('held', soon, 'site', 'forum'), ('future', later, 'site', 'forum'),
+                                                   ('fallback', soon, 'site', 'guild'), ('former', soon, 'site', 'forum'),
+                                                   ('measured', soon, 'site', 'forum')]:
+            scope = f'http://{identifier}.example/'
+            store.db.execute('INSERT INTO candidates(id,url,scope,state,decision,coverage,rating) VALUES (?,?,?,?,?,?,?)',
+                             (identifier,scope,scope,'approved_waiting_batch',grant,json.dumps({'scope_mode':mode}),
+                              json.dumps({'category':category})))
+            estimate_scope = scope + 'different/' if identifier == 'former' else scope
+            store.db.execute('INSERT INTO capture_size_estimates(candidate,scope,mode,pages) VALUES (?,?,?,?)',
+                             (identifier,estimate_scope,mode,50 if identifier == 'measured' else 10000))
+        store.db.execute('INSERT INTO capture_queue_failures VALUES (?,?,?,?)', ('held',soon,'Needs correction','now'))
+        assert queue_order(store, '2025') == ['measured','former','fallback','future','held']
+        assert next_entry(store, '2025')['id'] == 'measured'
+        assert next_entry(store, '2099-01-02')['id'] == 'future'
+
+
 def test_publication_can_queue_during_capture_without_starting_another_download(candidate):
     from state import enqueue
     root,row=candidate
@@ -150,7 +218,7 @@ def test_out_of_order_transitions_are_rejected(state,action):
 
 
 @pytest.mark.parametrize('listing', [True, False])
-def test_large_mixed_queue_has_bounded_query_work_and_complete_fifo(tmp_path, listing):
+def test_large_mixed_queue_has_bounded_query_work_and_fifo_ties(tmp_path, listing):
     from capture_queue import next_entry, queue_order
     with connect(tmp_path/'state') as store:
         approvals = [f'{number:024x}' for number in range(300)]

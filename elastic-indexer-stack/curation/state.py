@@ -92,6 +92,9 @@ def connect(directory):
                 manifest_sha256 TEXT, publication TEXT, job TEXT, error TEXT, created TEXT, updated TEXT);
             CREATE TABLE IF NOT EXISTS capture_queue_failures(candidate TEXT PRIMARY KEY,
                 decision TEXT NOT NULL, error TEXT NOT NULL, created TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS capture_size_estimates(candidate TEXT PRIMARY KEY,
+                scope TEXT NOT NULL, mode TEXT NOT NULL, pages INTEGER, resume_key TEXT,
+                last_url TEXT, retry_at TEXT);
             CREATE TABLE IF NOT EXISTS capture_retries(operation TEXT PRIMARY KEY,
                 attempts INTEGER NOT NULL, retry_at TEXT, paused INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS capture_legacy_recovery(operation TEXT PRIMARY KEY,
