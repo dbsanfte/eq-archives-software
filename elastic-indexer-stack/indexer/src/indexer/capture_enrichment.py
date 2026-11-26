@@ -239,11 +239,12 @@ def validate(response, source, *, audit=None, grounding=(), summary_max=SHORT_SU
 
 
 class Enricher:
-    def __init__(self, directory, key_file, maximum=5, client_factory=Luna, check=None):
+    def __init__(self, directory, key_file, maximum=5, client_factory=Luna, check=None, *, prepared_cache=False):
         daily = current_budget.get()
         if maximum not in (LEGACY_POLICY['max_enrichment_usd'], DEFAULT_POLICY['max_enrichment_usd']) and not (maximum is None and daily and daily.settings()['configured']):
             raise CrawlError("Enrichment requires the reviewed batch budget")
-        self.store, self.client = Store(directory), None
+        self.store, self.client = Store(directory, initialize=not prepared_cache), None
+        self.prepared_cache = prepared_cache
         self.maximum = DEFAULT_POLICY['max_enrichment_usd'] if maximum is None else maximum
         self.client_factory, self.key_file = client_factory, key_file
         self.check = check
@@ -309,7 +310,7 @@ class Enricher:
         attempt = self.store.db.execute('INSERT INTO attempts(candidate,signature,reserved,status,created) VALUES (?,?,?,?,?)',
                                         (capture['archive_path'], signature, amount, 'reserved', now())).lastrowid
         try:
-            reserve_attempt(self.store, attempt, amount, site_maximum=self.maximum)
+            reserve_attempt(self.store, attempt, amount, site_maximum=self.maximum, scope_totals=self.prepared_cache)
         except SiteBudgetExceeded:
             raise EnrichmentError('budget') from None
         self.store.db.commit()

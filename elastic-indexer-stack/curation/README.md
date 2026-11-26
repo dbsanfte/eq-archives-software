@@ -1068,9 +1068,11 @@ resolved physical index, with no delete, cluster, mapping or security privilege.
 `PASSAGE_REENRICHMENT_ENABLED=1` admits a separate `eqarchives-enrichment-*`
 Job alongside the chunk updater. It rotates verified current passages across
 websites, mailing lists and newsgroups. Each Job examines at most 1,200 records
-or twelve minutes. The default is eight concurrent Luna requests with a shared
-Gemma summary embedding batch per wave. A bounded durable queue protects each
-collection's cursor across partial waves, budget waits and restarts.
+or twelve minutes. The default is eight concurrent Luna requests. Finished
+requests free their slots immediately while the coordinator collects small
+summary embedding batches. A bounded durable queue protects each collection's
+cursor across budget waits and restarts. The Job drains outstanding requests
+before releasing its shared Luna priority claim.
 Operators can set `luna_workers` to 1–32 in the optional
 `eqarchives-enrichment-tuning` ConfigMap in `eqarchives-es`. New slices read it
 at startup, so changing it leaves running Jobs intact.
@@ -1081,6 +1083,10 @@ labels from the bounded search passages. The maintenance prompt contains no
 date extraction. Each summary and its validated Gemma vector are committed
 together using the original read revision. Existing publication date evidence,
 readers, capture/index timestamps and body/OCR vectors retain their provenance.
+Each scope's cache is initialized once per Job. Its spend projection backfills
+from the original attempts and folds only changed rows during admission. SQLite
+triggers let older writers participate, and the same per-row integer rounding
+continues to count settled usage and unresolved reservations.
 Within each site, mailing list or newsgroup, a byte-identical date-free request can
 reuse a validated paid response. Each capture retains a source-bound validation
 receipt. Fresh requests stop before the slice deadline with time to drain. Model

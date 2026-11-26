@@ -1,7 +1,7 @@
 """Run the independent, bounded historical enrichment queue."""
 
 import argparse
-from concurrent.futures import ThreadPoolExecutor, wait
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import closing
 from contextvars import copy_context
 from datetime import datetime
@@ -12,11 +12,10 @@ import os
 from pathlib import Path
 import re
 import sqlite3
-from threading import Lock
 import time
 
-from common import CrawlError, digest, save
-from daily_budget import AutomaticStopped, DailyBudget, DailyBudgetPause, EnrichmentPriorityPause
+from common import CrawlError, Store, digest, save
+from daily_budget import AutomaticStopped, DailyBudget, DailyBudgetPause, EnrichmentPriorityPause, install_scope_totals
 from grading import Luna, LunaUnavailable
 from import_status import EnrichmentError
 from indexer import gemma, passages, search_enrichment
@@ -34,6 +33,8 @@ MAX_RECORDS = 1200
 SLICE_SECONDS = 720
 LUNA_SECONDS = 45
 MIN_REQUEST_TIME_LEFT = 15
+SUMMARY_BATCH_SIZE = 16
+SUMMARY_BATCH_WAIT = 1
 
 
 class State:
@@ -82,24 +83,28 @@ class State:
         now = time.time()
         db = self.db.connection()
         for collection, cursor, next_at in db.execute('SELECT collection,cursor,next_at FROM frontiers WHERE key=?', (self.key,)).fetchall():
-            if next_at > now or db.execute('SELECT 1 FROM pending WHERE key=? AND collection=? LIMIT 1', (self.key, collection)).fetchone():
+            if next_at > now:
+                continue
+            queued, = db.execute('SELECT COUNT(*) FROM pending WHERE key=? AND collection=?', (self.key, collection)).fetchone()
+            if queued > PAGE_SIZE // 2:
                 continue
             check()
-            identifiers = services.select_enrichment(cursor, collection=collection, limit=PAGE_SIZE)
+            identifiers = services.select_enrichment(cursor, collection=collection, limit=PAGE_SIZE - queued)
             if any(not identifier.startswith(collection + '/') for identifier in identifiers):
                 raise ServiceError('response_identity')
             with self.db.transaction(attempts=6) as db:
                 # The cursor can only pass IDs once they are in the durable queue.
-                db.executemany('INSERT INTO pending(key,collection,id) VALUES (?,?,?)',
+                db.executemany('INSERT OR IGNORE INTO pending(key,collection,id) VALUES (?,?,?)',
                                [(self.key, collection, identifier) for identifier in identifiers])
                 db.execute('UPDATE frontiers SET cursor=?,next_at=? WHERE key=? AND collection=?',
                            (identifiers[-1] if identifiers else '', 0 if identifiers else now + 900, self.key, collection))
 
-    def ready(self, rotation, limit):
+    def ready(self, rotation, limit, active=frozenset()):
         rows = {name: [] for name in COLLECTIONS}
         for collection, identifier in self.db.connection().execute(
                 'SELECT collection,id FROM pending WHERE key=? AND retry_at<=? ORDER BY id', (self.key, time.time())):
-            rows[collection].append(identifier)
+            if identifier not in active:
+                rows[collection].append(identifier)
         result = []
         while len(result) < limit and any(rows.values()):
             collection = next(rotation)
@@ -145,7 +150,7 @@ class State:
 
 
 def write_wave(services, records, check):
-    """Embed one wave and validate the whole response before the first write."""
+    """Validate the whole embedding batch before acknowledging any writes."""
     requests = {}
     for prepared, patch in records:
         if patch is not None:
@@ -182,8 +187,10 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
     phase, next_at = 'bounded', 0
     counters = {'luna_workers': workers, 'embedding_waves': 0, 'examined': 0}
     rotation, capped = cycle(COLLECTIONS), set()
-    started = []
-    opening_cache = Lock()
+    started, initialized = set(), set()
+    futures, scheduled = {}, {}
+    outcomes = []
+    buffered_at = 0
 
     def check():
         if time.monotonic() >= deadline or should_yield():
@@ -199,7 +206,7 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
         save(state.root / (job + '.json'), record)
         return record
 
-    def grade(prepared, scope):
+    def grade(prepared, cache):
         def check_request():
             check()
             if deadline - time.monotonic() < MIN_REQUEST_TIME_LEFT:
@@ -207,79 +214,91 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
 
         def client(path):
             return Luna(path, deadline=time.time() + LUNA_SECONDS)
-        # Cold records from one scope may share a database. Serialize WAL
-        # initialization only, then let the request threads run independently.
-        with opening_cache:
-            enricher = enricher_factory(state.root / 'policy-enrichment' / digest(scope), '/run/secrets/luna_api_key',
-                                        client_factory=client, check=check_request)
-        with closing(enricher):
+        with closing(enricher_factory(cache, '/run/secrets/luna_api_key', client_factory=client,
+                                     check=check_request, prepared_cache=True)) as enricher:
             return metadata_patch(enricher.enrich_for_maintenance(prepared.capture, prepared.source, prepared.grounding))
 
-    def request_key(prepared, scope):
-        return scope, prepared.capture['url'], prepared.capture['sha256'], digest(prepared.grounding)
+    def finish(identifier, result, reason=None):
+        if result == 'concurrent_update':
+            state.defer(identifier)
+        elif result not in COUNTERS:
+            state.finish(identifier, 'failed', result)
+        else:
+            state.finish(identifier, result, reason)
+        started.discard(identifier)
 
-    def wave(identifiers, pool):
-        outcomes, paid = [], []
+    def completed(prepared, patch):
+        nonlocal buffered_at
+        if not outcomes:
+            buffered_at = time.monotonic()
+        outcomes.append((prepared, patch))
+
+    def admit(pool, limit):
+        state.fill(services, check)
+        identifiers = state.ready(rotation, limit, started)
         for identifier in identifiers:
             check()
+            counters['examined'] += 1
             if not state.begin(identifier):
-                state.finish(identifier, 'failed', 'repeated_worker_interruption')
+                finish(identifier, 'failed', 'repeated_worker_interruption')
                 continue
-            started.append(identifier)
+            started.add(identifier)
             try:
                 url, scope = capture_identity(identifier)
                 prepared = None if scope in capped else prepare_refresh(services, sources, identifier, url, check)
-                if prepared is None:
-                    state.finish(identifier, 'skipped')
-                elif prepared.capture is None:
-                    outcomes.append((prepared, None))
-                else:
-                    paid.append((prepared, scope))
             except SourceError as error:
-                if error.reason == 'concurrent_update':
-                    state.defer(identifier)
-                else:
-                    state.finish(identifier, 'failed', error.reason)
+                finish(identifier, error.reason)
+                continue
             except ServiceError:
                 raise
             except (TypeError, KeyError, ValueError):
-                state.finish(identifier, 'failed', 'source_validation')
+                finish(identifier, 'failed', 'source_validation')
+                continue
+            if prepared is None:
+                finish(identifier, 'skipped')
+                continue
+            if prepared.capture is None:
+                completed(prepared, None)
+                continue
+            cache = state.root / 'policy-enrichment' / digest(scope)
+            if scope not in initialized:
+                with closing(Store(cache)) as store:
+                    install_scope_totals(store.db)
+                initialized.add(scope)
+            key = scope, prepared.capture['url'], prepared.capture['sha256'], digest(prepared.grounding)
+            if key not in scheduled:
+                future = pool.submit(copy_context().run, grade, prepared, cache)
+                scheduled[key] = future
+                futures[future] = (key, [])
+            futures[scheduled[key]][1].append(prepared)
+        return bool(identifiers)
 
-        pause = None
-        # All sibling contexts share one priority owner. Release the claim only
-        # after every response has been drained and its cost accounted for.
-        if paid:
-            with account.bind(purpose='maintenance', owner=job):
-                futures = {}
-                try:
-                    for prepared, scope in paid:
-                        key = request_key(prepared, scope)
-                        if key not in futures:
-                            futures[key] = pool.submit(copy_context().run, grade, prepared, scope)
-                    for prepared, scope in paid:
-                        identifier = prepared.hit['_id']
-                        try:
-                            outcomes.append((prepared, futures[request_key(prepared, scope)].result()))
-                        except EnrichmentError as error:
-                            if error.code == 'budget':
-                                capped.add(scope)
-                                state.finish(identifier, 'skipped', 'enrichment_budget')
-                            else:
-                                state.finish(identifier, 'failed', 'enrichment_' + error.code)
-                        except Exception as error:
-                            pause = pause or error
-                finally:
-                    wait(futures.values())
-        if outcomes:
-            counters['embedding_waves'] += int(any(patch is not None for _, patch in outcomes))
-            for identifier, result in write_wave(services, outcomes, check):
-                if result == 'concurrent_update':
-                    state.defer(identifier)
-                else:
-                    state.finish(identifier, result if result in COUNTERS else 'failed',
-                                 None if result in COUNTERS else result)
-        if pause:
-            raise pause
+    def collect(pause):
+        for future in tuple(futures):
+            if not future.done():
+                continue
+            key, records = futures.pop(future)
+            del scheduled[key]
+            try:
+                patch = future.result()
+            except EnrichmentError as error:
+                if error.code == 'budget':
+                    capped.add(key[0])
+                for prepared in records:
+                    finish(prepared.hit['_id'], 'skipped' if error.code == 'budget' else 'failed',
+                           'enrichment_' + error.code)
+            except Exception as error:
+                pause = pause or error
+            else:
+                for prepared in records:
+                    completed(prepared, patch)
+        return pause
+
+    def flush():
+        counters['embedding_waves'] += int(any(patch is not None for _, patch in outcomes))
+        for identifier, result in write_wave(services, outcomes, check):
+            finish(identifier, result)
+        outcomes.clear()
 
     try:
         budget = account.snapshot(maintenance=True)
@@ -292,21 +311,34 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
         if budget['enrichment_pending']:
             phase, next_at = 'waiting_imports', time.time() + 60
             return report(True)
-        with ThreadPoolExecutor(max_workers=workers) as pool:
+        # The pool drains before its shared priority lease is released, even
+        # when the slice yields or encounters a failed write.
+        with account.bind(purpose='maintenance', owner=job), ThreadPoolExecutor(max_workers=workers) as pool:
             last_report = 0
-            while counters['examined'] < maximum:
-                check()
-                state.fill(services, check)
-                identifiers = state.ready(rotation, min(workers, maximum - counters['examined']))
-                if not identifiers:
-                    phase, next_at = 'sweep_waiting', max(time.time() + 10, state.next_at())
-                    break
-                wave(identifiers, pool)
-                started.clear()
-                counters['examined'] += len(identifiers)
-                if time.monotonic() - last_report >= 5:
+            pause = None
+            while True:
+                pause = collect(pause)
+                now = time.monotonic()
+                if outcomes and (len(outcomes) >= SUMMARY_BATCH_SIZE or not futures or pause
+                                 or now - buffered_at >= SUMMARY_BATCH_WAIT):
+                    flush()
+                if now - last_report >= 5:
                     report()
-                    last_report = time.monotonic()
+                    last_report = now
+                if not pause:
+                    check()
+                    in_flight = sum(len(records) for _, records in futures.values())
+                    capacity = min(workers - in_flight, maximum - counters['examined'])
+                    if capacity > 0 and admit(pool, capacity):
+                        continue
+                if not futures:
+                    if pause:
+                        raise pause
+                    if counters['examined'] < maximum:
+                        phase, next_at = 'sweep_waiting', max(time.time() + 10, state.next_at())
+                    break
+                wait_time = max(0, buffered_at + SUMMARY_BATCH_WAIT - now) if outcomes else SUMMARY_BATCH_WAIT
+                wait(futures, timeout=wait_time, return_when=FIRST_COMPLETED)
     except YieldWork:
         phase = 'yielded'
     except DailyBudgetPause as error:

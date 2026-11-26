@@ -2,11 +2,13 @@
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 import json
+import sqlite3
 
 import pytest
 
 from common import CrawlError, Store
-from daily_budget import attempt_remaining_units, attempt_spending, units
+from daily_budget import (SiteBudgetExceeded, attempt_remaining_units, attempt_spending,
+                          install_scope_totals, reserve_attempt, scope_spending_units, units)
 from grading import PRICING, reserve
 
 
@@ -58,3 +60,59 @@ def test_invalid_costs_do_not_make_more_budget_available(tmp_path):
             store.db.commit()
             with pytest.raises(CrawlError, match='accounting'):
                 attempt_remaining_units(store, 2)
+
+
+def test_scope_totals_follow_legacy_writers_and_preserve_exact_rounding(tmp_path):
+    with closing(Store(tmp_path)) as store:
+        store.db.execute('INSERT INTO attempts(id,reserved,actual) VALUES (1,.2,.0000000011),(2,.0000000011,NULL)')
+        store.db.commit()
+        install_scope_totals(store.db)
+        with store.db:
+            store.db.execute('BEGIN IMMEDIATE')
+            assert scope_spending_units(store.db) == 4
+        with closing(sqlite3.connect(tmp_path / 'crawl.sqlite3')) as legacy, legacy:
+            legacy.execute('UPDATE attempts SET id=3,actual=.2 WHERE id=2')
+            legacy.execute('INSERT OR REPLACE INTO attempts(id,reserved,actual) VALUES (1,.03,NULL)')
+            legacy.execute('INSERT INTO attempts(id,reserved,actual) VALUES (4,.6,.5)')
+            legacy.execute('DELETE FROM attempts WHERE id=4')
+        with store.db:
+            store.db.execute('BEGIN IMMEDIATE')
+            assert scope_spending_units(store.db) == units(.23)
+            assert scope_spending_units(store.db) == sum(units(part) for part in attempt_spending(store).values())
+        assert not store.db.execute('SELECT 1 FROM scope_attempt_dirty').fetchone()
+
+
+def test_scope_totals_reject_damaged_rows_and_recover_after_repair(tmp_path):
+    with closing(Store(tmp_path)) as store, store.db:
+        store.db.execute('INSERT INTO attempts(id,reserved,actual) VALUES (1,.02,-.01)')
+        store.db.commit()
+        install_scope_totals(store.db)
+        store.db.execute('BEGIN IMMEDIATE')
+        with pytest.raises(CrawlError, match='accounting'):
+            scope_spending_units(store.db)
+        store.db.rollback()
+        store.db.execute('UPDATE attempts SET actual=.01 WHERE id=1')
+        assert scope_spending_units(store.db) == units(.01)
+
+
+def test_concurrent_scope_reservations_respect_cap_with_projected_totals(tmp_path):
+    with closing(Store(tmp_path)) as store:
+        store.db.execute('INSERT INTO attempts(reserved,actual) VALUES (.9,.1)')
+        store.db.commit()
+        install_scope_totals(store.db)
+
+    def reserve_slot(_):
+        with closing(Store(tmp_path, initialize=False)) as store:
+            store.db.execute('BEGIN IMMEDIATE')
+            attempt = store.db.execute('INSERT INTO attempts(reserved) VALUES (.2)').lastrowid
+            try:
+                reserve_attempt(store, attempt, .2, site_maximum=.5, scope_totals=True)
+            except SiteBudgetExceeded:
+                return False
+            store.db.commit()
+            return True
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        assert sum(pool.map(reserve_slot, range(8))) == 2
+    with closing(Store(tmp_path, initialize=False)) as store:
+        assert sum(units(part) for part in attempt_spending(store).values()) == units(.5)

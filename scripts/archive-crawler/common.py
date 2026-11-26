@@ -297,15 +297,29 @@ def save(path, value):
 
 
 class Store:
-    def __init__(self, directory):
+    def __init__(self, directory, *, initialize=True):
         self.root = Path(directory).resolve()
         repo = Path(__file__).resolve().parents[2]
         if self.root == repo or repo in self.root.parents:
             raise CrawlError("Keep crawl state outside the software repository")
-        self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
-        self.root.chmod(0o700)
-        self.db = sqlite3.connect(self.root / "crawl.sqlite3", timeout=10)
+        path = self.root / "crawl.sqlite3"
+        if initialize:
+            self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
+            self.root.chmod(0o700)
+        self.db = sqlite3.connect(path if initialize else path.as_uri() + '?mode=rw',
+                                  uri=not initialize, timeout=10)
         self.db.row_factory = sqlite3.Row
+        try:
+            if initialize:
+                self._initialize()
+            archive = self.get("archive_repository")
+            if archive and Path(archive).resolve() in (self.root, *self.root.parents):
+                raise CrawlError("Keep crawl state outside the archive checkout")
+        except BaseException:
+            self.db.close()
+            raise
+
+    def _initialize(self):
         self.db.executescript("""
             PRAGMA journal_mode=WAL;
             CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -329,10 +343,6 @@ class Store:
             CREATE TABLE IF NOT EXISTS sitepowerup_archive_boards(sha TEXT, board TEXT, host TEXT, path TEXT, PRIMARY KEY(sha,board));
         """)
         (self.root / "crawl.sqlite3").chmod(0o600)
-        archive = self.get("archive_repository")
-        if archive and Path(archive).resolve() in (self.root, *self.root.parents):
-            self.db.close()
-            raise CrawlError("Keep crawl state outside the archive checkout")
 
     def get(self, key, default=None):
         row = self.db.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
