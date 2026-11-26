@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import re
 import time
-from enrichment_worker import MAX_WORKERS as MAX_LUNA_WORKERS
+from enrichment_worker import EXECUTION_COUNTERS as ENRICHMENT_EXECUTION_COUNTERS, MAX_WORKERS as MAX_LUNA_WORKERS
 import math
 
 from common import CrawlError,save
@@ -101,7 +101,7 @@ def receipt(root,state):
         if not isinstance(issues,list) or len(issues)>5:return None
         if any(not isinstance(row,dict) or any(not isinstance(row.get(k),str) or len(row[k])>16384 for k in ('id','reason')) for row in issues):return None
         execution=result.get('execution',{})
-        execution_keys=({'luna_workers','embedding_waves','examined'} if dedicated else
+        execution_keys=({'luna_workers',*ENRICHMENT_EXECUTION_COUNTERS} if dedicated else
                         {'preparation_workers','documents','stored_vectors_reused','submitted_inputs'})
         if (not isinstance(execution,dict) or set(execution)-execution_keys
                 or any(type(v) is not int or not 0<=v<=10**12 for v in execution.values())

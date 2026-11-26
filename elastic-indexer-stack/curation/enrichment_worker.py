@@ -35,6 +35,7 @@ LUNA_SECONDS = 45
 MIN_REQUEST_TIME_LEFT = 15
 SUMMARY_BATCH_SIZE = 16
 SUMMARY_BATCH_WAIT = 1
+EXECUTION_COUNTERS = ('embedding_waves', 'examined', 'checkpoint_views', 'rebuilt_views')
 
 
 class State:
@@ -185,8 +186,7 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
     deadline = time.monotonic() + seconds
     should_yield = should_yield or (lambda: foreground(root, enrichment=True))
     phase, next_at = 'bounded', 0
-    counters = {'luna_workers': workers, 'embedding_waves': 0, 'examined': 0,
-                'checkpoint_views': 0, 'rebuilt_views': 0}
+    counters = {'luna_workers': workers, **dict.fromkeys(EXECUTION_COUNTERS, 0)}
     rotation, capped = cycle(COLLECTIONS), set()
     started, initialized = set(), set()
     futures, scheduled = {}, {}
