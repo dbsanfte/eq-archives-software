@@ -1,6 +1,7 @@
 """Shared, offline source decoding; no hostname, URL or corpus-specific rules."""
 import codecs
 from bisect import bisect_right
+from collections import Counter
 from contextvars import ContextVar
 import html
 from dataclasses import dataclass
@@ -13,6 +14,8 @@ KANJI=re.compile(r'[\u4e00-\u9fff]')
 HALF_KANA=re.compile(r'[\uff61-\uff9f]')
 BAD=re.compile(r'[\udc80-\udcff]')
 JAPANESE={'shift_jis','cp932','euc_jp','iso2022_jp'}
+REGIONAL_SCRIPT=re.compile(r'([\u0370-\u03ff])|([\u0400-\u052f])|([\u0590-\u05ff])|'
+                           r'([\u0600-\u06ff])|([\u3400-\u9fff])|([\uac00-\ud7af])')
 _DAMAGE=ContextVar('source_decode_damage',default=None)
 _JIS=ContextVar('source_decode_jis',default=None)
 
@@ -191,15 +194,15 @@ def regional_decode(data,limit,base_encoding,*,hints=()):
                     if damaged>limit:continue
                 else:text=raw.decode(encoding)
             except UnicodeDecodeError:continue
-            kana=len(KANA.findall(text));kanji=len(KANJI.findall(text));half=len(HALF_KANA.findall(text))
             if encoding=='utf-8':
                 high=sum(ord(c)>127 for c in text)
                 if high:result.append((100 if high>=2 or any(ord(c)>2047 for c in text) else 1,high,encoding,text))
-            elif encoding in JAPANESE and kana and kana*4>=kana+kanji+half:
-                result.append((10 if kana>=2 and kana+kanji>=4 and varied_japanese(text) else 1,kana+kanji,encoding,text))
-            elif encoding not in JAPANESE:
-                scripts=((0x370,0x3ff),(0x400,0x52f),(0x590,0x5ff),(0x600,0x6ff),(0x3400,0x9fff),(0xac00,0xd7af))
-                letters=max(sum(low<=ord(c)<=high for c in text) for low,high in scripts)
+            elif encoding in JAPANESE:
+                kana=len(KANA.findall(text));kanji=len(KANJI.findall(text));half=len(HALF_KANA.findall(text))
+                if kana and kana*4>=kana+kanji+half:
+                    result.append((10 if kana>=2 and kana+kanji>=4 and varied_japanese(text) else 1,kana+kanji,encoding,text))
+            else:
+                letters=max(Counter(match.lastindex for match in REGIONAL_SCRIPT.finditer(text)).values(),default=0)
                 if letters>=4:result.append((10,letters,encoding,text))
         if re.search(rb'[A-Za-z]{3}',raw) and any(b>=128 for b in raw):
             # Western words/punctuation, with no strong Japanese interpretation.
@@ -214,21 +217,28 @@ def regional_decode(data,limit,base_encoding,*,hints=()):
     for i,node in enumerate(nodes):
         # Markup attributes can carry their own evidence; separators cannot.
         text_or_tag=not i%2 or node.startswith(b'<')
-        encoded=not node.isascii() or b'\x1b' in node
-        options=candidates(node) if text_or_tag and encoded else []
+        if node.isascii() and b'\x1b' not in node:
+            offset+=len(node)
+            continue
+        options=candidates(node) if text_or_tag else []
         parent=max(options,key=lambda c:c[:2]) if options else None
         if parent and parent[0]>=10:anchors.add('shift_jis' if parent[2]=='cp932' else parent[2])
         chunks=re.split(rb'([ \t]+)',node) if not i%2 and b'\x1b' not in node else [node]
         for chunk in chunks:
-            options=candidates(chunk) if text_or_tag and (not chunk.isascii() or b'\x1b' in chunk) else []
-            best=max(options,key=lambda c:c[:2]) if options else None
-            if best and best[0]>=10:
-                anchors.add('shift_jis' if best[2]=='cp932' else best[2])
-            regions.append((offset,chunk,parent,best));offset+=len(chunk)
+            if not chunk.isascii() or b'\x1b' in chunk:
+                best=parent
+                if len(chunks)>1:
+                    options=candidates(chunk) if text_or_tag else []
+                    best=max(options,key=lambda c:c[:2]) if options else None
+                if best and best[0]>=10:anchors.add('shift_jis' if best[2]=='cp932' else best[2])
+                regions.append((offset,chunk,parent,best))
+            offset+=len(chunk)
     if len(anchors)<2 and not (base_encoding=='iso2022_jp' and anchors=={'iso2022_jp'}):return None
-    output=[];counts={};saved=[];invalid=0;entities=0;stateful=[]
+    output=[];counts={};saved=[];invalid=0;entities=0;stateful=[];cursor=0
     for start,raw,parent,best in regions:
-        if raw.isascii() and b'\x1b' not in raw:output.append(raw.decode('ascii'));continue
+        # Gaps contain only byte-for-byte ASCII already covered by the scan.
+        output.append(data[cursor:start].decode('ascii'))
+        cursor=start+len(raw)
         inherited=parent[2] if parent and parent[0]>=10 else base_encoding
         if best and best[0]>=10:
             encoding,text=best[2:];reason='local_evidence'
@@ -255,6 +265,7 @@ def regional_decode(data,limit,base_encoding,*,hints=()):
                           'reason':reason,'invalid_bytes':damaged})
         if restored:saved[-1]['restored_entities']=saved[-1].get('restored_entities',0)+restored
     if invalid>limit:return None
+    output.append(data[cursor:].decode('ascii'))
     return ''.join(output),invalid,tuple(sorted(counts.items())),tuple(saved),entities,tuple(stateful)
 
 

@@ -80,7 +80,15 @@ class EnrichmentInput:
 
 
 def prepare_refresh(services, sources, identifier, url, check):
-    hit = services.get(identifier)
+    prepared = prepare_refresh_hit(services.get(identifier), sources, url)
+    if prepared is not None:
+        check()
+    return prepared
+
+
+def prepare_refresh_hit(hit, sources, url):
+    """Verify a fetched revision and prepare exactly the historical grounding."""
+    identifier = hit['_id']
     source = hit['_source']
     if not eligible(source):
         return None
@@ -101,7 +109,6 @@ def prepare_refresh(services, sources, identifier, url, check):
     parts = search_enrichment.evidence_parts(view)
     if not parts:
         return None
-    check()
     revision = {key: hit[key] for key in ('_id', '_seq_no', '_primary_term')}
     if (source.get('llm_search_enrichment_version') == search_enrichment.VERSION
             and source.get('llm_enrichment_view_sha256') == digest(parts)):

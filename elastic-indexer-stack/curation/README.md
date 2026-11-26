@@ -1097,6 +1097,11 @@ Textual websites also require verified archive bytes and a matching decoded
 HTML hash. The existing preparation path checks missing or inconsistent
 evidence. The Job reports checkpoint and rebuilt view counts. It preserves the
 full source used to locate earlier paid responses.
+Two spawned processes verify sources and build grounding while Luna requests run.
+Ready records can grade while an earlier source is still preparing. The coordinator
+keeps ownership of the fetched revision, paid budget and index updates. A timed-out
+or stopped process defers its exact record with a bounded retry count. The Job
+reports these retries and cancels unfinished preparation when it yields.
 Within each site, mailing list or newsgroup, a byte-identical date-free request can
 reuse a validated paid response. Each capture retains a source-bound validation
 receipt. Fresh requests stop before the slice deadline with time to drain. Model

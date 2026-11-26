@@ -173,6 +173,17 @@ def test_mixed_html_posts_preserve_both_japanese_encodings_and_western_footer():
         assert raw[region['raw_start']:region['raw_end']].decode(region['encoding']) in decoded.text
 
 
+def test_plain_ascii_surrounding_mixed_regions_preserves_bytes_and_offsets():
+    raw, expected = mixed_posts()
+    before = b'<!-- Ordinary archive navigation with spaces -->\r\n'
+    after = b'\t \r\n<!-- End of archive capture -->'
+    original = decode_source(raw)
+    combined = decode_source(before + raw + after)
+    assert combined.text == before.decode() + expected + '</html>' + after.decode()
+    assert combined.provenance()['recoveries'] == original.provenance()['recoveries']
+    assert combined.regions == tuple({**region, 'raw_start': region['raw_start'] + len(before),
+                                      'raw_end': region['raw_end'] + len(before)} for region in original.regions)
+
 
 def test_mixed_html_retains_small_damage_and_rejects_unbounded_damage():
     raw,expected=mixed_posts(b'<p>\x82 </p>')
