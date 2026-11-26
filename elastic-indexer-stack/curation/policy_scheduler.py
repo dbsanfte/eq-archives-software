@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import re
 import time
+from enrichment_worker import MAX_WORKERS as MAX_LUNA_WORKERS
 import math
 
 from common import CrawlError,save
@@ -56,7 +57,10 @@ def job_for(name,image,*,enrichment=False):
         {'name':'ELASTICSEARCH_INDEX','valueFrom':{'secretKeyRef':{'name':'eqarchives-policy-indexer-secrets','key':'es_index'}}},
         {'name':'POLICY_INDEX','valueFrom':{'secretKeyRef':{'name':'eqarchives-policy-indexer-secrets','key':'es_index'}}},
         {'name':'POLICY_JOB_NAME','value':name},{'name':'IMPORT_IMAGE','value':image}]
-    if not dedicated:
+    if dedicated:
+        container['env'].append({'name':'LUNA_ENRICHMENT_WORKERS','valueFrom':{'configMapKeyRef':{
+            'name':'eqarchives-enrichment-tuning','key':'luna_workers','optional':True}}})
+    else:
         container['env'].append({'name':'POLICY_PREPARATION_WORKERS','value':'2'})
     container['volumeMounts']=[m for m in container['volumeMounts'] if m['mountPath'] in
                              ('/data','/run/secrets','/indexing-state','/usr/local/lib/python3.13/site-packages/certifi/cacert.pem')]+[
@@ -101,7 +105,7 @@ def receipt(root,state):
                         {'preparation_workers','documents','stored_vectors_reused','submitted_inputs'})
         if (not isinstance(execution,dict) or set(execution)-execution_keys
                 or any(type(v) is not int or not 0<=v<=10**12 for v in execution.values())
-                or execution.get('preparation_workers',0)>4 or execution.get('luna_workers',0)>4):return None
+                or execution.get('preparation_workers',0)>4 or execution.get('luna_workers',0)>MAX_LUNA_WORKERS):return None
         enrichment=result.get('enrichment')
         if dedicated and enrichment is None:return None
         if enrichment is not None:

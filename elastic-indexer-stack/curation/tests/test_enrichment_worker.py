@@ -6,7 +6,7 @@ import pytest
 
 from common import digest
 from daily_budget import DailyBudget
-from enrichment_worker import State, run
+from enrichment_worker import MAX_WORKERS, WORKERS, State, run
 from indexer import passages, search_enrichment
 from indexer.capture_enrichment import Enricher
 from policy_maintenance import State as PolicyState, identity, repair
@@ -28,13 +28,15 @@ class Service(Maintenance):
         return super().vectors(inputs, check)
 
 
-def prepared_service(root):
+def prepared_service(root, count=4):
     identifiers = [
         'websites/guild.example/20000101000000/page-one.html',
         'mailing-lists/Clerics/2.json',
         'newsgroups/alt.games.everquest-msg-3.txt',
         'websites/guild.example/20000101000000/page-four.html',
     ]
+    identifiers += [f'websites/guild.example/20000101000000/page-{index}.html'
+                    for index in range(5, count + 1)]
     hits = []
     for index, identifier in enumerate(identifiers, 1):
         raw = f'<title>Guild news</title><p>Our guild defeated Nagafen on expedition number {index}.</p>'
@@ -75,7 +77,7 @@ def factory(calls, barrier=None):
             if barrier:
                 barrier.wait(timeout=8)
             passage = ' '.join(supplied['search_passages'])
-            index = next(i for i in range(1, 5) if f'number {i}.' in passage)
+            index = next(i for i in range(1, MAX_WORKERS + 1) if f'number {i}.' in passage)
             return response({**{key: RESULT[key] for key in ('llm_tags','llm_content_flavour')},
                              'llm_summary': f'Guild expedition number {index}.', 'content_role': 'discussion',
                              'topics': [], 'entities': [{'kind': 'npc', 'name': 'Nagafen', 'excerpt': 'defeated Nagafen'}]})
@@ -86,14 +88,15 @@ def factory(calls, barrier=None):
     return lambda *args,client_factory,**kwargs: Enricher(*args,client_factory=Luna,**kwargs)
 
 
-def test_four_paid_requests_overlap_and_share_one_embedding_wave(tmp_path):
-    service, sources = prepared_service(tmp_path)
+@pytest.mark.parametrize('worker_count', [WORKERS, MAX_WORKERS])
+def test_paid_requests_overlap_at_default_and_maximum_concurrency(tmp_path, worker_count):
+    service, sources = prepared_service(tmp_path, count=worker_count)
     account = budget(tmp_path)
     state = State(tmp_path / 'state',identity())
     calls = []
     opener = Lock()
     competing_open = Event()
-    create_enricher = factory(calls, Barrier(4))
+    create_enricher = factory(calls, Barrier(worker_count))
 
     def open_enricher(*args, **kwargs):
         # Give the sibling pool threads a chance to enter while the first
@@ -108,15 +111,45 @@ def test_four_paid_requests_overlap_and_share_one_embedding_wave(tmp_path):
             opener.release()
 
     try:
-        result = run(tmp_path,state,service,sources,'fixture',account,maximum=4,should_yield=lambda:False,
-                     enricher_factory=open_enricher)
-        assert result['enrichment']['updated'] == 4
-        assert len(calls) == 4 and len(service.waves) == 1 and len(service.waves[0]) == 4
+        result = run(tmp_path,state,service,sources,'fixture',account,maximum=worker_count,should_yield=lambda:False,
+                     workers=worker_count, enricher_factory=open_enricher)
+        assert result['enrichment']['updated'] == worker_count
+        assert len(calls) == worker_count and len(service.waves) == 1 and len(service.waves[0]) == worker_count
         assert account.snapshot()['estimated_usd'] > 0
         assert not account.snapshot()['enrichment_pending']
-        assert len(service.updates) == 4 and all(p['llm_summary_vector'] == V for p in service.updates)
+        assert len(service.updates) == worker_count and all(p['llm_summary_vector'] == V for p in service.updates)
         assert all(p['llm_entities'] == ['npc: nagafen'] and 'llm_guessed_date' not in p for p in service.updates)
         assert not state.ready(cycle(('websites','mailing-lists','newsgroups')), 4)
+    finally:
+        state.close()
+        sources.close()
+
+
+def test_provider_access_failure_retains_records_and_backs_off(tmp_path):
+    import time
+    from grading import LunaUnavailable
+
+    service, sources = prepared_service(tmp_path)
+    account = budget(tmp_path)
+    state = State(tmp_path / 'state', identity())
+
+    class Rejected:
+        def request(self, payload):
+            raise LunaUnavailable(403, 1800)
+
+        def close(self):
+            pass
+
+    def unavailable(*args, client_factory, **kwargs):
+        return Enricher(*args, client_factory=lambda _: Rejected(), **kwargs)
+
+    try:
+        result = run(tmp_path, state, service, sources, 'fixture', account, maximum=4,
+                     should_yield=lambda: False, enricher_factory=unavailable)
+        assert result['phase'] == 'retry_wait' and result['next_at'] > time.time() + 1790
+        assert result['enrichment']['failed'] == result['enrichment']['updated'] == 0
+        assert len(state.ready(cycle(('websites', 'mailing-lists', 'newsgroups')), 4)) == 4
+        assert account.snapshot()['unresolved_usd'] > 0
     finally:
         state.close()
         sources.close()
@@ -182,3 +215,36 @@ def test_maintenance_reuses_legacy_paid_result_without_submitting_again(tmp_path
             assert len(calls)==1
         finally:
             client.close()
+
+
+def test_historical_enrichment_reuses_only_an_identical_paid_request(tmp_path):
+    from contextlib import closing
+
+    grounding = ('EverQuest guild raid report.',)
+    first = {'url':'http://guild.example/one', 'archive_path':'websites/first', 'sha256':digest(b'first')}
+    second = {'url':'http://guild.example/two', 'archive_path':'websites/second', 'sha256':digest(b'second')}
+    calls = []
+
+    class Luna:
+        def request(self, payload):
+            calls.append(payload)
+            return response({**{key: RESULT[key] for key in ('llm_tags','llm_content_flavour','llm_summary')},
+                             'content_role':'article', 'topics':[], 'entities':[]})
+
+        def close(self):
+            pass
+
+    def open_enricher():
+        return closing(Enricher(tmp_path/'scope', 'unused', client_factory=lambda _: Luna()))
+
+    with open_enricher() as client:
+        initial = client.enrich_for_maintenance(first, 'First capture', grounding)
+    with open_enricher() as client:
+        reused = client.enrich_for_maintenance(second, 'Distinct raw capture', grounding)
+        assert reused['llm_summary'] == initial['llm_summary']
+        assert reused['llm_enrichment_signature'] != initial['llm_enrichment_signature']
+        assert client.store.get('enrichment_validation:' + reused['llm_enrichment_signature'])[
+            'reused_response_signature'] == initial['llm_enrichment_signature']
+        assert len(calls) == 1
+        client.enrich_for_maintenance(second, 'Distinct raw capture', ('EverQuest crafting guide.',))
+        assert len(calls) == 2

@@ -1359,11 +1359,18 @@ Routine same-model chunk updates use `curation/policy_maintenance.py` and
 `policy_scheduler.py`: one 2,000-record/ten-minute slice, CUDA only, cooperative
 yield between batches and a 15-minute hard deadline. Separate historical
 enrichment Jobs use a bounded durable queue and per-collection cursors, rotate
-websites, mailing lists and newsgroups, and process up to 512 records or eight
-minutes with four concurrent paid requests and batched summary embeddings.
+websites, mailing lists and newsgroups, and process up to 1,200 records or twelve
+minutes with eight concurrent paid requests and batched summary embeddings.
+Constrain the operator-owned `eqarchives-enrichment-tuning` ConfigMap's
+`luna_workers` override to 1–16 and apply it only to new historical Jobs.
 Drain each wave before releasing its shared priority claim. Preserve the old
 paid totals, matching cursor, and cache after the old combined slice exits.
 Serialize per-scope cache initialization while keeping Luna calls concurrent.
+Update daily integer totals transactionally from the original reservation rows,
+including writes by older Jobs. Reuse date-free metadata only for the same exact
+request within one scope and retain separate raw-source validation receipts.
+Leave time for in-flight requests to drain and apply backoff for access, quota
+and rate failures while retaining pending IDs and reservations.
 Each write requires verified current source/passages and an exact optimistic
 revision. Replace the summary and validated Gemma vector atomically with the
 grounded labels; keep publication date evidence, readers, body/OCR vectors and

@@ -95,7 +95,42 @@ class DailyBudget:
                 CREATE TABLE IF NOT EXISTS enrichment_priority(owner TEXT PRIMARY KEY, expires TEXT NOT NULL);
             ''')
             db.execute('INSERT OR IGNORE INTO settings VALUES (1,?)', (json.dumps(DEFAULT),))
+            self.install_totals(db)
         (self.root / 'budget.sqlite3').chmod(0o600)
+
+    @staticmethod
+    def install_totals(db):
+        """Backfill once and include writes from workers using an older image."""
+        installed = "SELECT 1 FROM sqlite_schema WHERE name='luna_total_delete' AND type='trigger'"
+        if db.execute(installed).fetchone():
+            return
+        # Initialization above may have opened an implicit transaction.
+        db.commit()
+        db.execute('BEGIN IMMEDIATE')
+        if db.execute(installed).fetchone():
+            return
+        db.execute('''CREATE TABLE luna_day_totals(day TEXT PRIMARY KEY,
+            spent INTEGER NOT NULL,pending INTEGER NOT NULL,invalid INTEGER NOT NULL)''')
+        valid = "typeof({r}.reserved)='integer' AND {r}.reserved>=0 AND ({r}.actual IS NULL OR (typeof({r}.actual)='integer' AND {r}.actual>=0))"
+
+        def contribution(alias):
+            row = valid.format(r=alias)
+            return (f'CASE WHEN {row} THEN COALESCE({alias}.actual,0) ELSE 0 END',
+                    f'CASE WHEN {row} AND {alias}.actual IS NULL THEN {alias}.reserved ELSE 0 END', f'NOT ({row})')
+
+        totals = ','.join('SUM('+field+')' for field in contribution('r'))
+        db.execute(f'INSERT INTO luna_day_totals SELECT r.day,{totals} FROM reservations r GROUP BY r.day')
+        add = f'''INSERT INTO luna_day_totals VALUES (NEW.day,{','.join(contribution('NEW'))})
+            ON CONFLICT(day) DO UPDATE SET spent=spent+excluded.spent,pending=pending+excluded.pending,
+            invalid=invalid+excluded.invalid;'''
+        spent, pending, invalid = contribution('OLD')
+        remove = f'''UPDATE luna_day_totals SET spent=spent-({spent}),pending=pending-({pending}),
+            invalid=invalid-({invalid}) WHERE day=OLD.day;'''
+        db.execute(f'CREATE TRIGGER luna_total_insert AFTER INSERT ON reservations BEGIN {add} END')
+        db.execute(f'''CREATE TRIGGER luna_total_update AFTER UPDATE OF day,reserved,actual ON reservations
+            WHEN OLD.day IS NOT NEW.day OR OLD.reserved IS NOT NEW.reserved OR OLD.actual IS NOT NEW.actual
+            BEGIN {remove} {add} END''')
+        db.execute(f'CREATE TRIGGER luna_total_delete AFTER DELETE ON reservations BEGIN {remove} END')
 
     @contextmanager
     def database(self):
@@ -174,22 +209,23 @@ class DailyBudget:
 
     @staticmethod
     def totals(db, day):
-        row = db.execute('''SELECT COALESCE(SUM(actual),0),
-            COALESCE(SUM(CASE WHEN actual IS NULL THEN reserved ELSE 0 END),0)
-            FROM reservations WHERE day=?''', (day,)).fetchone()
-        return tuple(row)
+        row = db.execute('SELECT spent,pending,invalid FROM luna_day_totals WHERE day=?', (day,)).fetchone()
+        if row and row[2]:
+            raise CrawlError('Invalid Luna spend accounting; paid work is paused')
+        return (row[0], row[1]) if row else (0, 0)
 
     @staticmethod
     def limits(db, when, config):
         day=when.date().isoformat();first=when.replace(day=1,hour=0,minute=0,second=0,microsecond=0)
         month_reset=(first+timedelta(days=32)).replace(day=1)
-        month=db.execute('''SELECT COALESCE(SUM(actual),0),
-            COALESCE(SUM(CASE WHEN actual IS NULL THEN reserved ELSE 0 END),0)
-            FROM reservations WHERE day>=? AND day<?''',
+        month=db.execute('''SELECT COALESCE(SUM(spent),0),COALESCE(SUM(pending),0),COALESCE(SUM(invalid),0)
+            FROM luna_day_totals WHERE day>=? AND day<?''',
             (first.date().isoformat(),month_reset.date().isoformat())).fetchone()
+        if month[2]:
+            raise CrawlError('Invalid Luna spend accounting; paid work is paused')
         spent,pending=DailyBudget.totals(db,day)
         daily=units(config['daily_usd'])-spent-pending
-        monthly=units(config.get('monthly_usd',DEFAULT['monthly_usd']))-sum(month)
+        monthly=units(config.get('monthly_usd',DEFAULT['monthly_usd']))-month[0]-month[1]
         day_reset=(when+timedelta(days=1)).replace(hour=0,minute=0,second=0,microsecond=0)
         period='monthly' if monthly<daily else 'daily'
         return {'estimated_usd':spent/SCALE,'unresolved_usd':pending/SCALE,
@@ -211,6 +247,7 @@ class DailyBudget:
     def snapshot(self, *, maintenance=False):
         when = instant()
         with self.database() as db:
+            db.execute('BEGIN')
             config = {**DEFAULT,**json.loads(db.execute('SELECT value FROM settings WHERE id=1').fetchone()[0])}
             limits=self.limits(db,when,config)
             priority = self._enrichment_pending(db, when, maintenance=maintenance)

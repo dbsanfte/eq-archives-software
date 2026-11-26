@@ -17,7 +17,7 @@ import time
 
 from common import CrawlError, digest, save
 from daily_budget import AutomaticStopped, DailyBudget, DailyBudgetPause, EnrichmentPriorityPause
-from grading import Luna
+from grading import Luna, LunaUnavailable
 from import_status import EnrichmentError
 from indexer import gemma, passages, search_enrichment
 from indexer.capture_enrichment import Enricher, summary_requests
@@ -27,10 +27,13 @@ from policy_maintenance import MaintenanceServices, YieldWork, foreground, ident
 from policy_sources import ServiceError, SourceError, Sources
 
 
-WORKERS = 4
-PAGE_SIZE = 32
-MAX_RECORDS = 512
-SLICE_SECONDS = 480
+WORKERS = 8
+MAX_WORKERS = 16
+PAGE_SIZE = 64
+MAX_RECORDS = 1200
+SLICE_SECONDS = 720
+LUNA_SECONDS = 45
+MIN_REQUEST_TIME_LEFT = 15
 
 
 class State:
@@ -170,14 +173,14 @@ def write_wave(services, records, check):
             yield identifier, 'reused' if patch is None else 'updated'
 
 
-def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, maximum=MAX_RECORDS,
+def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, maximum=MAX_RECORDS, workers=WORKERS,
         enricher_factory=Enricher, should_yield=None):
-    if not 0 < seconds <= SLICE_SECONDS or not 1 <= maximum <= MAX_RECORDS:
+    if not 0 < seconds <= SLICE_SECONDS or not 1 <= maximum <= MAX_RECORDS or not 1 <= workers <= MAX_WORKERS:
         raise ValueError('Invalid historical enrichment slice bounds')
     deadline = time.monotonic() + seconds
     should_yield = should_yield or (lambda: foreground(root, enrichment=True))
     phase, next_at = 'bounded', 0
-    counters = {'luna_workers': WORKERS, 'embedding_waves': 0, 'examined': 0}
+    counters = {'luna_workers': workers, 'embedding_waves': 0, 'examined': 0}
     rotation, capped = cycle(COLLECTIONS), set()
     started = []
     opening_cache = Lock()
@@ -197,13 +200,18 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
         return record
 
     def grade(prepared, scope):
+        def check_request():
+            check()
+            if deadline - time.monotonic() < MIN_REQUEST_TIME_LEFT:
+                raise YieldWork()
+
         def client(path):
-            return Luna(path, deadline=time.time() + max(0, min(45, deadline - time.monotonic())))
+            return Luna(path, deadline=time.time() + LUNA_SECONDS)
         # Cold records from one scope may share a database. Serialize WAL
         # initialization only, then let the request threads run independently.
         with opening_cache:
             enricher = enricher_factory(state.root / 'policy-enrichment' / digest(scope), '/run/secrets/luna_api_key',
-                                        client_factory=client, check=check)
+                                        client_factory=client, check=check_request)
         with closing(enricher):
             return metadata_patch(enricher.enrich_for_maintenance(prepared.capture, prepared.source, prepared.grounding))
 
@@ -284,12 +292,12 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
         if budget['enrichment_pending']:
             phase, next_at = 'waiting_imports', time.time() + 60
             return report(True)
-        with ThreadPoolExecutor(max_workers=WORKERS) as pool:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
             last_report = 0
             while counters['examined'] < maximum:
                 check()
                 state.fill(services, check)
-                identifiers = state.ready(rotation, min(WORKERS, maximum - counters['examined']))
+                identifiers = state.ready(rotation, min(workers, maximum - counters['examined']))
                 if not identifiers:
                     phase, next_at = 'sweep_waiting', max(time.time() + 10, state.next_at())
                     break
@@ -307,6 +315,8 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
         phase, next_at = 'waiting_imports', time.time() + 60
     except AutomaticStopped:
         phase, next_at = 'waiting_configuration', time.time() + 300
+    except LunaUnavailable as error:
+        phase, next_at = 'retry_wait', time.time() + error.retry_after
     except (CrawlError, ValueError, OSError, sqlite3.Error):
         phase, next_at = 'retry_wait', time.time() + 60
     finally:
@@ -322,9 +332,13 @@ def main():
     job = os.environ['POLICY_JOB_NAME']
     if not re.fullmatch(r'eqarchives-enrichment-' + identity() + r'-[1-9][0-9]{0,8}', job):
         raise ValueError('Invalid enrichment job identity')
+    configured_workers = os.environ.get('LUNA_ENRICHMENT_WORKERS', str(WORKERS))
+    if not re.fullmatch(r'[1-9][0-9]?', configured_workers) or int(configured_workers) > MAX_WORKERS:
+        raise ValueError('Historical Luna workers must be between 1 and 16')
     with closing(State('/indexing-state', identity())) as state, closing(MaintenanceServices()) as services, \
             Sources(['/archive-sources', '/archive'], '/data/publisher.git') as sources:
-        result = run(args.root, state, services, sources, job, DailyBudget(os.environ['LUNA_DAILY_BUDGET_ROOT']))
+        result = run(args.root, state, services, sources, job, DailyBudget(os.environ['LUNA_DAILY_BUDGET_ROOT']),
+                     workers=int(configured_workers))
         print(json.dumps(result), flush=True)
 
 

@@ -1,5 +1,6 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime,timedelta,timezone
+import sqlite3
 
 import pytest
 
@@ -46,6 +47,39 @@ def test_monthly_reset_and_late_settlement_stay_in_original_month(tmp_path,monke
     assert account.snapshot()['remaining_usd']==20 and account.snapshot()['monthly']['remaining_usd']==25
     account.reserve(20);account.settle(receipt,.1)
     assert account.snapshot()['remaining_usd']==0 and account.snapshot()['monthly']['remaining_usd']==5
+
+
+def test_daily_totals_migrate_and_follow_writes_from_an_old_worker(tmp_path,monkeypatch):
+    monkeypatch.setattr('daily_budget.instant', lambda: datetime(2026,11,8,tzinfo=timezone.utc))
+    root = tmp_path/'luna'
+    root.mkdir()
+    previous = sqlite3.connect(root/'budget.sqlite3')
+    try:
+        with previous:
+            previous.execute('CREATE TABLE reservations(id TEXT PRIMARY KEY, day TEXT NOT NULL, reserved INTEGER NOT NULL, actual INTEGER, created TEXT NOT NULL)')
+            previous.execute("INSERT INTO reservations VALUES ('settled','2026-11-07',100,8,'previous')")
+            previous.execute("INSERT INTO reservations VALUES ('pending','2026-11-08',100,NULL,'today')")
+        account = DailyBudget(root)
+        assert account.snapshot()['estimated_usd'] == 0
+        assert account.snapshot()['monthly']['estimated_usd'] == 8e-9
+        assert account.snapshot()['unresolved_usd'] == 100e-9
+        with previous:
+            previous.execute("UPDATE reservations SET actual=3 WHERE id='pending'")
+            previous.execute("INSERT INTO reservations VALUES ('new','2026-11-08',27,NULL,'today')")
+            previous.execute("UPDATE reservations SET actual=3 WHERE id='pending'")
+            previous.execute("DELETE FROM reservations WHERE id='settled'")
+        live = account.snapshot()
+        assert live['estimated_usd'] == live['monthly']['estimated_usd'] == 3e-9
+        assert live['unresolved_usd'] == live['monthly']['unresolved_usd'] == 27e-9
+        with previous:
+            previous.execute("INSERT INTO reservations VALUES ('bad','2026-11-07',-1,NULL,'previous')")
+        with pytest.raises(CrawlError, match='Invalid Luna spend accounting'):
+            account.reserve(.01)
+        with previous:
+            previous.execute("DELETE FROM reservations WHERE id='bad'")
+        assert account.snapshot()['remaining_usd'] == live['remaining_usd']
+    finally:
+        previous.close()
 
 
 @pytest.mark.parametrize('value',[0,-1,True,'200',float('nan'),float('inf'),1000001])
