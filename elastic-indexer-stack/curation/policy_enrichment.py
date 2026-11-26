@@ -24,6 +24,7 @@ MAX_ATTEMPTED = 8
 SLICE_SECONDS = 75
 COUNTERS = ('updated', 'reused', 'failed', 'skipped')
 COLLECTIONS = ('websites', 'mailing-lists', 'newsgroups')
+FRONTIER_PAGE_SIZE = 384
 APP = 'eqarchives-rolling-enrichment'
 
 

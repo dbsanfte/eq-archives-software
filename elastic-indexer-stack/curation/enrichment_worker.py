@@ -1,6 +1,7 @@
 """Run the independent, bounded historical enrichment queue."""
 
 import argparse
+from collections import deque
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import closing
 from contextvars import copy_context
@@ -21,21 +22,21 @@ from import_status import EnrichmentError
 from indexer import gemma, passages, search_enrichment
 from indexer.capture_enrichment import Enricher, summary_requests
 from indexer.sqlite_state import SQLiteState
-from policy_enrichment import COLLECTIONS, COUNTERS, capture_identity, metadata_patch, prepare_refresh
+from policy_enrichment import COLLECTIONS, COUNTERS, FRONTIER_PAGE_SIZE, capture_identity, metadata_patch, prepare_refresh
 from policy_maintenance import MaintenanceServices, YieldWork, foreground, identity
 from policy_sources import ServiceError, SourceError, Sources
 
 
 WORKERS = 8
 MAX_WORKERS = 32
-PAGE_SIZE = 64
+FRONTIER_REFILL_AT = MAX_WORKERS
 MAX_RECORDS = 1200
 SLICE_SECONDS = 720
 LUNA_SECONDS = 45
 MIN_REQUEST_TIME_LEFT = 15
 SUMMARY_BATCH_SIZE = 16
 SUMMARY_BATCH_WAIT = 1
-EXECUTION_COUNTERS = ('embedding_waves', 'examined', 'checkpoint_views', 'rebuilt_views')
+EXECUTION_COUNTERS = ('embedding_waves', 'examined', 'checkpoint_views', 'rebuilt_views', 'frontier_queries')
 
 
 class State:
@@ -55,6 +56,7 @@ class State:
                 db.execute('''CREATE TABLE IF NOT EXISTS pending (
                     key TEXT, collection TEXT, id TEXT, attempts INTEGER DEFAULT 0, retry_at REAL DEFAULT 0,
                     PRIMARY KEY(key,id))''')
+                db.execute('CREATE INDEX IF NOT EXISTS pending_collection ON pending(key,collection,id)')
                 if not db.execute('SELECT 1 FROM progress WHERE key=?', (self.key,)).fetchone():
                     self.migrate(db)
         except BaseException:
@@ -83,34 +85,42 @@ class State:
     def fill(self, services, check):
         now = time.time()
         db = self.db.connection()
+        queries = 0
         for collection, cursor, next_at in db.execute('SELECT collection,cursor,next_at FROM frontiers WHERE key=?', (self.key,)).fetchall():
             if next_at > now:
                 continue
             queued, = db.execute('SELECT COUNT(*) FROM pending WHERE key=? AND collection=?', (self.key, collection)).fetchone()
-            if queued > PAGE_SIZE // 2:
+            if queued > FRONTIER_REFILL_AT:
                 continue
             check()
-            identifiers = services.select_enrichment(cursor, collection=collection, limit=PAGE_SIZE - queued)
-            if any(not identifier.startswith(collection + '/') for identifier in identifiers):
+            limit = FRONTIER_PAGE_SIZE - queued
+            identifiers = services.select_enrichment(cursor, collection=collection, limit=limit)
+            if len(identifiers) > limit or any(not identifier.startswith(collection + '/') for identifier in identifiers):
                 raise ServiceError('response_identity')
+            queries += 1
             with self.db.transaction(attempts=6) as db:
                 # The cursor can only pass IDs once they are in the durable queue.
                 db.executemany('INSERT OR IGNORE INTO pending(key,collection,id) VALUES (?,?,?)',
                                [(self.key, collection, identifier) for identifier in identifiers])
                 db.execute('UPDATE frontiers SET cursor=?,next_at=? WHERE key=? AND collection=?',
                            (identifiers[-1] if identifiers else '', 0 if identifiers else now + 900, self.key, collection))
+        return queries
 
     def ready(self, rotation, limit, active=frozenset()):
-        rows = {name: [] for name in COLLECTIONS}
-        for collection, identifier in self.db.connection().execute(
-                'SELECT collection,id FROM pending WHERE key=? AND retry_at<=? ORDER BY id', (self.key, time.time())):
-            if identifier not in active:
-                rows[collection].append(identifier)
+        if limit <= 0:
+            return []
+        now = time.time()
+        blocked = tuple(active)
+        excluding = f"AND id NOT IN ({','.join('?' for _ in blocked)})" if blocked else ''
+        query = f'SELECT id FROM pending WHERE key=? AND collection=? AND retry_at<=? {excluding} ORDER BY id LIMIT ?'
+        db = self.db.connection()
+        rows = {collection: deque(row[0] for row in db.execute(query, (self.key, collection, now, *blocked, limit)))
+                for collection in COLLECTIONS}
         result = []
         while len(result) < limit and any(rows.values()):
             collection = next(rotation)
             if rows[collection]:
-                result.append(rows[collection].pop(0))
+                result.append(rows[collection].popleft())
         return result
 
     def next_at(self):
@@ -235,7 +245,7 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
         outcomes.append((prepared, patch))
 
     def admit(pool, limit):
-        state.fill(services, check)
+        counters['frontier_queries'] += state.fill(services, check)
         identifiers = state.ready(rotation, limit, started)
         for identifier in identifiers:
             check()
