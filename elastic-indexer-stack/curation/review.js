@@ -792,12 +792,14 @@ function renderLive() {
     host.append(box);
   } else if (row.stage==='indexing' && review) {
     const state=review.state,preparing=['awaiting_review','index_preflight_failed'].includes(state),preflightFailed=state==='index_preflight_failed',publishing=state==='publication_requested',paused=publishing && review.operation?.state==='interrupted',failed=state==='index_failed',budgetWaiting=state==='index_budget_waiting';
-    const title=budgetWaiting ? (review.job?.budget_period==='monthly' ? 'Waiting for monthly Luna budget' : 'Waiting for daily Luna budget') : preflightFailed ? 'Indexing preparation paused' : preparing ? 'Preparing automatic indexing' : paused ? 'Publication paused' : failed ? 'Indexing needs attention' : publishing ? 'Publishing approved files' : state==='published_waiting_index' ? 'Waiting to index' : 'AI enrichment & indexing';
+    const capacityWaiting=budgetWaiting && review.job?.budget_period==='provider';
+    const title=capacityWaiting ? 'Waiting for Luna capacity' : budgetWaiting ? (review.job?.budget_period==='monthly' ? 'Waiting for monthly Luna budget' : 'Waiting for daily Luna budget') : preflightFailed ? 'Indexing preparation paused' : preparing ? 'Preparing automatic indexing' : paused ? 'Publication paused' : failed ? 'Indexing needs attention' : publishing ? 'Publishing approved files' : state==='published_waiting_index' ? 'Waiting to index' : 'AI enrichment & indexing';
     const publicationRetry=paused && retryPending(review.operation?.retry);
-    const box=panel(publicationRetry ? 'Publication retry scheduled' : title,budgetWaiting ? `Paid results and indexed pages are retained. The next request needs a reservation of $${Number(review.job.required_usd).toFixed(4)}. This site resumes automatically when the daily budget allows, resetting at ${new Date(data.automation?.resets_at || review.job.retry_at).toUTCString()}. You can change the Luna limits in Candidates.` : preflightFailed ? 'Saved files are retained. Resolve the issue below and retry preparation.' : preparing ? 'Checking saved files, archive coverage and your original capture approval. Publication and indexing follow automatically.' : publicationRetry ? 'Your approval and saved files are retained. Publication will retry automatically and check the remote marker before publishing again.' : paused ? 'Your approval is saved. Retry publication to continue with the retained sources.' : failed ? 'Published sources are retained. Retry with saved AI results and the same site budget; existing entries are skipped.' : publishing ? 'The approved site is being added to the archive. Git publication can take several minutes.' : state==='published_waiting_index' ? 'Approved sites share one foreground import slot. Background policy work yields to them.' : 'Luna enrichment and indexing are running. The site will retire from the active portal when the import completes.',paused || failed || preflightFailed ? 'attention' : '');
+    const box=panel(publicationRetry ? 'Publication retry scheduled' : title,capacityWaiting ? 'Paid results are saved. This site resumes automatically after the Luna cooldown.' : budgetWaiting ? `Paid results and indexed pages are retained. The next request needs a reservation of $${Number(review.job.required_usd).toFixed(4)}. This site resumes automatically when the daily budget allows, resetting at ${new Date(data.automation?.resets_at || review.job.retry_at).toUTCString()}. You can change the Luna limits in Candidates.` : preflightFailed ? 'Saved files are retained. Resolve the issue below and retry preparation.' : preparing ? 'Checking saved files, archive coverage and your original capture approval. Publication and indexing follow automatically.' : publicationRetry ? 'Your approval and saved files are retained. Publication will retry automatically and check the remote marker before publishing again.' : paused ? 'Your approval is saved. Retry publication to continue with the retained sources.' : failed ? 'Published sources are retained. Retry with saved AI results and the same site budget; existing entries are skipped.' : publishing ? 'The approved site is being added to the archive. Git publication can take several minutes.' : state==='published_waiting_index' ? 'Approved sites share one foreground import slot. Background policy work yields to them.' : 'Luna enrichment and indexing are running. The site will retire from the active portal when the import completes.',paused || failed || preflightFailed ? 'attention' : '');
     box.append(node('p','Capture and discovery continue independently of publication and indexing.','meta'));
     box.append(node('p',`AI enrichment: up to $${siteEnrichmentLimit(review)} for this site across all dates, attempts and retries, plus the shared daily and monthly limits.`,'meta'));
     if (publicationRetry) activityDeadline(box,review.operation.retry.retry_at,'Publication retry');
+    if (capacityWaiting) activityDeadline(box,review.job.retry_at,'Luna retry');
     if (publishing && review.operation?.state==='running') publicationProgress(box,review.operation);
     if (review.error || review.operation?.error) box.append(node('p',review.error || review.operation.error));
     const step=preparing ? 0 : publishing ? 1 : state==='published_waiting_index' ? 2 : 3,pipeline=node('ol',undefined,'pipeline');
@@ -1124,6 +1126,9 @@ function renderPipelineActivity() {
           body.append(node('p',`$${Number(auto.remaining_usd).toFixed(4)} available within both limits. Saved work resumes automatically when funded.`));
           activityDeadline(body,auto.resets_at,`${period} budget reset`);
           if (auto.activity.required_usd>auto.settings.daily_usd) body.append(node('p','The next request exceeds the daily limit. Raise the limit in automatic settings to continue.','activity-warning'));
+        } else if (phase==='luna_capacity') {
+          status='Waiting for Luna capacity';tone='waiting';
+          activityDeadline(body,auto.activity.retry_at,'Luna retry');
         } else if (phase==='enrichment_priority') {
           status='Enrichment has priority';tone='waiting';
           body.append(node('p','Archive enrichment has first use of Luna funds. Discovery grading resumes automatically afterward.'));
@@ -1174,7 +1179,11 @@ function renderPipelineActivity() {
         activitySite(body,index.site);
         if (index.job?.waiting_for_reindex?.length) {status='Waiting for archive reindex';body.append(node('p',`Waiting for: ${index.job.waiting_for_reindex.join(', ')}`,'address'));}
         else if (index.job?.waiting_for?.length) {status='Waiting for another approved site';body.append(node('p',`Waiting for: ${index.job.waiting_for.join(', ')}`,'address'));}
-        else if (index.state==='index_budget_waiting') activityDeadline(body,auto?.resets_at || index.job?.retry_at,index.job?.budget_period==='monthly' ? 'Monthly budget reset' : 'Daily budget reset');
+        else if (index.state==='index_budget_waiting') {
+          const capacity=index.job?.budget_period==='provider';
+          if (capacity) status='Waiting for Luna capacity';
+          activityDeadline(body,capacity ? index.job?.retry_at : auto?.resets_at || index.job?.retry_at,capacity ? 'Luna retry' : index.job?.budget_period==='monthly' ? 'Monthly budget reset' : 'Daily budget reset');
+        }
         else body.append(node('p',index.state==='indexing' ? 'AI enrichment and import are running. Completed sites retire to History.' : 'The indexing worker checks approved work every 10 seconds.'));
         if (index.job?.name) body.append(node('p',`Job: ${index.job.name}`,'address'));
         if (index.error) {tone='attention';body.append(node('p',index.error,'activity-warning'));}
@@ -1254,6 +1263,7 @@ function renderAutomation() {
   let status=settings.enabled ? `Continuously discovering and grading. Sites at Grade ${settings.min_grade}+ are automatically captured and indexed; lower grades are saved for later.` : 'Off. Turn on automatic mode to keep discovering, grading, capturing and indexing sites.';
   if (settings.enabled && waiting) status=`Waiting for ${period.toLowerCase()} Luna funds. Discovery resumes automatically after the reset at ${reset}. Captures and approved work retain their progress.`;
   if (settings.enabled && auto.activity?.phase==='enrichment_priority') status='Archive enrichment has first use of Luna funds. Discovery grading resumes automatically when that work clears; capture and publication continue.';
+  if (settings.enabled && auto.activity?.phase==='luna_capacity') status='Discovery grading resumes automatically after the Luna cooldown.';
   if (settings.enabled && waiting && auto.activity.required_usd>settings.daily_usd) status=`The next grading request needs a $${auto.activity.required_usd.toFixed(4)} reservation, exceeding the daily limit. Raise the limit below to continue. Progress is retained.`;
   if (settings.enabled && auto.activity?.phase==='links_exhausted') status='All currently known new links have been checked. Discovery checks again in five minutes; remembered sites are kept.';
   if (settings.enabled && auto.activity?.phase==='archive_unavailable') status='Available source pages have been checked; some archive sources are unavailable locally. See Pipeline activity for scan progress and the next check.';

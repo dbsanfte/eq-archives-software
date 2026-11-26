@@ -557,7 +557,10 @@ class Worker:
                 pause = read_budget_pause(self.root, batch, name)
                 if pause:
                     state, detail = 'index_budget_waiting', {**detail, 'state': 'waiting_budget', **pause}
-                    if self.daily_budget.snapshot()['remaining_usd'] >= pause['required_usd']:
+                    budget = self.daily_budget.snapshot()
+                    ready = (max(pause['retry_at'], budget.get('luna_retry_at', '')) <= now()
+                             if pause.get('budget_period') == 'provider' else budget['remaining_usd'] >= pause['required_usd'])
+                    if ready:
                         state, detail = 'published_waiting_index', self.continue_import(batch, name)
                 elif diagnostic.get('state') != 'completed':
                     state = 'index_failed'

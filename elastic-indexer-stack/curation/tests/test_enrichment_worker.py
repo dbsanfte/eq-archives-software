@@ -1,17 +1,17 @@
 import json
 from contextlib import closing
 from itertools import cycle
-from threading import Barrier, Event, Lock
+from threading import Barrier, BrokenBarrierError, Event, Lock
 
 import pytest
 
 from common import digest
-from daily_budget import DailyBudget
+from daily_budget import DailyBudget, LunaRatePause
 import enrichment_worker
 from enrichment_worker import MAX_WORKERS, WORKERS, State, run
 from indexer import passages, search_enrichment
 from indexer.capture_enrichment import Enricher
-from policy_enrichment import prepare_refresh_hit
+from policy_enrichment import eligible, prepare_refresh_hit
 from policy_maintenance import State as PolicyState, identity, repair
 from policy_pool import PreparationPool
 from policy_scheduler import receipt
@@ -27,7 +27,8 @@ class Service(Maintenance):
         self.waves = []
 
     def select_enrichment(self, cursor, *, collection, limit):
-        return [key for key in super().select_enrichment(cursor) if key.startswith(collection + '/')][:limit]
+        return [key for key, hit in sorted(self.hits.items()) if key > cursor and key.startswith(collection + '/')
+                and eligible(hit['_source'])][:limit]
 
     def vectors(self, inputs, check):
         self.waves.append(list(inputs))
@@ -81,7 +82,10 @@ def factory(calls, barrier=None, on_request=None):
             with lock:
                 calls.append(supplied)
             if barrier:
-                barrier.wait(timeout=8)
+                try:
+                    barrier.wait()
+                except BrokenBarrierError as error:
+                    raise AssertionError(f'{len(calls)} of {barrier.parties} requests reached Luna') from error
             passage = ' '.join(supplied['search_passages'])
             index = next(i for i in range(1, MAX_WORKERS + 1) if f'number {i}.' in passage)
             if on_request:
@@ -99,11 +103,22 @@ def factory(calls, barrier=None, on_request=None):
 @pytest.mark.parametrize('worker_count', [WORKERS, MAX_WORKERS])
 def test_paid_requests_overlap_at_default_and_maximum_concurrency(tmp_path, worker_count, monkeypatch):
     service, sources = prepared_service(tmp_path, count=worker_count)
-    account = budget(tmp_path)
+    account = budget(tmp_path, daily=10)
     state = State(tmp_path / 'indexing-state', identity())
     calls = []
     initialized = []
     install = enrichment_worker.install_scope_totals
+    original_enrichment = Enricher.enrich_for_maintenance
+    problems = []
+
+    def record_failure(*args, **kwargs):
+        try:
+            return original_enrichment(*args, **kwargs)
+        except Exception as error:
+            problems.append((type(error).__name__, str(error)))
+            raise
+
+    monkeypatch.setattr(Enricher, 'enrich_for_maintenance', record_failure)
 
     def record_initialization(db):
         initialized.append(db.execute('PRAGMA database_list').fetchone()[2])
@@ -114,14 +129,14 @@ def test_paid_requests_overlap_at_default_and_maximum_concurrency(tmp_path, work
         job = 'eqarchives-enrichment-' + identity() + '-1'
         with closing(PreparationPool(sources.roots, sources.publication, enrichment=True)) as pool:
             result = run(tmp_path,state,service,sources,job,account,maximum=worker_count,should_yield=lambda:False,
-                         workers=worker_count, enricher_factory=factory(calls, Barrier(worker_count)),
+                         workers=worker_count, enricher_factory=factory(calls, Barrier(worker_count, timeout=20)),
                          preparation_pool=pool)
         scheduler_state = {'name':job, **{key:result[key] for key in ('image','policy','key')}}
         assert receipt(tmp_path, scheduler_state)['execution'] == result['execution']
         assert result['execution']['preparation_workers'] == 2
         assert result['execution']['checkpoint_views'] == worker_count
         assert result['execution']['rebuilt_views'] == 0
-        assert result['enrichment']['updated'] == worker_count
+        assert result['enrichment']['updated'] == worker_count, (len(calls), sorted(set(problems)), result)
         assert len(calls) == worker_count and sum(map(len, service.waves)) == worker_count
         assert len(initialized) == len(set(initialized)) == 3
         assert account.snapshot()['estimated_usd'] > 0
@@ -334,6 +349,57 @@ def test_provider_access_failure_retains_records_and_backs_off(tmp_path):
     finally:
         state.close()
         sources.close()
+
+
+def test_historical_cooldown_leaves_queue_unadmitted_and_resumes(tmp_path, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    service, sources = prepared_service(tmp_path)
+    account = budget(tmp_path)
+    stamp = datetime.now(timezone.utc)
+    monkeypatch.setattr('daily_budget.instant', lambda: stamp)
+    account.observe_luna_capacity(stamp, 15, {})
+    calls = []
+    with closing(sources), closing(State(tmp_path / 'state', identity())) as state:
+        def attempt():
+            return run(tmp_path, state, service, sources, 'fixture', account, maximum=4,
+                       should_yield=lambda: False, enricher_factory=factory(calls))
+
+        first = attempt()
+        assert first['phase'] == 'retry_wait' and first['execution']['examined'] == 0 and not calls
+        assert first['next_at'] == (stamp + timedelta(seconds=15)).timestamp()
+        stamp += timedelta(seconds=16)
+        assert attempt()['updated'] == 4 and len(calls) == 4
+
+
+def test_known_luna_throttle_keeps_reservation_and_can_resume_same_request(tmp_path):
+    from datetime import datetime, timezone
+
+    account = budget(tmp_path)
+    grounding = ('EverQuest guild raid report.',)
+    capture = {'url': 'http://guild.example/news', 'archive_path': 'websites/guild.example/20000101000000/news',
+               'sha256': digest(b'archive source')}
+    calls = []
+
+    class Provider:
+        def request(self, payload):
+            calls.append(payload)
+            if len(calls) <= 2:
+                raise LunaRatePause(datetime.now(timezone.utc), status=429)
+            return response({**{key: RESULT[key] for key in ('llm_tags', 'llm_content_flavour')},
+                             'llm_summary': 'Guild raid report.', 'content_role': 'article', 'topics': [], 'entities': []})
+
+        def close(self):
+            pass
+
+    with account.bind(purpose='maintenance'), closing(Enricher(tmp_path / 'cache', 'unused', client_factory=lambda _: Provider())) as enricher:
+        for _ in range(2):
+            with pytest.raises(LunaRatePause):
+                enricher.enrich_for_maintenance(capture, grounding[0], grounding)
+        assert enricher.enrich_for_maintenance(capture, grounding[0], grounding)['llm_summary'] == 'Guild raid report.'
+        assert calls[0] == calls[1] == calls[2]
+        assert enricher.store.db.execute("SELECT COUNT(*) FROM attempts WHERE status='provider_throttled' AND actual IS NULL").fetchone()[0] == 2
+        assert account.snapshot(maintenance=True)['unresolved_usd'] > 0
 
 
 def test_budget_pause_preserves_queue_and_embedding_failure_reuses_paid_wave(tmp_path):

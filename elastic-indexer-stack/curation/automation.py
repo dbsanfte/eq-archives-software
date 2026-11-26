@@ -8,7 +8,7 @@ import time
 from candidate_checks import require_finished, start as start_check
 from common import CrawlError, digest, now
 from coverage_check import refresh, require_new
-from daily_budget import DailyBudget, DailyBudgetPause, AutomaticStopped, EnrichmentPriorityPause
+from daily_budget import DailyBudget, DailyBudgetPause, AutomaticStopped, EnrichmentPriorityPause, LunaRatePause
 from portal import Stage, candidate_filter, decorate
 from review import _apply_decisions, record, checked_sources
 from grading import current_rating
@@ -182,6 +182,9 @@ def schedule(root, account):
         if snapshot.get('enrichment_pending'):
             store.set('automatic_activity',{'phase':'enrichment_priority'})
             return
+        if snapshot.get('luna_retry_at'):
+            store.set('automatic_activity', {'phase':'luna_capacity', 'retry_at':snapshot['luna_retry_at']})
+            return
         # Only automation-owned pauses are resumed. Manual paused runs retain
         # their explicit-resume semantics and their original limits.
         previous = store.db.execute("""SELECT * FROM operations WHERE kind IN ('discover','candidate_check')
@@ -240,6 +243,8 @@ def finished(root, operation, result):
 def pause_detail(error, operation=None):
     if isinstance(error, EnrichmentPriorityPause):
         return {'reason':'enrichment_priority'}
+    if isinstance(error, LunaRatePause):
+        return {'reason':'luna_capacity', 'retry_at':error.retry_at}
     if isinstance(error, DailyBudgetPause):
         return {'reason': 'daily_budget', 'required_usd': error.amount, 'retry_at': error.retry_at,'budget_period':error.period}
     if isinstance(error, AutomaticStopped):
@@ -257,7 +262,7 @@ def resume_owned(root, lane, account):
         if active_operation(store, lane):
             return
         rows = store.db.execute(f"""SELECT * FROM operations WHERE state='interrupted'
-            AND (json_extract(payload,'$.automatic')=1 OR json_extract(result,'$.automatic_pause.reason')='enrichment_priority')
+            AND (json_extract(payload,'$.automatic')=1 OR json_extract(result,'$.automatic_pause.reason') IN ('enrichment_priority','luna_capacity'))
             AND kind IN ({','.join('?' for _ in kinds)})
             ORDER BY updated,created,rowid""", kinds).fetchall()
         for row in rows:
@@ -265,7 +270,11 @@ def resume_owned(root, lane, account):
             pause = (operation['result'] or {}).get('automatic_pause') or {}
             reason = pause.get('reason')
             priority=reason=='enrichment_priority' and not snapshot.get('enrichment_pending')
-            allowed = (priority and (not operation['payload'].get('automatic') or snapshot['settings']['enabled']) or
+            retry_at = pause.get('retry_at')
+            capacity = (reason == 'luna_capacity' and isinstance(retry_at, str) and
+                        not snapshot.get('enrichment_pending') and
+                        max(retry_at, snapshot.get('luna_retry_at', '')) <= now())
+            allowed = ((priority or capacity) and (not operation['payload'].get('automatic') or snapshot['settings']['enabled']) or
                        snapshot['settings']['enabled'] and (reason == 'disabled' or
                        reason == 'daily_budget' and snapshot['remaining_usd'] >= pause.get('required_usd', float('inf')) or
                        operation['error'] == 'Worker stopped; resume explicitly'))

@@ -6,7 +6,7 @@ import pytest
 
 import automation
 from common import CrawlError, digest
-from daily_budget import DailyBudgetPause, current_budget
+from daily_budget import DailyBudgetPause, LunaRatePause, current_budget
 from import_status import read_budget_pause, status_path, write_status
 from jobs import import_job, import_name
 from server import create_app
@@ -18,7 +18,8 @@ from test_server import call
 from worker import Worker
 
 
-def test_budget_wait_is_not_completion_and_resumes_new_job_without_changing_reindex(tmp_path, monkeypatch):
+@pytest.mark.parametrize('provider', [False, True])
+def test_budget_wait_is_not_completion_and_resumes_new_job_without_changing_reindex(tmp_path, monkeypatch, provider):
     root = tmp_path/'state'
     row, manifest = completed(root)
     immutable = published(root, manifest, 'indexing')
@@ -36,9 +37,14 @@ def test_budget_wait_is_not_completion_and_resumes_new_job_without_changing_rein
     account.configure(settings(account, enabled=True, daily_usd=.1))
     today = datetime(2026, 10, 9, 23, 59, tzinfo=timezone.utc)
     monkeypatch.setattr('daily_budget.instant', lambda: today)
-    account.reserve(.1)
+    if provider:
+        account.observe_luna_capacity(today, 60, {})
+        monkeypatch.setattr('worker.now', lambda: today.isoformat())
+    else:
+        account.reserve(.1)
     directory = root/'enrichment'/batch['id']; directory.mkdir(parents=True)
-    write_status(directory, import_name(batch), batch['manifest_sha256'], 'waiting_budget', DailyBudgetPause(.01, '2026-10-10T00:00:00+00:00'))
+    pause = LunaRatePause(today + timedelta(minutes=1)) if provider else DailyBudgetPause(.01, '2026-10-10T00:00:00+00:00')
+    write_status(directory, import_name(batch), batch['manifest_sha256'], 'waiting_budget', pause)
     kube = Kube()
     monkeypatch.setenv('IMPORT_IMAGE', IMAGE)
     worker = Worker(root, kube=kube)
@@ -48,7 +54,7 @@ def test_budget_wait_is_not_completion_and_resumes_new_job_without_changing_rein
         view = call(app, 'GET', '/api/candidate?id='+row['id']).json()
         assert view['candidate']['stage'] == 'indexing'
         assert view['review']['state'] == 'index_budget_waiting'
-        assert view['review']['job']['required_usd'] == .01
+        assert view['review']['job']['required_usd'] == (0 if provider else .01)
         assert not kube.created
         today += timedelta(minutes=2)
         worker.indexing()
@@ -98,7 +104,7 @@ def test_indexer_budget_exit_retains_manifest_bound_wait_and_closes_context(cand
     assert account.snapshot()['unresolved_usd'] == .1
 
 
-@pytest.mark.parametrize('change', [{'required_usd': -1}, {'required_usd': 'secret'}, {'required_usd': True},
+@pytest.mark.parametrize('change', [{'required_usd': -1}, {'required_usd': 'secret'}, {'required_usd': True}, {'budget_period': 'provider'},
     {'retry_at': 'invalid'}, {'retry_at': '2026-10-10'}, {'manifest_sha256': 'stale'}, {'state': 'completed'}])
 def test_budget_diagnostics_reject_invalid_or_stale_content(tmp_path, change):
     batch = {'id': 'a'*32, 'manifest_sha256': 'b'*64}

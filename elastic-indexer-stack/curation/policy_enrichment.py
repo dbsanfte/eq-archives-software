@@ -9,7 +9,7 @@ import time
 from urllib.parse import urlsplit
 
 from common import CrawlError, digest
-from daily_budget import AutomaticStopped, DailyBudget, DailyBudgetPause, EnrichmentPriorityPause
+from daily_budget import AutomaticStopped, DailyBudget, DailyBudgetPause, EnrichmentPriorityPause, LunaRatePause
 from grading import Luna
 from import_status import EnrichmentError
 from indexer import gemma, passages, search_enrichment
@@ -173,6 +173,8 @@ def run_enrichment(state, services, sources, owner, budget_root, check, *, secon
             return report('waiting_configuration', next_at=time.time() + 300)
         if budget['remaining_usd'] <= 0:
             return report('waiting_budget', next_at=datetime.fromisoformat(budget['resets_at']).timestamp())
+        if budget['luna_retry_at']:
+            return report('retry_wait', next_at=datetime.fromisoformat(budget['luna_retry_at']).timestamp())
         if budget['enrichment_pending']:
             return report('waiting_imports', next_at=time.time() + 60)
         allowed()
@@ -228,6 +230,8 @@ def run_enrichment(state, services, sources, owner, budget_root, check, *, secon
         return report('bounded')
     except SliceDone:
         return report('bounded')
+    except LunaRatePause as error:
+        return report('retry_wait', next_at=datetime.fromisoformat(error.retry_at).timestamp())
     except DailyBudgetPause as error:
         return report('waiting_budget', next_at=datetime.fromisoformat(error.retry_at).timestamp())
     except EnrichmentPriorityPause:
