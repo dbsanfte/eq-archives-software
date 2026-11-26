@@ -2,6 +2,7 @@
 
 from contextlib import nullcontext
 from datetime import date
+from functools import lru_cache
 import json
 import logging
 import math
@@ -111,17 +112,21 @@ def policy(manifest):
     return dict(settings)
 
 
-def domain_prompts(domain):
-    files = [RESOURCES / "prompts" / "default.yml"]
-    files.extend(sorted(path for path in (RESOURCES / "prompts").glob("*.yml") if path.name != "default.yml"))
-    prompts = None
-    for path in files:
+@lru_cache(maxsize=4)
+def prompt_templates(directory):
+    default = yaml.safe_load((directory / 'default.yml').read_text())['text_prompts']
+    overrides = []
+    for path in sorted(directory.glob('*.yml')):
+        if path.name == 'default.yml':
+            continue
         content = yaml.safe_load(path.read_text())
-        if path.name == "default.yml" or re.search(content["domain_match_regex"], domain):
-            prompts = content["text_prompts"]
-            if path.name != "default.yml":
-                break
-    return prompts
+        overrides.append((re.compile(content['domain_match_regex']), content['text_prompts']))
+    return default, tuple(overrides)
+
+
+def domain_prompts(domain):
+    default, overrides = prompt_templates(RESOURCES / 'prompts')
+    return dict(next((prompts for pattern, prompts in overrides if pattern.search(domain)), default))
 
 
 def instructions(domain, legacy=False):

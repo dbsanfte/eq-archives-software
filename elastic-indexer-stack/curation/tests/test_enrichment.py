@@ -6,7 +6,7 @@ import pytest
 
 from common import CrawlError, digest
 from import_status import EnrichmentError
-from indexer import search_enrichment
+from indexer import capture_enrichment, search_enrichment
 from indexer.capture_enrichment import (MAINTENANCE_SCHEMA, Enricher, adaptive_summary,
                                        instructions, policy, response_metadata, validate)
 
@@ -325,6 +325,30 @@ def test_reviewed_policy_enables_enrichment_and_domain_prompts_keep_archive_cont
     assert policy({})=={'enrichment':True,'model':'gpt-6-luna','max_enrichment_usd':2}
     with pytest.raises(CrawlError):policy({'indexing':{'enrichment':False}})
     assert 'Castersrealm' in instructions('eq.castersrealm.com')
+
+
+def test_prompt_yaml_is_loaded_once_with_original_override_order_and_independent_results(tmp_path, monkeypatch):
+    templates = tmp_path / 'prompts'
+    templates.mkdir()
+    (templates / 'default.yml').write_text('text_prompts: {summary: Default}')
+    (templates / 'a-specific.yml').write_text('domain_match_regex: raid.example\ntext_prompts: {summary: Raid}')
+    (templates / 'b-general.yml').write_text('domain_match_regex: example\ntext_prompts: {summary: General}')
+    monkeypatch.setattr(capture_enrichment, 'RESOURCES', tmp_path)
+    load = capture_enrichment.yaml.safe_load
+    calls = []
+
+    def counted(value):
+        calls.append(value)
+        return load(value)
+
+    monkeypatch.setattr(capture_enrichment.yaml, 'safe_load', counted)
+    chosen = capture_enrichment.domain_prompts('raid.example')
+    assert chosen == {'summary': 'Raid'}
+    chosen['summary'] = 'Changed by the caller'
+    assert capture_enrichment.domain_prompts('raid.example') == {'summary': 'Raid'}
+    assert capture_enrichment.domain_prompts('other.example') == {'summary': 'General'}
+    assert capture_enrichment.domain_prompts('unrelated.test') == {'summary': 'Default'}
+    assert len(calls) == 3
 
 
 def table_result(excerpt='Last Comment | 10/13/99 2:54:01 am'):
