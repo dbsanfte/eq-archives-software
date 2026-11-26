@@ -752,6 +752,12 @@ on retry without paying again for a received response, while existing document
 IDs incur no model calls. Failed enrichment or an exhausted budget leaves that
 document pending instead of silently creating an unenriched entry. There is no
 index/mapping creation, RabbitMQ or broad scan.
+New import Jobs run up to 12 paid requests concurrently within one approved
+site import. The worker prepares up to 8 MiB of text source per batch and handles
+larger individual files alone. Equal URL and source hashes use the same paid
+cache in order. Embedding validation and create-only writes remain in manifest
+order. The worker lets outstanding requests settle before rechecking a site,
+daily or monthly budget denial. Provider cooldowns keep their normal wake-up.
 Mislabeled binary downloads (for example DWF maps served as `text/plain`) remain
 preserved source files, without paid text enrichment or blocking later pages.
 Classification uses known binary signatures or dense control-byte evidence,

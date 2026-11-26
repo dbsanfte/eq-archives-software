@@ -127,6 +127,7 @@ def import_job(batch, image):
                                                        {"name": "LUNA_DAILY_BUDGET_ROOT", "value": "/luna-budget"},
                                                        {"name": "LUNA_MONTHLY_BUDGET_VERSION", "value": "calendar-v1"},
                                                        {"name": "LUNA_SITE_BUDGET_VERSION", "value": "site-v1"},
+                                                       {"name": "IMPORT_LUNA_WORKERS", "value": "12"},
                                                        {"name": "EMBEDDING_CACHE_PATH", "value": "/indexing-state/embeddings.sqlite"},
                                                        {"name": "DISCUSSION_CATALOG_PATH", "value": "/indexing-state/discussions.sqlite"},
                                                        {"name": "EMBEDDING_URL", "value": "http://cuda-batch-inference.eqarchives-es.svc.cluster.local:8080"},

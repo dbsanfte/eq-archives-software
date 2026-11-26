@@ -847,6 +847,12 @@ retain their configured daily policy). Preserve full source,
 model provenance and supported date evidence; capture dates are not publication
 estimates. Enrichment failures leave the new document pending. Skip existing
 IDs without paying for enrichment or overwriting their metadata.
+New approved import Jobs overlap up to twelve Luna requests in bounded text
+batches, with at most 8 MiB of source per batch and larger pages handled alone.
+Serialize equal URL/source pairs, preserve the shared paid ledger and cache, and
+apply create-only document writes in manifest order. Recheck scope or calendar
+budget denials after the batch's reservations settle. Keep provider cooldowns
+and previously started Jobs intact.
 New enrichment requests derive bounded, excerpt-backed free-form topics and
 typed entities from the indexed passage projection. Keep broad tags, original
 readers, date evidence and previous paid-response identities. Do not index
