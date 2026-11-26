@@ -1383,6 +1383,13 @@ Maintenance continues the unfinished older-policy frontier, retries scoped gaps
 and then sweeps the earlier prefix, reusing vectors only with exact proof.
 Existing broad Jobs and old checkpoints remain retained.
 
+When a historical enrichment request is denied after its newsgroup has drained
+to one grade, that slice stops refilling exact numbered messages from the same
+group. Other groups and collections can keep using the remaining record
+allowance. The filtered search uses a temporary cursor, and the next slice can
+recheck eligibility from the saved unfiltered cursor. Status receipts count
+known queued rows bypassed in `scope_budget_bypassed`.
+
 ### Optional Wayback relay
 
 The operator-owned `eqarchives-wayback-relay` ConfigMap in `eqarchives-es`
