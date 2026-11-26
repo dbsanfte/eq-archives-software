@@ -25,7 +25,8 @@ from indexer.sqlite_state import SQLiteState
 from indexer.embedding_batches import embed_batches, decode_vectors
 from indexer.vector_json import dumps as vector_json
 from policy_sources import Sources, SourceError, ServiceError
-from policy_enrichment import COLLECTIONS, COUNTERS, FRONTIER_PAGE_SIZE, current_enrichment, run_enrichment
+from policy_enrichment import (COLLECTIONS, COUNTERS, FRONTIER_PAGE_SIZE, MAX_HELD_NEWSGROUPS, NEWSGROUP_MESSAGE_SUFFIX,
+                               NEWSGROUP_NAME, current_enrichment, run_enrichment)
 from policy_preparation import (LEGACY_POLICY, FIELDS as PASSAGE_FIELDS, newer, prepare,
                                 verify_prepared,renderer_identity,request_identity)
 from policy_pool import PreparationPool, WorkerLost
@@ -217,7 +218,7 @@ class MaintenanceServices(Services):
     def select(self,cursor):
         return self.select_ids(cursor, filter_by=[], exclude=[self.current_policy()])
 
-    def select_enrichment(self,cursor,*,collection=None,limit=100):
+    def select_enrichment(self,cursor,*,collection=None,limit=100,exclude_newsgroups=()):
         if collection is not None and collection not in COLLECTIONS:
             raise ValueError('Unknown enrichment collection')
         acceptable={'bool':{'should':[{'bool':{'must_not':[{'exists':{'field':'llm_search_enrichment_version'}}]}},
@@ -225,7 +226,16 @@ class MaintenanceServices(Services):
         policy=self.current_policy() if collection in (None,'websites') else {'term':{'text_chunking_version':passages.VERSION}}
         filters=[policy,acceptable,
                  {'nested':{'path':'text','query':{'exists':{'field':'text.text_chunk'}},'score_mode':'none'}}]
-        return self.select_ids(cursor, filter_by=filters, exclude=[current_enrichment()],limit=limit,collection=collection)
+        exclude = [current_enrichment()]
+        if exclude_newsgroups:
+            if (collection != 'newsgroups' or len(exclude_newsgroups) > MAX_HELD_NEWSGROUPS
+                    or any(not re.fullmatch(NEWSGROUP_NAME, group) for group in exclude_newsgroups)):
+                raise ValueError('Invalid enrichment newsgroup exclusion')
+            for group in exclude_newsgroups:
+                literal = group.replace('.', r'\.').replace('+', r'\+')
+                pattern = f'newsgroups/{literal}{NEWSGROUP_MESSAGE_SUFFIX}'
+                exclude.append({'regexp': {'id': {'value': pattern, 'flags': 'NONE'}}})
+        return self.select_ids(cursor, filter_by=filters, exclude=exclude,limit=limit,collection=collection)
 
     def select_ids(self,cursor,*,filter_by,exclude,limit=100,collection=None):
         if type(limit) is not int or not 1<=limit<=(FRONTIER_PAGE_SIZE if collection else 100):

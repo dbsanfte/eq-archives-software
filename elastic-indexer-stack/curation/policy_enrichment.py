@@ -25,6 +25,9 @@ SLICE_SECONDS = 75
 COUNTERS = ('updated', 'reused', 'failed', 'skipped')
 COLLECTIONS = ('websites', 'mailing-lists', 'newsgroups')
 FRONTIER_PAGE_SIZE = 384
+MAX_HELD_NEWSGROUPS = 16
+NEWSGROUP_NAME = r'[A-Za-z0-9][A-Za-z0-9._+-]{0,127}'
+NEWSGROUP_MESSAGE_SUFFIX = r'-msg-[0-9]+\.txt'
 APP = 'eqarchives-rolling-enrichment'
 
 
@@ -65,8 +68,13 @@ def capture_identity(identifier):
         return url, (collection, host, port if port not in (80, 443) else None)
     if len(parts) < 2:
         raise SourceError('source_identity')
-    scope = parts[1] if collection == 'mailing-lists' else re.sub(r'-msg-[0-9]+\.txt$', '', parts[1])
+    scope = parts[1] if collection == 'mailing-lists' else re.sub(NEWSGROUP_MESSAGE_SUFFIX + '$', '', parts[1])
     return ArchiveHandler()._convert_to_archive_url(identifier), (collection, scope)
+
+
+def newsgroup_message_scope(identifier):
+    match = re.fullmatch(rf'newsgroups/({NEWSGROUP_NAME}){NEWSGROUP_MESSAGE_SUFFIX}', identifier)
+    return match[1] if match else None
 
 
 @dataclass(frozen=True)

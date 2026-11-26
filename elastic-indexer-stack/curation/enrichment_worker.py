@@ -23,7 +23,8 @@ from import_status import EnrichmentError
 from indexer import gemma, passages, search_enrichment
 from indexer.capture_enrichment import Enricher, domain_prompts, summary_requests
 from indexer.sqlite_state import SQLiteState
-from policy_enrichment import COLLECTIONS, COUNTERS, FRONTIER_PAGE_SIZE, capture_identity, metadata_patch, prepare_refresh
+from policy_enrichment import (COLLECTIONS, COUNTERS, FRONTIER_PAGE_SIZE, MAX_HELD_NEWSGROUPS, capture_identity,
+                               metadata_patch, newsgroup_message_scope, prepare_refresh)
 from policy_maintenance import UPDATE_BATCH_SIZE, MaintenanceServices, YieldWork, foreground, identity
 from policy_pool import PreparationPool, WorkerLost
 from policy_sources import ServiceError, SourceError, Sources
@@ -43,7 +44,8 @@ SUMMARY_BATCH_WAIT = 1
 PREPARATION_WORKERS = 2
 PREPARATION_POLL = .01
 EXECUTION_COUNTERS = ('embedding_waves', 'examined', 'checkpoint_views', 'rebuilt_views', 'frontier_queries',
-                      'preparation_workers', 'preparation_retries', 'scope_budget_retries', 'scope_budget_exhausted')
+                      'preparation_workers', 'preparation_retries', 'scope_budget_retries', 'scope_budget_exhausted',
+                      'scope_budget_bypassed')
 
 
 def pending_scope(identifier):
@@ -56,6 +58,9 @@ def pending_scope(identifier):
 class State:
     def __init__(self, root, key):
         self.root, self.key = Path(root), key + ':' + search_enrichment.VERSION
+        self.held_newsgroups = set()
+        self.newsgroup_cursor = None
+        self.newsgroup_next_at = 0
         self.root.mkdir(parents=True, exist_ok=True, mode=0o770)
         fd = os.open(self.root / 'enrichment-maintenance.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o660)
         self.lease = os.fdopen(fd, 'a')
@@ -103,11 +108,30 @@ class State:
         self.db.close()
         self.lease.close()
 
+    def hold_newsgroup(self, identifier, scope, active):
+        group = newsgroup_message_scope(identifier)
+        if group is None or len(self.held_newsgroups) >= MAX_HELD_NEWSGROUPS:
+            return 0
+        self.held_newsgroups.add(group)
+        with self.db.transaction(attempts=6) as db:
+            queued = [row[0] for row in db.execute('SELECT id FROM pending WHERE key=? AND collection=? AND scope=?',
+                                                   (self.key, 'newsgroups', scope))]
+            bypassed = [identifier for identifier in queued if identifier not in active]
+            db.executemany('DELETE FROM pending WHERE key=? AND id=?',
+                           [(self.key, identifier) for identifier in bypassed])
+            db.execute('UPDATE progress SET skipped=skipped+? WHERE key=?', (len(bypassed), self.key))
+        return len(bypassed)
+
     def fill(self, services, check, *, refill_at=FRONTIER_REFILL_AT):
         now = time.time()
         db = self.db.connection()
         queries = 0
         for collection, cursor, next_at in db.execute('SELECT collection,cursor,next_at FROM frontiers WHERE key=?', (self.key,)).fetchall():
+            excluded = self.held_newsgroups if collection == 'newsgroups' else ()
+            if excluded:
+                next_at = self.newsgroup_next_at
+                if self.newsgroup_cursor is not None:
+                    cursor = self.newsgroup_cursor
             if next_at > now:
                 continue
             queued, = db.execute('SELECT COUNT(*) FROM pending WHERE key=? AND collection=?', (self.key, collection)).fetchone()
@@ -115,7 +139,8 @@ class State:
                 continue
             check()
             limit = FRONTIER_PAGE_SIZE - queued
-            identifiers = services.select_enrichment(cursor, collection=collection, limit=limit)
+            selection = {'exclude_newsgroups': sorted(excluded)} if excluded else {}
+            identifiers = services.select_enrichment(cursor, collection=collection, limit=limit, **selection)
             if len(identifiers) > limit or any(not identifier.startswith(collection + '/') for identifier in identifiers):
                 raise ServiceError('response_identity')
             queries += 1
@@ -123,8 +148,16 @@ class State:
             with self.db.transaction(attempts=6) as db:
                 # The cursor can only pass IDs once they are in the durable queue.
                 db.executemany('INSERT OR IGNORE INTO pending(key,collection,id,scope) VALUES (?,?,?,?)', items)
-                db.execute('UPDATE frontiers SET cursor=?,next_at=? WHERE key=? AND collection=?',
-                           (identifiers[-1] if identifiers else '', 0 if identifiers else now + 900, self.key, collection))
+                if not excluded:
+                    db.execute('UPDATE frontiers SET cursor=?,next_at=? WHERE key=? AND collection=?',
+                               (identifiers[-1] if identifiers else '', 0 if identifiers else now + 900, self.key, collection))
+            if excluded:
+                # A filtered page cannot advance the durable cursor over unseen records.
+                # The next job can discover them again with a fresh budget decision.
+                if identifiers:
+                    self.newsgroup_cursor = identifiers[-1]
+                else:
+                    self.newsgroup_next_at = now + 900
         return queries
 
     def ready(self, rotation, limit, active=frozenset(), blocked_scopes=()):
@@ -150,8 +183,10 @@ class State:
     def next_at(self):
         row = self.db.connection().execute('''SELECT MIN(ready) FROM (
             SELECT retry_at AS ready FROM pending WHERE key=? UNION ALL
-            SELECT next_at FROM frontiers f WHERE f.key=? AND NOT EXISTS (
-                SELECT 1 FROM pending p WHERE p.key=f.key AND p.collection=f.collection))''', (self.key, self.key)).fetchone()
+            SELECT CASE WHEN f.collection='newsgroups' AND ?>0 THEN ? ELSE next_at END FROM frontiers f
+            WHERE f.key=? AND NOT EXISTS (
+                SELECT 1 FROM pending p WHERE p.key=f.key AND p.collection=f.collection))''',
+            (self.key, self.newsgroup_next_at, self.newsgroup_next_at, self.key)).fetchone()
         return row[0] or 0
 
     def begin(self, identifier):
@@ -408,6 +443,7 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
                     # from this job. Its denial still counts historical uncertainty.
                     capped.add(scope)
                     counters['scope_budget_exhausted'] += 1
+                    counters['scope_budget_bypassed'] += state.hold_newsgroup(records[0].hit['_id'], scope, started)
                 for prepared in records:
                     finish(prepared.hit['_id'], 'skipped' if error.code == 'budget' else 'failed',
                            'enrichment_' + error.code)

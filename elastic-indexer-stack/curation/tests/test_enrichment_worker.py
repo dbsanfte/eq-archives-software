@@ -1,6 +1,8 @@
 import json
+import re
 import sqlite3
 from contextlib import closing, nullcontext
+from dataclasses import replace
 from itertools import cycle
 from threading import Barrier, BrokenBarrierError, Event, Lock
 from types import SimpleNamespace
@@ -241,6 +243,59 @@ def test_scope_exhaustion_keeps_uncertain_charges_and_other_scopes_running(tmp_p
     assert result['execution']['scope_budget_exhausted'] == 1
     with closing(Store(directory, initialize=False)) as store:
         assert attempt_spending(store) == {'estimated_usd': 49.90, 'reserved_usd': .09}
+
+
+def test_held_newsgroup_cannot_fill_the_next_enrichment_slice(tmp_path, monkeypatch):
+    root = tmp_path / 'state'
+    group = 'alt.games.everquest'
+    directory = root / 'policy-enrichment' / digest(('newsgroups', group))
+    with closing(Store(directory)) as store, store.db:
+        store.db.execute('''INSERT INTO attempts(candidate,signature,reserved,status,created,actual)
+                         VALUES ('prior','held',50,'reserved','2026-11-26T00:00:00Z',NULL)''')
+
+    size = enrichment_worker.FRONTIER_PAGE_SIZE
+    held = [f'newsgroups/{group}-msg-{index:04d}.txt' for index in range(3 * size)]
+    other = [f'newsgroups/{group}-msg-z.txt', 'newsgroups/alt.games.everquest.extra-msg-1.txt']
+    service, sources = prepared_service(tmp_path, count=3)
+    hit, = (hit for identifier, hit in service.hits.items() if identifier.startswith('newsgroups/'))
+
+    class Frontier(Service):
+        def __init__(self):
+            super().__init__({**hit, '_id': key, '_source': {**hit['_source'], 'id': key}}
+                             for key in held + other)
+            self.filtered_pages = []
+
+        def select_enrichment(self, cursor, *, collection, limit, exclude_newsgroups=()):
+            page = super().select_enrichment(cursor, collection=collection, limit=len(self.hits))
+            if exclude_newsgroups:
+                assert collection == 'newsgroups'
+                pattern = '|'.join(fr'newsgroups/{re.escape(group)}-msg-[0-9]+\.txt'
+                                   for group in exclude_newsgroups)
+                page = [key for key in page if not re.fullmatch(pattern, key)]
+                self.filtered_pages.append(page[:limit])
+            return page[:limit]
+
+    # Use the real budget logic with fixtures that share equivalent archive text.
+    def prepare(services, sources, identifier, url, check):
+        return replace(prepare_refresh_hit(hit, sources, url), hit=services.get(identifier))
+
+    monkeypatch.setattr(enrichment_worker, 'prepare_refresh', prepare)
+    frontier = Frontier()
+    calls = []
+    with closing(sources), closing(State(root, identity())) as state:
+        result = run(tmp_path, state, frontier, sources, 'held', budget(tmp_path, daily=10),
+                     maximum=12, workers=1, enricher_factory=factory(calls), should_yield=lambda: False)
+        assert result['updated'] == len(other)
+        assert result['failed'] == 0 and result['skipped'] == size
+        assert result['execution']['examined'] == 1 + len(other)
+        assert result['execution']['scope_budget_bypassed'] == size - 1
+        assert frontier.filtered_pages == [other, []]
+        assert result['next_at'] > result['updated_at'] + 600
+        assert len(calls) == len(other)
+    with closing(State(root, identity())) as resumed:
+        # A new slice with a fresh budget decision can still reach the hidden tail.
+        resumed.fill(frontier, lambda: None)
+        assert resumed.ready(cycle(enrichment_worker.COLLECTIONS), 1) == [held[size]]
 
 
 def test_scope_filter_keeps_existing_queue_and_canonical_aliases(tmp_path):

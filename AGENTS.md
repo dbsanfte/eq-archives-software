@@ -1388,6 +1388,11 @@ and let that scope's outstanding grades settle. Reduce concurrency for that
 scope and retry with its existing paid cache. Other scopes can keep using free
 slots. Only a denial at one in-flight grade can mark the scope exhausted for
 the slice. Keep the $50 lifetime limit and unresolved charges in the ledger.
+For a confirmed capped newsgroup, retire its known unstarted queue rows in one
+transaction and exclude its exact numbered message IDs from later refills for
+that slice. These rows use no further examination allowance. Filtered refills
+enqueue durably and leave the unfiltered cursor available for a fresh budget
+decision. Keep the filter private, bounded and literal.
 Share a verified TLS context within each historical Job and keep each grader's
 connection independent. Dedicated enrichment Jobs can burst to four CPUs with
 the existing low CPU request. Body maintenance keeps its two-CPU limit.

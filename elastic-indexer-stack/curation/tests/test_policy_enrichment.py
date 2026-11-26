@@ -325,6 +325,25 @@ def test_frontier_pages_use_bounded_id_reads_with_the_current_policy(collection)
         services.select_enrichment(cursor, collection=collection, limit=FRONTIER_PAGE_SIZE + 1)
 
 
+def test_frontier_excludes_only_literal_newsgroup_message_ids():
+    services = MaintenanceServices.__new__(MaintenanceServices)
+    services.index = 'eq-archive-0'
+
+    def request(method, path, body, *, limit):
+        exclusions = body['query']['bool']['must_not']
+        assert len(exclusions) == 2
+        assert {'regexp': {'id': {'value': r'newsgroups/alt\.game\+group-msg-[0-9]+\.txt',
+                                  'flags': 'NONE'}}} in exclusions
+        return {'timed_out': False, '_shards': {'failed': 0}, 'hits': {'hits': []}}
+
+    services.request = request
+    assert services.select_enrichment('', collection='newsgroups', exclude_newsgroups=['alt.game+group']) == []
+    for collection, names in [('websites', ['alt.games']), ('newsgroups', ['alt.game|other']),
+                              ('newsgroups', ['alt.games'] * 17)]:
+        with pytest.raises(ValueError, match='newsgroup exclusion'):
+            services.select_enrichment('', collection=collection, exclude_newsgroups=names)
+
+
 @pytest.mark.parametrize('changes,hits', [
     ({'timed_out': True}, []),
     ({'_shards': {'failed': 1}}, []),
