@@ -1109,6 +1109,13 @@ Each scope's cache is initialized once per Job. Its spend projection backfills
 from the original attempts and folds only changed rows during admission. SQLite
 triggers let older writers participate, and the same per-row integer rounding
 continues to count settled usage and unresolved reservations.
+If a reservation fills a scope's allowance during concurrent grading, the
+worker retains the affected IDs, waits for that scope's outstanding grades to
+settle, and retries with fewer requests in flight. Other scopes keep using free
+slots. A denial with the scope running one grade at a time marks that scope
+exhausted for the slice. Execution receipts distinguish retried IDs from scopes
+that reached this limit. Earlier unresolved reservations still count against
+the allowance.
 Grounding can reuse a current selected view reconstructed from its stored
 passage offsets. The complete view and reader must match their recorded hashes.
 Textual websites also require verified archive bytes and a matching decoded

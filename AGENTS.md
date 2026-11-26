@@ -1377,6 +1377,11 @@ Apply cooldown before taking a new reservation. Retain the money reserved on
 ambiguous responses and permit cooldown continuations with their saved work.
 Serialize each historical Job's short cache and spend transactions while its
 Luna requests continue concurrently outside SQLite transactions.
+On a scope-budget denial during concurrent grading, keep the exact IDs queued
+and let that scope's outstanding grades settle. Reduce concurrency for that
+scope and retry with its existing paid cache. Other scopes can keep using free
+slots. Only a denial at one in-flight grade can mark the scope exhausted for
+the slice. Keep the $50 lifetime limit and unresolved charges in the ledger.
 Share a verified TLS context within each historical Job and keep each grader's
 connection independent. Dedicated enrichment Jobs can burst to four CPUs with
 the existing low CPU request. Body maintenance keeps its two-CPU limit.

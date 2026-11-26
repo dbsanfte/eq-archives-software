@@ -124,12 +124,14 @@ def test_dedicated_budget_receipt_persists_pause_without_blocking_body_jobs(tmp_
     next_at=time.time()+3600
     progress=dict(job=state['name'],policy=passages.VERSION,model=gemma.MODEL,image=IMAGE,key=identity(),
                   scanned=76,unresolved=0,terminal=True,phase='waiting_budget',updated_at=time.time(),next_at=next_at,
-                  execution={'luna_workers':4,'embedding_waves':3,'examined':12},
+                  execution={'luna_workers':4,'embedding_waves':3,'examined':12,
+                             'scope_budget_retries':2,'scope_budget_exhausted':1},
                   enrichment={**counts,'last_reason':None,'phase':'waiting_budget','next_at':next_at},**counts)
     (tmp_path/'indexing-state').mkdir(exist_ok=True)
     save(tmp_path/'indexing-state'/(state['name']+'.json'),progress)
     paid=schedule(tmp_path,kube,kube.items.copy(),IMAGE,enrichment=True)
     assert paid['phase']=='waiting_budget' and paid['next_at']==next_at and len(kube.created)==1
+    assert paid['progress']['execution'] == progress['execution']
     assert background(tmp_path,kube)['phase']=='running' and len(kube.created)==2
 
 
