@@ -12,6 +12,7 @@ from enrichment_worker import MAX_WORKERS, WORKERS, State, run
 from indexer import passages, search_enrichment
 from indexer.capture_enrichment import Enricher
 from policy_maintenance import State as PolicyState, identity, repair
+from policy_scheduler import receipt
 from test_enrichment import RESULT, response
 from test_policy_enrichment import Maintenance, budget
 from test_policy_maintenance import V, fixture
@@ -96,7 +97,7 @@ def factory(calls, barrier=None, on_request=None):
 def test_paid_requests_overlap_at_default_and_maximum_concurrency(tmp_path, worker_count, monkeypatch):
     service, sources = prepared_service(tmp_path, count=worker_count)
     account = budget(tmp_path)
-    state = State(tmp_path / 'state',identity())
+    state = State(tmp_path / 'indexing-state', identity())
     calls = []
     initialized = []
     install = enrichment_worker.install_scope_totals
@@ -107,8 +108,13 @@ def test_paid_requests_overlap_at_default_and_maximum_concurrency(tmp_path, work
 
     monkeypatch.setattr(enrichment_worker, 'install_scope_totals', record_initialization)
     try:
-        result = run(tmp_path,state,service,sources,'fixture',account,maximum=worker_count,should_yield=lambda:False,
+        job = 'eqarchives-enrichment-' + identity() + '-1'
+        result = run(tmp_path,state,service,sources,job,account,maximum=worker_count,should_yield=lambda:False,
                      workers=worker_count, enricher_factory=factory(calls, Barrier(worker_count)))
+        scheduler_state = {'name':job, **{key:result[key] for key in ('image','policy','key')}}
+        assert receipt(tmp_path, scheduler_state)['execution'] == result['execution']
+        assert result['execution']['checkpoint_views'] == worker_count
+        assert result['execution']['rebuilt_views'] == 0
         assert result['enrichment']['updated'] == worker_count
         assert len(calls) == worker_count and sum(map(len, service.waves)) == worker_count
         assert len(initialized) == len(set(initialized)) == 3
