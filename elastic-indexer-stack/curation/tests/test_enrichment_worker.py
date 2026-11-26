@@ -1,5 +1,6 @@
 import json
-from contextlib import closing
+import sqlite3
+from contextlib import closing, nullcontext
 from itertools import cycle
 from threading import Barrier, BrokenBarrierError, Event, Lock
 from types import SimpleNamespace
@@ -7,10 +8,11 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from common import digest
-from daily_budget import DailyBudget, LunaRatePause
+from common import Store, digest
+from daily_budget import DailyBudget, LunaRatePause, attempt_spending
 import enrichment_worker
 from enrichment_worker import MAX_WORKERS, WORKERS, State, run, write_wave
+from import_status import EnrichmentError
 from indexer import passages, search_enrichment
 from indexer.capture_enrichment import Enricher
 from policy_enrichment import eligible, prepare_refresh_hit
@@ -158,6 +160,106 @@ def test_prepared_enrichment_reaches_the_optimistic_bulk_writer(tmp_path):
         result = run(tmp_path, state, service, sources, 'fixture', budget(tmp_path), maximum=1,
                      enricher_factory=factory([]), should_yield=lambda: False, preparation_pool=pool)
     assert len(calls) == result['updated'] == 1
+
+
+@pytest.mark.parametrize('maximum', [9, 60])
+def test_scope_reservations_release_under_concurrent_enrichment(tmp_path, monkeypatch, maximum):
+    service, sources = prepared_service(tmp_path, count=9)
+    account = budget(tmp_path, daily=10)
+    first_request, other_scope, budget_denied = Event(), Event(), Event()
+    scope = ('websites', 'guild.example', None)
+    directory = tmp_path / 'state' / 'policy-enrichment' / digest(scope)
+    with closing(Store(directory)) as store, store.db:
+        store.db.execute('''INSERT INTO attempts(candidate,signature,reserved,status,created,actual)
+                            VALUES ('prior','settled',49.96,'received','2026-11-26T00:00:00Z',49.96)''')
+
+    original = Enricher.enrich_for_maintenance
+
+    def observe_budget(enricher, *args, **kwargs):
+        try:
+            return original(enricher, *args, **kwargs)
+        except EnrichmentError as error:
+            if error.code == 'budget':
+                budget_denied.set()
+            raise
+
+    def await_reservations(number):
+        if number in (2, 3):
+            other_scope.set()
+        elif not first_request.is_set():
+            first_request.set()
+            assert budget_denied.wait(5), 'expected overlapping requests to fill the scope allowance'
+            assert other_scope.wait(5), 'another scope could not make progress'
+
+    monkeypatch.setattr(Enricher, 'enrich_for_maintenance', observe_budget)
+    calls = []
+    root = tmp_path / 'state'
+    enrich = factory(calls, on_request=await_reservations)
+    preparation = (closing(PreparationPool(sources.roots, sources.publication, enrichment=True))
+                   if maximum == 60 else nullcontext())
+    with closing(sources), preparation as pool:
+        with closing(State(root, identity())) as state:
+            result = run(tmp_path, state, service, sources, 'fixture', account, maximum=maximum, workers=8,
+                         should_yield=lambda: False, enricher_factory=enrich, preparation_pool=pool)
+            assert result['execution']['scope_budget_retries'] > 0
+            assert result['failed'] == result['skipped'] == 0
+            if maximum == 9:
+                attempts = state.db.connection().execute('SELECT attempts FROM pending').fetchall()
+                assert attempts and all(row == (0,) for row in attempts)
+            else:
+                assert not state.ready(cycle(enrichment_worker.COLLECTIONS), 60)
+        if maximum == 9:
+            with closing(State(root, identity())) as state:
+                result = run(tmp_path, state, service, sources, 'resumed', account, maximum=60, workers=8,
+                             should_yield=lambda: False, enricher_factory=enrich)
+                assert not state.ready(cycle(enrichment_worker.COLLECTIONS), 60)
+    assert budget_denied.is_set()
+    assert len(calls) == result['updated'] == 9
+    assert result['failed'] == result['skipped'] == 0
+    with closing(Store(directory, initialize=False)) as store:
+        spent = attempt_spending(store)
+    assert 49.96 < spent['estimated_usd'] < 50 and spent['reserved_usd'] == 0
+
+
+def test_scope_exhaustion_keeps_uncertain_charges_and_other_scopes_running(tmp_path):
+    service, sources = prepared_service(tmp_path, count=9)
+    root = tmp_path / 'state'
+    directory = root / 'policy-enrichment' / digest(('websites', 'guild.example', None))
+    with closing(Store(directory)) as store, store.db:
+        store.db.executemany('''INSERT INTO attempts(candidate,signature,reserved,status,created,actual)
+                              VALUES ('prior',?,?,?,'2026-11-26T00:00:00Z',?)''',
+                             [('settled', 49.90, 'received', 49.90), ('uncertain', .09, 'reserved', None)])
+    requests = []
+    account = budget(tmp_path, daily=10)
+    with closing(sources), closing(State(root, identity())) as state:
+        result = run(tmp_path, state, service, sources, 'fixture', account, maximum=60, workers=8,
+                     should_yield=lambda: False, enricher_factory=factory([], on_request=requests.append))
+        assert not state.ready(cycle(enrichment_worker.COLLECTIONS), 60)
+    assert sorted(requests) == [2, 3]
+    assert result['updated'] == 2 and result['skipped'] == 7 and result['failed'] == 0
+    assert result['execution']['scope_budget_retries'] > 0
+    assert result['execution']['scope_budget_exhausted'] == 1
+    with closing(Store(directory, initialize=False)) as store:
+        assert attempt_spending(store) == {'estimated_usd': 49.90, 'reserved_usd': .09}
+
+
+def test_scope_filter_keeps_existing_queue_and_canonical_aliases(tmp_path):
+    key = identity() + ':' + search_enrichment.VERSION
+    website = 'websites/guild.example/20000101000000/page.html'
+    alias = 'websites/www.guild.example:80/20000101000000/another.html'
+    other = 'websites/other.example/20000101000000/news.html'
+    identifiers = [website, alias, other]
+    with closing(sqlite3.connect(tmp_path / 'enrichment-maintenance.sqlite')) as old, old:
+        old.execute('''CREATE TABLE pending (key TEXT, collection TEXT, id TEXT, attempts INTEGER DEFAULT 0,
+                    retry_at REAL DEFAULT 0, PRIMARY KEY(key,id))''')
+        old.executemany('INSERT INTO pending VALUES (?,\'websites\',?,2,0)', [(key, path) for path in identifiers])
+
+    with closing(State(tmp_path, identity())) as state:
+        scope = digest(('websites', 'guild.example', None))
+        rotation = cycle(enrichment_worker.COLLECTIONS)
+        assert state.ready(rotation, 4, blocked_scopes=(scope,)) == [other]
+        assert state.ready(rotation, 4) == sorted(identifiers)
+        assert state.db.connection().execute('SELECT DISTINCT attempts FROM pending').fetchall() == [(2,)]
 
 
 @pytest.mark.parametrize('worker_count', [WORKERS, MAX_WORKERS])

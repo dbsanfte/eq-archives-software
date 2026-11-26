@@ -1,7 +1,7 @@
 """Run the independent, bounded historical enrichment queue."""
 
 import argparse
-from collections import deque
+from collections import Counter, deque
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import closing
 from contextvars import copy_context
@@ -43,7 +43,14 @@ SUMMARY_BATCH_WAIT = 1
 PREPARATION_WORKERS = 2
 PREPARATION_POLL = .01
 EXECUTION_COUNTERS = ('embedding_waves', 'examined', 'checkpoint_views', 'rebuilt_views', 'frontier_queries',
-                      'preparation_workers', 'preparation_retries')
+                      'preparation_workers', 'preparation_retries', 'scope_budget_retries', 'scope_budget_exhausted')
+
+
+def pending_scope(identifier):
+    try:
+        return digest(capture_identity(identifier)[1])
+    except (SourceError, TypeError, ValueError):
+        return ''  # Leave invalid identifiers to the normal per-record failure path.
 
 
 class State:
@@ -62,7 +69,14 @@ class State:
                     key TEXT, collection TEXT, cursor TEXT, next_at REAL, PRIMARY KEY(key,collection))''')
                 db.execute('''CREATE TABLE IF NOT EXISTS pending (
                     key TEXT, collection TEXT, id TEXT, attempts INTEGER DEFAULT 0, retry_at REAL DEFAULT 0,
-                    PRIMARY KEY(key,id))''')
+                    scope TEXT, PRIMARY KEY(key,id))''')
+                if 'scope' not in {row[1] for row in db.execute('PRAGMA table_info(pending)')}:
+                    db.execute('ALTER TABLE pending ADD COLUMN scope TEXT')
+                # Older images can still populate this queue after a rollback.
+                missing_scopes = db.execute('SELECT id FROM pending WHERE key=? AND scope IS NULL', (self.key,)).fetchall()
+                if missing_scopes:
+                    db.executemany('UPDATE pending SET scope=? WHERE key=? AND id=?',
+                                   [(pending_scope(identifier), self.key, identifier) for identifier, in missing_scopes])
                 db.execute('CREATE INDEX IF NOT EXISTS pending_collection ON pending(key,collection,id)')
                 if not db.execute('SELECT 1 FROM progress WHERE key=?', (self.key,)).fetchone():
                     self.migrate(db)
@@ -105,23 +119,26 @@ class State:
             if len(identifiers) > limit or any(not identifier.startswith(collection + '/') for identifier in identifiers):
                 raise ServiceError('response_identity')
             queries += 1
+            items = [(self.key, collection, identifier, pending_scope(identifier)) for identifier in identifiers]
             with self.db.transaction(attempts=6) as db:
                 # The cursor can only pass IDs once they are in the durable queue.
-                db.executemany('INSERT OR IGNORE INTO pending(key,collection,id) VALUES (?,?,?)',
-                               [(self.key, collection, identifier) for identifier in identifiers])
+                db.executemany('INSERT OR IGNORE INTO pending(key,collection,id,scope) VALUES (?,?,?,?)', items)
                 db.execute('UPDATE frontiers SET cursor=?,next_at=? WHERE key=? AND collection=?',
                            (identifiers[-1] if identifiers else '', 0 if identifiers else now + 900, self.key, collection))
         return queries
 
-    def ready(self, rotation, limit, active=frozenset()):
+    def ready(self, rotation, limit, active=frozenset(), blocked_scopes=()):
         if limit <= 0:
             return []
         now = time.time()
         blocked = tuple(active)
         excluding = f"AND id NOT IN ({','.join('?' for _ in blocked)})" if blocked else ''
+        if blocked_scopes:
+            excluding += f" AND (scope IS NULL OR scope NOT IN ({','.join('?' for _ in blocked_scopes)}))"
         query = f'SELECT id FROM pending WHERE key=? AND collection=? AND retry_at<=? {excluding} ORDER BY id LIMIT ?'
         db = self.db.connection()
-        rows = {collection: deque(row[0] for row in db.execute(query, (self.key, collection, now, *blocked, limit)))
+        rows = {collection: deque(row[0] for row in db.execute(
+            query, (self.key, collection, now, *blocked, *blocked_scopes, limit)))
                 for collection in COLLECTIONS}
         result = []
         while len(result) < limit and any(rows.values()):
@@ -216,6 +233,7 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
     if preparation_pool:
         counters['preparation_workers'] = preparation_pool.workers
     rotation, capped = cycle(COLLECTIONS), set()
+    scope_running, scope_limits, draining = Counter(), {}, set()
     started, initialized = set(), set()
     futures, scheduled = {}, {}
     preparing = {}
@@ -265,6 +283,15 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
             buffered_at = time.monotonic()
         outcomes.append((prepared, patch))
 
+    def scope_blocked(scope):
+        running = scope_running[scope]
+        return running > 0 and (scope in draining or running >= scope_limits.get(scope, workers))
+
+    def requeue(identifiers):
+        # Capacity holds never consume one of the record's interruption attempts.
+        state.release(identifiers)
+        started.difference_update(identifiers)
+
     def submit_grade(pool, identifier, scope, prepared):
         if prepared is None or scope in capped:
             finish(identifier, 'skipped')
@@ -273,17 +300,22 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
         if prepared.capture is None:
             completed(prepared, None)
             return False
-        cache = state.root / 'policy-enrichment' / digest(scope)
+        key = scope, prepared.capture['url'], prepared.capture['sha256'], digest(prepared.grounding)
+        if key in scheduled:
+            futures[scheduled[key]][1].append(prepared)
+            return True
+        if scope_blocked(scope):
+            requeue([identifier])
+            return False
+        cache = state.root / 'policy-enrichment' / scope
         if scope not in initialized:
             with closing(Store(cache)) as store:
                 install_scope_totals(store.db)
             initialized.add(scope)
-        key = scope, prepared.capture['url'], prepared.capture['sha256'], digest(prepared.grounding)
-        if key not in scheduled:
-            future = pool.submit(copy_context().run, grade, prepared, cache)
-            scheduled[key] = future
-            futures[future] = (key, [])
-        futures[scheduled[key]][1].append(prepared)
+        future = pool.submit(copy_context().run, grade, prepared, cache)
+        scheduled[key] = future
+        futures[future] = (key, [prepared], scope_limits.get(scope, workers))
+        scope_running[scope] += 1
         return True
 
     def preparation_lost(identifier):
@@ -294,7 +326,8 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
 
     def admit(pool, limit):
         counters['frontier_queries'] += state.fill(services, check, refill_at=max(FRONTIER_REFILL_AT, workers))
-        identifiers = state.ready(rotation, limit, started)
+        blocked_scopes = tuple(scope for scope in scope_limits if scope_blocked(scope))
+        identifiers = state.ready(rotation, limit, started, blocked_scopes)
         for identifier in identifiers:
             check()
             counters['examined'] += 1
@@ -304,6 +337,7 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
             started.add(identifier)
             try:
                 url, scope = capture_identity(identifier)
+                scope = digest(scope)
                 if preparation_pool and scope not in capped:
                     hit = services.get(identifier)
                     preparing[identifier] = (preparation_pool.submit((hit, url)), scope)
@@ -348,13 +382,32 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
         for future in tuple(futures):
             if not future.done():
                 continue
-            key, records = futures.pop(future)
+            key, records, submitted_limit = futures.pop(future)
             del scheduled[key]
+            scope = key[0]
+            running = scope_running[scope]
+            scope_running[scope] -= 1
+            if running == 1:
+                del scope_running[scope]
+                draining.discard(scope)
             try:
                 patch = future.result()
             except EnrichmentError as error:
                 if error.code == 'budget':
-                    capped.add(key[0])
+                    if submitted_limit > 1:
+                        # The other reservations can still settle and free room.
+                        # Drain this scope, then reduce overlap and recheck the exact records.
+                        if submitted_limit == scope_limits.get(scope, workers):
+                            scope_limits[scope] = max(1, running // 2)
+                        if running > 1:
+                            draining.add(scope)
+                        requeue([prepared.hit['_id'] for prepared in records])
+                        counters['scope_budget_retries'] += len(records)
+                        continue
+                    # A grade launched at a width of one had no peer reservations
+                    # from this job. Its denial still counts historical uncertainty.
+                    capped.add(scope)
+                    counters['scope_budget_exhausted'] += 1
                 for prepared in records:
                     finish(prepared.hit['_id'], 'skipped' if error.code == 'budget' else 'failed',
                            'enrichment_' + error.code)
@@ -387,7 +440,7 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
             capacity = 0
             if not pause:
                 check()
-                capacity = workers - sum(len(records) for _, records in futures.values())
+                capacity = workers - sum(len(records) for _, records, _ in futures.values())
                 capacity = collect_preparations(pool, capacity)
                 # Each process can hold one prepared result while grading is full.
                 available = preparation_pool.workers - len(preparing) if preparation_pool else capacity
