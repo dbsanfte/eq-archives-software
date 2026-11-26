@@ -1373,6 +1373,10 @@ from older images.
 Update daily integer totals transactionally from the original reservation rows,
 including writes by older Jobs. Reuse date-free metadata only for the same exact
 request within one scope and retain separate raw-source validation receipts.
+Historical grounding can reconstruct a current single-source passage view from
+strict offsets and overlaps with exact reader and view hashes. Require verified
+archive bytes and matching decoded HTML for textual websites. Keep the full
+preparation fallback and the legacy paid-cache source content.
 Leave time for in-flight requests to drain and apply backoff for access, quota
 and rate failures while retaining pending IDs and reservations.
 Each write requires verified current source/passages and an exact optimistic

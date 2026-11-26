@@ -15,7 +15,7 @@ from import_status import EnrichmentError
 from indexer import gemma, passages, search_enrichment
 from indexer.archive_handler import ArchiveHandler
 from indexer.capture_enrichment import Enricher, summary_requests
-from policy_preparation import newer, prepare
+from policy_preparation import enrichment_from_checkpoint, newer, prepare
 from policy_sources import ServiceError, SourceError, relative
 
 
@@ -75,6 +75,7 @@ class EnrichmentInput:
     source: str = ''
     view: str = ''
     grounding: tuple = ()
+    checkpoint_view: bool = False
 
 
 def prepare_refresh(services, sources, identifier, url, check):
@@ -82,10 +83,20 @@ def prepare_refresh(services, sources, identifier, url, check):
     source = hit['_source']
     if not eligible(source):
         return None
-    prepared = prepare(hit, sources, enrichment=True)
-    if prepared.enrichment_source is None:
-        return None
-    view = prepared.plan.view
+    try:
+        checkpoint = enrichment_from_checkpoint(source, sources)
+    except SourceError:
+        raise
+    except (ValueError, TypeError, KeyError, AttributeError, RecursionError, MemoryError):
+        checkpoint = None
+    if checkpoint is None:
+        prepared = prepare(hit, sources, enrichment=True)
+        if prepared.enrichment_source is None:
+            return None
+        body, sha256 = prepared.enrichment_source
+        view = prepared.plan.view
+    else:
+        body, sha256, view = checkpoint
     parts = search_enrichment.evidence_parts(view)
     if not parts:
         return None
@@ -93,9 +104,9 @@ def prepare_refresh(services, sources, identifier, url, check):
     revision = {key: hit[key] for key in ('_id', '_seq_no', '_primary_term')}
     if (source.get('llm_search_enrichment_version') == search_enrichment.VERSION
             and source.get('llm_enrichment_view_sha256') == digest(parts)):
-        return EnrichmentInput(revision)
-    body, sha256 = prepared.enrichment_source
-    return EnrichmentInput(revision, {'url': url, 'archive_path': identifier, 'sha256': sha256}, body, view, parts)
+        return EnrichmentInput(revision, checkpoint_view=checkpoint is not None)
+    return EnrichmentInput(revision, {'url': url, 'archive_path': identifier, 'sha256': sha256}, body, view, parts,
+                           checkpoint_view=checkpoint is not None)
 
 
 def metadata_patch(metadata):

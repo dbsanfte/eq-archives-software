@@ -14,7 +14,7 @@ from bs4 import BeautifulSoup
 
 from indexer import gemma, passages, html_extraction
 from indexer.archive_handler import ArchiveHandler
-from indexer.source_encoding import decode_source, repaired_title
+from indexer.source_encoding import VERSION as DECODING_VERSION, decode_source, repaired_title
 from indexer.source_files import SourceError, relative
 
 LEGACY_POLICY='embeddinggemma2-paragraphs-480-overlap48-v1'
@@ -26,6 +26,8 @@ LEGACY_RENDERER='f7f14f134c636a06058e872f252ae1640aba99b8d59ca0ef81cda768e99e669
 LEGACY_REQUEST='bc3b052359bb7cf79b8b4a40d8ea96dac78ff5d9b5a97cf54517adb892640bab'
 READER_CHECKPOINTS={'html-2026-11-05-regional-decoding','html-2026-11-05-script-evidence',
                     'html-2026-11-12-jis-extensions'}
+TITLE_REPAIR_REASONS = ('japanese_script_evidence', 'regional_evidence', 'iso2022_escape')
+TEXTUAL_MIME = ('application/xhtml+xml', 'application/xml', 'application/json')
 
 
 @lru_cache(maxsize=1)
@@ -102,6 +104,78 @@ def reader_proof(reader,raw,decoding):
             'html_sha256':passages.digest(raw),'source_sha256':decoding['source_sha256']}
 
 
+def decoded_website(sources, source, mime, previous):
+    hint = previous.get('encoding')
+    detected = {'encoding': hint, 'confidence': 1.0} if hint else None
+    decoded = decode_source(sources.read(source), mime, detection=detected)
+    return replace(decoded, text=decoded.text.replace('\r\n', '\n').replace('\r', '\n'))
+
+
+def rebuild_view(rows):
+    """Recover the selected source in offset order, proving every overlap."""
+    if not isinstance(rows, list) or not rows:
+        return None
+    view = ''
+    previous_start = -1
+    for row in rows:
+        if not isinstance(row, dict):
+            return None
+        start, end, body = (row.get(key) for key in ('source_start', 'source_end', 'text_chunk'))
+        covered = len(view)
+        if (type(start) is not int or type(end) is not int or not isinstance(body, str)
+                or not previous_start < start <= covered <= end <= 32 * 1024 * 1024
+                or start == end or len(body) != end - start
+                or view[start:] != body[:covered - start]):
+            return None
+        view += body[covered - start:]
+        previous_start = start
+    return view
+
+
+def enrichment_from_checkpoint(source, sources):
+    """Reuse a current indexed view for grounding without rebuilding body chunks."""
+    previous = source.get('text_passage_provenance') or {}
+    if (source.get('text_chunking_version') != passages.VERSION
+            or not isinstance(previous, dict) or previous.get('version') != passages.VERSION):
+        return None
+    bound = bindings(previous)
+    if not isinstance(bound, list) or len(bound) != 1 or not isinstance(bound[0], dict):
+        return None
+    binding = bound[0]
+    reader = source.get('text_full')
+    if (binding.get('version') != passages.VERSION or not isinstance(reader, str) or not reader.strip()
+            or binding.get('source_sha256') != passages.digest(reader)
+            or binding.get('method') == 'archive_status'
+            or 'supporting_asset' in (binding.get('exclusions') or ())):
+        return None
+    identifier = source['id']
+    relative(identifier)
+    view = rebuild_view(source.get('text'))
+    if not view or passages.digest(view) != binding.get('view_sha256'):
+        return None
+    if not identifier.startswith('websites/'):
+        if binding.get('method') == 'source_text' and binding.get('html_sha256') is None:
+            return reader, binding['source_sha256'], view
+        return None
+    mime = source.get('mime_type') or ''
+    decoding = previous.get('decoding') or {}
+    if not isinstance(decoding, dict) or decoding.get('version') != DECODING_VERSION:
+        return None
+    source_hash = decoding.get('source_sha256')
+    if (not (isinstance(mime, str) and (not mime or mime.startswith('text/') or mime in TEXTUAL_MIME))
+            or source.get('text_extraction_version') != html_extraction.WEBSITE_EXTRACTION_VERSION
+            or not isinstance(source_hash, str) or not re.fullmatch('[0-9a-f]{64}', source_hash)
+            or not isinstance(binding.get('html_sha256'), str)):
+        return None
+    decoded = decoded_website(sources, source, mime, decoding)
+    raw = decoded.text
+    if (decoded.reason in TITLE_REPAIR_REASONS or decoded.source_sha256 != source_hash
+            or passages.digest(raw) != binding['html_sha256']):
+        return None
+    body = raw if mime == 'text/plain' else html_extraction.website_markdown(raw)
+    return body, decoded.source_sha256, view
+
+
 @dataclass(frozen=True)
 class Prepared:
     identifier:str
@@ -170,7 +244,7 @@ def _prepare(source,identifier,reader,sources,enrichment):
     if version and newer(version):return Prepared(identifier,reader,None,{},result='newer_policy')
     relative(identifier)
     website=identifier.startswith('websites/');mime=source.get('mime_type') or ''
-    textual=not mime or mime.startswith('text/') or mime in ('application/xhtml+xml','application/xml','application/json')
+    textual=not mime or mime.startswith('text/') or mime in TEXTUAL_MIME
     if not reader.strip():raise SourceError('reader_unavailable')
     bound=bindings(previous);legacy_reader=version==LEGACY_POLICY and not previous and website and textual
     if not legacy_reader and (len(bound)!=1 or bound[0].get('source_sha256')!=passages.digest(reader)):
@@ -178,11 +252,9 @@ def _prepare(source,identifier,reader,sources,enrichment):
     complete=version==passages.VERSION and previous.get('version')==passages.VERSION and (not website or not textual or source.get('text_extraction_version')==html_extraction.WEBSITE_EXTRACTION_VERSION)
     patch={};raw=None;decoding=None;proof=None
     if website and textual:
-        data=sources.read(source);hint=(previous.get('decoding') or {}).get('encoding')
-        decoded=decode_source(data,mime,detection={'encoding':hint,'confidence':1.0} if hint else None)
-        decoded=replace(decoded,text=decoded.text.replace('\r\n','\n').replace('\r','\n'))
+        decoded=decoded_website(sources,source,mime,previous.get('decoding') or {})
         raw=decoded.text;decoding=decoded.provenance()
-        if decoded.reason in ('japanese_script_evidence','regional_evidence','iso2022_escape'):
+        if decoded.reason in TITLE_REPAIR_REASONS:
             title=BeautifulSoup(raw,'html.parser').title
             corrected=repaired_title(source.get('title'),title.string if title else None,decoded)
             if corrected!=source.get('title'):patch['title']=corrected

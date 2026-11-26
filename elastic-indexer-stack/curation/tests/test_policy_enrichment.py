@@ -7,8 +7,9 @@ import pytest
 from daily_budget import DailyBudget, EnrichmentPriorityPause
 from indexer import passages, search_enrichment
 from indexer.capture_enrichment import Enricher
-from policy_enrichment import capture_identity, eligible, refresh, run_enrichment
+from policy_enrichment import capture_identity, eligible, prepare_refresh, refresh, run_enrichment
 from policy_maintenance import MaintenanceServices, State, identity, repair, run
+from policy_preparation import prepare, rebuild_view
 from policy_sources import ServiceError, SourceError
 from test_enrichment import RESULT, response
 from test_policy_maintenance import Services, V, fixture
@@ -70,6 +71,87 @@ def test_refresh_replaces_summary_and_vector_atomically_from_verified_passages(t
     finally:
         enricher.close()
         sources.close()
+
+
+@pytest.mark.parametrize('identifier', [
+    'websites/guild.example/20000101000000/article.html',
+    'newsgroups/alt.games.everquest-msg-1.txt',
+    'mailing-lists/guild/1.txt',
+])
+def test_verified_checkpoint_keeps_exact_grounding_and_legacy_source(tmp_path, monkeypatch, identifier):
+    prose = 'Our guild defeated Nagafen and returned to the Temple of Veeshan. ' * 160
+    hit, sources = fixture(tmp_path, raw=f'<html><title>Guild news</title><body><p>{prose}</p></body></html>',
+                           identifier=identifier)
+    if not identifier.startswith('websites/'):
+        reader = '# Subject: Guild news\n# From: An archive author\n\n---\n\n' + prose
+        plan = passages.prepare(reader, identifier, mime_type='text/plain')
+        saved = hit['_source']
+        saved.update(text_full=reader, mime_type='text/plain', text=[],
+                     text_passage_provenance={'version': 'eq-passages-480-v10',
+                         'sources': [{**plan.provenance(), 'version': 'eq-passages-480-v10'}]})
+    try:
+        service = Maintenance([hit])
+        repair(service, sources, identifier, lambda: None)
+        before = prepare(service.get(identifier), sources, enrichment=True)
+        assert len(before.plan.passages) > 1
+
+        def rebuild(*args, **kwargs):
+            raise AssertionError('a verified checkpoint rebuilt body passages')
+
+        monkeypatch.setattr(passages, 'prepare', rebuild)
+        current = prepare_refresh(service, sources, identifier, capture_identity(identifier)[0], lambda: None)
+        assert current.checkpoint_view
+        assert (current.source, current.capture['sha256']) == before.enrichment_source
+        assert current.view == before.plan.view
+        assert current.grounding == search_enrichment.evidence_parts(before.plan.view)
+    finally:
+        sources.close()
+
+
+@pytest.mark.parametrize('damage', ['gap', 'passage_text', 'decoded_html', 'view_digest', 'reader', 'raw'])
+def test_enrichment_requires_checkpoint_proof_or_verified_rebuild(tmp_path, damage):
+    hit, sources = fixture(tmp_path, raw='<html><title>Guild news</title><body>Defeated Nagafen.</body></html>')
+    try:
+        service = Maintenance([hit])
+        identifier = hit['_id']
+        repair(service, sources, identifier, lambda: None)
+        saved = service.hits[identifier]['_source']
+        baseline = prepare(service.get(identifier), sources, enrichment=True)
+        binding = saved['text_passage_provenance']['sources'][0]
+        if damage == 'gap':
+            saved['text'][0]['source_start'] += 1
+        elif damage == 'passage_text':
+            saved['text'][0]['text_chunk'] = 'x' * len(saved['text'][0]['text_chunk'])
+        elif damage == 'decoded_html':
+            binding['html_sha256'] = '0' * 64
+        elif damage == 'view_digest':
+            binding['view_sha256'] = '0' * 64
+        elif damage == 'reader':
+            saved['text_full'] += 'unexpected copy'
+        elif damage == 'raw':
+            (sources.roots[0] / identifier).write_text('changed archive file')
+
+        def refresh():
+            return prepare_refresh(service, sources, identifier, capture_identity(identifier)[0], lambda: None)
+
+        reason = {'view_digest': 'checkpoint_integrity', 'reader': 'reader_integrity', 'raw': 'source_integrity'}.get(damage)
+        if reason:
+            with pytest.raises(SourceError, match=reason):
+                refresh()
+        else:
+            restored = refresh()
+            assert restored.checkpoint_view is False
+            assert restored.view == baseline.plan.view
+            assert (restored.source, restored.capture['sha256']) == baseline.enrichment_source
+    finally:
+        sources.close()
+
+
+def test_checkpoint_checks_overlapping_bytes_even_when_new_suffix_is_correct():
+    first = {'source_start': 0, 'source_end': 5, 'text_chunk': 'hello'}
+    next_passage = {'source_start': 3, 'source_end': 8, 'text_chunk': 'lo!!!'}
+    assert rebuild_view([first, next_passage]) == 'hello!!!'
+    assert rebuild_view([first, {**next_passage, 'text_chunk': 'xx!!!'}]) is None
 
 
 def test_paid_budget_wait_does_not_hold_the_body_cursor_or_spend(tmp_path):
