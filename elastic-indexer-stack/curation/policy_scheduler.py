@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 import re
 import time
-from enrichment_worker import WORKERS as MAX_LUNA_WORKERS
+from enrichment_worker import MAX_WORKERS as MAX_LUNA_WORKERS
 import math
 
 from common import CrawlError,save
@@ -57,7 +57,10 @@ def job_for(name,image,*,enrichment=False):
         {'name':'ELASTICSEARCH_INDEX','valueFrom':{'secretKeyRef':{'name':'eqarchives-policy-indexer-secrets','key':'es_index'}}},
         {'name':'POLICY_INDEX','valueFrom':{'secretKeyRef':{'name':'eqarchives-policy-indexer-secrets','key':'es_index'}}},
         {'name':'POLICY_JOB_NAME','value':name},{'name':'IMPORT_IMAGE','value':image}]
-    if not dedicated:
+    if dedicated:
+        container['env'].append({'name':'LUNA_ENRICHMENT_WORKERS','valueFrom':{'configMapKeyRef':{
+            'name':'eqarchives-enrichment-tuning','key':'luna_workers','optional':True}}})
+    else:
         container['env'].append({'name':'POLICY_PREPARATION_WORKERS','value':'2'})
     container['volumeMounts']=[m for m in container['volumeMounts'] if m['mountPath'] in
                              ('/data','/run/secrets','/indexing-state','/usr/local/lib/python3.13/site-packages/certifi/cacert.pem')]+[

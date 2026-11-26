@@ -6,7 +6,7 @@ import pytest
 
 from common import digest
 from daily_budget import DailyBudget
-from enrichment_worker import State, run
+from enrichment_worker import MAX_WORKERS, WORKERS, State, run
 from indexer import passages, search_enrichment
 from indexer.capture_enrichment import Enricher
 from policy_maintenance import State as PolicyState, identity, repair
@@ -77,7 +77,7 @@ def factory(calls, barrier=None):
             if barrier:
                 barrier.wait(timeout=8)
             passage = ' '.join(supplied['search_passages'])
-            index = next(i for i in range(1, 9) if f'number {i}.' in passage)
+            index = next(i for i in range(1, MAX_WORKERS + 1) if f'number {i}.' in passage)
             return response({**{key: RESULT[key] for key in ('llm_tags','llm_content_flavour')},
                              'llm_summary': f'Guild expedition number {index}.', 'content_role': 'discussion',
                              'topics': [], 'entities': [{'kind': 'npc', 'name': 'Nagafen', 'excerpt': 'defeated Nagafen'}]})
@@ -88,14 +88,15 @@ def factory(calls, barrier=None):
     return lambda *args,client_factory,**kwargs: Enricher(*args,client_factory=Luna,**kwargs)
 
 
-def test_eight_paid_requests_overlap_and_share_one_embedding_wave(tmp_path):
-    service, sources = prepared_service(tmp_path, count=8)
+@pytest.mark.parametrize('worker_count', [WORKERS, MAX_WORKERS])
+def test_paid_requests_overlap_at_default_and_maximum_concurrency(tmp_path, worker_count):
+    service, sources = prepared_service(tmp_path, count=worker_count)
     account = budget(tmp_path)
     state = State(tmp_path / 'state',identity())
     calls = []
     opener = Lock()
     competing_open = Event()
-    create_enricher = factory(calls, Barrier(8))
+    create_enricher = factory(calls, Barrier(worker_count))
 
     def open_enricher(*args, **kwargs):
         # Give the sibling pool threads a chance to enter while the first
@@ -110,13 +111,13 @@ def test_eight_paid_requests_overlap_and_share_one_embedding_wave(tmp_path):
             opener.release()
 
     try:
-        result = run(tmp_path,state,service,sources,'fixture',account,maximum=8,should_yield=lambda:False,
-                     enricher_factory=open_enricher)
-        assert result['enrichment']['updated'] == 8
-        assert len(calls) == 8 and len(service.waves) == 1 and len(service.waves[0]) == 8
+        result = run(tmp_path,state,service,sources,'fixture',account,maximum=worker_count,should_yield=lambda:False,
+                     workers=worker_count, enricher_factory=open_enricher)
+        assert result['enrichment']['updated'] == worker_count
+        assert len(calls) == worker_count and len(service.waves) == 1 and len(service.waves[0]) == worker_count
         assert account.snapshot()['estimated_usd'] > 0
         assert not account.snapshot()['enrichment_pending']
-        assert len(service.updates) == 8 and all(p['llm_summary_vector'] == V for p in service.updates)
+        assert len(service.updates) == worker_count and all(p['llm_summary_vector'] == V for p in service.updates)
         assert all(p['llm_entities'] == ['npc: nagafen'] and 'llm_guessed_date' not in p for p in service.updates)
         assert not state.ready(cycle(('websites','mailing-lists','newsgroups')), 4)
     finally:

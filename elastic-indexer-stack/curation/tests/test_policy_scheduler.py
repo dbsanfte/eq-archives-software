@@ -94,6 +94,8 @@ def test_paid_policy_slice_mounts_only_the_luna_item_and_shared_account(tmp_path
     assert secrets['eqarchives-curation-secrets']==[{'key':'luna_api_key','path':'luna_api_key'}]
     assert not pod['automountServiceAccountToken']
     assert {'name':'LUNA_DAILY_BUDGET_ROOT','value':'/luna-budget'} in container['env']
+    assert {'name':'LUNA_ENRICHMENT_WORKERS','valueFrom':{'configMapKeyRef':{
+        'name':'eqarchives-enrichment-tuning','key':'luna_workers','optional':True}}} in container['env']
     assert {'name':'staging','mountPath':'/luna-budget','subPath':'luna-budget'} in container['volumeMounts']
     assert all(m['readOnly'] for m in container['volumeMounts']
                if m['mountPath'] in ('/data','/archive-sources','/archive'))
