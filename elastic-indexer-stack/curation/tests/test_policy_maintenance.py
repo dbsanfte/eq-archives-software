@@ -356,6 +356,57 @@ def test_search_get_and_optimistic_updates_keep_the_index_and_response_identity_
     assert all('eq-archive-0.4' in request.url.path for request in seen)
 
 
+@pytest.mark.parametrize('damaged', [None, 'short', 'reordered', 'wrong_index', 'bad_status', 'false_success', 'whole_request'])
+def test_bulk_updates_use_exact_revisions_and_validate_every_receipt(damaged):
+    index = 'archive-fixture'
+    identifiers = ['websites/forum.example/20000101000000/' + str(n) for n in range(5)]
+    updates = [({'_id': key, '_index': index, '_seq_no': n + 17, '_primary_term': 2}, {'llm_summary': 'new'})
+               for n, key in enumerate(identifiers)]
+    rows = [{'update': {'_index': index, '_id': key, 'status': status, **details}} for key, status, details in zip(
+        identifiers, (200, 409, 200, 404, 503), (
+            {'result': 'updated'}, {'error': {'type': 'version_conflict_engine_exception'}}, {'result': 'noop'},
+            {'error': {'type': 'document_missing_exception'}}, {'error': {'reason': 'private upstream details'}}),
+        strict=True)]
+    if damaged == 'short':
+        rows.pop()
+    elif damaged == 'reordered':
+        rows[1], rows[2] = rows[2], rows[1]
+    elif damaged == 'wrong_index':
+        rows[-1]['update']['_index'] = 'wrong'
+    elif damaged == 'bad_status':
+        rows[-1]['update']['status'] = True
+    elif damaged == 'false_success':
+        rows[-1]['update']['status'] = 200
+
+    def respond(request):
+        assert request.method == 'POST' and request.url.path == '/archive-fixture/_bulk'
+        assert request.headers['content-type'] == 'application/x-ndjson'
+        assert request.content.endswith(b'\n')
+        lines = [json.loads(line) for line in request.content.splitlines()]
+        assert lines == [entry for hit, patch in updates for entry in (
+            {'update': {'_id': hit['_id'], 'if_seq_no': hit['_seq_no'], 'if_primary_term': hit['_primary_term']}},
+            {'doc': patch})]
+        if damaged == 'whole_request':
+            return httpx.Response(404, text='private upstream details')
+        return httpx.Response(200, json={'errors': True, 'items': rows})
+
+    services = MaintenanceServices.__new__(MaintenanceServices)
+    services.es_url, services.index = 'https://archive', index
+    with httpx.Client(transport=httpx.MockTransport(respond)) as services.client:
+        if damaged == 'whole_request':
+            with pytest.raises(ServiceError, match='^elasticsearch_unavailable$'):
+                services.update_many(updates)
+        elif damaged:
+            with pytest.raises(ServiceError, match='update_not_acknowledged'):
+                services.update_many(updates)
+        else:
+            ok, conflict, noop, missing, unavailable = services.update_many(updates)
+            assert ok is noop is None
+            assert isinstance(conflict, SourceError) and conflict.reason == 'concurrent_update'
+            assert isinstance(missing, SourceError) and missing.reason == 'record_unavailable'
+            assert isinstance(unavailable, ServiceError) and str(unavailable) == 'elasticsearch_unavailable'
+
+
 @pytest.mark.parametrize('status,expected',[(409,SourceError),(404,SourceError),(401,ServiceError),(403,ServiceError),(503,ServiceError)])
 def test_elasticsearch_error_categories_never_include_upstream_responses(status,expected):
     service=MaintenanceServices.__new__(MaintenanceServices);service.es_url='https://archive'

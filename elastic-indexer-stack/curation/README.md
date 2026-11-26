@@ -1074,6 +1074,12 @@ requests free their slots immediately while the coordinator collects small
 summary embedding batches. A bounded durable queue protects each collection's
 cursor across budget waits and restarts. The Job drains outstanding requests
 before releasing its shared Luna priority claim.
+Validated summaries and reused checkpoints are written in batches of up to
+16 optimistic partial updates. Each acknowledgment is bound to its exact
+document in the physical index. Conflicting or unacknowledged rows stay eligible
+for retry when their failure is transient, using the saved paid responses.
+Foreground priority is checked before
+each write batch.
 Each collection keeps up to 384 pending IDs. A refill fetches ordered IDs
 without a total hit count and requires a complete shard response before
 advancing its cursor. Ready reads fetch just enough IDs for the free slots

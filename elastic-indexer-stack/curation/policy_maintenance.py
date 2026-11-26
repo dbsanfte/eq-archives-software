@@ -31,6 +31,8 @@ from policy_preparation import (LEGACY_POLICY, FIELDS as PASSAGE_FIELDS, newer, 
 from policy_pool import PreparationPool, WorkerLost
 
 APP='eqarchives-policy-maintenance'
+UPDATE_BATCH_SIZE = 16
+UPDATE_BATCH_BYTES = 1024 * 1024
 FIELDS=['id','file_type','mime_type','title','text_full','text.text_chunk','text.title','text.context',
         'text.kind','text.source_start','text.source_end','embedding_model','text_chunking_version',
         'text_extraction_version','text_passage_provenance','archive_source_sha256','archive_commit',
@@ -183,10 +185,12 @@ class State:
 
 
 class MaintenanceServices(Services):
-    def request(self,method,path,body=None,limit=32*1024*1024):
+    def request(self,method,path,body=None,limit=32*1024*1024,*,ndjson=False):
+        content = body if ndjson or body is None else vector_json(body)
+        content_type = 'application/x-ndjson' if ndjson else 'application/json'
         try:
-            with self.client.stream(method,self.es_url+path,content=vector_json(body) if body is not None else None,
-                                    headers={'Content-Type':'application/json'}) as response:
+            with self.client.stream(method,self.es_url+path,content=content,
+                                    headers={'Content-Type':content_type}) as response:
                 if response.status_code==409:raise SourceError('concurrent_update')
                 if response.status_code in (401,403):raise ServiceError('authentication')
                 if response.status_code==404:raise SourceError('record_unavailable')
@@ -268,6 +272,59 @@ class MaintenanceServices(Services):
                             urlencode({'if_seq_no':hit['_seq_no'],'if_primary_term':hit['_primary_term']}),{'doc':patch})
         if result.get('_id')!=hit['_id'] or result.get('_index')!=self.index or result.get('result') not in ('updated','noop'):
             raise ServiceError('update_not_acknowledged')
+
+    def update_many(self, updates):
+        """Return one verified result per optimistic partial update in input order."""
+        if not 1 <= len(updates) <= UPDATE_BATCH_SIZE:
+            raise ValueError('Invalid maintenance update batch size')
+        identifiers, lines = [], []
+        for hit, patch in updates:
+            identifier = hit['_id']
+            if hit['_index'] != self.index or identifier in identifiers:
+                raise ServiceError('response_identity')
+            identifiers.append(identifier)
+            lines.extend((vector_json({'update': {'_id': identifier, 'if_seq_no': hit['_seq_no'],
+                                                 'if_primary_term': hit['_primary_term']}}),
+                          vector_json({'doc': patch})))
+        body = b'\n'.join((*lines, b''))
+        if len(body) > UPDATE_BATCH_BYTES:
+            raise ServiceError('update_batch_too_large')
+        try:
+            result = self.request('POST', '/'+quote(self.index, safe='')+'/_bulk', body,
+                                  limit=UPDATE_BATCH_BYTES, ndjson=True)
+        except SourceError:
+            # Whole-request failures cannot identify a conflicting or missing document.
+            raise ServiceError('elasticsearch_unavailable') from None
+
+        outcomes = []
+        try:
+            if not isinstance(result['items'], list) or type(result['errors']) is not bool:
+                raise ValueError()
+            for identifier, item in zip(identifiers, result['items'], strict=True):
+                if set(item) != {'update'}:
+                    raise ValueError()
+                row = item['update']
+                status = row['status']
+                if row['_id'] != identifier or row['_index'] != self.index or type(status) is not int:
+                    raise ValueError()
+                if status == 200:
+                    if row.get('result') not in ('updated', 'noop') or 'error' in row:
+                        raise ValueError()
+                    outcomes.append(None)
+                    continue
+                error = row.get('error', {}).get('type')
+                if status == 409 and error == 'version_conflict_engine_exception':
+                    outcomes.append(SourceError('concurrent_update'))
+                elif status == 404 and error == 'document_missing_exception':
+                    outcomes.append(SourceError('record_unavailable'))
+                else:
+                    category = 'authentication' if status in (401, 403) else 'elasticsearch_unavailable'
+                    outcomes.append(ServiceError(category))
+            if result['errors'] != any(error is not None for error in outcomes):
+                raise ValueError()
+        except (AttributeError, KeyError, TypeError, ValueError):
+            raise ServiceError('update_not_acknowledged') from None
+        return outcomes
 
     def stored_vectors(self,hit):
         rows=hit['_source'].get('text') or []
