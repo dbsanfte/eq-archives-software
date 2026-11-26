@@ -1073,6 +1073,10 @@ requests free their slots immediately while the coordinator collects small
 summary embedding batches. A bounded durable queue protects each collection's
 cursor across budget waits and restarts. The Job drains outstanding requests
 before releasing its shared Luna priority claim.
+Each collection keeps up to 384 pending IDs. A refill fetches ordered IDs
+without a total hit count and requires a complete shard response before
+advancing its cursor. Ready reads fetch just enough IDs for the free slots
+while preserving rotation across collections.
 Operators can set `luna_workers` to 1–32 in the optional
 `eqarchives-enrichment-tuning` ConfigMap in `eqarchives-es`. New slices read it
 at startup, so changing it leaves running Jobs intact.

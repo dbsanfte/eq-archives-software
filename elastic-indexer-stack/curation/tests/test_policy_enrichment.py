@@ -7,7 +7,7 @@ import pytest
 from daily_budget import DailyBudget, EnrichmentPriorityPause
 from indexer import passages, search_enrichment
 from indexer.capture_enrichment import Enricher
-from policy_enrichment import capture_identity, eligible, prepare_refresh, refresh, run_enrichment
+from policy_enrichment import FRONTIER_PAGE_SIZE, capture_identity, eligible, prepare_refresh, refresh, run_enrichment
 from policy_maintenance import MaintenanceServices, State, identity, repair, run
 from policy_preparation import prepare, rebuild_view
 from policy_sources import ServiceError, SourceError
@@ -288,3 +288,47 @@ def test_paid_selection_is_bounded_and_excludes_current_enrichment():
         return {'hits': {'hits': [{'_id': next_id, '_index': services.index}]}}
     services.request = request
     assert services.select_enrichment(cursor) == [next_id]
+
+
+@pytest.mark.parametrize('collection', ['websites', 'mailing-lists', 'newsgroups'])
+def test_frontier_pages_use_bounded_id_reads_with_the_current_policy(collection):
+    services = MaintenanceServices.__new__(MaintenanceServices)
+    services.index = 'eq-archive-0'
+    cursor = f'{collection}/0000'
+    expected = [f'{collection}/{number:04d}' for number in range(1, FRONTIER_PAGE_SIZE + 1)]
+
+    def request(method, path, body, *, limit):
+        assert method == 'POST' and path == '/eq-archive-0/_search?allow_partial_search_results=false'
+        assert body['size'] == FRONTIER_PAGE_SIZE and body['_source'] is False
+        assert body['track_total_hits'] is False and body['sort'] == [{'id': 'asc'}]
+        assert limit == 4 * 1024 * 1024
+        filters = body['query']['bool']['filter']
+        assert {'prefix': {'id': collection+'/'}} in filters
+        assert {'range': {'id': {'gt': cursor}}} in filters
+        assert {'nested': {'path':'text', 'query':{'exists':{'field':'text.text_chunk'}}, 'score_mode':'none'}} in filters
+        policy = services.current_policy() if collection == 'websites' else {'term': {'text_chunking_version': passages.VERSION}}
+        assert policy in filters
+        return {'timed_out': False, '_shards': {'failed': 0},
+                'hits': {'hits': [{'_id': identifier, '_index': services.index} for identifier in expected]}}
+
+    services.request = request
+    assert services.select_enrichment(cursor, collection=collection, limit=FRONTIER_PAGE_SIZE) == expected
+    with pytest.raises(ValueError, match='bound'):
+        services.select_enrichment(cursor, collection=collection, limit=FRONTIER_PAGE_SIZE + 1)
+
+
+@pytest.mark.parametrize('changes,hits', [
+    ({'timed_out': True}, []),
+    ({'_shards': {'failed': 1}}, []),
+    ({'_shards': {}}, []),
+    ({}, [{'_id':'websites/other', '_index':'eq-archive-0'}]),
+    ({}, [{'_id':'newsgroups/0000', '_index':'eq-archive-0'}]),
+])
+def test_frontier_rejects_incomplete_or_wrong_collection_pages(changes, hits):
+    services = MaintenanceServices.__new__(MaintenanceServices)
+    services.index = 'eq-archive-0'
+    services.request = lambda *args, **kwargs: {
+        'timed_out': False, '_shards': {'failed': 0}, 'hits': {'hits': hits}, **changes,
+    }
+    with pytest.raises(ServiceError):
+        services.select_enrichment('newsgroups/0000', collection='newsgroups')

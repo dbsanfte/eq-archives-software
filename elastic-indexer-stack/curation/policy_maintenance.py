@@ -25,7 +25,7 @@ from indexer.sqlite_state import SQLiteState
 from indexer.embedding_batches import embed_batches, decode_vectors
 from indexer.vector_json import dumps as vector_json
 from policy_sources import Sources, SourceError, ServiceError
-from policy_enrichment import COUNTERS, current_enrichment, run_enrichment
+from policy_enrichment import COLLECTIONS, COUNTERS, FRONTIER_PAGE_SIZE, current_enrichment, run_enrichment
 from policy_preparation import (LEGACY_POLICY, FIELDS as PASSAGE_FIELDS, newer, prepare,
                                 verify_prepared,renderer_identity,request_identity)
 from policy_pool import PreparationPool, WorkerLost
@@ -214,29 +214,41 @@ class MaintenanceServices(Services):
         return self.select_ids(cursor, filter_by=[], exclude=[self.current_policy()])
 
     def select_enrichment(self,cursor,*,collection=None,limit=100):
+        if collection is not None and collection not in COLLECTIONS:
+            raise ValueError('Unknown enrichment collection')
         acceptable={'bool':{'should':[{'bool':{'must_not':[{'exists':{'field':'llm_search_enrichment_version'}}]}},
                     {'term':{'llm_search_enrichment_version':search_enrichment.VERSION}}], 'minimum_should_match':1}}
-        filters=[self.current_policy(),acceptable,
+        policy=self.current_policy() if collection in (None,'websites') else {'term':{'text_chunking_version':passages.VERSION}}
+        filters=[policy,acceptable,
                  {'nested':{'path':'text','query':{'exists':{'field':'text.text_chunk'}},'score_mode':'none'}}]
-        if collection is not None:
-            from policy_enrichment import COLLECTIONS
-            if collection not in COLLECTIONS:raise ValueError('Unknown enrichment collection')
-            filters.append({'prefix':{'id':collection+'/'}})
-        return self.select_ids(cursor, filter_by=filters, exclude=[current_enrichment()],limit=limit)
+        return self.select_ids(cursor, filter_by=filters, exclude=[current_enrichment()],limit=limit,collection=collection)
 
-    def select_ids(self,cursor,*,filter_by,exclude,limit=100):
-        if not 1<=limit<=100:raise ValueError('Invalid policy selection bound')
+    def select_ids(self,cursor,*,filter_by,exclude,limit=100,collection=None):
+        if type(limit) is not int or not 1<=limit<=(FRONTIER_PAGE_SIZE if collection else 100):
+            raise ValueError('Invalid policy selection bound')
+        scope={'prefix':{'id':collection+'/'}} if collection else {'exists':{'field':'id'}}
         query={'bool':{'filter':[{'term':{'embedding_model':gemma.MODEL}},{'term':{'file_type':'text'}},
-            {'exists':{'field':'id'}},*filter_by], 'must_not':exclude}}
+            scope,*filter_by], 'must_not':exclude}}
         if cursor:query['bool']['filter'].append({'range':{'id':{'gt':cursor}}})
-        result=self.request('POST','/'+quote(self.index,safe='')+'/_search',
-                            {'size':limit,'_source':False,'sort':[{'id':'asc'}],'query':query},limit=1024*1024)
+        path='/'+quote(self.index,safe='')+'/_search'
+        body={'size':limit,'_source':False,'sort':[{'id':'asc'}],'query':query}
+        if collection:
+            # Refill consumes the ordered IDs only. Keep partial pages out of
+            # durable cursor advancement and skip counting all the matches.
+            path+='?allow_partial_search_results=false'
+            body['track_total_hits']=False
+        result=self.request('POST',path,body,limit=(4 if collection else 1)*1024*1024)
         try:
-            if result.get('timed_out') or result.get('_shards',{}).get('failed'):
+            timed_out = result.get('timed_out')
+            failed_shards = result.get('_shards', {}).get('failed')
+            if timed_out or failed_shards:
                 raise ServiceError('elasticsearch_unavailable')
+            if collection and (timed_out is not False or type(failed_shards) is not int):
+                raise ValueError()
             hits=result['hits']['hits'];identifiers=[hit['_id'] for hit in hits]
             if (not isinstance(hits,list) or len(hits)>limit or any(not isinstance(value,str) or value<=cursor for value in identifiers)
                     or any(hit.get('_index')!=self.index for hit in hits)
+                    or (collection and any(not identifier.startswith(collection+'/') for identifier in identifiers))
                     or identifiers!=sorted(set(identifiers))):raise ValueError()
             return identifiers
         except ServiceError:raise

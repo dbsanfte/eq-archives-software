@@ -1377,6 +1377,10 @@ Historical grounding can reconstruct a current single-source passage view from
 strict offsets and overlaps with exact reader and view hashes. Require verified
 archive bytes and matching decoded HTML for textual websites. Keep the full
 preparation fallback and the legacy paid-cache source content.
+Fetch up to 384 ordered IDs per historical collection without total hits.
+Retain the existing eligibility filters, reject incomplete shard responses
+and persist a refill before advancing its cursor. Bound indexed ready reads
+by the available worker slots and retain rotation and retry state.
 Leave time for in-flight requests to drain and apply backoff for access, quota
 and rate failures while retaining pending IDs and reservations.
 Each write requires verified current source/passages and an exact optimistic

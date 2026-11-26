@@ -13,6 +13,7 @@ from indexer import passages, search_enrichment
 from indexer.capture_enrichment import Enricher
 from policy_maintenance import State as PolicyState, identity, repair
 from policy_scheduler import receipt
+from policy_sources import ServiceError
 from test_enrichment import RESULT, response
 from test_policy_enrichment import Maintenance, budget
 from test_policy_maintenance import V, fixture
@@ -167,9 +168,10 @@ def test_over_limit_worker_count_is_rejected_before_work(tmp_path):
 
 
 def test_durable_queue_refills_before_previous_page_has_finished(tmp_path):
-    size = enrichment_worker.PAGE_SIZE
+    size = enrichment_worker.FRONTIER_PAGE_SIZE
+    retained = enrichment_worker.FRONTIER_REFILL_AT
     identifiers = [f'websites/guild.example/20000101000000/page-{number:03d}'
-                   for number in range(size + size // 2)]
+                   for number in range(2 * size - retained)]
 
     class Frontier:
         def select_enrichment(self, cursor, *, collection, limit):
@@ -177,14 +179,56 @@ def test_durable_queue_refills_before_previous_page_has_finished(tmp_path):
 
     rotation = cycle(('websites', 'mailing-lists', 'newsgroups'))
     with closing(State(tmp_path, identity())) as state:
-        state.fill(Frontier(), lambda:None)
+        assert state.fill(Frontier(), lambda:None) == 3
         assert state.ready(rotation, size) == identifiers[:size]
-        for identifier in identifiers[:size // 2]:
+        for identifier in identifiers[:size - retained]:
             state.finish(identifier, 'skipped')
-        kept = set(identifiers[size // 2:size])
-        state.fill(Frontier(), lambda:None)
+        kept = set(identifiers[size - retained:size])
+        assert state.fill(Frontier(), lambda:None) == 1
         assert state.ready(rotation, size, kept) == identifiers[size:]
-        assert state.ready(rotation, size) == identifiers[size // 2:]
+        assert state.ready(rotation, size) == identifiers[size - retained:]
+    with closing(State(tmp_path, identity())) as state:
+        assert state.fill(Frontier(), lambda:None) == 0
+        assert state.ready(rotation, size) == identifiers[size - retained:]
+
+
+def test_ready_refill_keeps_round_robin_and_skips_deferred_and_active_rows(tmp_path):
+    collections = enrichment_worker.COLLECTIONS
+    size = enrichment_worker.FRONTIER_PAGE_SIZE
+    identifiers = {name: [f'{name}/{number:04d}' for number in range(size)] for name in collections}
+
+    class Frontier:
+        def select_enrichment(self, cursor, *, collection, limit):
+            return [identifier for identifier in identifiers[collection] if identifier > cursor][:limit]
+
+    with closing(State(tmp_path, identity())) as state:
+        state.fill(Frontier(), lambda:None)
+        initial = [identifiers[collection][0] for collection in collections]
+        state.defer(identifiers[collections[0]][1])
+        assert state.ready(cycle(collections), 3, set(initial)) == [
+            identifiers[collections[0]][2], identifiers[collections[1]][1], identifiers[collections[2]][1]]
+
+
+def test_failed_frontier_page_keeps_its_cursor_and_pending_work(tmp_path):
+    class Frontier:
+        def select_enrichment(self, cursor, *, collection, limit):
+            raise ServiceError('elasticsearch_unavailable')
+
+    with closing(State(tmp_path, identity())) as state:
+        collection = 'mailing-lists'
+        pending = 'mailing-lists/guild/0001'
+        db = state.db.connection()
+        with state.db.transaction() as transaction:
+            transaction.execute('UPDATE frontiers SET cursor=? WHERE key=? AND collection=?',
+                                (pending, state.key, collection))
+            transaction.execute('INSERT INTO pending(key,collection,id) VALUES (?,?,?)',
+                                (state.key, collection, pending))
+        with pytest.raises(ServiceError, match='elasticsearch_unavailable'):
+            state.fill(Frontier(), lambda:None)
+        cursor, = db.execute('SELECT cursor FROM frontiers WHERE key=? AND collection=?',
+                             (state.key, collection)).fetchone()
+        assert cursor == pending
+        assert state.ready(cycle(enrichment_worker.COLLECTIONS), 1) == [pending]
 
 
 def test_provider_access_failure_retains_records_and_backs_off(tmp_path):
