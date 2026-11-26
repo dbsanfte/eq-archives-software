@@ -19,7 +19,7 @@ from common import CrawlError, now
 from luna_limits import MINUTE_REQUEST_TARGET, MINUTE_TOKEN_TARGET
 
 SCALE = 1_000_000_000
-MAINTENANCE_SCOPE_LIMIT_USD = 50
+MAINTENANCE_SCOPE_LIMIT_USD = 200
 PORTAL_PRIORITY = 'portal'
 DEFAULT = {'enabled': False, 'configured': False, 'daily_usd': 2.0, 'monthly_usd': 500.0, 'site_usd': None,
            'min_grade': 2, 'grading_criteria': '', 'revision': 0}
