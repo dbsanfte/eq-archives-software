@@ -1360,9 +1360,10 @@ Routine same-model chunk updates use `curation/policy_maintenance.py` and
 yield between batches and a 15-minute hard deadline. Separate historical
 enrichment Jobs use a bounded durable queue and per-collection cursors, rotate
 websites, mailing lists and newsgroups, and process up to 1,200 records or twelve
-minutes with eight concurrent paid requests and batched summary embeddings.
+minutes, with batched summary embeddings and eight concurrent paid requests by
+default.
 Constrain the operator-owned `eqarchives-enrichment-tuning` ConfigMap's
-`luna_workers` override to 1–16 and apply it only to new historical Jobs.
+`luna_workers` override to 1–32 and apply it only to new historical Jobs.
 Drain each wave before releasing its shared priority claim. Preserve the old
 paid totals, matching cursor, and cache after the old combined slice exits.
 Serialize per-scope cache initialization while keeping Luna calls concurrent.

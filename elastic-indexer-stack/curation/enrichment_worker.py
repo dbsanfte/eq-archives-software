@@ -28,7 +28,7 @@ from policy_sources import ServiceError, SourceError, Sources
 
 
 WORKERS = 8
-MAX_WORKERS = 16
+MAX_WORKERS = 32
 PAGE_SIZE = 64
 MAX_RECORDS = 1200
 SLICE_SECONDS = 720
@@ -334,7 +334,7 @@ def main():
         raise ValueError('Invalid enrichment job identity')
     configured_workers = os.environ.get('LUNA_ENRICHMENT_WORKERS', str(WORKERS))
     if not re.fullmatch(r'[1-9][0-9]?', configured_workers) or int(configured_workers) > MAX_WORKERS:
-        raise ValueError('Historical Luna workers must be between 1 and 16')
+        raise ValueError(f'Historical Luna workers must be between 1 and {MAX_WORKERS}')
     with closing(State('/indexing-state', identity())) as state, closing(MaintenanceServices()) as services, \
             Sources(['/archive-sources', '/archive'], '/data/publisher.git') as sources:
         result = run(args.root, state, services, sources, job, DailyBudget(os.environ['LUNA_DAILY_BUDGET_ROOT']),

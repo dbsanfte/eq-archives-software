@@ -125,6 +125,11 @@ def test_paid_requests_overlap_at_default_and_maximum_concurrency(tmp_path, work
         sources.close()
 
 
+def test_over_limit_worker_count_is_rejected_before_work(tmp_path):
+    with pytest.raises(ValueError, match='Invalid historical enrichment slice bounds'):
+        run(tmp_path, None, None, None, 'fixture', None, workers=MAX_WORKERS + 1)
+
+
 def test_provider_access_failure_retains_records_and_backs_off(tmp_path):
     import time
     from grading import LunaUnavailable

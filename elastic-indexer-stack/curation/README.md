@@ -1068,10 +1068,10 @@ resolved physical index, with no delete, cluster, mapping or security privilege.
 `PASSAGE_REENRICHMENT_ENABLED=1` admits a separate `eqarchives-enrichment-*`
 Job alongside the chunk updater. It rotates verified current passages across
 websites, mailing lists and newsgroups. Each Job examines at most 1,200 records
-or twelve minutes, with eight concurrent Luna requests and a shared Gemma
-summary embedding batch per wave. A bounded durable queue protects each
+or twelve minutes. The default is eight concurrent Luna requests with a shared
+Gemma summary embedding batch per wave. A bounded durable queue protects each
 collection's cursor across partial waves, budget waits and restarts.
-Operators can set `luna_workers` to 1–16 in the optional
+Operators can set `luna_workers` to 1–32 in the optional
 `eqarchives-enrichment-tuning` ConfigMap in `eqarchives-es`. New slices read it
 at startup, so changing it leaves running Jobs intact.
 Already-current enrichment is skipped. If the same bounded evidence is still
