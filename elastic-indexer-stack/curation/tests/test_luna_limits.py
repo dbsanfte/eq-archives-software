@@ -150,17 +150,16 @@ def test_local_minute_threshold_expires_even_without_provider_headers(tmp_path, 
     assert account.reserve(.001)
 
 
-def test_daily_token_guard_includes_old_receipts_and_retains_paid_usage(tmp_path, clock, monkeypatch):
-    monkeypatch.setattr(daily_budget, 'DAILY_TOKEN_TARGET', 1000)
+def test_daily_token_meter_includes_old_receipts_without_applying_batch_queue_limit(tmp_path, clock):
     account = DailyBudget(tmp_path / 'budget')
-    old = account.reserve(.00004)
-    account.settle(old, .00004)  # an older image recorded spend only
+    account.configure({'enabled':False,'daily_usd':200,'monthly_usd':500,'min_grade':2,
+                       'grading_criteria':'','revision':0})
+    old = account.reserve(90)
+    account.settle(old, 90)  # an older image recorded spend only
     new = account.reserve(.00004)
     account.settle(new, .00004, usage={'input_tokens': 175, 'output_tokens': 45})
-    assert account.snapshot()['luna_accounted_tokens_today'] == 620
-    with pytest.raises(LunaRatePause) as error:
-        account.reserve(.00004)
-    assert error.value.retry_at == '2026-11-27T00:00:00+00:00'
+    assert account.snapshot()['luna_accounted_tokens_today'] == 900_000_220
     assert account.snapshot()['luna_recent_requests'] == 2
+    assert account.reserve(.00004)
     clock.advance(86400)
     assert account.reserve(.00004)

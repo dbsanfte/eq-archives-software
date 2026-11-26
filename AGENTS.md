@@ -1368,9 +1368,10 @@ Constrain the operator-owned `eqarchives-enrichment-tuning` ConfigMap's
 `luna_workers` override to 1–192 and apply it only to new historical Jobs.
 Ramp the paid traffic in measured steps while checking Luna latency and quota
 headroom, coordinator throughput, and host resources. Keep the 80% pacing
-targets of 8,000 requests/minute, 8 million tokens/minute and 800 million
-tokens per UTC day. The shared ledger records admissions and usage and carries
-forward conservative token bounds for older or unresolved receipts. Honor the
+targets of 8,000 requests/minute and 8 million tokens/minute. Daily token
+accounting is diagnostic. The configured dollar budgets govern daily and
+monthly spend. The Batch/Background queue allowance applies to asynchronous
+requests. Honor the
 stricter provider request, token and project-token headers and `Retry-After`.
 Apply cooldown before taking a new reservation. Retain the money reserved on
 ambiguous responses and permit cooldown continuations with their saved work.

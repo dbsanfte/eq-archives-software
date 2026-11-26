@@ -1083,9 +1083,11 @@ Operators can set `luna_workers` to 1–192 in the optional
 at startup, so changing it leaves running Jobs intact.
 Ramp traffic in measured steps and watch Luna latency, request rate, token usage
 and node health. The shared ledger paces admission at 8,000 requests/minute,
-8 million tokens/minute and 800 million tokens per UTC day. It uses settled token
-counts for the minute and a conservative bound for old or unresolved daily
-receipts. All paid lanes share a cooldown when provider request, token or project
+and 8 million tokens/minute. It uses settled token counts for the minute and
+reports an estimate for UTC-day usage. The configured dollar budgets govern
+daily/monthly spend. The provider's Batch/Background queued-token allowance
+applies to asynchronous workloads. [Luna model limits](https://developers.openai.com/api/docs/models/gpt-6-luna)
+All paid lanes share a cooldown when provider request, token or project
 token headers report 20% remaining or less, or when Luna asks clients to retry
 later. Cached responses and verified progress stay available across cooldowns.
 Already-current enrichment is skipped. If the same bounded evidence is still
