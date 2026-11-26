@@ -1146,7 +1146,7 @@ distinguishes advice or disputed claims from reported outcomes. Current
 enrichment checkpoints, paid responses and in-flight attempts are retained.
 
 The paid pass uses the configured UTC
-daily/monthly Luna ledger and a $50 lifetime maintenance cap per canonical
+daily/monthly Luna ledger and a $200 lifetime maintenance cap per canonical
 website host, mailing list or newsgroup. Settled usage and unresolved
 reservations count against that cap. Import approvals use their own per-site
 allowance and ledgers. The maintenance cache under

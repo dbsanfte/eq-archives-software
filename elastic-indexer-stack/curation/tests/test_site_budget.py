@@ -108,7 +108,7 @@ def test_reservation_uses_current_site_setting_under_the_shared_admission_lock(t
 
 def test_rolling_maintenance_raises_the_lifetime_cap_without_resetting_charges(tmp_path):
     account = DailyBudget(tmp_path / 'budget')
-    configure(account, site_usd=5, daily_usd=20, monthly_usd=500)
+    configure(account, site_usd=5, daily_usd=200, monthly_usd=500)
     with closing(Store(tmp_path / 'existing-scope')) as store:
         store.db.execute("INSERT INTO attempts(reserved,actual,status) VALUES (49,44,'completed')")
         store.db.execute("INSERT INTO attempts(reserved,status) VALUES (5,'reserved')")
@@ -122,10 +122,12 @@ def test_rolling_maintenance_raises_the_lifetime_cap_without_resetting_charges(t
 
         with account.bind(purpose='maintenance'):
             reserve(1)
+            reserve(0.01)
+            reserve(149.99)
             with pytest.raises(SiteBudgetExceeded):
                 reserve(0.01)
-        assert store.db.execute('SELECT COUNT(*) FROM attempts').fetchone()[0] == 3
-        assert account.snapshot()['unresolved_usd'] == 1
+        assert store.db.execute('SELECT COUNT(*) FROM attempts').fetchone()[0] == 5
+        assert account.snapshot()['unresolved_usd'] == 151
     with account.bind(purpose='enrichment'):
         with pytest.raises(SiteBudgetExceeded):
             account.reserve(0.01, site_spent_units=units(5), site_maximum=5)

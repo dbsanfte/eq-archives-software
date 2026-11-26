@@ -1387,7 +1387,7 @@ On a scope-budget denial during concurrent grading, keep the exact IDs queued
 and let that scope's outstanding grades settle. Reduce concurrency for that
 scope and retry with its existing paid cache. Other scopes can keep using free
 slots. Only a denial at one in-flight grade can mark the scope exhausted for
-the slice. Keep the $50 lifetime limit and unresolved charges in the ledger.
+the slice. Keep the $200 lifetime limit and unresolved charges in the ledger.
 For a confirmed capped newsgroup, retire its known unstarted queue rows in one
 transaction and exclude its exact numbered message IDs from later refills for
 that slice. These rows use no further examination allowance. Filtered refills
@@ -1436,7 +1436,7 @@ New import and historical summaries default to 500 characters. Allow up to
 evidence contains at least 3,000 Unicode letters. Keep paid or uncertain attempts
 on their original prompt and correction chain. Preserve completed checkpoints.
 Preserve paid responses across retries. Use the same configured UTC
-limits and a $50 lifetime maintenance allowance per website host, mailing list
+limits and a $200 lifetime maintenance allowance per website host, mailing list
 or newsgroup. Retain earlier charges and the separate import budget. Due
 maintenance gets first admission ahead of waiting imports. Historical
 re-enrichment, approved-site enrichment and discovery receive Luna priority in

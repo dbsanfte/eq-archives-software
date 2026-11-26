@@ -173,7 +173,7 @@ def test_scope_reservations_release_under_concurrent_enrichment(tmp_path, monkey
     directory = tmp_path / 'state' / 'policy-enrichment' / digest(scope)
     with closing(Store(directory)) as store, store.db:
         store.db.execute('''INSERT INTO attempts(candidate,signature,reserved,status,created,actual)
-                            VALUES ('prior','settled',49.96,'received','2026-11-26T00:00:00Z',49.96)''')
+                            VALUES ('prior','settled',199.96,'received','2026-11-26T00:00:00Z',199.96)''')
 
     original = Enricher.enrich_for_maintenance
 
@@ -220,7 +220,7 @@ def test_scope_reservations_release_under_concurrent_enrichment(tmp_path, monkey
     assert result['failed'] == result['skipped'] == 0
     with closing(Store(directory, initialize=False)) as store:
         spent = attempt_spending(store)
-    assert 49.96 < spent['estimated_usd'] < 50 and spent['reserved_usd'] == 0
+    assert 199.96 < spent['estimated_usd'] < 200 and spent['reserved_usd'] == 0
 
 
 def test_scope_exhaustion_keeps_uncertain_charges_and_other_scopes_running(tmp_path):
@@ -230,7 +230,7 @@ def test_scope_exhaustion_keeps_uncertain_charges_and_other_scopes_running(tmp_p
     with closing(Store(directory)) as store, store.db:
         store.db.executemany('''INSERT INTO attempts(candidate,signature,reserved,status,created,actual)
                               VALUES ('prior',?,?,?,'2026-11-26T00:00:00Z',?)''',
-                             [('settled', 49.90, 'received', 49.90), ('uncertain', .09, 'reserved', None)])
+                             [('settled', 199.90, 'received', 199.90), ('uncertain', .09, 'reserved', None)])
     requests = []
     account = budget(tmp_path, daily=10)
     with closing(sources), closing(State(root, identity())) as state:
@@ -242,7 +242,7 @@ def test_scope_exhaustion_keeps_uncertain_charges_and_other_scopes_running(tmp_p
     assert result['execution']['scope_budget_retries'] > 0
     assert result['execution']['scope_budget_exhausted'] == 1
     with closing(Store(directory, initialize=False)) as store:
-        assert attempt_spending(store) == {'estimated_usd': 49.90, 'reserved_usd': .09}
+        assert attempt_spending(store) == {'estimated_usd': 199.90, 'reserved_usd': .09}
 
 
 def test_held_newsgroup_cannot_fill_the_next_enrichment_slice(tmp_path, monkeypatch):
@@ -251,7 +251,7 @@ def test_held_newsgroup_cannot_fill_the_next_enrichment_slice(tmp_path, monkeypa
     directory = root / 'policy-enrichment' / digest(('newsgroups', group))
     with closing(Store(directory)) as store, store.db:
         store.db.execute('''INSERT INTO attempts(candidate,signature,reserved,status,created,actual)
-                         VALUES ('prior','held',50,'reserved','2026-11-26T00:00:00Z',NULL)''')
+                         VALUES ('prior','held',200,'reserved','2026-11-26T00:00:00Z',NULL)''')
 
     size = enrichment_worker.FRONTIER_PAGE_SIZE
     held = [f'newsgroups/{group}-msg-{index:04d}.txt' for index in range(3 * size)]
