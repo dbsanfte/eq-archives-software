@@ -21,7 +21,7 @@ from daily_budget import AutomaticStopped, DailyBudget, DailyBudgetPause, Enrich
 from grading import Luna, LunaUnavailable
 from import_status import EnrichmentError
 from indexer import gemma, passages, search_enrichment
-from indexer.capture_enrichment import Enricher, summary_requests
+from indexer.capture_enrichment import Enricher, domain_prompts, summary_requests
 from indexer.sqlite_state import SQLiteState
 from policy_enrichment import COLLECTIONS, COUNTERS, FRONTIER_PAGE_SIZE, capture_identity, metadata_patch, prepare_refresh
 from policy_maintenance import MaintenanceServices, YieldWork, foreground, identity
@@ -414,6 +414,7 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
             phase, next_at = 'waiting_imports', time.time() + 60
             return report(True)
         tls_context = Luna.tls_context()
+        domain_prompts('')  # Load bundled templates before the grading threads start.
         # The pool drains before its shared priority lease is released, even
         # when the slice yields or encounters a failed write.
         with account.bind(purpose='maintenance', owner=job), ThreadPoolExecutor(max_workers=workers) as pool:

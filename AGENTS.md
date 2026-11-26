@@ -1380,6 +1380,8 @@ Luna requests continue concurrently outside SQLite transactions.
 Share a verified TLS context within each historical Job and keep each grader's
 connection independent. Dedicated enrichment Jobs can burst to four CPUs with
 the existing low CPU request. Body maintenance keeps its two-CPU limit.
+Parse bundled Luna prompt YAML once per process. Preserve regex precedence,
+template contents and exact request signatures across the cache change.
 Refill grading slots on completion and batch validated summaries for embedding.
 Drain admitted requests before releasing the shared priority claim. Preserve
 paid totals, matching cursors and cached responses during handoffs. Initialize
