@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import re
 import time
+from enrichment_worker import WORKERS as MAX_LUNA_WORKERS
 import math
 
 from common import CrawlError,save
@@ -101,7 +102,7 @@ def receipt(root,state):
                         {'preparation_workers','documents','stored_vectors_reused','submitted_inputs'})
         if (not isinstance(execution,dict) or set(execution)-execution_keys
                 or any(type(v) is not int or not 0<=v<=10**12 for v in execution.values())
-                or execution.get('preparation_workers',0)>4 or execution.get('luna_workers',0)>4):return None
+                or execution.get('preparation_workers',0)>4 or execution.get('luna_workers',0)>MAX_LUNA_WORKERS):return None
         enrichment=result.get('enrichment')
         if dedicated and enrichment is None:return None
         if enrichment is not None:

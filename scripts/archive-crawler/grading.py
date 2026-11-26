@@ -229,6 +229,14 @@ def validate(response, documents, *, repair_legacy_bounds=False):
     return rating
 
 
+class LunaUnavailable(CrawlError):
+    """A provider rejection whose status can pause historical admission."""
+
+    def __init__(self, status, retry_after):
+        self.retry_after = retry_after
+        super().__init__(f'Luna HTTP {status}; upstream details omitted')
+
+
 class Luna:
     def __init__(self, key_file, deadline=None):
         self.deadline = deadline
@@ -279,6 +287,14 @@ class Luna:
             if len(data) > response_limit:
                 raise CrawlError("Luna response exceeds the response limit")
             if response.status != 200:
+                if response.status in (401, 403):
+                    raise LunaUnavailable(response.status, 1800)
+                if response.status == 429:
+                    try:
+                        quota = json.loads(data).get('error', {}).get('code') == 'insufficient_quota'
+                    except (AttributeError, ValueError):
+                        quota = False
+                    raise LunaUnavailable(response.status, 1800 if quota else 60)
                 raise CrawlError(f"Luna HTTP {response.status}; upstream details omitted")
             return json.loads(data)
         except (OSError, http.client.HTTPException, ValueError):

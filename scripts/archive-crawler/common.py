@@ -321,6 +321,7 @@ class Store:
                 id,url,scope,priority,coverage,state,captures,rating,error,decision);
             CREATE TABLE IF NOT EXISTS attempts(id INTEGER PRIMARY KEY, candidate TEXT,
                 signature TEXT, reserved REAL, actual REAL, status TEXT, created TEXT);
+            CREATE INDEX IF NOT EXISTS attempt_signature ON attempts(signature);
             CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, candidate TEXT, action TEXT, detail TEXT, created TEXT);
             CREATE TABLE IF NOT EXISTS ezboard_aliases(token TEXT PRIMARY KEY, board TEXT, url TEXT, evidence TEXT);
             CREATE TABLE IF NOT EXISTS ezboard_archive_boards(sha TEXT, board TEXT, host TEXT, path TEXT, PRIMARY KEY(sha,board));

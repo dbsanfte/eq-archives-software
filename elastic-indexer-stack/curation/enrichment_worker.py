@@ -17,7 +17,7 @@ import time
 
 from common import CrawlError, digest, save
 from daily_budget import AutomaticStopped, DailyBudget, DailyBudgetPause, EnrichmentPriorityPause
-from grading import Luna
+from grading import Luna, LunaUnavailable
 from import_status import EnrichmentError
 from indexer import gemma, passages, search_enrichment
 from indexer.capture_enrichment import Enricher, summary_requests
@@ -27,10 +27,12 @@ from policy_maintenance import MaintenanceServices, YieldWork, foreground, ident
 from policy_sources import ServiceError, SourceError, Sources
 
 
-WORKERS = 4
-PAGE_SIZE = 32
-MAX_RECORDS = 512
-SLICE_SECONDS = 480
+WORKERS = 8
+PAGE_SIZE = 64
+MAX_RECORDS = 1200
+SLICE_SECONDS = 720
+LUNA_SECONDS = 45
+MIN_REQUEST_TIME_LEFT = 15
 
 
 class State:
@@ -197,13 +199,18 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
         return record
 
     def grade(prepared, scope):
+        def check_request():
+            check()
+            if deadline - time.monotonic() < MIN_REQUEST_TIME_LEFT:
+                raise YieldWork()
+
         def client(path):
-            return Luna(path, deadline=time.time() + max(0, min(45, deadline - time.monotonic())))
+            return Luna(path, deadline=time.time() + LUNA_SECONDS)
         # Cold records from one scope may share a database. Serialize WAL
         # initialization only, then let the request threads run independently.
         with opening_cache:
             enricher = enricher_factory(state.root / 'policy-enrichment' / digest(scope), '/run/secrets/luna_api_key',
-                                        client_factory=client, check=check)
+                                        client_factory=client, check=check_request)
         with closing(enricher):
             return metadata_patch(enricher.enrich_for_maintenance(prepared.capture, prepared.source, prepared.grounding))
 
@@ -307,6 +314,8 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
         phase, next_at = 'waiting_imports', time.time() + 60
     except AutomaticStopped:
         phase, next_at = 'waiting_configuration', time.time() + 300
+    except LunaUnavailable as error:
+        phase, next_at = 'retry_wait', time.time() + error.retry_after
     except (CrawlError, ValueError, OSError, sqlite3.Error):
         phase, next_at = 'retry_wait', time.time() + 60
     finally:

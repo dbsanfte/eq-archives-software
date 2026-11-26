@@ -1067,8 +1067,8 @@ resolved physical index, with no delete, cluster, mapping or security privilege.
 
 `PASSAGE_REENRICHMENT_ENABLED=1` admits a separate `eqarchives-enrichment-*`
 Job alongside the chunk updater. It rotates verified current passages across
-websites, mailing lists and newsgroups. Each Job examines at most 512 records
-or eight minutes, with four concurrent Luna requests and a shared Gemma
+websites, mailing lists and newsgroups. Each Job examines at most 1,200 records
+or twelve minutes, with eight concurrent Luna requests and a shared Gemma
 summary embedding batch per wave. A bounded durable queue protects each
 collection's cursor across partial waves, budget waits and restarts.
 Already-current enrichment is skipped. If the same bounded evidence is still
@@ -1078,6 +1078,10 @@ labels from the bounded search passages. The maintenance prompt contains no
 date extraction. Each summary and its validated Gemma vector are committed
 together using the original read revision. Existing publication date evidence,
 readers, capture/index timestamps and body/OCR vectors retain their provenance.
+Within each site, mailing list or newsgroup, a byte-identical date-free request can
+reuse a validated paid response. Each capture retains a source-bound validation
+receipt. Fresh requests stop before the slice deadline with time to drain. Model
+access and quota errors preserve the pending frontier and retry after a cooldown.
 
 Summaries default to 500 characters. New imports and maintenance requests may
 use up to 1,200 for articles, discussions and reference pages when the selected
@@ -1099,6 +1103,9 @@ finishes. Budget waits and paid service failures leave the free body pass
 eligible to run. The paid profile projects only the Luna item and mounts the
 shared budget directory. Both profiles run without the publisher key or
 Kubernetes token.
+The daily ledger maintains integer day totals in the same transaction as each
+reservation or settlement. The original reservation rows remain the audit record
+and also update the totals when a Job launched before the migration writes them.
 
 Source reads are exact, bounded and remote-free, from the preserved source cache,
 archive checkout or local Git objects. No checkout walk, clone, fetch or source

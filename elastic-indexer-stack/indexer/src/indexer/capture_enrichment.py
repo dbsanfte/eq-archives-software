@@ -11,9 +11,9 @@ from urllib.parse import urlsplit
 import yaml
 
 from common import CrawlError, Store, digest, now
-from grading import Luna, MODEL, PRICING
+from grading import Luna, LunaUnavailable, MODEL, PRICING
 from import_status import EnrichmentError
-from daily_budget import SiteBudgetExceeded, current_budget, reserve_attempt, settle_attempt, units
+from daily_budget import SiteBudgetExceeded, current_budget, request_purpose, reserve_attempt, settle_attempt, units
 from . import gemma, passages, search_enrichment
 
 RESOURCES = Path(__file__).with_name("resources")
@@ -316,6 +316,10 @@ class Enricher:
         try:
             self.client = self.client or self.client_factory(self.key_file)
             response = self.client.request(payload)
+        except LunaUnavailable:
+            if request_purpose.get() == 'maintenance':
+                raise
+            raise EnrichmentError('request') from None
         except (CrawlError, OSError):
             raise EnrichmentError('request') from None
         # Cache the entire paid response before validation, without modifying any
@@ -407,6 +411,20 @@ class Enricher:
                 payload = standard
         summary_max = EXTENDED_SUMMARY_CHARS if payload is not standard else SHORT_SUMMARY_CHARS
         original = digest({'payload': payload, 'raw_source_sha256': capture['sha256']})
+        # Date-free maintenance requests contain only the bounded passages.
+        # Different captures in this scope can send exactly the same request.
+        # Their raw-source signatures and validation receipts remain separate.
+        evidence_key = 'maintenance_evidence:' + digest(payload)
+        if (proof := self.store.get(evidence_key)) and not self.started(original):
+            cached = self.store.get('enrichment:' + proof)
+            if isinstance(cached, dict):
+                try:
+                    reused = response_metadata(cached['response'], MAINTENANCE_SCHEMA, summary_max=summary_max)
+                except (KeyError, EnrichmentError):
+                    pass
+                else:
+                    return self.record_metadata(cached['response'], reused, original, grounding,
+                                                reused_response_signature=proof)
         signature = original
         response = self.exchange(capture, payload, signature, initial_signatures=(legacy_signature,))
         last_issue = 'request'
@@ -414,7 +432,10 @@ class Enricher:
             if response is not MISSING_RESPONSE:
                 try:
                     result = response_metadata(response, MAINTENANCE_SCHEMA, summary_max=summary_max)
-                    return self.record_metadata(response, result, signature, grounding)
+                    accepted = self.record_metadata(response, result, signature, grounding)
+                    self.store.db.execute('INSERT OR IGNORE INTO meta VALUES (?,?)', (evidence_key, json.dumps(signature)))
+                    self.store.db.commit()
+                    return accepted
                 except ValidationError as error:
                     last_issue = error.code
                     self.store.set('enrichment_validation:' + signature, {'code': error.code, 'checked_at': now()})
