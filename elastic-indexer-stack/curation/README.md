@@ -1087,6 +1087,12 @@ Each scope's cache is initialized once per Job. Its spend projection backfills
 from the original attempts and folds only changed rows during admission. SQLite
 triggers let older writers participate, and the same per-row integer rounding
 continues to count settled usage and unresolved reservations.
+Grounding can reuse a current selected view reconstructed from its stored
+passage offsets. The complete view and reader must match their recorded hashes.
+Textual websites also require verified archive bytes and a matching decoded
+HTML hash. The existing preparation path checks missing or inconsistent
+evidence. The Job reports checkpoint and rebuilt view counts. It preserves the
+full source used to locate earlier paid responses.
 Within each site, mailing list or newsgroup, a byte-identical date-free request can
 reuse a validated paid response. Each capture retains a source-bound validation
 receipt. Fresh requests stop before the slice deadline with time to drain. Model

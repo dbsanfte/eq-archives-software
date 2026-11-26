@@ -185,7 +185,8 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
     deadline = time.monotonic() + seconds
     should_yield = should_yield or (lambda: foreground(root, enrichment=True))
     phase, next_at = 'bounded', 0
-    counters = {'luna_workers': workers, 'embedding_waves': 0, 'examined': 0}
+    counters = {'luna_workers': workers, 'embedding_waves': 0, 'examined': 0,
+                'checkpoint_views': 0, 'rebuilt_views': 0}
     rotation, capped = cycle(COLLECTIONS), set()
     started, initialized = set(), set()
     futures, scheduled = {}, {}
@@ -257,6 +258,7 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
             if prepared is None:
                 finish(identifier, 'skipped')
                 continue
+            counters['checkpoint_views' if prepared.checkpoint_view else 'rebuilt_views'] += 1
             if prepared.capture is None:
                 completed(prepared, None)
                 continue
