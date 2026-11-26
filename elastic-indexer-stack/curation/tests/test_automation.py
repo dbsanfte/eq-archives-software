@@ -8,7 +8,7 @@ import pytest
 import automation
 from common import CrawlError, digest, now
 from conftest import add_candidate, mock_publication
-from daily_budget import DailyBudgetPause, AutomaticStopped
+from daily_budget import DailyBudgetPause, AutomaticStopped, LunaRatePause
 from review import record
 from server import create_app
 from state import Lane, connect, enqueue, unpack
@@ -189,6 +189,32 @@ def test_budget_pause_resumes_same_operation_after_utc_reset_preserving_manual_p
         with connect(root) as store:
             assert json.loads(store.db.execute('SELECT result FROM operations WHERE id=?', (operation['id'],)).fetchone()[0])['automatic_pause']['reason'] == 'disabled'
     finally: worker.close()
+
+
+@pytest.mark.parametrize('automatic', [False, True])
+def test_provider_cooldown_resumes_original_discovery_operation(tmp_path, monkeypatch, automatic):
+    root = tmp_path / 'state'
+    account = enable(root)
+    stamp = datetime.now(timezone.utc)
+    monkeypatch.setattr('daily_budget.instant', lambda: stamp)
+    monkeypatch.setattr('automation.now', lambda: stamp.isoformat())
+    with connect(root) as store:
+        identifier = enqueue(store, 'discover', {'max_candidates': 1, 'max_usd': 2, 'automatic': automatic})
+        pause = automation.pause_detail(LunaRatePause(stamp + timedelta(seconds=12)))
+        store.db.execute("UPDATE operations SET state='interrupted',result=? WHERE id=?",
+                         (json.dumps({'automatic_pause': pause}), identifier))
+        store.db.commit()
+    account.observe_luna_capacity(stamp, 20, {})
+    stamp += timedelta(seconds=13)
+    automation.resume_owned(root, Lane.CANDIDATES, account)
+    automation.schedule(root, account)
+    with connect(root) as store:
+        assert store.db.execute('SELECT state FROM operations WHERE id=?', (identifier,)).fetchone()[0] == 'interrupted'
+        assert store.db.execute('SELECT COUNT(*) FROM operations').fetchone()[0] == 1
+    stamp += timedelta(seconds=8)
+    automation.resume_owned(root, Lane.CANDIDATES, account)
+    with connect(root) as store:
+        assert store.db.execute('SELECT state FROM operations WHERE id=?', (identifier,)).fetchone()[0] == 'queued'
 
 
 def test_automatic_capture_claim_retains_undo_grace_and_marks_only_owned_work(candidate):

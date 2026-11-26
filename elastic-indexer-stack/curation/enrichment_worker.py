@@ -13,10 +13,11 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+from threading import Lock
 import time
 
 from common import CrawlError, Store, digest, save
-from daily_budget import AutomaticStopped, DailyBudget, DailyBudgetPause, EnrichmentPriorityPause, install_scope_totals
+from daily_budget import AutomaticStopped, DailyBudget, DailyBudgetPause, EnrichmentPriorityPause, LunaRatePause, install_scope_totals
 from grading import Luna, LunaUnavailable
 from import_status import EnrichmentError
 from indexer import gemma, passages, search_enrichment
@@ -29,9 +30,11 @@ from policy_sources import ServiceError, SourceError, Sources
 
 
 WORKERS = 8
-MAX_WORKERS = 32
-FRONTIER_REFILL_AT = MAX_WORKERS
+MAX_WORKERS = 192
+FRONTIER_REFILL_AT = 32
 MAX_RECORDS = 1200
+BASELINE_WORKERS = 32
+MAX_SLICE_RECORDS = MAX_RECORDS * MAX_WORKERS // BASELINE_WORKERS
 SLICE_SECONDS = 720
 LUNA_SECONDS = 45
 MIN_REQUEST_TIME_LEFT = 15
@@ -86,7 +89,7 @@ class State:
         self.db.close()
         self.lease.close()
 
-    def fill(self, services, check):
+    def fill(self, services, check, *, refill_at=FRONTIER_REFILL_AT):
         now = time.time()
         db = self.db.connection()
         queries = 0
@@ -94,7 +97,7 @@ class State:
             if next_at > now:
                 continue
             queued, = db.execute('SELECT COUNT(*) FROM pending WHERE key=? AND collection=?', (self.key, collection)).fetchone()
-            if queued > FRONTIER_REFILL_AT:
+            if queued > refill_at:
                 continue
             check()
             limit = FRONTIER_PAGE_SIZE - queued
@@ -195,7 +198,7 @@ def write_wave(services, records, check):
 
 def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, maximum=MAX_RECORDS, workers=WORKERS,
         enricher_factory=Enricher, should_yield=None, preparation_pool=None):
-    if not 0 < seconds <= SLICE_SECONDS or not 1 <= maximum <= MAX_RECORDS or not 1 <= workers <= MAX_WORKERS:
+    if not 0 < seconds <= SLICE_SECONDS or not 1 <= maximum <= MAX_SLICE_RECORDS or not 1 <= workers <= MAX_WORKERS:
         raise ValueError('Invalid historical enrichment slice bounds')
     deadline = time.monotonic() + seconds
     should_yield = should_yield or (lambda: foreground(root, enrichment=True))
@@ -209,6 +212,8 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
     preparing = {}
     outcomes = []
     buffered_at = 0
+    # All graders update the same SQLite budget. Keep network I/O outside this lock.
+    writer = Lock()
 
     def check():
         if time.monotonic() >= deadline or should_yield():
@@ -233,7 +238,7 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
         def client(path):
             return Luna(path, deadline=time.time() + LUNA_SECONDS)
         with closing(enricher_factory(cache, '/run/secrets/luna_api_key', client_factory=client,
-                                     check=check_request, prepared_cache=True)) as enricher:
+                                     check=check_request, prepared_cache=True, writer=writer)) as enricher:
             return metadata_patch(enricher.enrich_for_maintenance(prepared.capture, prepared.source, prepared.grounding))
 
     def finish(identifier, result, reason=None):
@@ -279,7 +284,7 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
         started.discard(identifier)
 
     def admit(pool, limit):
-        counters['frontier_queries'] += state.fill(services, check)
+        counters['frontier_queries'] += state.fill(services, check, refill_at=max(FRONTIER_REFILL_AT, workers))
         identifiers = state.ready(rotation, limit, started)
         for identifier in identifiers:
             check()
@@ -402,6 +407,9 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
         if budget['remaining_usd'] <= 0:
             phase, next_at = 'waiting_budget', datetime.fromisoformat(budget['resets_at']).timestamp()
             return report(True)
+        if budget['luna_retry_at']:
+            phase, next_at = 'retry_wait', datetime.fromisoformat(budget['luna_retry_at']).timestamp()
+            return report(True)
         if budget['enrichment_pending']:
             phase, next_at = 'waiting_imports', time.time() + 60
             return report(True)
@@ -415,6 +423,8 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
                     preparation_pool.cancel_pending()
     except YieldWork:
         phase = 'yielded'
+    except LunaRatePause as error:
+        phase, next_at = 'retry_wait', datetime.fromisoformat(error.retry_at).timestamp()
     except DailyBudgetPause as error:
         phase, next_at = 'waiting_budget', datetime.fromisoformat(error.retry_at).timestamp()
     except EnrichmentPriorityPause:
@@ -439,14 +449,16 @@ def main():
     if not re.fullmatch(r'eqarchives-enrichment-' + identity() + r'-[1-9][0-9]{0,8}', job):
         raise ValueError('Invalid enrichment job identity')
     configured_workers = os.environ.get('LUNA_ENRICHMENT_WORKERS', str(WORKERS))
-    if not re.fullmatch(r'[1-9][0-9]?', configured_workers) or int(configured_workers) > MAX_WORKERS:
+    if not re.fullmatch(r'[1-9][0-9]{0,2}', configured_workers) or int(configured_workers) > MAX_WORKERS:
         raise ValueError(f'Historical Luna workers must be between 1 and {MAX_WORKERS}')
+    workers = int(configured_workers)
+    maximum = max(MAX_RECORDS, MAX_RECORDS * workers // BASELINE_WORKERS)
     with closing(State('/indexing-state', identity())) as state, closing(MaintenanceServices()) as services, \
             Sources(['/archive-sources', '/archive'], '/data/publisher.git') as sources, \
             closing(PreparationPool(sources.roots, sources.publication, PREPARATION_WORKERS,
                                     enrichment=True, tasks=256, timeout=30)) as preparation_pool:
         result = run(args.root, state, services, sources, job, DailyBudget(os.environ['LUNA_DAILY_BUDGET_ROOT']),
-                     workers=int(configured_workers), preparation_pool=preparation_pool)
+                     workers=workers, maximum=maximum, preparation_pool=preparation_pool)
         print(json.dumps(result), flush=True)
 
 

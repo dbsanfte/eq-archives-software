@@ -1,9 +1,12 @@
 """Explicit paid, source-bound Luna classification with conservative spend caps."""
 
 import copy
+from datetime import timedelta
 import http.client
 import json
+import logging
 import math
+import sqlite3
 import time
 from pathlib import Path
 
@@ -11,9 +14,12 @@ from common import CATEGORIES, CrawlError, Page, decode, digest, now
 from wayback_transport import TransportUnavailable, current_transport
 from selection_policy import VERSION as SELECTION_VERSION, SITE_TYPES, CONTENT_KINDS, evidence_boundary
 from daily_budget import (AutomaticStopped, DailyBudgetPause, EnrichmentPriorityPause,
-                          attempt_remaining_units, attempt_spending, reserve_attempt, settle_attempt, units)
+                          LunaRatePause, attempt_remaining_units, attempt_spending, current_budget,
+                          instant, reserve_attempt, settle_attempt, units)
+from luna_limits import capacity, cooldown
 
 MODEL = "gpt-6-luna"
+LOG = logging.getLogger(__name__)
 PRICING = {"input_per_million": 0.10, "output_per_million": 0.50,
            "reference": "https://developers.openai.com/api/docs/models/gpt-6-luna",
            "verified": "2026-10-06"}
@@ -260,6 +266,8 @@ class Luna:
         return self._post("/v1/responses", payload, 1_048_576)
 
     def count_input_tokens(self, payload):
+        if budget := current_budget.get():
+            budget.check_luna_capacity()
         request = {key: payload[key] for key in ("model", "input", "instructions", "reasoning", "text") if key in payload}
         result = self._post("/v1/responses/input_tokens", request, 4096)
         if (not isinstance(result, dict) or result.get("object") != "response.input_tokens"
@@ -286,15 +294,28 @@ class Luna:
                     data += block
             if len(data) > response_limit:
                 raise CrawlError("Luna response exceeds the response limit")
+            when = instant()
+            quota = False
+            if response.status == 429:
+                try:
+                    quota = json.loads(data).get('error', {}).get('code') == 'insufficient_quota'
+                except (AttributeError, ValueError):
+                    pass
+            headroom = capacity(response)
+            delay = cooldown(response, when, headroom, quota=quota)
+            budget = current_budget.get()
+            if budget and (headroom or delay):
+                try:
+                    budget.observe_luna_capacity(when, delay, headroom)
+                except sqlite3.Error:
+                    LOG.warning('Could not save Luna capacity observations')
             if response.status != 200:
                 if response.status in (401, 403):
                     raise LunaUnavailable(response.status, 1800)
-                if response.status == 429:
-                    try:
-                        quota = json.loads(data).get('error', {}).get('code') == 'insufficient_quota'
-                    except (AttributeError, ValueError):
-                        quota = False
-                    raise LunaUnavailable(response.status, 1800 if quota else 60)
+                if response.status in (429, 503):
+                    if budget:
+                        raise LunaRatePause(when + timedelta(seconds=delay), status=response.status)
+                    raise LunaUnavailable(response.status, delay)
                 raise CrawlError(f"Luna HTTP {response.status}; upstream details omitted")
             return json.loads(data)
         except (OSError, http.client.HTTPException, ValueError):
@@ -359,7 +380,14 @@ def judgment(args,store,candidate,signature,old_signature,payload,client,documen
             if transport:=current_transport.get():transport.require_available()
             attempt=reserve(store,candidate['id'],signature,payload,args.max_usd)
             store.set('luna_retry_generation:'+signature,generation)
-            response=client.request(payload);cache_signature=signature
+            try:
+                response=client.request(payload)
+            except LunaRatePause as error:
+                if error.status is not None:
+                    store.db.execute("UPDATE attempts SET status='provider_throttled' WHERE id=?", (attempt,))
+                    store.db.commit()
+                raise
+            cache_signature=signature
             cached={'attempt':attempt,'response':response}
             store.set(f'luna_response_record:{signature}:{attempt}:{digest(response)}',cached)
             store.set('luna_response:'+signature,cached)

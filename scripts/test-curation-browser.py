@@ -1849,6 +1849,10 @@ async def automatic_indexing_flow(browser,base,width):
     await page.evaluate('refresh()');await settled(page)
     await expect(page.get_by_role('heading',name='Waiting for daily Luna budget',exact=True)).to_be_visible()
     await expect(page.locator('#stage-live')).to_contain_text('resumes automatically')
+    review['job'].update(budget_period='provider',required_usd=0)
+    await page.evaluate('refresh()');await settled(page)
+    await expect(page.get_by_role('heading',name='Waiting for Luna capacity',exact=True)).to_be_visible()
+    await expect(page.locator('#stage-live')).to_contain_text('after the Luna cooldown')
     assert len(posts)==1
     review.update(state='indexed');row.update(state='indexed',review_state='indexed',stage='history')
     await page.evaluate('refresh()');await settled(page)

@@ -83,10 +83,13 @@ def read_budget_pause(root, batch, job_name):
     if record.get('state') != 'waiting_budget':
         return None
     try:
-        if not 0 < units(record['required_usd']) or datetime.fromisoformat(record['retry_at']).utcoffset() is None:
+        period = record.get('budget_period')
+        amount = units(record['required_usd'])
+        if not (amount == 0 if period == 'provider' else amount > 0) or datetime.fromisoformat(record['retry_at']).utcoffset() is None:
             return None
-        if record.get('budget_period') not in (None,'daily','monthly'):return None
+        if period not in (None, 'daily', 'monthly', 'provider'):
+            return None
     except (CrawlError, KeyError, TypeError, ValueError):
         return None
     return {**{key: record[key] for key in ('required_usd', 'retry_at')},
-            **({'budget_period':record['budget_period']} if record.get('budget_period') in ('daily','monthly') else {})}
+            **({'budget_period':period} if period else {})}

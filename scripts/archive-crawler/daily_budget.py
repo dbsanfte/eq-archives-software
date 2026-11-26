@@ -12,9 +12,11 @@ import json
 import math
 from pathlib import Path
 import sqlite3
+from threading import Lock
 import uuid
 
 from common import CrawlError, now
+from luna_limits import DAILY_TOKEN_TARGET, MINUTE_REQUEST_TARGET, MINUTE_TOKEN_TARGET
 
 SCALE = 1_000_000_000
 MAINTENANCE_SCOPE_LIMIT_USD = 50
@@ -145,6 +147,13 @@ class DailyBudgetPause(CrawlError):
         super().__init__(f'{period.title()} Luna budget reached; paid work resumes after the UTC {period} reset')
 
 
+class LunaRatePause(DailyBudgetPause):
+    def __init__(self, until, *, status=None):
+        self.amount, self.retry_at, self.period = 0, until.isoformat(), 'provider'
+        self.status = status
+        CrawlError.__init__(self, 'Luna capacity is low; paid work will retry automatically after the cooldown')
+
+
 class SiteBudgetExceeded(CrawlError):
     """A lifetime site allowance is exhausted; calendar resets cannot renew it."""
 
@@ -162,6 +171,8 @@ class AutomaticStopped(CrawlError):
 class DailyBudget:
     def __init__(self, directory):
         self.root = Path(directory)
+        self.observation_lock = Lock()
+        self.observed_at = ''
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.root.chmod(0o700)
         with self.database() as db:
@@ -172,6 +183,12 @@ class DailyBudget:
                     reserved INTEGER NOT NULL, actual INTEGER, created TEXT NOT NULL);
                 CREATE INDEX IF NOT EXISTS reservation_day ON reservations(day);
                 CREATE TABLE IF NOT EXISTS enrichment_priority(owner TEXT PRIMARY KEY, expires TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS luna_capacity(id INTEGER PRIMARY KEY CHECK(id=1),
+                    retry_at TEXT NOT NULL, observed_at TEXT NOT NULL, headroom TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS luna_daily_tokens(day TEXT PRIMARY KEY,
+                    tokens INTEGER NOT NULL, charge INTEGER NOT NULL);
+                CREATE TABLE IF NOT EXISTS luna_recent_usage(slot INTEGER PRIMARY KEY,
+                    second INTEGER NOT NULL, requests INTEGER NOT NULL, tokens INTEGER NOT NULL);
             ''')
             db.execute('INSERT OR IGNORE INTO settings VALUES (1,?)', (json.dumps(DEFAULT),))
             self.install_totals(db)
@@ -294,6 +311,63 @@ class DailyBudget:
         return (row[0], row[1]) if row else (0, 0)
 
     @staticmethod
+    def capacity(db, when, spent, pending):
+        day = when.date().isoformat()
+        reported = db.execute('SELECT tokens,charge FROM luna_daily_tokens WHERE day=?', (day,)).fetchone()
+        tokens, charge = reported if reported else (0, 0)
+        # Old images and unresolved requests have only a dollar receipt. At
+        # Luna's least expensive metered rate ($0.10 per million), every 100
+        # nano-dollars represent at most one token in the local accounting.
+        tokens += (max(0, spent + pending - charge) + 99) // 100
+        row = db.execute('SELECT retry_at FROM luna_capacity WHERE id=1').fetchone()
+        retry_at = row[0] if row and row[0] > when.isoformat() else ''
+        if tokens >= DAILY_TOKEN_TARGET:
+            reset = (when + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            retry_at = max(retry_at, reset.isoformat())
+        floor = int(when.timestamp()) - 59
+        requests, recent_tokens = db.execute('''SELECT COALESCE(SUM(requests),0),COALESCE(SUM(tokens),0)
+            FROM luna_recent_usage WHERE second>=?''', (floor,)).fetchone()
+        if requests >= MINUTE_REQUEST_TARGET or recent_tokens >= MINUTE_TOKEN_TARGET:
+            pending_requests, pending_tokens = requests, recent_tokens
+            for second, count, total in db.execute('''SELECT second,requests,tokens
+                    FROM luna_recent_usage WHERE second>=? ORDER BY second''', (floor,)):
+                pending_requests -= count
+                pending_tokens -= total
+                if pending_requests < MINUTE_REQUEST_TARGET and pending_tokens < MINUTE_TOKEN_TARGET:
+                    retry_at = max(retry_at, datetime.fromtimestamp(second + 60, timezone.utc).isoformat())
+                    break
+        return retry_at, tokens, requests, recent_tokens
+
+    def check_luna_capacity(self):
+        when = instant()
+        with self.database() as db:
+            db.execute('BEGIN')
+            retry_at, *_ = self.capacity(db, when, *self.totals(db, when.date().isoformat()))
+        if retry_at:
+            raise LunaRatePause(datetime.fromisoformat(retry_at))
+
+    def observe_luna_capacity(self, when, delay, headroom):
+        """Keep the longest active cooldown and sample numeric provider headers."""
+        retry_at = (when + timedelta(seconds=delay)).isoformat() if delay else ''
+        sample_at = when.isoformat() if headroom else ''
+        if not retry_at and not sample_at:
+            return
+        cutoff = (when - timedelta(seconds=5)).isoformat()
+        with self.observation_lock:
+            if not retry_at and self.observed_at > cutoff:
+                return
+            with self.database() as db:
+                db.execute('''INSERT INTO luna_capacity VALUES (1,?,?,?) ON CONFLICT(id) DO UPDATE SET
+                    retry_at=MAX(luna_capacity.retry_at,excluded.retry_at),
+                    observed_at=MAX(luna_capacity.observed_at,excluded.observed_at),
+                    headroom=CASE WHEN excluded.observed_at>luna_capacity.observed_at THEN excluded.headroom
+                        ELSE luna_capacity.headroom END
+                    WHERE excluded.retry_at>luna_capacity.retry_at OR
+                        (excluded.observed_at<>'' AND luna_capacity.observed_at<=?)''',
+                    (retry_at, sample_at, json.dumps(headroom), cutoff))
+            self.observed_at = max(self.observed_at, sample_at)
+
+    @staticmethod
     def limits(db, when, config):
         day=when.date().isoformat();first=when.replace(day=1,hour=0,minute=0,second=0,microsecond=0)
         month_reset=(first+timedelta(days=32)).replace(day=1)
@@ -305,9 +379,12 @@ class DailyBudget:
         spent,pending=DailyBudget.totals(db,day)
         daily=units(config['daily_usd'])-spent-pending
         monthly=units(config.get('monthly_usd',DEFAULT['monthly_usd']))-month[0]-month[1]
+        retry_at,tokens,requests,recent_tokens=DailyBudget.capacity(db,when,spent,pending)
         day_reset=(when+timedelta(days=1)).replace(hour=0,minute=0,second=0,microsecond=0)
         period='monthly' if monthly<daily else 'daily'
         return {'estimated_usd':spent/SCALE,'unresolved_usd':pending/SCALE,
+                'luna_retry_at':retry_at,'luna_accounted_tokens_today':tokens,
+                'luna_recent_requests':requests,'luna_recent_tokens':recent_tokens,
                 '_remaining_units':max(0,min(daily,monthly)),
                 'remaining_usd':max(0,min(daily,monthly))/SCALE,'budget_period':period,
                 'resets_at':(month_reset if period=='monthly' else day_reset).isoformat(),
@@ -361,6 +438,11 @@ class DailyBudget:
             limits=self.limits(db,when,config)
             if config['configured'] and reserved>limits['_remaining_units']:
                 raise DailyBudgetPause(amount, limits['resets_at'], limits['budget_period'])
+            retry_at = limits['luna_retry_at']
+            if limits['luna_accounted_tokens_today'] + (reserved + 99) // 100 >= DAILY_TOKEN_TARGET:
+                retry_at = max(retry_at, limits['daily_resets_at'])
+            if retry_at:
+                raise LunaRatePause(datetime.fromisoformat(retry_at))
             if purpose in ('discovery','maintenance') and self._enrichment_pending(
                     db, when, owner=priority_owner.get() or '', maintenance=purpose=='maintenance'):
                 raise EnrichmentPriorityPause()
@@ -369,16 +451,31 @@ class DailyBudget:
                            (owner,(when+timedelta(minutes=5)).isoformat()))
             receipt = uuid.uuid4().hex
             db.execute('INSERT INTO reservations VALUES (?,?,?,NULL,?)', (receipt, day, reserved, when.isoformat()))
+            second = int(when.timestamp())
+            db.execute('''INSERT INTO luna_recent_usage VALUES (?,?,1,0) ON CONFLICT(slot) DO UPDATE SET
+                requests=CASE WHEN second=excluded.second THEN requests+1 ELSE 1 END,
+                tokens=CASE WHEN second=excluded.second THEN tokens ELSE 0 END,
+                second=excluded.second''', (second % 120, second))
         return receipt
 
-    def settle(self, receipt, actual):
+    def settle(self, receipt, actual, *, usage=None):
         actual = units(actual)
         with self.database() as db:
             db.execute('BEGIN IMMEDIATE')
-            previous = db.execute('SELECT actual FROM reservations WHERE id=?', (receipt,)).fetchone()
+            previous = db.execute('SELECT actual,day,created FROM reservations WHERE id=?', (receipt,)).fetchone()
             if previous is None or previous[0] is not None and previous[0] != actual:
                 raise CrawlError('Luna reservation accounting changed; paid work is paused')
             db.execute('UPDATE reservations SET actual=? WHERE id=?', (actual, receipt))
+            if (previous[0] is None and isinstance(usage, dict) and
+                    all(type(usage.get(key)) is int and 0 <= usage[key] <= 10**9
+                        for key in ('input_tokens', 'output_tokens'))):
+                tokens = usage['input_tokens'] + usage['output_tokens']
+                db.execute('''INSERT INTO luna_daily_tokens VALUES (?,?,?) ON CONFLICT(day) DO UPDATE SET
+                    tokens=luna_daily_tokens.tokens+excluded.tokens, charge=luna_daily_tokens.charge+excluded.charge''',
+                    (previous[1], tokens, actual))
+                second = int(datetime.fromisoformat(previous[2]).timestamp())
+                db.execute('UPDATE luna_recent_usage SET tokens=tokens+? WHERE slot=? AND second=?',
+                           (tokens, second % 120, second))
 
     def import_legacy(self, identifier, reserved, actual, created, receipt=None):
         """Idempotently count pre-deployment paid requests when first enabled."""
@@ -424,7 +521,7 @@ def settle_attempt(store, attempt, actual, usage):
         if not isinstance(usage, dict) or any(type(usage.get(key)) is not int or usage[key] < 0
                                               for key in ('input_tokens', 'output_tokens')):
             return
-        budget.settle(receipt, actual)
+        budget.settle(receipt, actual, usage=usage)
 
 
 def require_automatic():

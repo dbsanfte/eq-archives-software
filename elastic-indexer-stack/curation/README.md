@@ -1067,8 +1067,9 @@ resolved physical index, with no delete, cluster, mapping or security privilege.
 
 `PASSAGE_REENRICHMENT_ENABLED=1` admits a separate `eqarchives-enrichment-*`
 Job alongside the chunk updater. It rotates verified current passages across
-websites, mailing lists and newsgroups. Each Job examines at most 1,200 records
-or twelve minutes. The default is eight concurrent Luna requests. Finished
+websites, mailing lists and newsgroups. Each Job runs for up to twelve minutes.
+The record allowance is 1,200 through 32 workers and scales up to 7,200. The
+default is eight concurrent Luna requests. Finished
 requests free their slots immediately while the coordinator collects small
 summary embedding batches. A bounded durable queue protects each collection's
 cursor across budget waits and restarts. The Job drains outstanding requests
@@ -1077,9 +1078,16 @@ Each collection keeps up to 384 pending IDs. A refill fetches ordered IDs
 without a total hit count and requires a complete shard response before
 advancing its cursor. Ready reads fetch just enough IDs for the free slots
 while preserving rotation across collections.
-Operators can set `luna_workers` to 1–32 in the optional
+Operators can set `luna_workers` to 1–192 in the optional
 `eqarchives-enrichment-tuning` ConfigMap in `eqarchives-es`. New slices read it
 at startup, so changing it leaves running Jobs intact.
+Ramp traffic in measured steps and watch Luna latency, request rate, token usage
+and node health. The shared ledger paces admission at 8,000 requests/minute,
+8 million tokens/minute and 800 million tokens per UTC day. It uses settled token
+counts for the minute and a conservative bound for old or unresolved daily
+receipts. All paid lanes share a cooldown when provider request, token or project
+token headers report 20% remaining or less, or when Luna asks clients to retry
+later. Cached responses and verified progress stay available across cooldowns.
 Already-current enrichment is skipped. If the same bounded evidence is still
 valid after a passage upgrade, only the enrichment checkpoint advances.
 Otherwise Luna regenerates summaries, content flavour, tags and source-backed

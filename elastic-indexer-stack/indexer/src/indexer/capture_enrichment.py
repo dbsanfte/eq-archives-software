@@ -1,5 +1,6 @@
 """Source-bound Luna enrichment using the archive's text prompts and fields."""
 
+from contextlib import nullcontext
 from datetime import date
 import json
 import logging
@@ -13,7 +14,7 @@ import yaml
 from common import CrawlError, Store, digest, now
 from grading import Luna, LunaUnavailable, MODEL, PRICING
 from import_status import EnrichmentError
-from daily_budget import SiteBudgetExceeded, current_budget, request_purpose, reserve_attempt, settle_attempt, units
+from daily_budget import LunaRatePause, SiteBudgetExceeded, current_budget, request_purpose, reserve_attempt, settle_attempt, units
 from . import gemma, passages, search_enrichment
 
 RESOURCES = Path(__file__).with_name("resources")
@@ -239,7 +240,8 @@ def validate(response, source, *, audit=None, grounding=(), summary_max=SHORT_SU
 
 
 class Enricher:
-    def __init__(self, directory, key_file, maximum=5, client_factory=Luna, check=None, *, prepared_cache=False):
+    def __init__(self, directory, key_file, maximum=5, client_factory=Luna, check=None, *, prepared_cache=False,
+                 writer=None):
         daily = current_budget.get()
         if maximum not in (LEGACY_POLICY['max_enrichment_usd'], DEFAULT_POLICY['max_enrichment_usd']) and not (maximum is None and daily and daily.settings()['configured']):
             raise CrawlError("Enrichment requires the reviewed batch budget")
@@ -248,6 +250,7 @@ class Enricher:
         self.maximum = DEFAULT_POLICY['max_enrichment_usd'] if maximum is None else maximum
         self.client_factory, self.key_file = client_factory, key_file
         self.check = check
+        self.writer = writer if writer is not None else nullcontext()
 
     def close(self):
         if self.client:
@@ -282,52 +285,65 @@ class Enricher:
             try:
                 self.client = self.client or self.client_factory(self.key_file)
                 input_tokens = self.client.count_input_tokens(payload)
+            except LunaRatePause:
+                raise
             except (CrawlError, OSError):
                 raise EnrichmentError('context_check') from None
             if input_tokens + payload['max_output_tokens'] > LUNA_CONTEXT_TOKENS:
                 raise EnrichmentError('context')
         # Reserve every request, including corrections and ambiguous failures.
         # Each correction slot may spend only once across all Job/pod retries.
-        if self.check:
-            self.check()
         amount = (input_tokens * .20 + payload['max_output_tokens'] * .75) / 1_000_000
-        self.store.db.execute('BEGIN IMMEDIATE')
-        cached = self.store.get('enrichment:' + signature)
-        if cached:
-            self.store.db.rollback()
-            return cached['response']
-        # A larger allowance cannot reset ambiguous initial attempts made with
-        # either earlier prompt/output limit. Correction/recovery slots remain
-        # individually single-use, including a lost response.
-        signatures = tuple(dict.fromkeys((signature, *initial_signatures))) if not correction else (signature,)
-        attempts = self.store.db.execute('SELECT COUNT(*) FROM attempts WHERE signature IN (' +
-                                        ','.join('?' for _ in signatures) + ')', signatures).fetchone()[0]
-        if attempts >= (1 if correction else 2):
-            self.store.db.rollback()
-            if correction:
-                return MISSING_RESPONSE  # A lost response consumes its correction slot.
-            raise EnrichmentError('request')
-        attempt = self.store.db.execute('INSERT INTO attempts(candidate,signature,reserved,status,created) VALUES (?,?,?,?,?)',
-                                        (capture['archive_path'], signature, amount, 'reserved', now())).lastrowid
-        try:
-            reserve_attempt(self.store, attempt, amount, site_maximum=self.maximum, scope_totals=self.prepared_cache)
-        except SiteBudgetExceeded:
-            raise EnrichmentError('budget') from None
-        self.store.db.commit()
+        attempt, cached = self.begin_attempt(capture, signature, amount, correction, initial_signatures)
+        if attempt is None:
+            return cached
         try:
             self.client = self.client or self.client_factory(self.key_file)
             response = self.client.request(payload)
+        except LunaRatePause as error:
+            if error.status is not None:
+                with self.writer, self.store.db:
+                    self.store.db.execute("UPDATE attempts SET status='provider_throttled' WHERE id=?", (attempt,))
+            raise
         except LunaUnavailable:
             if request_purpose.get() == 'maintenance':
                 raise
             raise EnrichmentError('request') from None
         except (CrawlError, OSError):
             raise EnrichmentError('request') from None
+        with self.writer:
+            return self.record_response(attempt, response, capture, signature, parent, payload['max_output_tokens'])
+
+    def begin_attempt(self, capture, signature, amount, correction, initial_signatures):
+        with self.writer, self.store.db:
+            if self.check:
+                self.check()
+            self.store.db.execute('BEGIN IMMEDIATE')
+            cached = self.store.get('enrichment:' + signature)
+            if cached:
+                return None, cached['response']
+            # Retain uncertain initial and correction slots across all retries.
+            signatures = tuple(dict.fromkeys((signature, *initial_signatures))) if not correction else (signature,)
+            attempts = self.store.db.execute("SELECT COUNT(*) FROM attempts WHERE status<>'provider_throttled' AND signature IN (" +
+                                             ','.join('?' for _ in signatures) + ')', signatures).fetchone()[0]
+            if attempts >= (1 if correction else 2):
+                if correction:
+                    return None, MISSING_RESPONSE
+                raise EnrichmentError('request')
+            attempt = self.store.db.execute('INSERT INTO attempts(candidate,signature,reserved,status,created) VALUES (?,?,?,?,?)',
+                                            (capture['archive_path'], signature, amount, 'reserved', now())).lastrowid
+            try:
+                reserve_attempt(self.store, attempt, amount, site_maximum=self.maximum, scope_totals=self.prepared_cache)
+            except SiteBudgetExceeded:
+                raise EnrichmentError('budget') from None
+            return attempt, None
+
+    def record_response(self, attempt, response, capture, signature, parent, max_output_tokens):
         # Cache the entire paid response before validation, without modifying any
         # earlier response. Parent links retain the correction's provenance.
         self.store.set('enrichment:' + signature, {'response': response, 'signature': signature,
                        'source_sha256': capture['sha256'], 'received_at': now(), 'parent': parent,
-                       'max_output_tokens': payload['max_output_tokens']})
+                       'max_output_tokens': max_output_tokens})
         usage = response.get('usage', {}) if isinstance(response, dict) else {}
         if isinstance(usage, dict) and not all(key in usage for key in ('input_tokens', 'output_tokens')):
             self.store.db.execute("UPDATE attempts SET status='received' WHERE id=?", (attempt,))
@@ -354,7 +370,8 @@ class Enricher:
         try:
             result = validate(response, source, audit=audit, grounding=grounding, summary_max=summary_max)
         except ValidationError as error:
-            self.store.set('enrichment_validation:' + signature, {'code': error.code, 'checked_at': now()})
+            with self.writer:
+                self.store.set('enrichment_validation:' + signature, {'code': error.code, 'checked_at': now()})
             raise
         if audit['omitted_dates'] or audit['invalid_date_items'] or audit['discarded_evidence'] or audit['guessed_date_cleared']:
             LOG.info('Enrichment date normalization: supported=%d omitted=%d invalid=%d discarded_evidence=%d guess_cleared=%s',
@@ -364,8 +381,6 @@ class Enricher:
                                     date_validation=audit, date_evidence=result['date_evidence'])
 
     def record_metadata(self, response, result, signature, grounding, **date_receipt):
-        self.store.db.execute("UPDATE attempts SET status='enriched' WHERE signature=? AND status='received'", (signature,))
-        self.store.db.commit()
         receipt = {'code': 'validated', 'checked_at': now(), **date_receipt}
         metadata = {field: result[field] for field in (*SUMMARY_FIELDS, 'llm_guessed_date', 'llm_extracted_dates')
                     if field in result}
@@ -374,7 +389,9 @@ class Enricher:
             receipt.update(search_evidence=evidence, search_view_sha256=digest(grounding),
                            search_enrichment_version=search_enrichment.VERSION)
             metadata.update(labels, llm_enrichment_view_sha256=receipt['search_view_sha256'])
-        self.store.set('enrichment_validation:' + signature, receipt)
+        with self.writer, self.store.db:
+            self.store.db.execute("UPDATE attempts SET status='enriched' WHERE signature=? AND status='received'", (signature,))
+            self.store.set('enrichment_validation:' + signature, receipt)
         return {**metadata, 'llm_model_name': response.get('model', MODEL), 'llm_enrichment_signature': signature}
 
     def maintenance_payload(self, capture, previous, grounding):
@@ -434,12 +451,13 @@ class Enricher:
                 try:
                     result = response_metadata(response, MAINTENANCE_SCHEMA, summary_max=summary_max)
                     accepted = self.record_metadata(response, result, signature, grounding)
-                    self.store.db.execute('INSERT OR IGNORE INTO meta VALUES (?,?)', (evidence_key, json.dumps(signature)))
-                    self.store.db.commit()
+                    with self.writer, self.store.db:
+                        self.store.db.execute('INSERT OR IGNORE INTO meta VALUES (?,?)', (evidence_key, json.dumps(signature)))
                     return accepted
                 except ValidationError as error:
                     last_issue = error.code
-                    self.store.set('enrichment_validation:' + signature, {'code': error.code, 'checked_at': now()})
+                    with self.writer:
+                        self.store.set('enrichment_validation:' + signature, {'code': error.code, 'checked_at': now()})
             if correction == MAX_CORRECTIONS:
                 raise EnrichmentError('correction_limit', last_issue)
             request = {**payload, 'instructions': payload['instructions'] + (
