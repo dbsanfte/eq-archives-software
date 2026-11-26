@@ -1,3 +1,4 @@
+from contextlib import closing
 from copy import deepcopy
 from functools import partial
 import json
@@ -9,6 +10,7 @@ from indexer import passages, search_enrichment
 from indexer.capture_enrichment import Enricher
 from policy_enrichment import FRONTIER_PAGE_SIZE, capture_identity, eligible, prepare_refresh, refresh, run_enrichment
 from policy_maintenance import MaintenanceServices, State, identity, repair, run
+from policy_pool import PreparationPool
 from policy_preparation import prepare, rebuild_view
 from policy_sources import ServiceError, SourceError
 from test_enrichment import RESULT, response
@@ -104,6 +106,12 @@ def test_verified_checkpoint_keeps_exact_grounding_and_legacy_source(tmp_path, m
         assert (current.source, current.capture['sha256']) == before.enrichment_source
         assert current.view == before.plan.view
         assert current.grounding == search_enrichment.evidence_parts(before.plan.view)
+        with closing(PreparationPool(sources.roots, sources.publication, enrichment=True)) as pool:
+            task = pool.submit((service.get(identifier), current.capture['url']))
+            spawned = task.result(lambda: None)
+            assert spawned.hit == current.hit and spawned.capture == current.capture
+            assert spawned.source == current.source and spawned.grounding == current.grounding
+            assert spawned.checkpoint_view
     finally:
         sources.close()
 

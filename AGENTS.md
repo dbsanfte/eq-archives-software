@@ -286,6 +286,8 @@ The v4 decoder supports JIS halfwidth-kana designations and assigned Windows
 vendor rows, recovering Western word/copyright bytes only outside shifted JIS
 runs. Count these recoveries in hashed provenance; never relax damaged-byte
 bounds or introduce per-host codec overrides.
+Regional decoding carries plain ASCII through as exact byte ranges. Retain the
+same codec evidence, decoded content and region offsets for existing checkpoints.
 Bounded damaged Japanese sequences retain U+FFFD markers and a counted, hashed
 decoding provenance; excessive damage fails visibly. Website extraction uses
 `html-2026-11-12-jis-extensions`; retain mail/newsgroup checkpoints. The Gemma
@@ -1377,6 +1379,11 @@ Historical grounding can reconstruct a current single-source passage view from
 strict offsets and overlaps with exact reader and view hashes. Require verified
 archive bytes and matching decoded HTML for textual websites. Keep the full
 preparation fallback and the legacy paid-cache source content.
+The historical Job prepares up to two fetched revisions in spawned processes
+while grading continues. The coordinator owns Elasticsearch, durable queue state,
+budgets and writes. Dispatch ready results independently of slower preparations,
+cancel speculative work before draining paid requests, and defer an interrupted
+preparation by exact ID under the existing bounded interruption allowance.
 Fetch up to 384 ordered IDs per historical collection without total hits.
 Retain the existing eligibility filters, reject incomplete shard responses
 and persist a refill before advancing its cursor. Bound indexed ready reads

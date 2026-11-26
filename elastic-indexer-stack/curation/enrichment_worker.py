@@ -24,6 +24,7 @@ from indexer.capture_enrichment import Enricher, summary_requests
 from indexer.sqlite_state import SQLiteState
 from policy_enrichment import COLLECTIONS, COUNTERS, FRONTIER_PAGE_SIZE, capture_identity, metadata_patch, prepare_refresh
 from policy_maintenance import MaintenanceServices, YieldWork, foreground, identity
+from policy_pool import PreparationPool, WorkerLost
 from policy_sources import ServiceError, SourceError, Sources
 
 
@@ -36,7 +37,10 @@ LUNA_SECONDS = 45
 MIN_REQUEST_TIME_LEFT = 15
 SUMMARY_BATCH_SIZE = 16
 SUMMARY_BATCH_WAIT = 1
-EXECUTION_COUNTERS = ('embedding_waves', 'examined', 'checkpoint_views', 'rebuilt_views', 'frontier_queries')
+PREPARATION_WORKERS = 2
+PREPARATION_POLL = .01
+EXECUTION_COUNTERS = ('embedding_waves', 'examined', 'checkpoint_views', 'rebuilt_views', 'frontier_queries',
+                      'preparation_workers', 'preparation_retries')
 
 
 class State:
@@ -190,16 +194,19 @@ def write_wave(services, records, check):
 
 
 def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, maximum=MAX_RECORDS, workers=WORKERS,
-        enricher_factory=Enricher, should_yield=None):
+        enricher_factory=Enricher, should_yield=None, preparation_pool=None):
     if not 0 < seconds <= SLICE_SECONDS or not 1 <= maximum <= MAX_RECORDS or not 1 <= workers <= MAX_WORKERS:
         raise ValueError('Invalid historical enrichment slice bounds')
     deadline = time.monotonic() + seconds
     should_yield = should_yield or (lambda: foreground(root, enrichment=True))
     phase, next_at = 'bounded', 0
     counters = {'luna_workers': workers, **dict.fromkeys(EXECUTION_COUNTERS, 0)}
+    if preparation_pool:
+        counters['preparation_workers'] = preparation_pool.workers
     rotation, capped = cycle(COLLECTIONS), set()
     started, initialized = set(), set()
     futures, scheduled = {}, {}
+    preparing = {}
     outcomes = []
     buffered_at = 0
 
@@ -244,6 +251,33 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
             buffered_at = time.monotonic()
         outcomes.append((prepared, patch))
 
+    def submit_grade(pool, identifier, scope, prepared):
+        if prepared is None or scope in capped:
+            finish(identifier, 'skipped')
+            return False
+        counters['checkpoint_views' if prepared.checkpoint_view else 'rebuilt_views'] += 1
+        if prepared.capture is None:
+            completed(prepared, None)
+            return False
+        cache = state.root / 'policy-enrichment' / digest(scope)
+        if scope not in initialized:
+            with closing(Store(cache)) as store:
+                install_scope_totals(store.db)
+            initialized.add(scope)
+        key = scope, prepared.capture['url'], prepared.capture['sha256'], digest(prepared.grounding)
+        if key not in scheduled:
+            future = pool.submit(copy_context().run, grade, prepared, cache)
+            scheduled[key] = future
+            futures[future] = (key, [])
+        futures[scheduled[key]][1].append(prepared)
+        return True
+
+    def preparation_lost(identifier):
+        counters['preparation_retries'] += 1
+        # Count a crashed worker against this ID only; the next slice retains it.
+        state.defer(identifier)
+        started.discard(identifier)
+
     def admit(pool, limit):
         counters['frontier_queries'] += state.fill(services, check)
         identifiers = state.ready(rotation, limit, started)
@@ -256,34 +290,45 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
             started.add(identifier)
             try:
                 url, scope = capture_identity(identifier)
+                if preparation_pool and scope not in capped:
+                    hit = services.get(identifier)
+                    preparing[identifier] = (preparation_pool.submit((hit, url)), scope)
+                    continue
                 prepared = None if scope in capped else prepare_refresh(services, sources, identifier, url, check)
             except SourceError as error:
                 finish(identifier, error.reason)
                 continue
             except ServiceError:
                 raise
+            except WorkerLost:
+                preparation_lost(identifier)
+                continue
             except (TypeError, KeyError, ValueError):
                 finish(identifier, 'failed', 'source_validation')
                 continue
-            if prepared is None:
-                finish(identifier, 'skipped')
-                continue
-            counters['checkpoint_views' if prepared.checkpoint_view else 'rebuilt_views'] += 1
-            if prepared.capture is None:
-                completed(prepared, None)
-                continue
-            cache = state.root / 'policy-enrichment' / digest(scope)
-            if scope not in initialized:
-                with closing(Store(cache)) as store:
-                    install_scope_totals(store.db)
-                initialized.add(scope)
-            key = scope, prepared.capture['url'], prepared.capture['sha256'], digest(prepared.grounding)
-            if key not in scheduled:
-                future = pool.submit(copy_context().run, grade, prepared, cache)
-                scheduled[key] = future
-                futures[future] = (key, [])
-            futures[scheduled[key]][1].append(prepared)
+            submit_grade(pool, identifier, scope, prepared)
         return bool(identifiers)
+
+    def collect_preparations(pool, capacity):
+        for identifier, (task, scope) in tuple(preparing.items()):
+            if capacity <= 0:
+                break
+            if task.ready():
+                del preparing[identifier]
+                try:
+                    prepared = task.result(check)
+                except SourceError as error:
+                    if error.reason == 'preparation_timeout':
+                        preparation_lost(identifier)
+                    else:
+                        finish(identifier, error.reason)
+                except WorkerLost:
+                    preparation_lost(identifier)
+                else:
+                    if prepared is not None and prepared.hit['_id'] != identifier:
+                        raise ServiceError('preparation_identity')
+                    capacity -= submit_grade(pool, identifier, scope, prepared)
+        return capacity
 
     def collect(pause):
         for future in tuple(futures):
@@ -312,6 +357,43 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
             finish(identifier, result)
         outcomes.clear()
 
+    def process(pool):
+        nonlocal phase, next_at
+        last_report = 0
+        pause = None
+        while True:
+            pause = collect(pause)
+            now = time.monotonic()
+            if outcomes and (len(outcomes) >= SUMMARY_BATCH_SIZE or not futures or pause
+                             or now - buffered_at >= SUMMARY_BATCH_WAIT):
+                flush()
+            if now - last_report >= 5:
+                report()
+                last_report = now
+            capacity = 0
+            if not pause:
+                check()
+                capacity = workers - sum(len(records) for _, records in futures.values())
+                capacity = collect_preparations(pool, capacity)
+                # Each process can hold one prepared result while grading is full.
+                available = preparation_pool.workers - len(preparing) if preparation_pool else capacity
+                limit = min(available, maximum - counters['examined'])
+                if limit > 0 and admit(pool, limit):
+                    continue
+            if not futures and (pause or not preparing):
+                if pause:
+                    raise pause
+                if counters['examined'] < maximum:
+                    phase, next_at = 'sweep_waiting', max(time.time() + 10, state.next_at())
+                break
+            wait_time = max(0, buffered_at + SUMMARY_BATCH_WAIT - now) if outcomes else SUMMARY_BATCH_WAIT
+            if preparing and capacity > 0:
+                wait_time = min(wait_time, PREPARATION_POLL)
+            if futures:
+                wait(futures, timeout=wait_time, return_when=FIRST_COMPLETED)
+            elif wait_time:
+                time.sleep(wait_time)
+
     try:
         budget = account.snapshot(maintenance=True)
         if not budget['complete']:
@@ -326,31 +408,11 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
         # The pool drains before its shared priority lease is released, even
         # when the slice yields or encounters a failed write.
         with account.bind(purpose='maintenance', owner=job), ThreadPoolExecutor(max_workers=workers) as pool:
-            last_report = 0
-            pause = None
-            while True:
-                pause = collect(pause)
-                now = time.monotonic()
-                if outcomes and (len(outcomes) >= SUMMARY_BATCH_SIZE or not futures or pause
-                                 or now - buffered_at >= SUMMARY_BATCH_WAIT):
-                    flush()
-                if now - last_report >= 5:
-                    report()
-                    last_report = now
-                if not pause:
-                    check()
-                    in_flight = sum(len(records) for _, records in futures.values())
-                    capacity = min(workers - in_flight, maximum - counters['examined'])
-                    if capacity > 0 and admit(pool, capacity):
-                        continue
-                if not futures:
-                    if pause:
-                        raise pause
-                    if counters['examined'] < maximum:
-                        phase, next_at = 'sweep_waiting', max(time.time() + 10, state.next_at())
-                    break
-                wait_time = max(0, buffered_at + SUMMARY_BATCH_WAIT - now) if outcomes else SUMMARY_BATCH_WAIT
-                wait(futures, timeout=wait_time, return_when=FIRST_COMPLETED)
+            try:
+                process(pool)
+            finally:
+                if preparation_pool:
+                    preparation_pool.cancel_pending()
     except YieldWork:
         phase = 'yielded'
     except DailyBudgetPause as error:
@@ -380,9 +442,11 @@ def main():
     if not re.fullmatch(r'[1-9][0-9]?', configured_workers) or int(configured_workers) > MAX_WORKERS:
         raise ValueError(f'Historical Luna workers must be between 1 and {MAX_WORKERS}')
     with closing(State('/indexing-state', identity())) as state, closing(MaintenanceServices()) as services, \
-            Sources(['/archive-sources', '/archive'], '/data/publisher.git') as sources:
+            Sources(['/archive-sources', '/archive'], '/data/publisher.git') as sources, \
+            closing(PreparationPool(sources.roots, sources.publication, PREPARATION_WORKERS,
+                                    enrichment=True, tasks=256, timeout=30)) as preparation_pool:
         result = run(args.root, state, services, sources, job, DailyBudget(os.environ['LUNA_DAILY_BUDGET_ROOT']),
-                     workers=int(configured_workers))
+                     workers=int(configured_workers), preparation_pool=preparation_pool)
         print(json.dumps(result), flush=True)
 
 

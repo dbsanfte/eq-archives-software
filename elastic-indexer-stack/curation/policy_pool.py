@@ -1,5 +1,5 @@
 """Bounded spawned preparation processes with per-record crash identity."""
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import multiprocessing
 import time
 
@@ -12,16 +12,29 @@ class WorkerLost(Exception):
     pass
 
 
-def worker(connection,roots,publication,tasks):
+def worker(connection,roots,publication,tasks,enrichment=False):
     # Spawn, not fork: no parent's HTTP connections, SQLite handles or leases.
     sources=Sources(roots,publication)
     try:
-        gemma.load_tokenizer()
+        if enrichment:
+            from policy_enrichment import prepare_refresh_hit
+        else:
+            gemma.load_tokenizer()
         for _ in range(tasks):
-            hit=connection.recv()
-            if hit is None:return
-            try:result=('ready',prepare(hit,sources))
+            task=connection.recv()
+            if task is None:return
+            try:
+                if enrichment:
+                    hit, url = task
+                    prepared = prepare_refresh_hit(hit, sources, url)
+                    # Only the bounded grounding and legacy cache source are used by the worker.
+                    result = ('ready', replace(prepared, view='') if prepared is not None else None)
+                else:
+                    result = ('ready', prepare(task, sources))
             except SourceError as error:result=('source',error.reason,error.source_sha256)
+            except (TypeError, KeyError, ValueError):
+                if not enrichment:raise
+                result = ('source', 'source_validation', None)
             connection.send(result)
     except (EOFError,BrokenPipeError):pass
     finally:
@@ -40,6 +53,10 @@ class Pending:
     def __init__(self,pool,slot):
         self.pool,self.slot=pool,slot
         self.started=time.monotonic()
+
+    def ready(self):
+        return (time.monotonic()-self.started>self.pool.timeout
+                or self.slot.connection.poll() or not self.slot.process.is_alive())
 
     def result(self,check):
         slot=self.slot
@@ -65,27 +82,28 @@ class Pending:
 
 
 class PreparationPool:
-    def __init__(self,roots,publication,workers=2,*,tasks=128,timeout=120):
+    def __init__(self,roots,publication,workers=2,*,tasks=128,timeout=120,enrichment=False):
         if (type(workers) is not int or not 1<=workers<=4 or type(tasks) is not int or not 1<=tasks<=256
                 or type(timeout) not in (int,float) or not 0<timeout<=300):
             raise ValueError('Invalid preparation pool bounds')
         self.roots,self.publication=tuple(map(str,roots)),str(publication) if publication is not None else None
         self.workers,self.tasks,self.timeout=workers,tasks,timeout
+        self.enrichment=enrichment
         self.context=multiprocessing.get_context('spawn');self.slots=[]
 
-    def submit(self,hit):
+    def submit(self,task):
         slot=next((s for s in self.slots if not s.busy),None)
         if slot and (slot.completed>=self.tasks or not slot.process.is_alive()):
             self.retire(slot);self.slots.remove(slot);slot=None
         if slot is None:
             if len(self.slots)>=self.workers:raise ValueError('Preparation queue is full')
             parent,child=self.context.Pipe()
-            process=self.context.Process(target=worker,args=(child,self.roots,self.publication,self.tasks),
+            process=self.context.Process(target=worker,args=(child,self.roots,self.publication,self.tasks,self.enrichment),
                                          name='policy-preparation',daemon=True)
             try:process.start()
             except BaseException:parent.close();child.close();raise
             child.close();slot=Slot(process,parent);self.slots.append(slot)
-        try:slot.connection.send(hit)
+        try:slot.connection.send(task)
         except (BrokenPipeError,EOFError,OSError):
             self.discard(slot);raise WorkerLost() from None
         slot.busy=True

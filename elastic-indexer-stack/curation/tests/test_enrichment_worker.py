@@ -11,7 +11,9 @@ import enrichment_worker
 from enrichment_worker import MAX_WORKERS, WORKERS, State, run
 from indexer import passages, search_enrichment
 from indexer.capture_enrichment import Enricher
+from policy_enrichment import prepare_refresh_hit
 from policy_maintenance import State as PolicyState, identity, repair
+from policy_pool import PreparationPool
 from policy_scheduler import receipt
 from policy_sources import ServiceError
 from test_enrichment import RESULT, response
@@ -42,7 +44,7 @@ def prepared_service(root, count=4):
     identifiers += [f'websites/guild.example/20000101000000/page-{index}.html'
                     for index in range(5, count + 1)]
     hits = []
-    for index, identifier in enumerate(identifiers, 1):
+    for index, identifier in enumerate(identifiers[:count], 1):
         raw = f'<title>Guild news</title><p>Our guild defeated Nagafen on expedition number {index}.</p>'
         hit, sources = fixture(root, raw=raw, identifier=identifier)
         sources.close()
@@ -110,10 +112,13 @@ def test_paid_requests_overlap_at_default_and_maximum_concurrency(tmp_path, work
     monkeypatch.setattr(enrichment_worker, 'install_scope_totals', record_initialization)
     try:
         job = 'eqarchives-enrichment-' + identity() + '-1'
-        result = run(tmp_path,state,service,sources,job,account,maximum=worker_count,should_yield=lambda:False,
-                     workers=worker_count, enricher_factory=factory(calls, Barrier(worker_count)))
+        with closing(PreparationPool(sources.roots, sources.publication, enrichment=True)) as pool:
+            result = run(tmp_path,state,service,sources,job,account,maximum=worker_count,should_yield=lambda:False,
+                         workers=worker_count, enricher_factory=factory(calls, Barrier(worker_count)),
+                         preparation_pool=pool)
         scheduler_state = {'name':job, **{key:result[key] for key in ('image','policy','key')}}
         assert receipt(tmp_path, scheduler_state)['execution'] == result['execution']
+        assert result['execution']['preparation_workers'] == 2
         assert result['execution']['checkpoint_views'] == worker_count
         assert result['execution']['rebuilt_views'] == 0
         assert result['enrichment']['updated'] == worker_count
@@ -127,6 +132,76 @@ def test_paid_requests_overlap_at_default_and_maximum_concurrency(tmp_path, work
     finally:
         state.close()
         sources.close()
+
+
+def test_ready_source_is_graded_while_an_earlier_source_is_still_preparing(tmp_path):
+    service, sources = prepared_service(tmp_path, count=3)
+    account = budget(tmp_path)
+    graded = []
+
+    class Task:
+        def __init__(self, hit, url):
+            self.hit, self.url = hit, url
+
+        def ready(self):
+            return not self.hit['_id'].endswith('page-one.html') or bool(graded)
+
+        def result(self, check):
+            check()
+            return prepare_refresh_hit(self.hit, sources, self.url)
+
+    class Pool:
+        workers = 2
+
+        def submit(self, task):
+            return Task(*task)
+
+        def cancel_pending(self):
+            pass
+
+    with closing(sources), closing(State(tmp_path / 'state', identity())) as state:
+        result = run(tmp_path, state, service, sources, 'fixture', account, maximum=3, workers=1,
+                     should_yield=lambda: False, preparation_pool=Pool(),
+                     enricher_factory=factory([], on_request=graded.append), seconds=25)
+    assert len(graded) == 3 and graded[0] == 2
+    assert result['updated'] == 3
+
+
+def test_lost_preparation_defers_only_its_record_and_runs_later_sources(tmp_path):
+    service, sources = prepared_service(tmp_path, count=3)
+    account = budget(tmp_path)
+    lost_id = 'websites/guild.example/20000101000000/page-one.html'
+
+    class Pool(PreparationPool):
+        def submit(self, task):
+            pending = super().submit(task)
+            if task[0]['_id'] == lost_id:
+                pending.slot.process.kill()
+                pending.slot.process.join(2)
+            return pending
+
+    with closing(sources), closing(State(tmp_path / 'state', identity())) as state, \
+            closing(Pool(sources.roots, sources.publication, enrichment=True)) as pool:
+        result = run(tmp_path, state, service, sources, 'fixture', account, maximum=3,
+                     should_yield=lambda: False, preparation_pool=pool, enricher_factory=factory([]))
+        pending = state.db.connection().execute('SELECT id,attempts FROM pending WHERE key=?', (state.key,)).fetchall()
+    assert pending == [(lost_id, 1)]
+    assert result['updated'] == 2 and result['failed'] == 0
+    assert result['execution']['preparation_retries'] == 1
+
+
+def test_foreground_yield_cancels_source_prefetch_and_preserves_queue(tmp_path):
+    service, sources = prepared_service(tmp_path, count=3)
+    account = budget(tmp_path)
+    graded = []
+    with closing(sources), closing(State(tmp_path / 'state', identity())) as state, \
+            closing(PreparationPool(sources.roots, sources.publication, enrichment=True)) as pool:
+        result = run(tmp_path, state, service, sources, 'fixture', account, maximum=3,
+                     should_yield=lambda: bool(pool.slots), preparation_pool=pool, enricher_factory=factory(graded))
+        pending = state.db.connection().execute('SELECT attempts FROM pending WHERE key=?', (state.key,)).fetchall()
+        assert pending == [(0,), (0,), (0,)] and pool.slots == []
+    assert result['phase'] == 'yielded' and result['execution']['examined'] == 1
+    assert not graded and not service.updates
 
 
 def test_finished_slot_starts_more_work_with_one_request_blocked(tmp_path):
