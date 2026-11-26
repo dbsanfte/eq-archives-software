@@ -109,7 +109,7 @@ def prepare_refresh_hit(hit, sources, url):
     parts = search_enrichment.evidence_parts(view)
     if not parts:
         return None
-    revision = {key: hit[key] for key in ('_id', '_seq_no', '_primary_term')}
+    revision = {key: hit[key] for key in ('_index', '_id', '_seq_no', '_primary_term')}
     if (source.get('llm_search_enrichment_version') == search_enrichment.VERSION
             and source.get('llm_enrichment_view_sha256') == digest(parts)):
         return EnrichmentInput(revision, checkpoint_view=checkpoint is not None)
