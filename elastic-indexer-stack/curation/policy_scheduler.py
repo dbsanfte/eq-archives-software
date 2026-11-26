@@ -52,7 +52,7 @@ def job_for(name,image,*,enrichment=False):
     container=pod['containers'][0]
     entrypoint='enrichment_worker.py' if dedicated else 'policy_maintenance.py'
     container.update(name='enrichment' if dedicated else 'policy',command=['python','/app/curation/'+entrypoint,'--root','/data'],
-        resources={'requests':{'cpu':'100m','memory':'512Mi'},'limits':{'cpu':'2','memory':'3Gi'}})
+        resources={'requests':{'cpu':'100m','memory':'512Mi'},'limits':{'cpu':'4' if dedicated else '2','memory':'3Gi'}})
     container['env']=[e for e in container['env'] if e['name'] in ('ELASTICSEARCH_URL','SSL_CERT_FILE','EMBEDDING_URL','EMBEDDING_MODEL','EMBEDDING_CACHE_PATH','EMBEDDING_BATCH_SIZE','EMBEDDING_BATCH_CONCURRENCY')]+[
         {'name':'ELASTICSEARCH_INDEX','valueFrom':{'secretKeyRef':{'name':'eqarchives-policy-indexer-secrets','key':'es_index'}}},
         {'name':'POLICY_INDEX','valueFrom':{'secretKeyRef':{'name':'eqarchives-policy-indexer-secrets','key':'es_index'}}},
