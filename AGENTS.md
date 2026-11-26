@@ -1364,9 +1364,12 @@ minutes, with batched summary embeddings and eight concurrent paid requests by
 default.
 Constrain the operator-owned `eqarchives-enrichment-tuning` ConfigMap's
 `luna_workers` override to 1–32 and apply it only to new historical Jobs.
-Drain each wave before releasing its shared priority claim. Preserve the old
-paid totals, matching cursor, and cache after the old combined slice exits.
-Serialize per-scope cache initialization while keeping Luna calls concurrent.
+Refill grading slots on completion and batch validated summaries for embedding.
+Drain admitted requests before releasing the shared priority claim. Preserve
+paid totals, matching cursors and cached responses during handoffs. Initialize
+each scope cache once per Job. Fold changed attempt IDs into exact per-scope
+integer totals inside the admission transaction, retaining raw rows and writes
+from older images.
 Update daily integer totals transactionally from the original reservation rows,
 including writes by older Jobs. Reuse date-free metadata only for the same exact
 request within one scope and retain separate raw-source validation receipts.

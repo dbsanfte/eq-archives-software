@@ -1,4 +1,5 @@
 import json
+from contextlib import closing
 from itertools import cycle
 from threading import Barrier, Event, Lock
 
@@ -6,6 +7,7 @@ import pytest
 
 from common import digest
 from daily_budget import DailyBudget
+import enrichment_worker
 from enrichment_worker import MAX_WORKERS, WORKERS, State, run
 from indexer import passages, search_enrichment
 from indexer.capture_enrichment import Enricher
@@ -60,7 +62,7 @@ def prepared_service(root, count=4):
     return service, sources
 
 
-def factory(calls, barrier=None):
+def factory(calls, barrier=None, on_request=None):
     lock = Lock()
 
     class Luna:
@@ -78,6 +80,8 @@ def factory(calls, barrier=None):
                 barrier.wait(timeout=8)
             passage = ' '.join(supplied['search_passages'])
             index = next(i for i in range(1, MAX_WORKERS + 1) if f'number {i}.' in passage)
+            if on_request:
+                on_request(index)
             return response({**{key: RESULT[key] for key in ('llm_tags','llm_content_flavour')},
                              'llm_summary': f'Guild expedition number {index}.', 'content_role': 'discussion',
                              'topics': [], 'entities': [{'kind': 'npc', 'name': 'Nagafen', 'excerpt': 'defeated Nagafen'}]})
@@ -89,32 +93,25 @@ def factory(calls, barrier=None):
 
 
 @pytest.mark.parametrize('worker_count', [WORKERS, MAX_WORKERS])
-def test_paid_requests_overlap_at_default_and_maximum_concurrency(tmp_path, worker_count):
+def test_paid_requests_overlap_at_default_and_maximum_concurrency(tmp_path, worker_count, monkeypatch):
     service, sources = prepared_service(tmp_path, count=worker_count)
     account = budget(tmp_path)
     state = State(tmp_path / 'state',identity())
     calls = []
-    opener = Lock()
-    competing_open = Event()
-    create_enricher = factory(calls, Barrier(worker_count))
+    initialized = []
+    install = enrichment_worker.install_scope_totals
 
-    def open_enricher(*args, **kwargs):
-        # Give the sibling pool threads a chance to enter while the first
-        # connection sets up WAL, which can fail on concurrent initialization.
-        if not opener.acquire(blocking=False):
-            competing_open.set()
-            raise AssertionError('Overlapping enrichment cache initialization')
-        try:
-            competing_open.wait(.1)
-            return create_enricher(*args, **kwargs)
-        finally:
-            opener.release()
+    def record_initialization(db):
+        initialized.append(db.execute('PRAGMA database_list').fetchone()[2])
+        install(db)
 
+    monkeypatch.setattr(enrichment_worker, 'install_scope_totals', record_initialization)
     try:
         result = run(tmp_path,state,service,sources,'fixture',account,maximum=worker_count,should_yield=lambda:False,
-                     workers=worker_count, enricher_factory=open_enricher)
+                     workers=worker_count, enricher_factory=factory(calls, Barrier(worker_count)))
         assert result['enrichment']['updated'] == worker_count
-        assert len(calls) == worker_count and len(service.waves) == 1 and len(service.waves[0]) == worker_count
+        assert len(calls) == worker_count and sum(map(len, service.waves)) == worker_count
+        assert len(initialized) == len(set(initialized)) == 3
         assert account.snapshot()['estimated_usd'] > 0
         assert not account.snapshot()['enrichment_pending']
         assert len(service.updates) == worker_count and all(p['llm_summary_vector'] == V for p in service.updates)
@@ -125,9 +122,63 @@ def test_paid_requests_overlap_at_default_and_maximum_concurrency(tmp_path, work
         sources.close()
 
 
+def test_finished_slot_starts_more_work_with_one_request_blocked(tmp_path):
+    service, sources = prepared_service(tmp_path, count=6)
+    state = State(tmp_path / 'state', identity())
+    account = budget(tmp_path)
+    slow_started, refilled, later_written = Event(), Event(), Event()
+    update = service.update
+
+    def on_request(number):
+        if number == 1:
+            slow_started.set()
+            assert later_written.wait(5), 'later records waited for the slow request'
+        elif number == 3:
+            assert slow_started.wait(3)
+            refilled.set()
+
+    def record_write(hit, patch):
+        update(hit, patch)
+        if hit['_id'].startswith('newsgroups/'):
+            assert refilled.is_set()
+            later_written.set()
+
+    service.update = record_write
+    try:
+        result = run(tmp_path, state, service, sources, 'fixture', account, maximum=6,
+                     workers=2, should_yield=lambda:False, enricher_factory=factory([], on_request=on_request))
+        assert refilled.is_set()
+        assert result['updated'] == 6 and result['failed'] == 0
+        assert len(service.updates) == 6
+    finally:
+        state.close()
+        sources.close()
+
+
 def test_over_limit_worker_count_is_rejected_before_work(tmp_path):
     with pytest.raises(ValueError, match='Invalid historical enrichment slice bounds'):
         run(tmp_path, None, None, None, 'fixture', None, workers=MAX_WORKERS + 1)
+
+
+def test_durable_queue_refills_before_previous_page_has_finished(tmp_path):
+    size = enrichment_worker.PAGE_SIZE
+    identifiers = [f'websites/guild.example/20000101000000/page-{number:03d}'
+                   for number in range(size + size // 2)]
+
+    class Frontier:
+        def select_enrichment(self, cursor, *, collection, limit):
+            return [key for key in identifiers if key.startswith(collection + '/') and key > cursor][:limit]
+
+    rotation = cycle(('websites', 'mailing-lists', 'newsgroups'))
+    with closing(State(tmp_path, identity())) as state:
+        state.fill(Frontier(), lambda:None)
+        assert state.ready(rotation, size) == identifiers[:size]
+        for identifier in identifiers[:size // 2]:
+            state.finish(identifier, 'skipped')
+        kept = set(identifiers[size // 2:size])
+        state.fill(Frontier(), lambda:None)
+        assert state.ready(rotation, size, kept) == identifiers[size:]
+        assert state.ready(rotation, size) == identifiers[size // 2:]
 
 
 def test_provider_access_failure_retains_records_and_backs_off(tmp_path):

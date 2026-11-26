@@ -60,6 +60,85 @@ def attempt_remaining_units(store, maximum):
     return units(maximum) - sum(units(value) for value in attempt_spending(store).values())
 
 
+def scope_charge(actual, reserved):
+    """Project each row with the same rounding as the original audit path."""
+    try:
+        amount = units(reserved if actual is None else actual)
+        if amount <= (1 << 63) - 1:
+            return (0, amount, 0) if actual is None else (amount, 0, 0)
+    except (CrawlError, ArithmeticError):
+        pass
+    return 0, 0, 1
+
+
+def install_scope_totals(db):
+    """Backfill an enrichment scope, then record changed IDs from any writer."""
+    installed = "SELECT 1 FROM sqlite_schema WHERE name='scope_attempt_deleted' AND type='trigger'"
+    if db.execute(installed).fetchone():
+        return
+    with db:
+        db.execute('BEGIN IMMEDIATE')
+        if db.execute(installed).fetchone():
+            return
+        db.execute('''CREATE TABLE scope_attempt_totals (
+            id INTEGER PRIMARY KEY CHECK(id=1), spent INTEGER NOT NULL,
+            pending INTEGER NOT NULL, invalid INTEGER NOT NULL)''')
+        db.execute('''CREATE TABLE scope_attempt_charges (
+            id INTEGER PRIMARY KEY, spent INTEGER NOT NULL,
+            pending INTEGER NOT NULL, invalid INTEGER NOT NULL)''')
+        db.execute('CREATE TABLE scope_attempt_dirty (id INTEGER PRIMARY KEY)')
+        totals = [0, 0, 0]
+
+        def charges():
+            for identifier, actual, reserved in db.execute('SELECT id,actual,reserved FROM attempts'):
+                charge = scope_charge(actual, reserved)
+                for index, part in enumerate(charge):
+                    totals[index] += part
+                yield (identifier, *charge)
+
+        db.executemany('INSERT INTO scope_attempt_charges VALUES (?,?,?,?)', charges())
+        if any(value >= 1 << 63 for value in totals):
+            raise CrawlError('Invalid Luna spend accounting; paid work is paused')
+        db.execute('INSERT INTO scope_attempt_totals VALUES (1,?,?,?)', totals)
+        # Keep triggers usable from old images and standalone SQLite. Decimal
+        # conversion happens on dirty rows only, inside the next admission.
+        db.execute('''CREATE TRIGGER scope_attempt_inserted AFTER INSERT ON attempts BEGIN
+            INSERT OR IGNORE INTO scope_attempt_dirty VALUES (NEW.id);
+            END''')
+        db.execute('''CREATE TRIGGER scope_attempt_changed AFTER UPDATE OF id,actual,reserved ON attempts
+            WHEN OLD.id IS NOT NEW.id OR OLD.actual IS NOT NEW.actual OR OLD.reserved IS NOT NEW.reserved BEGIN
+            INSERT OR IGNORE INTO scope_attempt_dirty VALUES (OLD.id), (NEW.id);
+            END''')
+        db.execute('''CREATE TRIGGER scope_attempt_deleted AFTER DELETE ON attempts BEGIN
+            INSERT OR IGNORE INTO scope_attempt_dirty VALUES (OLD.id);
+            END''')
+
+
+def scope_spending_units(db):
+    """Fold pending changes under the scope's existing write transaction."""
+    if not db.in_transaction:
+        raise CrawlError('Scope spend accounting requires a write transaction')
+    totals = list(db.execute('SELECT spent,pending,invalid FROM scope_attempt_totals WHERE id=1').fetchone())
+    changes = db.execute('''SELECT dirty.id,a.id,a.actual,a.reserved,p.spent,p.pending,p.invalid
+        FROM scope_attempt_dirty dirty LEFT JOIN attempts a ON a.id=dirty.id
+        LEFT JOIN scope_attempt_charges p ON p.id=dirty.id''').fetchall()
+    for identifier, present, actual, reserved, old_spent, old_pending, old_invalid in changes:
+        charge = scope_charge(actual, reserved) if present is not None else (0, 0, 0)
+        for index, previous in enumerate((old_spent, old_pending, old_invalid)):
+            totals[index] += charge[index] - (previous or 0)
+        if present is None:
+            db.execute('DELETE FROM scope_attempt_charges WHERE id=?', (identifier,))
+        else:
+            db.execute('INSERT OR REPLACE INTO scope_attempt_charges VALUES (?,?,?,?)', (identifier, *charge))
+    if (any(type(value) is not int or not 0 <= value < 1 << 63 for value in totals)
+            or totals[2]):
+        raise CrawlError('Invalid Luna spend accounting; paid work is paused')
+    if changes:
+        db.execute('UPDATE scope_attempt_totals SET spent=?,pending=?,invalid=? WHERE id=1', totals)
+        db.execute('DELETE FROM scope_attempt_dirty')
+    return totals[0] + totals[1]
+
+
 class DailyBudgetPause(CrawlError):
     def __init__(self, amount, retry_at, period='daily'):
         self.amount, self.retry_at, self.period = amount, retry_at, period
@@ -316,14 +395,15 @@ class DailyBudget:
                 ('legacy:' + identifier, when.date().isoformat(), reserved, actual, created))
 
 
-def reserve_attempt(store, attempt, amount, *, site_maximum=None):
+def reserve_attempt(store, attempt, amount, *, site_maximum=None, scope_totals=False):
     """Call while holding the operation's write transaction, before commit/send."""
     try:
         site_spent = None
         if site_maximum is not None:
             # The just-inserted attempt is already included in this locked
             # ledger. Count it exactly once, using the shared integer rounding.
-            site_spent = sum(units(v) for v in attempt_spending(store).values()) - units(amount)
+            spent = scope_spending_units(store.db) if scope_totals else sum(units(v) for v in attempt_spending(store).values())
+            site_spent = spent - units(amount)
             if site_spent < 0:
                 raise CrawlError('Invalid site spend accounting; paid work is paused')
         if budget := current_budget.get():
