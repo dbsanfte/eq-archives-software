@@ -5,14 +5,19 @@ Reuse the archive's extractor, EmbeddingGemma chunker and default source-bound e
 """
 
 import argparse
-from contextlib import ExitStack
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import ExitStack, closing
+from contextvars import copy_context
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from functools import partial
 import html
 import json
 from bs4 import BeautifulSoup
 import os
 from pathlib import Path
 import re
+from threading import Lock
 import time
 from urllib.parse import quote, urlsplit
 
@@ -33,8 +38,13 @@ from indexer.html_extraction import WEBSITE_EXTRACTION_VERSION, website_markdown
 from indexer.source_encoding import decode_source, repaired_title
 from indexer.capture_enrichment import Enricher, policy, summary_requests
 from import_status import EnrichmentError, describe, write_status
-from daily_budget import DailyBudget, DailyBudgetPause
+from daily_budget import DailyBudget, DailyBudgetPause, LunaRatePause, install_scope_totals
+from grading import Luna
 from publication_files import indexed_captures
+
+
+MAX_IMPORT_LUNA_WORKERS = 12
+IMPORT_ENRICHMENT_BYTES = 8 * 1024 * 1024
 
 
 def read_batch(root, relative, expected):
@@ -60,6 +70,10 @@ def read_batch(root, relative, expected):
 def text_document(root, capture):
     content_type = source_type(capture)
     text, _ = decode(verified_source(root, capture), content_type)
+    return render_text(capture, text)
+
+
+def render_text(capture, text):
     replay = f"https://web.archive.org/web/{capture['timestamp']}/{capture['url']}"
     header = f"<b>Page URL:</b> {html.escape(replay)}<br/><hr/>"
     content = (website_markdown(header) + '\n\n' + text if media_type(capture) == 'text/plain'
@@ -72,6 +86,11 @@ def text_document(root, capture):
 class Services:
     def __init__(self, directory=Path("/run/secrets"), enricher=None):
         self.enricher = enricher
+        raw_workers = os.environ.get('IMPORT_LUNA_WORKERS', '1')
+        if not re.fullmatch(r'[1-9][0-9]?', raw_workers) or int(raw_workers) > MAX_IMPORT_LUNA_WORKERS:
+            raise CrawlError('Invalid capture enrichment worker configuration')
+        self.luna_workers = int(raw_workers)
+        self.luna_pool = None
         self.es_url = os.environ.get("ELASTICSEARCH_URL", "http://elasticsearch.eqarchives-es.svc.cluster.local:9200").rstrip("/")
         self.index = os.environ.get("ELASTICSEARCH_INDEX", "eq-archive")
         self.model = os.environ.get("EMBEDDING_MODEL", MODEL)
@@ -93,6 +112,8 @@ class Services:
                                     timeout=httpx.Timeout(120, connect=10), trust_env=False)
 
     def close(self):
+        if self.luna_pool:
+            self.luna_pool.shutdown(cancel_futures=True)
         self.client.close()
         self.embedder.close()
         if self.embedding_cache:
@@ -107,6 +128,58 @@ class Services:
         if not self.enricher:
             raise CrawlError("Default enrichment is not configured; document remains pending")
         return self.enricher.enrich(capture, source, search_view)
+
+    def enrich_batch(self, records):
+        """Overlap independent paid requests, with one budget and one result per capture."""
+        if not 2 <= len(records) <= self.luna_workers or sum(len(record.raw) for record in records) > IMPORT_ENRICHMENT_BYTES:
+            raise CrawlError('Invalid capture enrichment batch size')
+        enricher = self.enricher
+        if enricher is None:
+            raise CrawlError("Default enrichment is not configured; document remains pending")
+        if self.luna_pool is None:
+            install_scope_totals(enricher.store.db)
+            if enricher.client_factory is Luna:
+                enricher.client_factory = partial(Luna, tls_context=Luna.tls_context())
+            self.luna_writer = Lock()
+            self.luna_pool = ThreadPoolExecutor(max_workers=self.luna_workers)
+
+        def enrich_group(group):
+            # Equal URL/source pairs have overlapping request signatures.
+            # A received result can satisfy the later request through the existing paid cache.
+            with closing(Enricher(enricher.store.root, enricher.key_file, maximum=enricher.maximum,
+                                  client_factory=enricher.client_factory, check=enricher.check,
+                                  prepared_cache=True, writer=self.luna_writer)) as worker:
+                results = {}
+                error = None
+                for position, record in group:
+                    if error is None:
+                        try:
+                            results[position] = worker.enrich(*record.enrichment_inputs())
+                            continue
+                        except Exception as failure:
+                            error = failure
+                    results[position] = error
+                return results
+
+        groups = {}
+        for position, record in enumerate(records):
+            key = record.capture['url'], record.capture['sha256']
+            groups.setdefault(key, []).append((position, record))
+        tasks = [self.luna_pool.submit(copy_context().run, enrich_group, group) for group in groups.values()]
+        results = {}
+        for task in tasks:
+            results.update(task.result())
+
+        for position, record in enumerate(records):
+            result = results[position]
+            if isinstance(result, LunaRatePause):
+                raise result
+            if isinstance(result, DailyBudgetPause) or (isinstance(result, EnrichmentError) and result.code == 'budget'):
+                # All peers have finished. Only an isolated denial should pause the import.
+                result = self.enrich(*record.enrichment_inputs())
+            if isinstance(result, Exception):
+                raise result
+            yield result
 
     def exists(self, record_id):
         response = self.client.head(f"{self.es_url}/{quote(self.index, safe='')}/_doc/{quote(record_id, safe='')}")
@@ -248,6 +321,79 @@ def image_document(root, capture, batch, services):
     return document
 
 
+@dataclass(frozen=True)
+class PreparedCapture:
+    capture: dict
+    identifier: str
+    raw: bytes
+    replay: str
+    content: str
+    source: str
+    title: str | None
+    plan: passages.Plan
+    decoding: dict
+
+    def enrichment_inputs(self):
+        return self.capture, self.source, self.plan.view
+
+
+def prepare_text(root, capture, identifier):
+    raw = verified_source(root, capture)
+    if binary_source(raw):
+        return None
+    decoded = decode_source(raw, source_type(capture))
+    source = decoded.text
+    replay, content = render_text(capture, source)
+    title_node = BeautifulSoup(source, 'html.parser').title
+    title = repaired_title(capture.get('title'), title_node.string if title_node else None, decoded)
+    mime = media_type(capture)
+    plan = passages.prepare(content, identifier, title or '', html_source=source, mime_type=mime)
+    if not plan.passages:
+        return None
+    # Keep the replay header and capture date out of the complete source used to extract dates.
+    evidence = source if mime == 'text/plain' else website_markdown(source)
+    return PreparedCapture(capture, identifier, raw, replay, content, evidence, title, plan, decoded.provenance())
+
+
+def commit_text(record, metadata, batch, services, chunker):
+    capture, plan = record.capture, record.plan
+    if metadata.get('llm_search_enrichment_version'):
+        metadata['llm_enrichment_passage_version'] = passages.VERSION
+    unique, positions = passages.embedding_inputs(plan)
+    # Body and summary share bounded inference while preserving their distinct prefixes and offsets.
+    requests = [p.request for p in unique] + summary_requests(metadata['llm_summary'], chunker)
+    all_vectors = services.embeddings(requests)
+    if len(all_vectors) != len(requests):
+        raise CrawlError('Incomplete source/summary embeddings; document remains pending')
+    vectors, summary_vectors = all_vectors[:len(unique)], all_vectors[len(unique):]
+    chunks = [{'text_chunk': p.text, 'source_start': p.start, 'source_end': p.end,
+               'title': p.title, 'context': p.context, 'kind': p.kind,
+               'vector': vectors[position].copy()} for p,position in zip(plan.passages,positions,strict=True)]
+    if not chunks:
+        raise CrawlError('Capture has no source chunks')
+    if not summary_vectors:
+        raise CrawlError('Summary has no usable embedding chunks; enriched result retained for retry')
+    try:
+        summary_vector = gemma.mean_vector(summary_vectors)
+    except ValueError:
+        raise CrawlError('Summary embedding is invalid; enriched result retained for retry') from None
+    timestamp = datetime.strptime(capture['timestamp'], '%Y%m%d%H%M%S').replace(tzinfo=timezone.utc).isoformat()
+    document = {'id': record.identifier, 'title': record.title or urlsplit(capture['url']).path or 'Archived page',
+                'domain_name': urlsplit(capture['url']).netloc, 'capture_date': timestamp, 'last_indexed': now(),
+                'url': record.replay, 'mime_type': media_type(capture), 'file_type': 'text',
+                'thumbnail': 'thumbnails/website.webp', 'text_full': record.content, 'text': chunks,
+                'text_extraction_version': WEBSITE_EXTRACTION_VERSION, 'text_chunking_version': passages.VERSION,
+                'text_passage_provenance': {**plan.provenance(), 'decoding': record.decoding},
+                'embedding_model': MODEL, 'archive_source_sha256': capture['sha256'],
+                'archive_source_manifest': batch['manifest_sha256'], 'archive_commit': batch['publication']['commit'],
+                **metadata, 'llm_summary_vector': summary_vector}
+    discussion = discussion_metadata(record.identifier, record.raw, record.replay,
+                                     catalog=getattr(services, 'discussions', None))
+    if discussion:
+        document['discussion'] = discussion
+    return services.create(record.identifier, document)
+
+
 def index_batch(root, batch, services, chunker=chunk_source):
     manifest = batch["manifest"]
     check_manifest(root, manifest)
@@ -262,11 +408,30 @@ def index_batch(root, batch, services, chunker=chunk_source):
                 catalog.learn_safe(lithium_feed(archive_path(capture), verified_source(root, capture),
                                           f"https://web.archive.org/web/{capture['timestamp']}/{capture['url']}"))
     created = skipped = preserved = 0
+    pending = []
+    pending_bytes = 0
+    workers = getattr(services, 'luna_workers', 1)
+
+    def flush():
+        nonlocal created, skipped, pending_bytes
+        if not pending:
+            return
+        metadata = (services.enrich_batch(pending) if len(pending) > 1 else
+                    (services.enrich(*pending[0].enrichment_inputs()),))
+        for record, result in zip(pending, metadata, strict=True):
+            if commit_text(record, result, batch, services, chunker):
+                created += 1
+            else:
+                skipped += 1
+        pending.clear()
+        pending_bytes = 0
+
     for capture in captures:
         record_id = archive_path(capture)
         image = media_type(capture) in (
             'image/png','image/jpeg','image/gif','image/webp','image/bmp','image/tiff')
         if image:
+            flush()
             if services.exists(record_id):
                 skipped += 1
             elif services.create(record_id, image_document(root, capture, batch, services)):
@@ -280,59 +445,17 @@ def index_batch(root, batch, services, chunker=chunk_source):
         if services.exists(record_id):
             skipped += 1
             continue
-        raw=verified_source(root,capture)
-        if binary_source(raw):
+        if pending_bytes + capture['bytes'] > IMPORT_ENRICHMENT_BYTES:
+            flush()
+        record = prepare_text(root, capture, record_id)
+        if record is None:
             preserved += 1
             continue
-        replay, content = text_document(root, capture)
-        # Model date extraction sees the original body, not our synthetic
-        # provenance header or the capture timestamp embedded in its URL.
-        decoded=decode_source(raw,source_type(capture))
-        source=decoded.text
-        title_node=BeautifulSoup(source,'html.parser').title
-        title=repaired_title(capture.get('title'),title_node.string if title_node else None,decoded)
-        plan = passages.prepare(content, record_id, title or '',
-                                html_source=source, mime_type=media_type(capture))
-        if not plan.passages:
-            preserved += 1
-            continue
-        metadata = services.enrich(capture, source if media_type(capture) == 'text/plain' else website_markdown(source), plan.view)
-        if metadata.get('llm_search_enrichment_version'):
-            metadata['llm_enrichment_passage_version'] = passages.VERSION
-        unique, positions = passages.embedding_inputs(plan)
-        # Body and summary share one bounded inference operation, retaining their
-        # complete, distinct prefixes/context and all original passage offsets.
-        requests = [p.request for p in unique] + summary_requests(metadata["llm_summary"], chunker)
-        all_vectors = services.embeddings(requests)
-        if len(all_vectors) != len(requests):
-            raise CrawlError('Incomplete source/summary embeddings; document remains pending')
-        vectors, summary_vectors = all_vectors[:len(unique)], all_vectors[len(unique):]
-        chunks = [{"text_chunk": p.text, "source_start": p.start, "source_end": p.end,
-                   "title": p.title, "context": p.context, "kind": p.kind,
-                   "vector": vectors[position].copy()} for p,position in zip(plan.passages,positions,strict=True)]
-        if not chunks:
-            raise CrawlError("Capture has no source chunks")
-        if not summary_vectors:
-            raise CrawlError("Summary has no usable embedding chunks; enriched result retained for retry")
-        try:
-            summary_vector = gemma.mean_vector(summary_vectors)
-        except ValueError:
-            raise CrawlError("Summary embedding is invalid; enriched result retained for retry") from None
-        timestamp = datetime.strptime(capture["timestamp"], "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc).isoformat()
-        document = {"id": record_id, "title": title or urlsplit(capture["url"]).path or "Archived page",
-                    "domain_name": urlsplit(capture["url"]).netloc, "capture_date": timestamp, "last_indexed": now(),
-                    "url": replay, "mime_type": media_type(capture), "file_type": "text", "thumbnail": "thumbnails/website.webp",
-                    "text_full": content, "text": chunks, "text_extraction_version": WEBSITE_EXTRACTION_VERSION,
-                    "text_chunking_version": passages.VERSION, "text_passage_provenance": {**plan.provenance(),'decoding':decoded.provenance()},
-                    "embedding_model": MODEL, "archive_source_sha256": capture["sha256"],
-                    "archive_source_manifest": batch["manifest_sha256"], "archive_commit": batch["publication"]["commit"],
-                    **metadata, "llm_summary_vector": summary_vector}
-        discussion=discussion_metadata(record_id,raw,replay,catalog=catalog)
-        if discussion:document['discussion']=discussion
-        if services.create(record_id, document):
-            created += 1
-        else:
-            skipped += 1
+        pending.append(record)
+        pending_bytes += capture['bytes']
+        if len(pending) >= workers or pending_bytes >= IMPORT_ENRICHMENT_BYTES:
+            flush()
+    flush()
     retained = len(manifest['captures']) - len(captures)
     return {"created": created, "existing": skipped, "captures": len(manifest["captures"]),
             **({'retained_private': retained} if retained else {}),

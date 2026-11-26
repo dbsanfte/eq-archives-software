@@ -1,5 +1,8 @@
 import json
+from contextlib import closing
+from copy import deepcopy
 from pathlib import Path
+from threading import Event, Lock
 from unittest.mock import patch
 
 import httpx
@@ -294,6 +297,156 @@ def service(tmp_path,handler):
     instance.client=httpx.Client(transport=httpx.MockTransport(handler))
     instance.embedder=httpx.Client(transport=httpx.MockTransport(handler))
     return instance
+
+
+def import_pages(candidate, pages):
+    from captures import archive_path
+    root, row = candidate
+    batch = published(row)
+    batch['manifest']['sites'][0].update(scope='http://guild.example/', scope_mode='site')
+    captures = []
+    for index, (url, timestamp) in enumerate(pages):
+        capture = deepcopy(batch['manifest']['captures'][0])
+        raw = b'<title>Guild raids</title><p>EverQuest guild raid report. Updated January 2, 2000.</p>'
+        capture.update(url='http://guild.example/' + url, timestamp=timestamp, path=f'page-{index}.html',
+                       bytes=len(raw), sha256=digest(raw))
+        capture['archive_path'] = archive_path(capture)
+        (root / capture['path']).write_bytes(raw)
+        captures.append(capture)
+    batch['manifest']['captures'] = captures
+    batch['manifest_sha256'] = digest(batch['manifest'])
+    return root, batch
+
+
+def test_paid_import_requests_overlap_and_keep_create_order(candidate, tmp_path, monkeypatch):
+    from daily_budget import current_budget
+    from indexer.capture_enrichment import Enricher
+    from test_enrichment import RESULT, response
+    from test_policy_enrichment import budget
+
+    root, batch = import_pages(candidate, [('raid.html','20000101000000'), ('raid.html','20000102000000'),
+                                          ('roster.html','20000103000000')])
+    account = budget(tmp_path)
+    started = Event()
+    lock = Lock()
+    requests, indexed = [], []
+
+    class Luna:
+        def request(self, payload):
+            assert current_budget.get() is account
+            original = json.loads(payload['input'])['original_url']
+            with lock:
+                requests.append(original)
+            if original.endswith('raid.html'):
+                assert started.wait(2), 'distinct paid requests ran serially'
+            else:
+                started.set()
+            return response({**RESULT, 'content_role':'article', 'topics':[], 'entities':[]})
+
+        def close(self):
+            pass
+
+    monkeypatch.setenv('IMPORT_LUNA_WORKERS', '4')
+    with closing(service(tmp_path, lambda _: pytest.fail('unexpected transport request'))) as services:
+        services.enricher = Enricher(tmp_path / 'paid', 'unused', client_factory=lambda _: Luna())
+        services.exists = lambda _: False
+        services.embeddings = lambda inputs: [[1.] + [0.]*767 for _ in inputs]
+        services.create = lambda identifier, _: indexed.append(identifier) or True
+        with account.bind(purpose='enrichment', owner='test-import'):
+            result = index_batch(root, batch, services)
+    assert result['created'] == 3
+    assert indexed == [row['archive_path'] for row in batch['manifest']['captures']]
+    assert sorted(requests) == ['http://guild.example/raid.html', 'http://guild.example/roster.html']
+    assert account.snapshot()['estimated_usd'] == pytest.approx(.0004)
+
+
+@pytest.mark.parametrize('cap', ['site', 'daily', 'monthly'])
+def test_import_retries_budget_after_parallel_reservations_settle(candidate, tmp_path, monkeypatch, cap):
+    from daily_budget import DailyBudget, DailyBudgetPause, SiteBudgetExceeded
+    from indexer.capture_enrichment import Enricher
+    from test_enrichment import RESULT, response
+
+    root, batch = import_pages(candidate, [(f'raid-{n}.html', '20000101000000') for n in range(3)])
+    account = DailyBudget(tmp_path / 'luna')
+    account.configure({'enabled':False, 'daily_usd': .04 if cap == 'daily' else 1,
+                       'monthly_usd': .04 if cap == 'monthly' else 1,
+                       'site_usd': .04 if cap == 'site' else 1,
+                       'min_grade':2, 'grading_criteria':'', 'revision':0})
+    denial = Event()
+    reserve = account.reserve
+
+    def track_denial(*args, **kwargs):
+        try:
+            return reserve(*args, **kwargs)
+        except (DailyBudgetPause, SiteBudgetExceeded):
+            denial.set()
+            raise
+
+    requests = []
+
+    class Luna:
+        def request(self, payload):
+            requests.append(json.loads(payload['input'])['original_url'])
+            if len(requests) == 1:
+                assert denial.wait(3), 'expected a temporary reservation denial'
+            return response({**RESULT, 'content_role':'article', 'topics':[], 'entities':[]})
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(account, 'reserve', track_denial)
+    monkeypatch.setenv('IMPORT_LUNA_WORKERS', '3')
+    with closing(service(tmp_path, lambda _: pytest.fail('unexpected transport request'))) as services:
+        services.enricher = Enricher(tmp_path / 'paid', 'unused', client_factory=lambda _: Luna())
+        services.exists = lambda _: False
+        services.embeddings = lambda inputs: [[1.] + [0.]*767 for _ in inputs]
+        services.create = lambda *_: True
+        with account.bind(purpose='enrichment', owner='test-import'):
+            result = index_batch(root, batch, services)
+    assert denial.is_set() and result['created'] == 3
+    assert sorted(requests) == sorted(item['url'] for item in batch['manifest']['captures'])
+    snapshot = account.snapshot()
+    assert snapshot['estimated_usd'] == pytest.approx(.0006) and snapshot['unresolved_usd'] == 0
+
+
+def test_import_retry_reuses_a_later_paid_result_after_an_earlier_record_fails(candidate, tmp_path, monkeypatch):
+    from import_status import EnrichmentError
+    from indexer.capture_enrichment import Enricher
+    from test_enrichment import RESULT, response
+    from test_policy_enrichment import budget
+
+    root, batch = import_pages(candidate, [('first.html', '20000101000000'), ('later.html', '20000101000000')])
+    account = budget(tmp_path)
+    requests, indexed = [], []
+    fail_first = True
+
+    class Luna:
+        def request(self, payload):
+            original = json.loads(payload['input'])['original_url']
+            requests.append(original)
+            if fail_first and original.endswith('/first.html'):
+                raise CrawlError('fixture transport failure before settlement')
+            return response({**RESULT, 'content_role':'article', 'topics':[], 'entities':[]})
+
+        def close(self):
+            pass
+
+    monkeypatch.setenv('IMPORT_LUNA_WORKERS', '2')
+    with closing(service(tmp_path, lambda _: pytest.fail('unexpected transport request'))) as services:
+        services.enricher = Enricher(tmp_path / 'paid', 'unused', client_factory=lambda _: Luna())
+        services.exists = lambda _: False
+        services.embeddings = lambda inputs: [[1.] + [0.]*767 for _ in inputs]
+        services.create = lambda identifier, _: indexed.append(identifier) or True
+        with account.bind(purpose='enrichment', owner='test-import'):
+            with pytest.raises(EnrichmentError) as error:
+                index_batch(root, batch, services)
+            assert error.value.code == 'request' and not indexed
+            assert account.snapshot()['unresolved_usd'] > 0
+            fail_first = False
+            assert index_batch(root, batch, services)['created'] == 2
+    assert requests.count('http://guild.example/later.html') == 1
+    assert indexed == [row['archive_path'] for row in batch['manifest']['captures']]
+    assert account.snapshot()['estimated_usd'] == pytest.approx(.0004)
 
 
 def test_es_requests_are_exact_create_only_and_conflicts_preserve_other_writer(tmp_path):
