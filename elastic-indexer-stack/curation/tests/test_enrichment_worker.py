@@ -4,6 +4,7 @@ from itertools import cycle
 from threading import Barrier, BrokenBarrierError, Event, Lock
 from types import SimpleNamespace
 
+import httpx
 import pytest
 
 from common import digest
@@ -13,7 +14,7 @@ from enrichment_worker import MAX_WORKERS, WORKERS, State, run, write_wave
 from indexer import passages, search_enrichment
 from indexer.capture_enrichment import Enricher
 from policy_enrichment import eligible, prepare_refresh_hit
-from policy_maintenance import UPDATE_BATCH_SIZE, State as PolicyState, identity, repair
+from policy_maintenance import UPDATE_BATCH_SIZE, MaintenanceServices, State as PolicyState, identity, repair
 from policy_pool import PreparationPool
 from policy_scheduler import receipt
 from policy_sources import ServiceError, SourceError
@@ -131,6 +132,32 @@ def factory(calls, barrier=None, on_request=None):
             pass
 
     return lambda *args,client_factory,**kwargs: Enricher(*args,client_factory=Luna,**kwargs)
+
+
+def test_prepared_enrichment_reaches_the_optimistic_bulk_writer(tmp_path):
+    service, sources = prepared_service(tmp_path, count=1)
+    hit, = service.hits.values()
+    backend = MaintenanceServices.__new__(MaintenanceServices)
+    backend.index, backend.es_url = hit['_index'], 'https://archive'
+    calls = []
+
+    def respond(request):
+        action, payload = [json.loads(line) for line in request.content.splitlines()]
+        assert request.url.path == f'/{backend.index}/_bulk'
+        assert action == {'update': {'_id': hit['_id'], 'if_seq_no': hit['_seq_no'], 'if_primary_term': hit['_primary_term']}}
+        assert payload['doc']['llm_enrichment_passage_version'] == passages.VERSION
+        assert len(payload['doc']['llm_summary_vector']) == 768
+        calls.append(action)
+        return httpx.Response(200, json={'errors': False, 'items': [{'update': {
+            '_id': hit['_id'], '_index': backend.index, 'status': 200, 'result': 'updated'}}]})
+
+    with closing(sources), closing(State(tmp_path / 'state', identity())) as state, \
+            httpx.Client(transport=httpx.MockTransport(respond)) as backend.client, \
+            closing(PreparationPool(sources.roots, sources.publication, workers=1, enrichment=True)) as pool:
+        service.update_many = backend.update_many
+        result = run(tmp_path, state, service, sources, 'fixture', budget(tmp_path), maximum=1,
+                     enricher_factory=factory([]), should_yield=lambda: False, preparation_pool=pool)
+    assert len(calls) == result['updated'] == 1
 
 
 @pytest.mark.parametrize('worker_count', [WORKERS, MAX_WORKERS])

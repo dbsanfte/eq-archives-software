@@ -279,12 +279,14 @@ class MaintenanceServices(Services):
             raise ValueError('Invalid maintenance update batch size')
         identifiers, lines = [], []
         for hit, patch in updates:
-            identifier = hit['_id']
-            if hit['_index'] != self.index or identifier in identifiers:
+            identifier, seq_no, primary_term = hit.get('_id'), hit.get('_seq_no'), hit.get('_primary_term')
+            if (hit.get('_index') != self.index or not isinstance(identifier, str) or not identifier
+                    or identifier in identifiers or type(seq_no) is not int or seq_no < 0
+                    or type(primary_term) is not int or primary_term < 1):
                 raise ServiceError('response_identity')
             identifiers.append(identifier)
-            lines.extend((vector_json({'update': {'_id': identifier, 'if_seq_no': hit['_seq_no'],
-                                                 'if_primary_term': hit['_primary_term']}}),
+            lines.extend((vector_json({'update': {'_id': identifier, 'if_seq_no': seq_no,
+                                                'if_primary_term': primary_term}}),
                           vector_json({'doc': patch})))
         body = b'\n'.join((*lines, b''))
         if len(body) > UPDATE_BATCH_BYTES:
