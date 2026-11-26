@@ -1081,8 +1081,10 @@ while preserving rotation across collections.
 Operators can set `luna_workers` to 1–192 in the optional
 `eqarchives-enrichment-tuning` ConfigMap in `eqarchives-es`. New slices read it
 at startup, so changing it leaves running Jobs intact.
+Each dedicated Job can use up to four CPUs. Graders share the verified TLS
+context for that Job and maintain independent connections.
 Ramp traffic in measured steps and watch Luna latency, request rate, token usage
-and node health. The shared ledger paces admission at 8,000 requests/minute,
+and node health. The shared ledger paces admission at 8,000 requests/minute
 and 8 million tokens/minute. It uses settled token counts for the minute and
 reports an estimate for UTC-day usage. The configured dollar budgets govern
 daily/monthly spend. The provider's Batch/Background queued-token allowance

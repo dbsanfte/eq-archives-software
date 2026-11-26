@@ -236,7 +236,7 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
                 raise YieldWork()
 
         def client(path):
-            return Luna(path, deadline=time.time() + LUNA_SECONDS)
+            return Luna(path, deadline=time.time() + LUNA_SECONDS, tls_context=tls_context)
         with closing(enricher_factory(cache, '/run/secrets/luna_api_key', client_factory=client,
                                      check=check_request, prepared_cache=True, writer=writer)) as enricher:
             return metadata_patch(enricher.enrich_for_maintenance(prepared.capture, prepared.source, prepared.grounding))
@@ -413,6 +413,7 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
         if budget['enrichment_pending']:
             phase, next_at = 'waiting_imports', time.time() + 60
             return report(True)
+        tls_context = Luna.tls_context()
         # The pool drains before its shared priority lease is released, even
         # when the slice yields or encounters a failed write.
         with account.bind(purpose='maintenance', owner=job), ThreadPoolExecutor(max_workers=workers) as pool:

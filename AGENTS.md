@@ -1377,6 +1377,9 @@ Apply cooldown before taking a new reservation. Retain the money reserved on
 ambiguous responses and permit cooldown continuations with their saved work.
 Serialize each historical Job's short cache and spend transactions while its
 Luna requests continue concurrently outside SQLite transactions.
+Share a verified TLS context within each historical Job and keep each grader's
+connection independent. Dedicated enrichment Jobs can burst to four CPUs with
+the existing low CPU request. Body maintenance keeps its two-CPU limit.
 Refill grading slots on completion and batch validated summaries for embedding.
 Drain admitted requests before releasing the shared priority claim. Preserve
 paid totals, matching cursors and cached responses during handoffs. Initialize

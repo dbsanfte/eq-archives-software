@@ -7,6 +7,7 @@ import json
 import logging
 import math
 import sqlite3
+import ssl
 import time
 from pathlib import Path
 
@@ -244,7 +245,7 @@ class LunaUnavailable(CrawlError):
 
 
 class Luna:
-    def __init__(self, key_file, deadline=None):
+    def __init__(self, key_file, deadline=None, *, tls_context=None):
         self.deadline = deadline
         try:
             self.key = Path(key_file).read_text().strip()
@@ -252,7 +253,16 @@ class Luna:
             raise CrawlError("Could not read the private OpenAI key file") from None
         if not self.key or any(c.isspace() for c in self.key):
             raise CrawlError("OpenAI key file must contain a single key")
-        self.connection = http.client.HTTPSConnection("api.openai.com", timeout=90)
+        self.connection = http.client.HTTPSConnection("api.openai.com", timeout=90, context=tls_context)
+
+    @staticmethod
+    def tls_context():
+        """Build the same verified HTTP/1.1 profile once for a grading Job."""
+        context = ssl.create_default_context()
+        context.set_alpn_protocols(['http/1.1'])
+        if context.post_handshake_auth is not None:
+            context.post_handshake_auth = True
+        return context
 
     def time_left(self):
         remaining = 90 if self.deadline is None else min(90, self.deadline - time.time())

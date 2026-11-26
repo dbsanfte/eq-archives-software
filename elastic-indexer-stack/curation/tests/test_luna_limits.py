@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime
 from pathlib import Path
 import json
+import ssl
 
 import pytest
 
@@ -69,6 +70,27 @@ def client(directory, response):
     luna = Luna(path)
     luna.connection = Connection(response)
     return luna
+
+
+def test_graders_can_share_default_verified_tls_context_with_distinct_connections(tmp_path, monkeypatch):
+    key = tmp_path / 'key'
+    key.write_text('fixture-key')
+    contexts = []
+
+    def connection(host, *, timeout, context):
+        assert host == 'api.openai.com' and timeout == 90
+        contexts.append(context)
+        return Connection(Response(200))
+
+    monkeypatch.setattr(grading.http.client, 'HTTPSConnection', connection)
+    context = Luna.tls_context()
+    default = ssl.create_default_context()
+    assert context.check_hostname and context.verify_mode == ssl.CERT_REQUIRED
+    assert context.cert_store_stats() == default.cert_store_stats()
+    assert context.minimum_version == default.minimum_version and context.verify_flags == default.verify_flags
+    with closing(Luna(key, tls_context=context)) as first, closing(Luna(key, tls_context=context)) as second:
+        assert first.connection is not second.connection
+        assert contexts == [context, context]
 
 
 def test_low_project_quota_and_out_of_order_healthy_headers_share_hold(tmp_path, clock):
