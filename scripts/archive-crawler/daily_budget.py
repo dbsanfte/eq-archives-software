@@ -16,7 +16,7 @@ from threading import Lock
 import uuid
 
 from common import CrawlError, now
-from luna_limits import DAILY_TOKEN_TARGET, MINUTE_REQUEST_TARGET, MINUTE_TOKEN_TARGET
+from luna_limits import MINUTE_REQUEST_TARGET, MINUTE_TOKEN_TARGET
 
 SCALE = 1_000_000_000
 MAINTENANCE_SCOPE_LIMIT_USD = 50
@@ -321,9 +321,6 @@ class DailyBudget:
         tokens += (max(0, spent + pending - charge) + 99) // 100
         row = db.execute('SELECT retry_at FROM luna_capacity WHERE id=1').fetchone()
         retry_at = row[0] if row and row[0] > when.isoformat() else ''
-        if tokens >= DAILY_TOKEN_TARGET:
-            reset = (when + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-            retry_at = max(retry_at, reset.isoformat())
         floor = int(when.timestamp()) - 59
         requests, recent_tokens = db.execute('''SELECT COALESCE(SUM(requests),0),COALESCE(SUM(tokens),0)
             FROM luna_recent_usage WHERE second>=?''', (floor,)).fetchone()
@@ -438,11 +435,8 @@ class DailyBudget:
             limits=self.limits(db,when,config)
             if config['configured'] and reserved>limits['_remaining_units']:
                 raise DailyBudgetPause(amount, limits['resets_at'], limits['budget_period'])
-            retry_at = limits['luna_retry_at']
-            if limits['luna_accounted_tokens_today'] + (reserved + 99) // 100 >= DAILY_TOKEN_TARGET:
-                retry_at = max(retry_at, limits['daily_resets_at'])
-            if retry_at:
-                raise LunaRatePause(datetime.fromisoformat(retry_at))
+            if limits['luna_retry_at']:
+                raise LunaRatePause(datetime.fromisoformat(limits['luna_retry_at']))
             if purpose in ('discovery','maintenance') and self._enrichment_pending(
                     db, when, owner=priority_owner.get() or '', maintenance=purpose=='maintenance'):
                 raise EnrichmentPriorityPause()
