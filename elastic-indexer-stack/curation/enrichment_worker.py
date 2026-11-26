@@ -24,7 +24,7 @@ from indexer import gemma, passages, search_enrichment
 from indexer.capture_enrichment import Enricher, domain_prompts, summary_requests
 from indexer.sqlite_state import SQLiteState
 from policy_enrichment import COLLECTIONS, COUNTERS, FRONTIER_PAGE_SIZE, capture_identity, metadata_patch, prepare_refresh
-from policy_maintenance import MaintenanceServices, YieldWork, foreground, identity
+from policy_maintenance import UPDATE_BATCH_SIZE, MaintenanceServices, YieldWork, foreground, identity
 from policy_pool import PreparationPool, WorkerLost
 from policy_sources import ServiceError, SourceError, Sources
 
@@ -184,16 +184,25 @@ def write_wave(services, records, check):
     except (TypeError, ValueError, KeyError):
         raise ServiceError('summary_embedding') from None
     checkpoint = {'llm_enrichment_passage_version': passages.VERSION}
-    for prepared, patch in records:
+    for offset in range(0, len(records), UPDATE_BATCH_SIZE):
+        group = records[offset:offset + UPDATE_BATCH_SIZE]
+        updates = []
+        for prepared, patch in group:
+            identifier = prepared.hit['_id']
+            update = checkpoint if patch is None else {**patch, **checkpoint, 'llm_summary_vector': summaries[identifier]}
+            updates.append((prepared.hit, update))
         check()
-        identifier = prepared.hit['_id']
-        update = checkpoint if patch is None else {**patch, **checkpoint, 'llm_summary_vector': summaries[identifier]}
-        try:
-            services.update(prepared.hit, update)
-        except SourceError as error:
-            yield identifier, error.reason
-        else:
-            yield identifier, 'reused' if patch is None else 'updated'
+        failed = None
+        for (prepared, patch), error in zip(group, services.update_many(updates), strict=True):
+            identifier = prepared.hit['_id']
+            if error is None:
+                yield identifier, 'reused' if patch is None else 'updated'
+            elif isinstance(error, SourceError):
+                yield identifier, error.reason
+            else:
+                failed = failed or error
+        if failed:
+            raise failed
 
 
 def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, maximum=MAX_RECORDS, workers=WORKERS,

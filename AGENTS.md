@@ -1383,6 +1383,10 @@ the existing low CPU request. Body maintenance keeps its two-CPU limit.
 Parse bundled Luna prompt YAML once per process. Preserve regex precedence,
 template contents and exact request signatures across the cache change.
 Refill grading slots on completion and batch validated summaries for embedding.
+The dedicated enrichment Job sends at most sixteen exact-revision partial
+updates per Elasticsearch request. Validate every receipt against the fixed
+index and input order. Keep conflict retries, paid caches and foreground yields
+between batches. Body maintenance retains individual writes.
 Drain admitted requests before releasing the shared priority claim. Preserve
 paid totals, matching cursors and cached responses during handoffs. Initialize
 each scope cache once per Job. Fold changed attempt IDs into exact per-scope

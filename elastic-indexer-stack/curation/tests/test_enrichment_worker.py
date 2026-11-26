@@ -2,20 +2,21 @@ import json
 from contextlib import closing
 from itertools import cycle
 from threading import Barrier, BrokenBarrierError, Event, Lock
+from types import SimpleNamespace
 
 import pytest
 
 from common import digest
 from daily_budget import DailyBudget, LunaRatePause
 import enrichment_worker
-from enrichment_worker import MAX_WORKERS, WORKERS, State, run
+from enrichment_worker import MAX_WORKERS, WORKERS, State, run, write_wave
 from indexer import passages, search_enrichment
 from indexer.capture_enrichment import Enricher
 from policy_enrichment import eligible, prepare_refresh_hit
-from policy_maintenance import State as PolicyState, identity, repair
+from policy_maintenance import UPDATE_BATCH_SIZE, State as PolicyState, identity, repair
 from policy_pool import PreparationPool
 from policy_scheduler import receipt
-from policy_sources import ServiceError
+from policy_sources import ServiceError, SourceError
 from test_enrichment import RESULT, response
 from test_policy_enrichment import Maintenance, budget
 from test_policy_maintenance import V, fixture
@@ -33,6 +34,38 @@ class Service(Maintenance):
     def vectors(self, inputs, check):
         self.waves.append(list(inputs))
         return super().vectors(inputs, check)
+
+    def update_many(self, updates):
+        for hit, patch in updates:
+            self.update(hit, patch)
+        return [None] * len(updates)
+
+
+def test_write_wave_bounds_batches_and_acknowledges_only_verified_items():
+    records = [(SimpleNamespace(hit={'_id': str(index)}), None) for index in range(UPDATE_BATCH_SIZE + 1)]
+    sent = []
+    checks = []
+
+    class Writer:
+        def update_many(self, updates):
+            sent.append([hit['_id'] for hit, _ in updates])
+            assert all(patch == {'llm_enrichment_passage_version': passages.VERSION} for _, patch in updates)
+            return [None] * len(updates)
+
+    assert list(write_wave(Writer(), records, lambda: checks.append(1))) == [
+        (str(index), 'reused') for index in range(UPDATE_BATCH_SIZE + 1)]
+    assert list(map(len, sent)) == [UPDATE_BATCH_SIZE, 1] and len(checks) == 2
+
+    class Interrupted(Writer):
+        def update_many(self, updates):
+            super().update_many(updates)
+            return [ServiceError('elasticsearch_unavailable'), SourceError('concurrent_update'), None]
+
+    results = write_wave(Interrupted(), records[:3], lambda: None)
+    assert next(results) == ('1', 'concurrent_update')
+    assert next(results) == ('2', 'reused')
+    with pytest.raises(ServiceError, match='elasticsearch_unavailable'):
+        next(results)
 
 
 def prepared_service(root, count=4):
