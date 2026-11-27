@@ -3,7 +3,7 @@
 import argparse
 from collections import Counter, deque
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
-from contextlib import closing
+from contextlib import closing, contextmanager
 from contextvars import copy_context
 from datetime import datetime
 import fcntl
@@ -45,7 +45,7 @@ PREPARATION_WORKERS = 2
 PREPARATION_POLL = .01
 EXECUTION_COUNTERS = ('embedding_waves', 'examined', 'checkpoint_views', 'rebuilt_views', 'frontier_queries',
                       'preparation_workers', 'preparation_retries', 'scope_budget_retries', 'scope_budget_exhausted',
-                      'scope_budget_bypassed')
+                      'scope_budget_bypassed', 'luna_coalesced_hits', 'luna_evidence_cache_hits', 'luna_prefix_requests')
 
 
 def pending_scope(identifier):
@@ -276,6 +276,7 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
     buffered_at = 0
     # All graders update the same SQLite budget. Keep network I/O outside this lock.
     writer = Lock()
+    gates, gate_guard = {}, Lock()
 
     def check():
         if time.monotonic() >= deadline or should_yield():
@@ -291,6 +292,23 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
         save(state.root / (job + '.json'), record)
         return record
 
+    @contextmanager
+    def join_evidence(cache, key, check_request):
+        # The slice's record bound also bounds the number of gates. Each
+        # waiter still resolves its own paid attempts and writes its own proof.
+        with gate_guard:
+            gate = gates.get((cache, key))
+            if gate is None:
+                gate = gates[(cache, key)] = Lock()
+        joined = not gate.acquire(blocking=False)
+        if joined:
+            while not gate.acquire(timeout=.1):
+                check_request()
+        try:
+            yield joined
+        finally:
+            gate.release()
+
     def grade(prepared, cache):
         def check_request():
             check()
@@ -300,8 +318,10 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
         def client(path):
             return Luna(path, deadline=time.time() + LUNA_SECONDS, tls_context=tls_context)
         with closing(enricher_factory(cache, '/run/secrets/luna_api_key', client_factory=client,
-                                     check=check_request, prepared_cache=True, writer=writer)) as enricher:
-            return metadata_patch(enricher.enrich_for_maintenance(prepared.capture, prepared.source, prepared.grounding))
+                                     check=check_request, prepared_cache=True, writer=writer,
+                                     maintenance_flight=lambda key: join_evidence(cache, key, check_request))) as enricher:
+            patch = metadata_patch(enricher.enrich_for_maintenance(prepared.capture, prepared.source, prepared.grounding))
+            return patch, enricher.evidence_cache_hit, enricher.prefix_requests
 
     def finish(identifier, result, reason=None):
         if result == 'concurrent_update':
@@ -426,7 +446,7 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
                 del scope_running[scope]
                 draining.discard(scope)
             try:
-                patch = future.result()
+                patch, cache_hit, prefix_requests = future.result()
             except EnrichmentError as error:
                 if error.code == 'budget':
                     if submitted_limit > 1:
@@ -450,6 +470,9 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
             except Exception as error:
                 pause = pause or error
             else:
+                counters['luna_coalesced_hits'] += int(cache_hit == 'inflight')
+                counters['luna_evidence_cache_hits'] += int(cache_hit == 'saved')
+                counters['luna_prefix_requests'] += prefix_requests
                 for prepared in records:
                     completed(prepared, patch)
         return pause

@@ -1,4 +1,5 @@
 import copy
+from contextlib import closing
 import json
 from unittest.mock import Mock
 
@@ -76,6 +77,41 @@ def test_short_and_markup_only_evidence_preserves_the_exact_prompt():
     assert adaptive_summary(payload, ('# Requirements', ' - []()\n' * 1000)) is payload
     assert adaptive_summary(payload, ('あ' * 2999,)) is payload
     assert 'up to 1200 characters' in adaptive_summary(payload, ('あ' * 3000,))['instructions']
+
+
+@pytest.mark.parametrize(('host', 'explicit'), [
+    ('eqloot.gamez.com', True), ('eqbeastiary.allakhazam.com', True),
+    ('eqforums.station.sony.com', False),
+])
+def test_catalog_transport_keeps_logical_enrichment_signature_and_saved_charges(tmp_path, host, explicit):
+    capture = {'url': f'http://{host}/raid', 'archive_path': 'websites/site/raid', 'sha256': 'raw'}
+    grounding = (SOURCE,)
+    ready = response(summary_result(50, 'reference', maintenance=True))
+    ready['usage']['input_tokens_details'] = {'cached_tokens': 500, 'cache_write_tokens': 100}
+    factory = Mock()
+    factory.return_value.request.return_value = ready
+    from test_policy_enrichment import budget
+    account = budget(tmp_path)
+    with account.bind(purpose='maintenance'), closing(Enricher(tmp_path/'paid', 'unused', client_factory=factory)) as enricher:
+        logical = enricher.maintenance_payload(capture, enricher.payload(capture, SOURCE, grounding=grounding), grounding)
+        signature = digest({'payload': logical, 'raw_source_sha256': capture['sha256']})
+        result = enricher.enrich_for_maintenance(capture, SOURCE, grounding)
+        request = factory.return_value.request.call_args.args[0]
+        assert result['llm_enrichment_signature'] == signature
+        assert enricher.prefix_requests == int(explicit)
+        if explicit:
+            assert request['prompt_cache_options'] == {'mode': 'explicit', 'ttl': '30m'}
+            developer, user = request['input']
+            assert developer['role'] == 'developer'
+            assert developer['content'] == [{'type': 'input_text', 'text': logical['instructions'],
+                                             'prompt_cache_breakpoint': {'mode': 'explicit'}}]
+            assert user == {'role': 'user', 'content': logical['input']}
+        else:
+            assert request == logical
+        assert enricher.enrich_for_maintenance(capture, SOURCE, grounding) == result
+        assert factory.return_value.request.call_count == 1
+        assert enricher.store.db.execute('SELECT actual FROM attempts').fetchone()[0] == .0001575
+        assert account.snapshot()['estimated_usd'] == .0001575
 
 
 @pytest.mark.parametrize('maintenance', [False, True])
@@ -210,8 +246,7 @@ def test_large_enrichment_counts_complete_requests_before_reserving_initial_and_
             assert json.loads(counted.args[0]['input'])['complete_source_markdown'] == source
         assert json.loads(luna.request.call_args.args[0]['input'])['rejected_response'] == rejected
         reservations = client.store.db.execute('SELECT reserved FROM attempts ORDER BY id').fetchall()
-        assert [record[0] for record in reservations] == [
-            (tokens * .20 + 32_768 * .75) / 1_000_000 for tokens in (400_000, 1_050_000 - 32_768)]
+        assert [record[0] for record in reservations] == [.124576, .278884]
     finally:
         client.close()
 

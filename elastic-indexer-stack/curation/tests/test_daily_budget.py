@@ -88,6 +88,13 @@ def test_reservations_are_durable_before_local_send_and_denial_does_not_use_retr
         assert account.snapshot()['unresolved_usd'] == .1
         settle_attempt(store, attempt, .01, {'input_tokens': 5, 'output_tokens': 1})
         assert account.snapshot()['estimated_usd'] == .01
+        receipt = store.get(f'daily_reservation:{attempt}')
+        with pytest.raises(CrawlError, match='accounting changed'):
+            account.settle(receipt, .005)
+        assert settle_attempt(store, attempt, .005, {'input_tokens': 5, 'output_tokens': 1},
+                              recover_existing=True) == .01
+        assert account.snapshot()['estimated_usd'] == .01
+        assert account.snapshot()['luna_accounted_tokens_today'] == 6
         # A lost local write retains the already-committed global reservation.
         store.db.execute('BEGIN IMMEDIATE')
         attempt = store.db.execute("INSERT INTO attempts(reserved,status) VALUES (.09,'reserved')").lastrowid

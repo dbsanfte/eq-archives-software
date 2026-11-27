@@ -213,12 +213,12 @@ Paid grading uses Responses, `gpt-6-luna`, low reasoning, strict structured outp
 and `store: false`. Captured instructions are untrusted data. Grades value
 substantive EQ content, including small guilds and personal sites; supporting
 quotes must occur verbatim in complete extracted sources. Incomplete or invalid
-responses leave candidates unjudged. Reservation pricing is $0.10 input / $0.50
-output per million tokens, verified against the
-[official model page](https://developers.openai.com/api/docs/models/gpt-6-luna)
-on 2026-10-06. Verify it before later paid runs. Reservations use input UTF-8
-bytes plus overhead and the full output-token cap. Ambiguous failures retain
-their full reservation; usage-based cost totals are estimates, not account bills.
+responses leave candidates unjudged. Reservations use input UTF-8 bytes plus
+overhead, the highest applicable 30-minute cache write rate and the full
+output-token cap. Settlement accounts for ordinary input, cache reads, cache
+writes, output and the long-context rates. Ambiguous failures retain their
+full reservation. Usage-based cost totals estimate charges from the
+[Luna tariff](https://developers.openai.com/api/docs/models/gpt-6-luna).
 
 Work directories are private, exports are mode 0600, and API errors omit upstream
 details. Keep keys, state, captured content and decisions out of Git. The offline
