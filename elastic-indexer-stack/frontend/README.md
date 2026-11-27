@@ -42,6 +42,14 @@ BROWSER_TEST_PYTHON="$PWD/.venv/bin/python" \
   bash scripts/smoke-frontend.sh eqarchives-frontend:local
 ```
 
+## Search result site icons
+
+Regular result cards and grouped discussion cards share the same site badges.
+They use small, fingerprinted WebP files and fall back to a monogram if a known
+site has no verified logo or its image cannot load. The domain stays visible as
+text. The ranked inventory records every source and the alias rules.
+[Top 100 archive sites and logo sources](../../docs/top-100-site-icons.md)
+
 ## Date filters
 
 **Captured date** and **Estimated content date** ranges stay applied across searches,
