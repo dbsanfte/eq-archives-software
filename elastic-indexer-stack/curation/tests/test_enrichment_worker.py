@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 
-from common import Store, digest
+from common import CrawlError, Store, digest
 from daily_budget import DailyBudget, LunaRatePause, attempt_spending
 import enrichment_worker
 from enrichment_worker import MAX_WORKERS, WORKERS, State, run, write_wave
@@ -712,3 +712,55 @@ def test_historical_enrichment_reuses_only_an_identical_paid_request(tmp_path):
         assert len(calls) == 1
         client.enrich_for_maintenance(second, 'Distinct raw capture', ('EverQuest crafting guide.',))
         assert len(calls) == 2
+
+
+@pytest.mark.parametrize('first_fails', [False, True])
+def test_simultaneous_captures_share_only_validated_luna_results(tmp_path, monkeypatch, first_fails):
+    identifiers = [f'websites/guild.example/20000101000000/{page}.html' for page in ('first', 'second')]
+    hits = []
+    for index, identifier in enumerate(identifiers):
+        raw = f'<!-- saved capture {index} --><title>Guild news</title><p>Our guild defeated Nagafen on expedition number 1.</p>'
+        hit, sources = fixture(tmp_path, raw=raw, identifier=identifier)
+        sources.close()
+        hits.append(hit)
+    from policy_sources import Sources
+    service = Service(hits)
+    calls = []
+    started = Barrier(2, timeout=5)
+    second_request = Event()
+
+    original = Enricher.enrich_for_maintenance
+
+    def overlap(self, *args):
+        started.wait()
+        return original(self, *args)
+
+    monkeypatch.setattr(Enricher, 'enrich_for_maintenance', overlap)
+
+    def provider(index):
+        if len(calls) == 1:
+            second_request.wait(.25)
+            if first_fails:
+                raise CrawlError('Lost Luna response')
+        else:
+            second_request.set()
+
+    account = budget(tmp_path)
+    root = tmp_path / 'state'
+    with closing(Sources([tmp_path / 'archive'])) as sources, closing(State(root, identity())) as state:
+        for identifier in identifiers:
+            repair(service, sources, identifier, lambda: None)
+        service.updates.clear()
+        result = run(tmp_path, state, service, sources, 'coalesce', account, maximum=2, workers=2,
+                     enricher_factory=factory(calls, on_request=provider), should_yield=lambda: False)
+    assert len(calls) == (2 if first_fails else 1)
+    assert result['failed'] == int(first_fails)
+    assert result['updated'] == 2 - int(first_fails)
+    assert account.snapshot()['estimated_usd'] == .0002
+    assert (account.snapshot()['unresolved_usd'] > 0) is first_fails
+    if not first_fails:
+        assert len(service.updates) == len(identifiers)
+        sources = [service.hits[identifier]['_source'] for identifier in identifiers]
+        assert len({source['llm_enrichment_signature'] for source in sources}) == 2
+        assert len({source['llm_enrichment_view_sha256'] for source in sources}) == 1
+        assert sum(result['execution'][key] for key in ('luna_coalesced_hits', 'luna_evidence_cache_hits')) == 1

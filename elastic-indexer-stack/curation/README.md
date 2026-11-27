@@ -1162,6 +1162,18 @@ The daily ledger maintains integer day totals in the same transaction as each
 reservation or settlement. The original reservation rows remain the audit record
 and also update the totals when a Job launched before the migration writes them.
 
+Historical graders share in-flight date-free requests with identical payloads
+within a scope. Each capture still checks its own paid history, validated evidence
+and index revision. A waiting capture can make its own request if the first
+grader has no validated result. Job receipts track concurrent reuse, saved
+evidence hits and catalog prefix requests.
+
+Historical requests for EQ Loot and Allakhazam's bestiary place a 30-minute
+cache breakpoint after the stable instructions. Their page passages are passed
+separately. Logical request signatures continue to locate existing paid
+responses and correction chains. New settlements account for Luna cache
+reads and writes using the response usage details.
+
 Source reads are exact, bounded and remote-free, from the preserved source cache,
 archive checkout or local Git objects. No checkout walk, clone, fetch or source
 preparation runs. Missing/corrupt sources advance into durable diagnostics; retries

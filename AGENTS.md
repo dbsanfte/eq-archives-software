@@ -1398,6 +1398,15 @@ connection independent. Dedicated enrichment Jobs can burst to four CPUs with
 the existing low CPU request. Body maintenance keeps its two-CPU limit.
 Parse bundled Luna prompt YAML once per process. Preserve regex precedence,
 template contents and exact request signatures across the cache change.
+Serialize identical date-free requests within each scope by the exact logical
+payload. Keep each capture's paid and uncertain attempt lineage, evidence
+validation and optimistic write. Gate waiters must respect the Job deadline.
+Use explicit 30-minute breakpoints for the measured EQ Loot and Allakhazam
+bestiary cohorts. Keep the stable prompt and schema in the reusable prefix,
+followed by the source passages. Preserve logical signatures and saved
+correction identities through transport changes. Use verified ordinary, read,
+write and output usage for new Luna settlements. Preserve earlier settlements
+when revalidating cached responses and retain invalid or uncertain usage.
 Refill grading slots on completion and batch validated summaries for embedding.
 The dedicated enrichment Job sends at most sixteen exact-revision partial
 updates per Elasticsearch request. Validate every receipt against the fixed

@@ -9,7 +9,7 @@ import pytest
 from common import CrawlError, Store
 from daily_budget import (SiteBudgetExceeded, attempt_remaining_units, attempt_spending,
                           install_scope_totals, reserve_attempt, scope_spending_units, units)
-from grading import PRICING, reserve
+from grading import luna_reservation, luna_usage_cost, reserve
 
 
 def test_settlement_counts_rejected_responses_corrections_and_unknown_usage(tmp_path):
@@ -33,8 +33,7 @@ def test_parallel_admission_cannot_overspend_after_old_reservations_settle(tmp_p
         store.db.execute("INSERT INTO attempts(reserved,actual,status) VALUES (10,.1,'enriched')")
         store.db.commit()
     payload = {'max_output_tokens': 2500}
-    amount = ((len(json.dumps(payload).encode()) + 8192) * PRICING['input_per_million']
-              + payload['max_output_tokens'] * PRICING['output_per_million']) / 1_000_000
+    amount = luna_reservation(len(json.dumps(payload).encode()) + 8192, payload['max_output_tokens'])
     # Two requests fit at nanodollar precision, including conservative rounding.
     maximum = (units(.1) + 2 * units(amount)) / 1_000_000_000
     def request(index):
@@ -50,6 +49,30 @@ def test_parallel_admission_cannot_overspend_after_old_reservations_settle(tmp_p
     with closing(Store(root)) as store:
         assert store.db.execute('SELECT COUNT(*) FROM attempts').fetchone()[0] == 3
         assert attempt_remaining_units(store, maximum) == 0
+
+
+def test_luna_cache_reads_writes_and_long_context_match_published_tariff():
+    usage = {'input_tokens': 12000, 'output_tokens': 400, 'input_tokens_details': {
+        'cached_tokens': 4000, 'cache_write_tokens': 7000,
+        'cache_write_tokens_details': {'ttl_30m_tokens': 3000, 'ttl_12h_tokens': 4000}}}
+    assert luna_usage_cost(usage) == .001715
+    usage['input_tokens'] = 280000
+    assert luna_usage_cost(usage) == .05693
+    assert luna_usage_cost({'input_tokens': 2000, 'output_tokens': 500}) == .00045
+    assert luna_usage_cost({'input_tokens': 12000}) is None
+    assert luna_reservation(280000, 400, input_rate=.20, output_rate=.75) == .0703
+
+
+@pytest.mark.parametrize('details', [
+    {'cached_tokens': 1000, 'cache_write_tokens': 1},
+    {'cached_tokens': True},
+    {'cache_write_tokens': -1},
+    {'cache_write_tokens': 4, 'cache_write_tokens_details': {'ttl_30m_tokens': 3}},
+    {'cache_write_tokens': 4, 'cache_write_tokens_details': []},
+])
+def test_bad_cache_metadata_cannot_reduce_the_luna_charge(details):
+    with pytest.raises(ValueError, match='Invalid Luna'):
+        luna_usage_cost({'input_tokens': 1000, 'output_tokens': 200, 'input_tokens_details': details})
 
 
 def test_invalid_costs_do_not_make_more_budget_available(tmp_path):

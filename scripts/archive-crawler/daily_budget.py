@@ -452,13 +452,17 @@ class DailyBudget:
                 second=excluded.second''', (second % 120, second))
         return receipt
 
-    def settle(self, receipt, actual, *, usage=None):
+    def settle(self, receipt, actual, *, usage=None, recover_existing=False):
         actual = units(actual)
         with self.database() as db:
             db.execute('BEGIN IMMEDIATE')
             previous = db.execute('SELECT actual,day,created FROM reservations WHERE id=?', (receipt,)).fetchone()
-            if previous is None or previous[0] is not None and previous[0] != actual:
+            if previous is None:
                 raise CrawlError('Luna reservation accounting changed; paid work is paused')
+            if previous[0] is not None:
+                if previous[0] != actual and not recover_existing:
+                    raise CrawlError('Luna reservation accounting changed; paid work is paused')
+                return previous[0] / SCALE
             db.execute('UPDATE reservations SET actual=? WHERE id=?', (actual, receipt))
             if (previous[0] is None and isinstance(usage, dict) and
                     all(type(usage.get(key)) is int and 0 <= usage[key] <= 10**9
@@ -470,6 +474,7 @@ class DailyBudget:
                 second = int(datetime.fromisoformat(previous[2]).timestamp())
                 db.execute('UPDATE luna_recent_usage SET tokens=tokens+? WHERE slot=? AND second=?',
                            (tokens, second % 120, second))
+        return actual / SCALE
 
     def import_legacy(self, identifier, reserved, actual, created, receipt=None):
         """Idempotently count pre-deployment paid requests when first enabled."""
@@ -509,13 +514,14 @@ def reserve_attempt(store, attempt, amount, *, site_maximum=None, scope_totals=F
         raise
 
 
-def settle_attempt(store, attempt, actual, usage):
+def settle_attempt(store, attempt, actual, usage, *, recover_existing=False):
     if (budget := current_budget.get()) and (receipt := store.get('daily_reservation:' + str(attempt))):
         # Missing/invalid usage is uncertain, never a zero-cost request.
         if not isinstance(usage, dict) or any(type(usage.get(key)) is not int or usage[key] < 0
                                               for key in ('input_tokens', 'output_tokens')):
             return
-        budget.settle(receipt, actual, usage=usage)
+        return budget.settle(receipt, actual, usage=usage, recover_existing=recover_existing)
+    return actual
 
 
 def require_automatic():

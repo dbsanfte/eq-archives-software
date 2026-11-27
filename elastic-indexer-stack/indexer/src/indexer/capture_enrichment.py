@@ -5,7 +5,6 @@ from datetime import date
 from functools import lru_cache
 import json
 import logging
-import math
 from pathlib import Path
 import re
 from urllib.parse import urlsplit
@@ -13,7 +12,7 @@ from urllib.parse import urlsplit
 import yaml
 
 from common import CrawlError, Store, digest, now
-from grading import Luna, LunaUnavailable, MODEL, PRICING
+from grading import Luna, LunaUnavailable, MODEL, luna_reservation, luna_usage_cost
 from import_status import EnrichmentError
 from daily_budget import LunaRatePause, SiteBudgetExceeded, current_budget, request_purpose, reserve_attempt, settle_attempt, units
 from . import gemma, passages, search_enrichment
@@ -59,6 +58,8 @@ LUNA_CONTEXT_TOKENS = 1_050_000
 DATE_VALIDATION_VERSION = 'date-evidence-v2'
 LOG = logging.getLogger(__name__)
 MISSING_RESPONSE = object()
+# Bounded pilot with receipt evidence of predominantly one-off page text.
+PREFIX_CACHE_CATALOGS = frozenset(('eqloot.gamez.com', 'eqbeastiary.allakhazam.com'))
 EVIDENCE_INSTRUCTIONS = (
     "\n\nEvery date_evidence excerpt must be one contiguous span copied from the source. "
     "For a Markdown table, quote the date cell itself; never combine its column heading "
@@ -95,6 +96,18 @@ def adaptive_summary(payload, grounding):
         'advice or proposals from reported outcomes. Avoid generic lists of what the page covers. Omit filler, '
         'navigation and details from missing portions of the source. Stay concise when fewer facts suffice.'
     )}
+
+
+def cache_only_instructions(payload):
+    """Write the stable prompt to Luna's cache and leave page text outside it."""
+    request = {key: value for key, value in payload.items() if key != 'instructions'}
+    request['prompt_cache_options'] = {'mode': 'explicit', 'ttl': '30m'}
+    request['input'] = [
+        {'role': 'developer', 'content': [{'type': 'input_text', 'text': payload['instructions'],
+                                         'prompt_cache_breakpoint': {'mode': 'explicit'}}]},
+        {'role': 'user', 'content': payload['input']},
+    ]
+    return request
 
 
 def policy_for_sites(sites):
@@ -246,7 +259,7 @@ def validate(response, source, *, audit=None, grounding=(), summary_max=SHORT_SU
 
 class Enricher:
     def __init__(self, directory, key_file, maximum=5, client_factory=Luna, check=None, *, prepared_cache=False,
-                 writer=None):
+                 writer=None, maintenance_flight=None):
         daily = current_budget.get()
         if maximum not in (LEGACY_POLICY['max_enrichment_usd'], DEFAULT_POLICY['max_enrichment_usd']) and not (maximum is None and daily and daily.settings()['configured']):
             raise CrawlError("Enrichment requires the reviewed batch budget")
@@ -256,6 +269,9 @@ class Enricher:
         self.client_factory, self.key_file = client_factory, key_file
         self.check = check
         self.writer = writer if writer is not None else nullcontext()
+        self.maintenance_flight = maintenance_flight or (lambda key: nullcontext(False))
+        self.evidence_cache_hit = None
+        self.prefix_requests = 0
 
     def close(self):
         if self.client:
@@ -298,13 +314,14 @@ class Enricher:
                 raise EnrichmentError('context')
         # Reserve every request, including corrections and ambiguous failures.
         # Each correction slot may spend only once across all Job/pod retries.
-        amount = (input_tokens * .20 + payload['max_output_tokens'] * .75) / 1_000_000
+        amount = luna_reservation(input_tokens, payload['max_output_tokens'], input_rate=.20, output_rate=.75)
         attempt, cached = self.begin_attempt(capture, signature, amount, correction, initial_signatures)
         if attempt is None:
             return cached
         try:
             self.client = self.client or self.client_factory(self.key_file)
             response = self.client.request(payload)
+            self.prefix_requests += int('prompt_cache_options' in payload)
         except LunaRatePause as error:
             if error.status is not None:
                 with self.writer, self.store.db:
@@ -350,24 +367,14 @@ class Enricher:
                        'source_sha256': capture['sha256'], 'received_at': now(), 'parent': parent,
                        'max_output_tokens': max_output_tokens})
         usage = response.get('usage', {}) if isinstance(response, dict) else {}
-        if isinstance(usage, dict) and not all(key in usage for key in ('input_tokens', 'output_tokens')):
-            self.store.db.execute("UPDATE attempts SET status='received' WHERE id=?", (attempt,))
-            self.store.db.commit()
-            return response  # Retain the reservation; validation/corrections still apply.
         try:
-            input_tokens, output_tokens = usage.get('input_tokens'), usage.get('output_tokens')
-            if any(type(value) is not int or value < 0 for value in (input_tokens, output_tokens)):
-                raise ValueError
-            long_context = input_tokens > 272000
-            actual = (input_tokens * PRICING['input_per_million'] * (2 if long_context else 1)
-                      + output_tokens * PRICING['output_per_million'] * (1.5 if long_context else 1)) / 1_000_000
-            if not math.isfinite(actual):
-                raise ValueError
+            actual = luna_usage_cost(usage)
         except (ValueError, TypeError, AttributeError, OverflowError):
             raise EnrichmentError('usage') from None
         self.store.db.execute("UPDATE attempts SET actual=?,status='received' WHERE id=?", (actual, attempt))
         self.store.db.commit()
-        settle_attempt(self.store, attempt, actual, usage)
+        if actual is not None:
+            settle_attempt(self.store, attempt, actual, usage)
         return response
 
     def accepted(self, response, source, signature, grounding=(), *, summary_max=SHORT_SUMMARY_CHARS):
@@ -438,6 +445,11 @@ class Enricher:
         # Different captures in this scope can send exactly the same request.
         # Their raw-source signatures and validation receipts remain separate.
         evidence_key = 'maintenance_evidence:' + digest(payload)
+        with self.maintenance_flight(evidence_key) as joined:
+            return self.maintain(capture, grounding, payload, original, legacy_signature,
+                                 evidence_key, summary_max, joined)
+
+    def maintain(self, capture, grounding, payload, original, legacy_signature, evidence_key, summary_max, joined):
         if (proof := self.store.get(evidence_key)) and not self.started(original):
             cached = self.store.get('enrichment:' + proof)
             if isinstance(cached, dict):
@@ -446,10 +458,14 @@ class Enricher:
                 except (KeyError, EnrichmentError):
                     pass
                 else:
+                    self.evidence_cache_hit = 'inflight' if joined else 'saved'
                     return self.record_metadata(cached['response'], reused, original, grounding,
                                                 reused_response_signature=proof)
         signature = original
-        response = self.exchange(capture, payload, signature, initial_signatures=(legacy_signature,))
+        host = urlsplit(capture['url']).hostname
+        # The transport change preserves logical signatures and old cache/attempt lookup.
+        initial = cache_only_instructions(payload) if host in PREFIX_CACHE_CATALOGS else payload
+        response = self.exchange(capture, initial, signature, initial_signatures=(legacy_signature,))
         last_issue = 'request'
         for correction in range(MAX_CORRECTIONS + 1):
             if response is not MISSING_RESPONSE:
