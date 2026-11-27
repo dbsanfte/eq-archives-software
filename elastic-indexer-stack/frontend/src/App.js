@@ -32,6 +32,7 @@ import EnhancedSearchBox from "./views/search/EnhancedSearchBox";
 import SearchError from "./views/search/SearchError";
 import SearchProgress from "./views/search/SearchProgress";
 import { createSearchActivity, SearchActivityContext, useSearchActivity } from './search/SearchActivity';
+import { cacheReaderReturn, forgetReaderReturn, readReaderReturn, searchPageKey } from './search/ReaderReturnCache';
 import archiveTheme from "./theme";
 import { CapturePaging, CaptureSummary } from "./views/search/CapturePaging";
 import DocumentReader from "./views/reader/DocumentReader";
@@ -66,9 +67,13 @@ const SearchState = withSearch(({
 
 function SearchApp() {
   const [activity] = useState(createSearchActivity);
+  const [readerReturn] = useState(readReaderReturn);
+  const firstSearch = useRef(true);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showSyntax, setShowSyntax] = useState(false);
-  const [knnParams, setKnnParams] = useState({ ...DEFAULT_KNN_PARAMS, groupCaptures: true });
+  const [knnParams, setKnnParams] = useState(() => ({
+    ...DEFAULT_KNN_PARAMS, groupCaptures: true, ...readerReturn?.parameters
+  }));
 
   const knnParamsRef = useRef(knnParams);
   useEffect(() => {
@@ -92,15 +97,21 @@ function SearchApp() {
     const baseConfig = getSearchConfig(knnParamsRef);
     return {
       ...baseConfig,
-      onSearch: (state, queryConfig, next) => activity.search(state,
-        prepared => (baseConfig.onSearch || next)(prepared, queryConfig)),
+      onSearch: (state, queryConfig, next) => activity.search(state, prepared => {
+        if (firstSearch.current) {
+          firstSearch.current = false;
+          forgetReaderReturn();
+          if (readerReturn?.request === searchPageKey(state)) return readerReturn.response;
+        }
+        return (baseConfig.onSearch || next)(prepared, queryConfig);
+      }),
       // Override these settings to prevent automatic searches
       searchQuery: {
         ...(baseConfig.searchQuery || {}),
         searchAsYouType: false // This disables automatic searches
       }
     };
-  }, [knnParamsRef, activity]);
+  }, [knnParamsRef, activity, readerReturn]);
 
   return (
       <SearchActivityContext.Provider value={activity}><SearchProvider config={config}>
@@ -174,7 +185,8 @@ function SearchApp() {
                 }
                 bodyContent={
                   <ErrorBoundary view={SearchError} error={isLoading ? '' : error} onRetry={executeSearch}>
-                  <section aria-label="Search results" aria-busy={isLoading}>
+                  <section aria-label="Search results" aria-busy={isLoading}
+                    onClick={event => cacheReaderReturn(event, activity.getSnapshot(), knnParamsRef.current)}>
                     <ReaderSearchContext.Provider value={searchPhrase(resultSearchTerm)}>
                       <Results
                         results={searchState.results}

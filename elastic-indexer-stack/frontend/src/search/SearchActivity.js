@@ -1,4 +1,5 @@
 import { createContext, useContext, useSyncExternalStore } from 'react';
+import { searchPageKey } from './ReaderReturnCache';
 
 const idle = { phase: 'idle', display: null };
 export const SearchActivityContext = createContext(null);
@@ -42,7 +43,7 @@ export function createSearchActivity() {
           const current = response.current ?? state.current ?? 1;
           const size = state.resultsPerPage || 20;
           const start = (current - 1) * size;
-          publish({ phase: 'idle', display: {
+          publish({ phase: 'idle', request: searchPageKey(state), display: {
             ...response, current, resultSearchTerm: state.searchTerm, wasSearched: true,
             pagingStart: response.pagingStart ?? (response.results.length ? start + 1 : 0),
             pagingEnd: response.pagingEnd ?? (response.results.length ? start + response.results.length : 0),

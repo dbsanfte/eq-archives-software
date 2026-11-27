@@ -1242,6 +1242,7 @@ class FrontendBrowserTests(unittest.TestCase):
                         save_filters.click()
                     self.assertEqual(documents, [])
                     results_url = page.url
+                    search_calls = len(requests)
                     results_path = urlparse(results_url).path + '?' + urlparse(results_url).query
                     self.assertIn('sort-field=', results_url)
                     self.assertIn('filters', results_url)
@@ -1257,7 +1258,10 @@ class FrontendBrowserTests(unittest.TestCase):
                     back.click()
                     expect(page.get_by_role('link', name='Ancient Cyclops notes')).to_be_visible()
                     self.assertEqual(page.url, results_url)
+                    self.assertEqual(len(requests), search_calls)
                     expect(page.locator('.sui-search-box__text-input')).to_have_value('cleric soloing')
+                    page.get_by_role('button', name='Advanced...', exact=True).click()
+                    expect(page.get_by_role('checkbox', name='Enable semantic search')).not_to_be_checked()
                     show_filters = page.get_by_role('button', name='Show Filters', exact=True)
                     if show_filters.is_visible():
                         show_filters.click()
@@ -1275,7 +1279,7 @@ class FrontendBrowserTests(unittest.TestCase):
                 context = self.browser.new_context(viewport={"width": width, "height": 950})
                 try:
                     page = context.new_page()
-                    requests, ranks = [], []
+                    requests, ranks, embeddings = [], [], []
                     def record(identity):
                         return {"_id": identity, "_score": 1, "_source": {"id": identity,
                             "title": identity, "url": "https://example.org/" + identity}}
@@ -1290,14 +1294,23 @@ class FrontendBrowserTests(unittest.TestCase):
                         if route.request.url.endswith('/_rerank'):
                             ranks.append(body)
                             return route.fulfill(json={"ids": list(reversed(body['ids'])), "status": "applied"})
+                        if 'ids' in body.get('query', {}):
+                            identifier = body['query']['ids']['values'][0]
+                            row = record(identifier)
+                            row['_source']['text_full'] = '# Archived passage\n\nThe reader fetches this separately.'
+                            return route.fulfill(json={'hits': {'hits': [row]}})
                         requests.append(body)
                         rows = semantic if 'knn' in body and 'query' not in body else lexical
                         start = body.get('from', 0)
                         route.fulfill(json={"hits": {"total": {"value": len(rows), "relation": "eq"},
                             "hits": rows[start:start+body['size']]}, "aggregations": {"facet_bucket_all": {
                                 "doc_count": len(rows), **empty_facets()}}})
+                    def embed(route):
+                        embeddings.append(route.request.url)
+                        return route.fulfill(json={"data": [{"embedding": [0.1]*768}]})
+
                     page.route('**/elasticsearch/**', archive)
-                    page.route('**/openai/**', lambda route: route.fulfill(json={"data": [{"embedding": [0.1]*768}]}))
+                    page.route('**/openai/**', embed)
                     page.goto(self.base_url+'/?q=bard', wait_until='networkidle')
                     expect(page.locator('.sui-result')).to_have_count(20)
                     page.wait_for_load_state('networkidle')
@@ -1325,6 +1338,22 @@ class FrontendBrowserTests(unittest.TestCase):
                     self.assertEqual(all_ids.count('newsgroups/129.txt'), 1)
                     self.assertEqual(len(ranks), rank_count)
                     self.assertTrue(page.evaluate('document.documentElement.scrollWidth <= innerWidth'))
+                    page.wait_for_url(lambda url: parse_qs(urlparse(url).query).get('current') == ['n_7_n'])
+                    saved_ids = visible_ids()
+                    saved_calls = (len(requests), len(ranks), len(embeddings))
+                    results_url = page.url
+                    page.get_by_role('link', name='Read document', exact=True).first.click()
+                    expect(page.get_by_role('heading', name='Archived passage')).to_be_visible()
+                    page.reload(wait_until='networkidle')
+                    page.get_by_role('link', name='← Back to results', exact=True).click()
+                    expect(page.get_by_text('Page 7', exact=True)).to_be_visible()
+                    page.wait_for_load_state('networkidle')
+                    self.assertEqual(page.url, results_url)
+                    self.assertEqual(visible_ids(), saved_ids)
+                    self.assertEqual((len(requests), len(ranks), len(embeddings)), saved_calls)
+                    page.reload(wait_until='networkidle')
+                    self.assertGreater(len(requests), saved_calls[0])
+                    self.assertGreater(len(ranks), saved_calls[1])
                 finally:
                     context.close()
 
