@@ -16,6 +16,7 @@ import sqlite3
 from threading import Lock
 import time
 
+from ai_provider import current_provider
 from common import CrawlError, Store, digest, save
 from daily_budget import AutomaticStopped, DailyBudget, DailyBudgetPause, EnrichmentPriorityPause, LunaRatePause, install_scope_totals
 from grading import Luna, LunaUnavailable
@@ -521,11 +522,13 @@ def run(root, state, services, sources, job, account, *, seconds=SLICE_SECONDS, 
                 time.sleep(wait_time)
 
     try:
+        profile = current_provider()
+        account.activate_provider(profile)
         budget = account.snapshot(maintenance=True)
         if not budget['complete']:
             phase, next_at = 'waiting_configuration', time.time() + 300
             return report(True)
-        if budget['remaining_usd'] <= 0:
+        if budget['remaining_usd'] <= 0 and not profile.free:
             phase, next_at = 'waiting_budget', datetime.fromisoformat(budget['resets_at']).timestamp()
             return report(True)
         if budget['luna_retry_at']:

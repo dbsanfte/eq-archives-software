@@ -52,6 +52,9 @@ export CURATION_ES_URL="$DATABASE_OPERATOR_URL"
 "${kubectl[@]}" -n eqarchives-es get secret elastic-password-secret eqarchives-capture-indexer-secrets eqarchives-policy-indexer-secrets --ignore-not-found -o json |
   python3 "$repo_dir/scripts/curation-secrets.py" |
   "${kubectl[@]}" apply --server-side --force-conflicts --field-manager=curation-cicd -f - >/dev/null
+if [[ -z $("${kubectl[@]}" -n eqarchives-es get secret eqarchives-curation-provider --ignore-not-found -o name) ]]; then
+  "${kubectl[@]}" -n eqarchives-es create secret generic eqarchives-curation-provider >/dev/null
+fi
 policy_target=$("${kubectl[@]}" -n eqarchives-es get secret eqarchives-policy-indexer-secrets -o jsonpath='{.data.es_index}')
 if [[ -z "$policy_target" ]]; then echo 'Policy index identity is unavailable; rollout stopped.' >&2; exit 1; fi
 policy_checksum=$(printf '%s' "$policy_target" | sha256sum | cut -d' ' -f1)

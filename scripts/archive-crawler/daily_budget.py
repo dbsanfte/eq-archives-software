@@ -148,9 +148,10 @@ class DailyBudgetPause(CrawlError):
 
 
 class LunaRatePause(DailyBudgetPause):
-    def __init__(self, until, *, status=None):
+    def __init__(self, until, *, status=None, provider_revision=0):
         self.amount, self.retry_at, self.period = 0, until.isoformat(), 'provider'
         self.status = status
+        self.provider_revision = provider_revision
         CrawlError.__init__(self, 'Luna capacity is low; paid work will retry automatically after the cooldown')
 
 
@@ -173,6 +174,7 @@ class DailyBudget:
         self.root = Path(directory)
         self.observation_lock = Lock()
         self.observed_at = ''
+        self.provider_revision = 0
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.root.chmod(0o700)
         with self.database() as db:
@@ -185,6 +187,8 @@ class DailyBudget:
                 CREATE TABLE IF NOT EXISTS enrichment_priority(owner TEXT PRIMARY KEY, expires TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS luna_capacity(id INTEGER PRIMARY KEY CHECK(id=1),
                     retry_at TEXT NOT NULL, observed_at TEXT NOT NULL, headroom TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS ai_provider_capacity(id INTEGER PRIMARY KEY CHECK(id=1), revision INTEGER NOT NULL,
+                    requests_per_minute INTEGER NOT NULL, tokens_per_minute INTEGER NOT NULL);
                 CREATE TABLE IF NOT EXISTS luna_daily_tokens(day TEXT PRIMARY KEY,
                     tokens INTEGER NOT NULL, charge INTEGER NOT NULL);
                 CREATE TABLE IF NOT EXISTS luna_recent_usage(slot INTEGER PRIMARY KEY,
@@ -324,13 +328,15 @@ class DailyBudget:
         floor = int(when.timestamp()) - 59
         requests, recent_tokens = db.execute('''SELECT COALESCE(SUM(requests),0),COALESCE(SUM(tokens),0)
             FROM luna_recent_usage WHERE second>=?''', (floor,)).fetchone()
-        if requests >= MINUTE_REQUEST_TARGET or recent_tokens >= MINUTE_TOKEN_TARGET:
+        targets = db.execute('SELECT requests_per_minute,tokens_per_minute FROM ai_provider_capacity WHERE id=1').fetchone()
+        max_requests, max_tokens = targets or (MINUTE_REQUEST_TARGET, MINUTE_TOKEN_TARGET)
+        if requests >= max_requests or recent_tokens >= max_tokens:
             pending_requests, pending_tokens = requests, recent_tokens
             for second, count, total in db.execute('''SELECT second,requests,tokens
                     FROM luna_recent_usage WHERE second>=? ORDER BY second''', (floor,)):
                 pending_requests -= count
                 pending_tokens -= total
-                if pending_requests < MINUTE_REQUEST_TARGET and pending_tokens < MINUTE_TOKEN_TARGET:
+                if pending_requests < max_requests and pending_tokens < max_tokens:
                     retry_at = max(retry_at, datetime.fromtimestamp(second + 60, timezone.utc).isoformat())
                     break
         return retry_at, tokens, requests, recent_tokens
@@ -341,9 +347,23 @@ class DailyBudget:
             db.execute('BEGIN')
             retry_at, *_ = self.capacity(db, when, *self.totals(db, when.date().isoformat()))
         if retry_at:
-            raise LunaRatePause(datetime.fromisoformat(retry_at))
+            raise LunaRatePause(datetime.fromisoformat(retry_at), provider_revision=self.provider_revision)
 
-    def observe_luna_capacity(self, when, delay, headroom):
+    def activate_provider(self, provider):
+        if provider.revision <= self.provider_revision:
+            return
+        with self.observation_lock:
+            with self.database() as db:
+                db.execute('BEGIN IMMEDIATE')
+                row = db.execute('SELECT revision FROM ai_provider_capacity WHERE id=1').fetchone()
+                if provider.revision > (row[0] if row else 0):
+                    db.execute('INSERT OR REPLACE INTO ai_provider_capacity VALUES (1,?,?,?)',
+                               (provider.revision, provider.requests_per_minute, provider.tokens_per_minute))
+                    db.execute('DELETE FROM luna_capacity WHERE id=1')
+                    self.observed_at = ''
+            self.provider_revision = provider.revision
+
+    def observe_luna_capacity(self, when, delay, headroom, *, provider_revision=0):
         """Keep the longest active cooldown and sample numeric provider headers."""
         retry_at = (when + timedelta(seconds=delay)).isoformat() if delay else ''
         sample_at = when.isoformat() if headroom else ''
@@ -354,6 +374,10 @@ class DailyBudget:
             if not retry_at and self.observed_at > cutoff:
                 return
             with self.database() as db:
+                db.execute('BEGIN IMMEDIATE')
+                row = db.execute('SELECT revision FROM ai_provider_capacity WHERE id=1').fetchone()
+                if provider_revision != (row[0] if row else 0):
+                    return  # The previous provider may settle outstanding spend only.
                 db.execute('''INSERT INTO luna_capacity VALUES (1,?,?,?) ON CONFLICT(id) DO UPDATE SET
                     retry_at=MAX(luna_capacity.retry_at,excluded.retry_at),
                     observed_at=MAX(luna_capacity.observed_at,excluded.observed_at),
@@ -430,13 +454,13 @@ class DailyBudget:
                 else:
                     maximum = config.get('site_usd') if config['configured'] else None
                     maximum = site_maximum if maximum is None else maximum
-                if site_spent_units + reserved > units(maximum):
+                if reserved and site_spent_units + reserved > units(maximum):
                     raise SiteBudgetExceeded('Site Luna budget reached; paid results are retained')
             limits=self.limits(db,when,config)
             if config['configured'] and reserved>limits['_remaining_units']:
                 raise DailyBudgetPause(amount, limits['resets_at'], limits['budget_period'])
             if limits['luna_retry_at']:
-                raise LunaRatePause(datetime.fromisoformat(limits['luna_retry_at']))
+                raise LunaRatePause(datetime.fromisoformat(limits['luna_retry_at']), provider_revision=self.provider_revision)
             if purpose in ('discovery','maintenance') and self._enrichment_pending(
                     db, when, owner=priority_owner.get() or '', maintenance=purpose=='maintenance'):
                 raise EnrichmentPriorityPause()

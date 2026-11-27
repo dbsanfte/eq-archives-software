@@ -1,9 +1,11 @@
 from copy import deepcopy
+from dataclasses import replace
 import json
 import time
 
 import pytest
 
+import ai_provider
 from common import CrawlError,save
 from indexer import gemma,passages
 from jobs import blockers
@@ -115,7 +117,7 @@ def test_dedicated_lane_waits_for_legacy_paid_job_and_allows_free_chunking(tmp_p
     assert background(tmp_path,kube)['phase']=='running' and len(kube.created)==2
 
 
-def test_dedicated_budget_receipt_persists_pause_without_blocking_body_jobs(tmp_path):
+def test_dedicated_budget_receipt_persists_pause_without_blocking_body_jobs(tmp_path, monkeypatch):
     kube=Kube()
     state=schedule(tmp_path,kube,[],IMAGE,enrichment=True)
     job=kube.items[0]
@@ -133,6 +135,11 @@ def test_dedicated_budget_receipt_persists_pause_without_blocking_body_jobs(tmp_
     assert paid['phase']=='waiting_budget' and paid['next_at']==next_at and len(kube.created)==1
     assert paid['progress']['execution'] == progress['execution']
     assert background(tmp_path,kube)['phase']=='running' and len(kube.created)==2
+    previous=deepcopy(job)
+    monkeypatch.setattr('policy_scheduler.current_provider', lambda: replace(ai_provider.DEFAULT_PROVIDER, revision=1))
+    resumed=schedule(tmp_path,kube,kube.items.copy(),IMAGE,enrichment=True)
+    assert resumed['phase']=='running' and resumed['provider_revision']==1 and resumed['name']!=state['name']
+    assert job==previous
 
 
 def test_waiting_imports_never_hold_the_reindex_slot(tmp_path):

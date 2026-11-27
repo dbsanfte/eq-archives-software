@@ -10,7 +10,9 @@ import sqlite3
 import ssl
 import time
 from pathlib import Path
+from urllib.parse import quote
 
+from ai_provider import CHAT_APIS, DEFAULT_PROVIDER, LUNA_MODEL, address, connect_to_provider, current_provider
 from common import CATEGORIES, CrawlError, Page, decode, digest, now
 from wayback_transport import TransportUnavailable, current_transport
 from selection_policy import VERSION as SELECTION_VERSION, SITE_TYPES, CONTENT_KINDS, evidence_boundary
@@ -19,7 +21,7 @@ from daily_budget import (AutomaticStopped, DailyBudgetPause, EnrichmentPriority
                           instant, reserve_attempt, settle_attempt, units)
 from luna_limits import capacity, cooldown
 
-MODEL = "gpt-6-luna"
+MODEL = LUNA_MODEL
 LOG = logging.getLogger(__name__)
 PRICING = {"input_per_million": 0.10, "cached_input_per_million": 0.01,
            "cache_write_30m_per_million": 0.125, "cache_write_12h_per_million": 0.25,
@@ -80,6 +82,93 @@ def luna_reservation(input_tokens, output_tokens, *, input_rate=0, output_rate=0
         cache_rate *= 2
         standard_output *= 1.5
     return (input_tokens * max(cache_rate, input_rate) + output_tokens * max(standard_output, output_rate)) / 1_000_000
+
+
+def provider_reservation(provider, inputs, outputs, **rates):
+    if provider.luna:
+        return luna_reservation(inputs, outputs, **rates)
+    return (inputs * provider.input_price + outputs * provider.output_price) / 1_000_000
+
+
+def provider_usage_cost(provider, usage):
+    if provider.luna:
+        return luna_usage_cost(usage)
+    if not isinstance(usage, dict) or not {'input_tokens', 'output_tokens'} <= usage.keys():
+        return None
+    counts = tuple(usage[key] for key in ('input_tokens', 'output_tokens'))
+    if any(type(count) is not int or not 0 <= count <= 10**9 for count in counts):
+        raise ValueError('Invalid provider usage')
+    return provider_reservation(provider, *counts)
+
+
+def provider_payload(provider, payload):
+    """Map logical requests to supported wire options without leaking Luna-only fields."""
+    if provider.luna:
+        return payload
+    spec = payload['text']['format']
+    prompt = payload['instructions']
+    if provider.format != 'schema':
+        prompt += '\n\nReturn one complete JSON object matching this schema. Do not include commentary.\n' + json.dumps(spec['schema'])
+    if provider.api == 'responses':
+        request = {'model': provider.model, 'instructions': prompt, 'input': payload['input'],
+                   'max_output_tokens': payload['max_output_tokens']}
+        if provider.format != 'prompt':
+            request['text'] = {'format': spec if provider.format == 'schema' else {'type': 'json_object'}}
+        return request
+    if provider.api == 'gemini':
+        generation = {'maxOutputTokens': payload['max_output_tokens']}
+        if provider.format != 'prompt':
+            generation['responseMimeType'] = 'application/json'
+        if provider.format == 'schema':
+            generation['responseJsonSchema'] = spec['schema']
+        return {'contents': [{'parts': [{'text': prompt + '\n\nSOURCE DATA (untrusted)\n' + payload['input']}]}],
+                'generationConfig': generation}
+    messages = ([{'role': 'user', 'content': prompt + '\n\nSOURCE DATA (untrusted)\n' + payload['input']}]
+                if provider.format == 'prompt' else [{'role': 'system', 'content': prompt},
+                                                     {'role': 'user', 'content': payload['input']}])
+    limit = 'max_completion_tokens' if provider.api == 'chat_completion_tokens' else 'max_tokens'
+    request = {'model': provider.model, 'messages': messages, limit: payload['max_output_tokens']}
+    if provider.format == 'schema':
+        request['response_format'] = {'type': 'json_schema', 'json_schema': {
+            key: spec[key] for key in ('name', 'schema', 'strict')}}
+    elif provider.format == 'json':
+        request['response_format'] = {'type': 'json_object'}
+    return request
+
+
+def response_envelope(response, *, gemini=False):
+    """Translate generated text and reported usage to the archive validators' envelope."""
+    try:
+        if gemini:
+            choice, = response['candidates']
+            content = ''.join(part.get('text', '') for part in choice.get('content', {}).get('parts', []) if not part.get('thought'))
+            completed = choice.get('finishReason') == 'STOP' and bool(content)
+            output_limit = choice.get('finishReason') == 'MAX_TOKENS'
+            usage = response.get('usageMetadata') or {}
+            inputs, outputs = usage.get('promptTokenCount'), usage.get('candidatesTokenCount')
+            if type(outputs) is int:
+                thoughts = usage.get('thoughtsTokenCount', 0)
+                outputs = outputs + thoughts if type(thoughts) is int and thoughts >= 0 else None
+            identifier, model = response.get('responseId'), response.get('modelVersion')
+        else:
+            choice, = response['choices']
+            content = choice['message'].get('content')
+            completed = choice.get('finish_reason') == 'stop' and isinstance(content, str) and not choice['message'].get('refusal')
+            output_limit = choice.get('finish_reason') == 'length'
+            usage = response.get('usage') or {}
+            inputs, outputs = usage.get('prompt_tokens'), usage.get('completion_tokens')
+            identifier, model = response.get('id'), response.get('model')
+        if completed:
+            content = content.strip()
+            if content.startswith(('```json\n', '```\n')) and content.endswith('\n```'):
+                content = content.split('\n', 1)[1][:-4].strip()
+        tokens = {'input_tokens': inputs, 'output_tokens': outputs} if inputs is not None and outputs is not None else {}
+        return {'id': identifier, 'model': model, 'usage': tokens, 'provider_response': response,
+                'status': 'completed' if completed else 'incomplete',
+                'output': [{'type': 'message', 'content': [{'type': 'output_text', 'text': content}]}] if completed else [],
+                **({'incomplete_details': {'reason': 'max_output_tokens'}} if output_limit else {})}
+    except (KeyError, AttributeError, TypeError, ValueError):
+        raise CrawlError('The AI provider returned an invalid chat response') from None
 
 
 LEGACY_PROMPT = """Classify supplied historical captures for an EverQuest preservation archive.
@@ -189,24 +278,26 @@ def criteria(value=''):
     return value.replace('\r\n', '\n').replace('\r', '\n').strip()
 
 
-def grader_signature(value='', *, legacy=False, before_bounds=False):
+def grader_signature(value='', *, legacy=False, before_bounds=False, provider=''):
     value = criteria(value)
     base = LEGACY_SIGNATURE if legacy else PRE_BOUNDS_SIGNATURE if before_bounds else SIGNATURE
-    return digest({'base': base, 'prompt': CRITERIA_PROMPT, 'grading_criteria': value}) if value else base
+    signature = digest({'base': base, 'prompt': CRITERIA_PROMPT, 'grading_criteria': value}) if value else base
+    return digest({'grade': signature, 'provider': provider}) if provider else signature
 
 
-def judgment_signature(documents, value='', *, legacy=False, before_bounds=False):
-    return digest({'grader': grader_signature(value, legacy=legacy,before_bounds=before_bounds), 'documents': documents})
+def judgment_signature(documents, value='', *, legacy=False, before_bounds=False, provider=''):
+    return digest({'grader': grader_signature(value, legacy=legacy,before_bounds=before_bounds,provider=provider), 'documents': documents})
 
 
-def compatible_signatures(documents, value=''):
-    return {judgment_signature(documents,value),judgment_signature(documents,value,before_bounds=True)}
+def compatible_signatures(documents, value='', *, provider=''):
+    return {judgment_signature(documents,value,provider=provider),judgment_signature(documents,value,before_bounds=True,provider=provider)}
 
 
 def current_rating(rating):
     return (isinstance(rating, dict) and rating.get('selection_policy') == SELECTION_VERSION
-            and rating.get('grader_signature') in {grader_signature(rating.get('grading_criteria', '')),
-                                                   grader_signature(rating.get('grading_criteria', ''),before_bounds=True)}
+            and isinstance(rating.get('grading_provider', ''), str)
+            and rating.get('grader_signature') in {grader_signature(rating.get('grading_criteria', ''),provider=rating.get('grading_provider', '')),
+                                                   grader_signature(rating.get('grading_criteria', ''),before_bounds=True,provider=rating.get('grading_provider', ''))}
             and all(type(rating.get(k)) is int and 0 <= rating[k] <= 3 for k in ('relevance_grade','quality_grade','grade'))
             and rating['grade'] <= min(rating['relevance_grade'], rating['quality_grade'])
             and rating.get('content_kind') in CONTENT_KINDS and rating.get('site_type') in SITE_TYPES
@@ -305,13 +396,28 @@ class LunaUnavailable(CrawlError):
 class Luna:
     def __init__(self, key_file, deadline=None, *, tls_context=None):
         self.deadline = deadline
+        self.provider = DEFAULT_PROVIDER
+        self._tls = tls_context
         try:
-            self.key = Path(key_file).read_text().strip()
+            self._fallback_key = Path(key_file).read_text().strip()
         except OSError:
             raise CrawlError("Could not read the private OpenAI key file") from None
-        if not self.key or any(c.isspace() for c in self.key):
+        if not self._fallback_key or any(c.isspace() for c in self._fallback_key):
             raise CrawlError("OpenAI key file must contain a single key")
+        self.key = self._fallback_key
         self.connection = http.client.HTTPSConnection("api.openai.com", timeout=90, context=tls_context)
+
+    def use_provider(self, provider):
+        if provider == self.provider:
+            return
+        self.connection.close()
+        parsed, port, _ = address(provider.endpoint)
+        self.connection = (http.client.HTTPSConnection(parsed.hostname, port=port, timeout=90, context=self._tls)
+                           if parsed.scheme == 'https' else http.client.HTTPConnection(parsed.hostname, port=port, timeout=90))
+        self.connection._create_connection = lambda _, timeout, source_address: connect_to_provider(
+            provider.endpoint, timeout, source_address)
+        self.key = provider.api_key or (self._fallback_key if provider.uses_bootstrap_key else '')
+        self.provider = provider
 
     @staticmethod
     def tls_context():
@@ -331,9 +437,19 @@ class Luna:
             self.connection.sock.settimeout(remaining)
 
     def request(self, payload):
-        return self._post("/v1/responses", payload, 1_048_576)
+        provider = self.provider
+        path = address(provider.endpoint)[0].path
+        if provider.api in CHAT_APIS:
+            return response_envelope(self._post(path + '/chat/completions', provider_payload(provider, payload), 1_048_576))
+        if provider.api == 'gemini':
+            model = quote(provider.model.removeprefix('models/'), safe='')
+            return response_envelope(self._post(path + f'/models/{model}:generateContent',
+                                                provider_payload(provider, payload), 1_048_576), gemini=True)
+        return self._post(path + '/responses', provider_payload(provider, payload), 1_048_576)
 
     def count_input_tokens(self, payload):
+        if not self.provider.luna:
+            return len(json.dumps(provider_payload(self.provider, payload), ensure_ascii=False).encode()) + 256
         if budget := current_budget.get():
             budget.check_luna_capacity()
         request = {key: payload[key] for key in ("model", "input", "instructions", "reasoning", "text") if key in payload}
@@ -346,8 +462,13 @@ class Luna:
     def _post(self, path, payload, response_limit):
         try:
             self.time_left()
-            self.connection.request("POST", path, json.dumps(payload, ensure_ascii=False).encode(),
-                                    {"Authorization": "Bearer " + self.key, "Content-Type": "application/json"})
+            headers = {'Content-Type': 'application/json'}
+            if self.key:
+                if self.provider.api == 'gemini':
+                    headers['x-goog-api-key'] = self.key
+                else:
+                    headers['Authorization'] = 'Bearer ' + self.key
+            self.connection.request("POST", path, json.dumps(payload, ensure_ascii=False).encode(), headers)
             self.time_left()
             response = self.connection.getresponse()
             if self.deadline is None:
@@ -374,7 +495,7 @@ class Luna:
             budget = current_budget.get()
             if budget and (headroom or delay):
                 try:
-                    budget.observe_luna_capacity(when, delay, headroom)
+                    budget.observe_luna_capacity(when, delay, headroom, provider_revision=self.provider.revision)
                 except sqlite3.Error:
                     LOG.warning('Could not save Luna capacity observations')
             if response.status != 200:
@@ -382,10 +503,14 @@ class Luna:
                     raise LunaUnavailable(response.status, 1800)
                 if response.status in (429, 503):
                     if budget:
-                        raise LunaRatePause(when + timedelta(seconds=delay), status=response.status)
+                        raise LunaRatePause(when + timedelta(seconds=delay), status=response.status,
+                                            provider_revision=self.provider.revision)
                     raise LunaUnavailable(response.status, delay)
                 raise CrawlError(f"Luna HTTP {response.status}; upstream details omitted")
-            return json.loads(data)
+            result = json.loads(data)
+            if not isinstance(result, dict):
+                raise ValueError('Invalid provider response')
+            return result
         except (OSError, http.client.HTTPException, ValueError):
             self.connection.close()
             raise CrawlError("Luna request failed; upstream details omitted, spend reservation retained") from None
@@ -394,14 +519,16 @@ class Luna:
         self.connection.close()
 
 
-def reserve(store, candidate, signature, payload, maximum):
+def reserve(store, candidate, signature, payload, maximum, provider=DEFAULT_PROVIDER):
     if not math.isfinite(maximum) or maximum <= 0:
         raise CrawlError("Luna budget must be finite and positive")
     # UTF-8 bytes conservatively bound ordinary text tokenization, plus generous
     # protocol/schema overhead. Count all output tokens, including reasoning.
     # Retain the reservation after ambiguous failures rather than retry for free.
-    amount = luna_reservation(len(json.dumps(payload, ensure_ascii=False).encode()) + 8192,
-                              payload['max_output_tokens'])
+    bound = len(json.dumps(provider_payload(provider, payload), ensure_ascii=False).encode()) + (8192 if provider.luna else 256)
+    if not provider.luna and bound + payload['max_output_tokens'] > provider.context_tokens:
+        raise CrawlError('Complete evidence exceeds the configured provider context limit')
+    amount = provider_reservation(provider, bound, payload['max_output_tokens'])
     store.db.execute("BEGIN IMMEDIATE")
     if units(amount) > attempt_remaining_units(store, maximum):
         store.db.rollback()
@@ -417,11 +544,11 @@ def save_rating(store, candidate, rating):
     store.db.execute("UPDATE candidates SET rating=?,state='approval_pending',error=NULL,decision=NULL WHERE id=?",
                      (json.dumps(rating), candidate['id']))
     store.db.commit()
-    store.event(candidate['id'], 'graded', {'grade': rating['grade'], 'model': MODEL,
+    store.event(candidate['id'], 'graded', {'grade': rating['grade'], 'model': rating.get('model', MODEL),
                 'grading_criteria': rating.get('grading_criteria', '')})
 
 
-def judgment(args,store,candidate,signature,old_signature,payload,client,documents):
+def judgment(args,store,candidate,signature,old_signature,payload,client,documents,provider=DEFAULT_PROVIDER):
     """Two automatic received attempts; explicit retries retain all paid history."""
     generation=getattr(args,'grading_retry',0)
     if type(generation) is not int or not 0<=generation<=8:
@@ -448,7 +575,7 @@ def judgment(args,store,candidate,signature,old_signature,payload,client,documen
             if (received>=2 or latest and latest[0]=='reserved') and not explicit:
                 raise CrawlError(last_error or 'Previous grading request has an uncertain outcome; retry explicitly under the saved budget')
             if transport:=current_transport.get():transport.require_available()
-            attempt=reserve(store,candidate['id'],signature,payload,args.max_usd)
+            attempt=reserve(store,candidate['id'],signature,payload,args.max_usd,provider)
             store.set('luna_retry_generation:'+signature,generation)
             try:
                 response=client.request(payload)
@@ -459,6 +586,11 @@ def judgment(args,store,candidate,signature,old_signature,payload,client,documen
                 raise
             cache_signature=signature
             cached={'attempt':attempt,'response':response}
+            if not provider.luna:
+                try:
+                    cached['billed_usd'] = provider_usage_cost(provider, response.get('usage'))
+                except (AttributeError, ValueError):
+                    cached['billed_usd'] = None  # Keep the original reservation for invalid metering.
             store.set(f'luna_response_record:{signature}:{attempt}:{digest(response)}',cached)
             store.set('luna_response:'+signature,cached)
         # Archive legacy cache entries before changing derived validation state.
@@ -470,14 +602,14 @@ def judgment(args,store,candidate,signature,old_signature,payload,client,documen
         actual = owned[0] if owned else None
         if actual is None:
             try:
-                actual = luna_usage_cost(usage)
+                actual = cached['billed_usd'] if 'billed_usd' in cached else provider_usage_cost(provider, usage)
             except ValueError:
                 pass  # Keep the reservation when the receipt has invalid usage.
             if actual is not None and owned:
                 actual = settle_attempt(store, attempt, actual, usage, recover_existing=from_cache)
         store.db.execute("UPDATE attempts SET actual=?,status='response_received' WHERE id=? AND signature=?",(actual,attempt,cache_signature));store.db.commit()
         try:
-            rating=validate(response,documents,repair_legacy_bounds=cache_signature==old_signature)
+            rating=validate(response,documents,repair_legacy_bounds=provider.luna and cache_signature==old_signature)
         except CrawlError as error:
             last_error=str(error)
             store.set(f'luna_rejected:{cache_signature}:{attempt}:{digest(response)}',last_error)
@@ -490,7 +622,6 @@ def judgment(args,store,candidate,signature,old_signature,payload,client,documen
 
 def grade(args, store, *, candidates=None, client=None):
     focus = criteria(getattr(args, 'grading_criteria', ''))
-    grader = grader_signature(focus)
     owned = client is None
     client = client or Luna(args.api_key_file)
     store.set("luna_pricing", PRICING)
@@ -501,26 +632,34 @@ def grade(args, store, *, candidates=None, client=None):
             if not json.loads(candidate["captures"]):
                 continue
             try:
+                provider = current_provider()
+                if provider.revision:
+                    if budget := current_budget.get():
+                        budget.activate_provider(provider)
+                    client.use_provider(provider)
+                identity = provider.cache_identity
                 documents = sources(store, candidate, args.max_source_characters)
-                signature = judgment_signature(documents, focus)
+                signature = judgment_signature(documents, focus, provider=identity)
+                old_signature = (judgment_signature(documents, focus, before_bounds=True) if provider.luna else signature)
                 previous = json.loads(candidate['rating']) if candidate['rating'] else None
                 if previous and previous.get('signature') in (compatible_signatures(documents,previous.get('grading_criteria','')) | {judgment_signature(documents,previous.get('grading_criteria',''),legacy=True)}):
                     store.set('luna_grade:' + previous['signature'], previous)
-                if current_rating(previous) and previous.get('signature') in compatible_signatures(documents,focus) and previous.get('grading_criteria','')==focus:
+                if current_rating(previous) and previous.get('signature') in compatible_signatures(documents,focus,provider=identity) and previous.get('grading_criteria','')==focus:
                     continue
-                saved = store.get('luna_grade:' + signature) or store.get('luna_grade:' + judgment_signature(documents,focus,before_bounds=True))
+                saved = store.get('luna_grade:' + signature) or store.get('luna_grade:' + old_signature)
                 if saved:
                     save_rating(store, candidate, saved)
                     count += 1
                     continue
-                payload = {"model": MODEL, "store": False, "instructions": PROMPT + (CRITERIA_PROMPT if focus else ''),
+                payload = {"model": provider.model, "store": False, "instructions": PROMPT + (CRITERIA_PROMPT if focus else ''),
                            "input": json.dumps({"captures": documents, **({'grading_criteria': focus} if focus else {})}, ensure_ascii=False),
-                           "reasoning": {"effort": "low"}, "max_output_tokens": 2500,
+                           "reasoning": {"effort": "low"}, "max_output_tokens": min(2500, provider.output_tokens),
                            "text": {"format": {"type": "json_schema", "name": "eq_candidate", "strict": True, "schema": SCHEMA}}}
-                attempt,response,signature,rating=judgment(args,store,candidate,signature,judgment_signature(documents,focus,before_bounds=True),payload,client,documents)
-                grader=grader_signature(focus,before_bounds=signature==judgment_signature(documents,focus,before_bounds=True))
+                attempt,response,signature,rating=judgment(args,store,candidate,signature,old_signature,payload,client,documents,provider)
+                grader=grader_signature(focus,before_bounds=provider.luna and signature==old_signature,provider=identity)
                 usage=response.get('usage',{})
-                rating.update({"origin": "model", "model": MODEL, "signature": signature,
+                rating.update({"origin": "model", "model": provider.model, "signature": signature,
+                               **({'grading_provider': identity} if identity else {}),
                                "response_model": response.get("model"), "response_id": response.get("id"),
                                "grader_signature": grader, "grading_criteria": focus, "usage": usage, "graded_at": now(),
                                "assessed_scope": "supplied_captures_only", "selection_policy": SELECTION_VERSION})

@@ -374,6 +374,11 @@ body[data-panel=reader] .site-header .scope { display:none; }
 #tools::backdrop { background:#102c23a0; }
 .dialog-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; }
 .dialog-heading h2 { font-size:24px; }
+#provider-fields,.provider-numbers {display:grid;gap:8px;min-width:0}
+#provider-fields {padding:0;border:0;margin:0 0 12px}
+#provider-fields input,#provider-fields select {width:100%;min-width:0;min-height:44px;box-sizing:border-box;font:inherit;padding:8px;border:1px solid var(--panel-line);border-radius:6px;color:var(--ink);background:var(--paper)}
+#provider-fields details {margin:4px 0}
+#provider-status {overflow-wrap:anywhere}
 .tool-links { display:grid; gap:10px; margin:20px 0; }
 .tool-links button { text-align:left; }
 .tool-links a { display:flex; align-items:center; min-height:44px; }

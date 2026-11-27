@@ -70,6 +70,59 @@ async def header_source_flow(browser,base,width):
     finally:await context.close()
 
 
+async def ai_provider_flow(browser,base,width):
+    context=await browser.new_context(viewport={'width':width,'height':844},is_mobile=width<700,has_touch=width<700)
+    page=await context.new_page()
+    initial={'endpoint':'https://api.openai.com/v1','model':'gpt-6-luna','api':'responses','format':'schema',
+             'context_tokens':1050000,'output_tokens':32768,'input_price':.1,'output_price':.5,
+             'requests_per_minute':8000,'tokens_per_minute':8000000,
+             'revision':0,'applied_revision':0,'key_configured':False,'builtin_pricing':True}
+    profile=copy.deepcopy(initial)
+    posts=[]
+
+    async def settings(route):
+        nonlocal profile
+        if route.request.method=='POST':
+            submitted=route.request.post_data_json.copy()
+            posts.append(submitted.copy())
+            if submitted.get('reset'):
+                profile={**initial,'revision':2,'applied_revision':2}
+            else:
+                submitted.pop('api_key')
+                profile={**profile,**submitted,'revision':1,'applied_revision':1,'key_configured':True,'builtin_pricing':False}
+        await route.fulfill(status=200,json=profile)
+
+    await page.route('**/api/ai-provider',settings)
+    try:
+        await page.goto(base);await settled(page)
+        await page.get_by_role('button',name='Open tools and history').click()
+        details=page.locator('#provider-settings');await details.locator('summary').first.click()
+        key=page.get_by_label('API key',exact=True)
+        model=page.get_by_label('Model name',exact=True)
+        await expect(model).to_have_value('gpt-6-luna')
+        await page.get_by_label('API base URL',exact=True).fill('https://generativelanguage.googleapis.com/v1beta')
+        await model.fill('gemma-4-26b-a4b-it')
+        await key.fill('example-only-key')
+        await expect(key).to_have_attribute('type','password')
+        await page.get_by_label('API protocol').select_option('gemini')
+        await page.get_by_label('Output format').select_option('prompt')
+        await expect(page.locator('#provider-limits')).to_have_attribute('open','')
+        await page.get_by_label('Context tokens').fill('131072')
+        await page.get_by_label('Maximum output tokens').fill('8192')
+        await page.get_by_label('Input USD per million tokens').fill('0')
+        await page.get_by_label('Output USD per million tokens').fill('0')
+        await page.get_by_role('button',name='Save AI provider').click()
+        await expect(page.locator('#provider-status')).to_contain_text('gemma-4-26b-a4b-it · Settings active')
+        await expect(key).to_have_value('')
+        assert posts[0]['api_key']=='example-only-key' and posts[0]['revision']==0 and posts[0]['output_tokens']==8192
+        assert not await page.evaluate('JSON.stringify(localStorage).includes("example-only-key") || document.body.textContent.includes("example-only-key")')
+        await safe_layout(page,width)
+        await page.get_by_role('button',name='Use built-in Luna').click()
+        await expect(model).to_have_value('gpt-6-luna')
+        assert posts[-1]=={'revision':1,'reset':True}
+    finally:await context.close()
+
+
 async def theme_flow(browser,base,width):
     context=await browser.new_context(viewport={'width':width,'height':844},
         is_mobile=width<700,has_touch=width<700,color_scheme='dark')
@@ -105,14 +158,14 @@ async def theme_flow(browser,base,width):
     # Follow OS changes until a choice is made, then persist that override.
     await page.emulate_media(color_scheme='light')
     await expect(toggle).to_have_attribute('aria-pressed','false')
-    await page.get_by_label('Luna spend details').click()
+    await page.get_by_label('AI spend details').click()
     popover=await page.locator('#spend-status').bounding_box()
     controls=await page.locator('.header-actions').bounding_box()
     assert popover['y']>=controls['y']+controls['height'],(popover,controls)
     if width<700: await toggle.tap()
     else: await toggle.focus();await page.keyboard.press('Enter')
     await expect(toggle).to_have_attribute('aria-pressed','true')
-    await page.get_by_label('Luna spend details').click()
+    await page.get_by_label('AI spend details').click()
     await page.reload();await settled(page)
     await expect(toggle).to_have_attribute('aria-pressed','true')
     await page.emulate_media(color_scheme='dark');await page.emulate_media(color_scheme='light')
@@ -163,7 +216,7 @@ async def basic_flow(browser,base,width):
     await page.goto(base)
     await page.locator('.site-tile').nth(1).wait_for()
     assert await page.locator('.site-tile').count()==2  # The real API hides the grade-1 fixture by default.
-    await page.get_by_role('slider',name='Minimum Luna grade').press('Home')
+    await page.get_by_role('slider',name='Minimum AI grade').press('Home')
     await page.locator('.site-tile').nth(2).wait_for()
     assert await page.locator('#stages button').count()==4
     assert await page.locator('#site-workspace').is_hidden()
@@ -1164,7 +1217,7 @@ async def manual_site_flow(browser,base,width):
     await page.locator('#manual-result').get_by_role('link',name='Open site',exact=True).wait_for(timeout=8000)
     assert await page.locator('#candidates .site-tile').count()==1
     await page.locator('#manual-result').get_by_role('link',name='Open site',exact=True).click()
-    await page.get_by_text('Luna grade 3/3 · guild',exact=True).wait_for()
+    await page.get_by_text('AI grade 3/3 · guild',exact=True).wait_for()
     assert await page.locator('#manual-site').is_hidden()
     await page.get_by_text('1 discovery references',exact=True).click()
     assert await page.get_by_role('link',name=submitted,exact=True).get_attribute('href')==submitted
@@ -1330,7 +1383,7 @@ async def candidate_quick_actions(browser,base,width):
     await page.goto(base+'/?view=candidates&search=swipe-');await settled(page)
     assert await page.locator('#spend-today').inner_text()=='$0.123'
     assert await page.locator('#spend-month').inner_text()=='$4.567'
-    await page.get_by_label('Luna spend details',exact=True).click()
+    await page.get_by_label('AI spend details',exact=True).click()
     assert await page.locator('#spend-status').is_visible()
     assert 'UTC calendar' in await page.locator('#spend-status').inner_text()
     assert 'today $0.020' in await page.locator('#spend-status').inner_text()
@@ -1346,7 +1399,7 @@ async def candidate_quick_actions(browser,base,width):
     await page.locator('#spend-status').filter(has_text='temporarily incomplete').wait_for()
     assert await page.locator('#spend-today').inner_text()=='—'
     spend['complete']=True
-    await page.get_by_label('Luna spend details',exact=True).click()
+    await page.get_by_label('AI spend details',exact=True).click()
     cdp=await context.new_cdp_session(page)
     def tile(index):return page.get_by_role('button',name=f'Open swipe-{index}.example/eq/',exact=True)
     async def swipe(index,dx,dy=0,cancel=False,reverse=False):
@@ -1548,7 +1601,7 @@ async def candidate_grade_controls(browser,base,width):
         except Exception:pass  # Obsolete responses are intentionally aborted.
     await page.route('**/api/**',fixture)
     await page.goto(base+'/?view=candidates');await settled(page)
-    slider=page.get_by_role('slider',name='Minimum Luna grade')
+    slider=page.get_by_role('slider',name='Minimum AI grade')
     assert await slider.input_value()=='2'
     await expect(page.locator('.site-tile')).to_have_count(50)
     assert (await page.locator('.site-tile h2').first.inner_text()).startswith('grade-3-')
@@ -1582,7 +1635,7 @@ async def candidate_grade_controls(browser,base,width):
     await expect(find).to_be_enabled()  # Other sites may join the candidate queue.
     retry['candidate_check'].update(state='running',phase='grading');operations[0]['state']='running'
     await page.locator('#refresh').click();await settled(page)
-    await page.get_by_role('button',name='Grading with Luna: '+urlsplit(retry['scope']).netloc,exact=True).wait_for()
+    await page.get_by_role('button',name='Grading source evidence: '+urlsplit(retry['scope']).netloc,exact=True).wait_for()
     retry['candidate_check'].update(state='interrupted',error='Luna response incomplete; no judgment saved')
     operations[0].update(state='interrupted',error='Luna response incomplete; no judgment saved')
     await page.locator('#refresh').click();await settled(page)
@@ -1595,7 +1648,7 @@ async def candidate_grade_controls(browser,base,width):
     saved.update(rating=copy.deepcopy(template['rating']),state='approval_pending',manifest_sha256='e'*64);saved['rating']['grade']=3
     saved['candidate_check']['state']='completed';operations.clear()
     await page.locator('#refresh').click();await settled(page)
-    await expect(page.get_by_text('Luna grade 3/3 · guild',exact=True)).to_be_visible()
+    await expect(page.get_by_text('AI grade 3/3 · guild',exact=True)).to_be_visible()
     await expect(page.get_by_label('Custom capture folder path',exact=True)).to_have_value('/research/')
     await expect(page.get_by_role('button',name='Approve site for capture',exact=True)).to_be_disabled()
     await page.get_by_role('button',name='Save capture scope',exact=True).click();await settled(page)
@@ -1847,12 +1900,12 @@ async def automatic_indexing_flow(browser,base,width):
     await page.screenshot(path=f'/tmp/curation-automatic-indexing-{width}.png',full_page=True)
     review.update(state='index_budget_waiting',job={'name':'eqarchives-captures-'+review['id'],'required_usd':.01,'retry_at':'2026-10-10T00:00:00+00:00'});row['review_state']='index_budget_waiting'
     await page.evaluate('refresh()');await settled(page)
-    await expect(page.get_by_role('heading',name='Waiting for daily Luna budget',exact=True)).to_be_visible()
+    await expect(page.get_by_role('heading',name='Waiting for daily AI budget',exact=True)).to_be_visible()
     await expect(page.locator('#stage-live')).to_contain_text('resumes automatically')
     review['job'].update(budget_period='provider',required_usd=0)
     await page.evaluate('refresh()');await settled(page)
-    await expect(page.get_by_role('heading',name='Waiting for Luna capacity',exact=True)).to_be_visible()
-    await expect(page.locator('#stage-live')).to_contain_text('after the Luna cooldown')
+    await expect(page.get_by_role('heading',name='Waiting for AI capacity',exact=True)).to_be_visible()
+    await expect(page.locator('#stage-live')).to_contain_text('after the AI cooldown')
     assert len(posts)==1
     review.update(state='indexed');row.update(state='indexed',review_state='indexed',stage='history')
     await page.evaluate('refresh()');await settled(page)
@@ -2125,7 +2178,7 @@ async def advanced_grading_flow(browser,base,width):
     operations.clear();await page.evaluate('refresh()')
     await page.locator('.site-tile').first.click()
     await page.locator('#site-workspace h1').wait_for();await settled(page)
-    await page.get_by_text('Advanced · Grade this site with Luna',exact=True).click()
+    await page.get_by_text('Advanced · Grade this site with AI',exact=True).click()
     local=page.get_by_label('Additional grading criteria for this site',exact=True)
     regrade=page.get_by_role('button',name='Regrade with these criteria',exact=True)
     assert await local.input_value()=='' and await regrade.is_disabled()
@@ -2255,7 +2308,7 @@ async def pipeline_activity_flow(browser,base,width):
     await page.route('**/api/**',fixture)
     await page.goto(base);await settled(page)
     await page.locator('#pipeline-activity > summary').click()
-    await expect(page.locator('#activity-candidates > summary')).to_contain_text('Grading with Luna')
+    await expect(page.locator('#activity-candidates > summary')).to_contain_text('Grading source evidence')
     await expect(page.locator('#activity-candidates')).to_contain_text('7/50 Grade 3+ sites · 23 checked')
     await expect(page.locator('#activity-candidates')).to_contain_text('http://new-guild.example/')
     await expect(page.locator('#discover')).to_be_disabled()
@@ -2626,6 +2679,7 @@ async def check(base):
                 await pipeline_activity_flow(browser,base,width)
                 await continuous_mode_flow(browser,base,width)
                 await header_source_flow(browser,base,width)
+                if width in (390,1280):await ai_provider_flow(browser,base,width)
                 await theme_flow(browser,base,width)
                 await regenerate_capture_flow(browser,base,width)
                 await regenerate_capture_flow(browser,base,width,retry_files=True)

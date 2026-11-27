@@ -1071,6 +1071,45 @@ are validated before saving. The dedicated
 `eqarchives-policy-indexer-secrets` account has read/index privileges only on the
 resolved physical index, with no delete, cluster, mapping or security privilege.
 
+### AI provider settings
+
+Open **More → AI provider** to change the endpoint, API protocol, model, key,
+output format, token and request limits, and USD rates used by discovery, imports and
+historical re-enrichment. **Use built-in Luna** restores the original OpenAI
+connection and tariff. A blank key retains the saved key for the same origin.
+Only the portal writes the `eqarchives-curation-provider` Kubernetes Secret.
+The portal never returns the credential. Paid Jobs receive its projected file
+without Kubernetes API access. CI creates the empty Secret once and leaves its
+contents operator-owned on deployment.
+Enter credentials from a trusted LAN connection. The intranet portal uses HTTP.
+
+Settings take effect at the next record boundary after Kubernetes projects the
+change into each pod. Requests already submitted finish with their original
+provider, key and tariff. Jobs predating this feature finish on their original
+profile. The shared budget, paid receipts and completed enrichments carry over.
+Different endpoint/model combinations have distinct paid cache identities. Key
+rotation on the same profile keeps valid cached responses. Generic providers
+settle from their reported token usage and configured rates. An unavailable
+usage receipt keeps its reservation. The shared daily and monthly caps still
+apply.
+
+For a hosted Gemma trial, Google documents `gemma-4-26b-a4b-it` and
+`gemma-4-31b-it` on the native Gemini API. Set the base URL to
+`https://generativelanguage.googleapis.com/v1beta`, choose **Gemini GenerateContent**
+and **JSON in the prompt**, then enter the model and your own API key. Use your
+provider's published token limits and USD rates. For Google's OpenAI-compatible
+endpoint, choose **Chat Completions** and use the base URL
+`https://generativelanguage.googleapis.com/v1beta/openai` with a Chat Completions
+model available to your account. [Gemma API models](https://gemma.ai/deployment/gemini-api/) · [Google's OpenAI compatibility](https://aistudio.google.com/docs/openai)
+
+Public API origins use HTTPS. For a self-hosted service, a cluster operator can
+set `private_origins` in the optional `eqarchives-curation-provider` ConfigMap to
+a space-separated list of exact scheme, host and port origins. Workers connect
+directly to validated addresses and ignore HTTP redirects. Only use an HTTP
+allowlisted origin for a trusted local service.
+
+### Historical re-enrichment
+
 `PASSAGE_REENRICHMENT_ENABLED=1` admits a separate `eqarchives-enrichment-*`
 Job alongside the chunk updater. It rotates verified current passages across
 websites, mailing lists and newsgroups. Each Job runs for up to twelve minutes.

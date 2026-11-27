@@ -12,7 +12,8 @@ from urllib.parse import urlsplit
 import yaml
 
 from common import CrawlError, Store, digest, now
-from grading import Luna, LunaUnavailable, MODEL, luna_reservation, luna_usage_cost
+from ai_provider import DEFAULT_PROVIDER, current_provider
+from grading import Luna, LunaUnavailable, MODEL, provider_payload, provider_reservation, provider_usage_cost
 from import_status import EnrichmentError
 from daily_budget import LunaRatePause, SiteBudgetExceeded, current_budget, request_purpose, reserve_attempt, settle_attempt, units
 from . import gemma, passages, search_enrichment
@@ -272,11 +273,34 @@ class Enricher:
         self.maintenance_flight = maintenance_flight or (lambda key: nullcontext(False))
         self.evidence_cache_hit = None
         self.prefix_requests = 0
+        self.provider = DEFAULT_PROVIDER
 
     def close(self):
         if self.client:
             self.client.close()
         self.store.close()
+
+    def select_provider(self):
+        self.provider = current_provider()
+        if self.provider.revision:
+            if daily := current_budget.get():
+                daily.activate_provider(self.provider)
+            if self.client is not None:
+                self.client.use_provider(self.provider)
+
+    def connection(self):
+        if self.client is None:
+            self.client = self.client_factory(self.key_file)
+            if self.provider.revision:
+                self.client.use_provider(self.provider)
+        return self.client
+
+    def signature(self, payload, capture=None):
+        identity = self.provider.cache_identity
+        if capture is None:
+            return digest({'payload': payload, 'provider': identity}) if identity else digest(payload)
+        return digest({'payload': payload, 'raw_source_sha256': capture['sha256'],
+                       **({'provider': identity} if identity else {})})
 
     def payload(self, capture, source, legacy=False, *, grounding=()):
         prompt = instructions(urlsplit(capture["url"]).hostname, legacy=legacy)
@@ -284,9 +308,9 @@ class Enricher:
         if grounding:
             prompt += search_enrichment.INSTRUCTIONS
             data['search_passages'] = grounding
-        payload = {"model": MODEL, "store": False, "service_tier": "default", "instructions": prompt,
+        payload = {"model": self.provider.model, "store": False, "service_tier": "default", "instructions": prompt,
                    "input": json.dumps(data, ensure_ascii=False),
-                   "reasoning": {"effort": "low"}, "max_output_tokens": MAX_OUTPUT_TOKENS,
+                   "reasoning": {"effort": "low"}, "max_output_tokens": self.provider.output_tokens,
                    "text": {"format": {"type": "json_schema", "name": "eq_enrichment", "strict": True,
                                        "schema": SEARCH_SCHEMA if grounding else SCHEMA}}}
         return payload
@@ -297,30 +321,29 @@ class Enricher:
             return cached['response']
         if self.check:
             self.check()
-        size = len(json.dumps(payload, ensure_ascii=False).encode())
+        size = len(json.dumps(provider_payload(self.provider, payload), ensure_ascii=False).encode())
         if size > MAX_REQUEST_BYTES:
             raise EnrichmentError('context')
-        input_tokens = size + 8192  # Existing conservative budget for small requests.
-        if size > INPUT_PREFLIGHT_BYTES:
+        input_tokens = size + (8192 if self.provider.luna else 256)
+        if self.provider.luna and size > INPUT_PREFLIGHT_BYTES:
             # Count the complete prompt and schema without holding a ledger lock.
             try:
-                self.client = self.client or self.client_factory(self.key_file)
-                input_tokens = self.client.count_input_tokens(payload)
+                input_tokens = self.connection().count_input_tokens(payload)
             except LunaRatePause:
                 raise
             except (CrawlError, OSError):
                 raise EnrichmentError('context_check') from None
-            if input_tokens + payload['max_output_tokens'] > LUNA_CONTEXT_TOKENS:
-                raise EnrichmentError('context')
+        if ((not self.provider.luna or size > INPUT_PREFLIGHT_BYTES or self.provider.context_tokens != LUNA_CONTEXT_TOKENS)
+                and input_tokens + payload['max_output_tokens'] > self.provider.context_tokens):
+            raise EnrichmentError('context')
         # Reserve every request, including corrections and ambiguous failures.
         # Each correction slot may spend only once across all Job/pod retries.
-        amount = luna_reservation(input_tokens, payload['max_output_tokens'], input_rate=.20, output_rate=.75)
+        amount = provider_reservation(self.provider, input_tokens, payload['max_output_tokens'], input_rate=.20, output_rate=.75)
         attempt, cached = self.begin_attempt(capture, signature, amount, correction, initial_signatures)
         if attempt is None:
             return cached
         try:
-            self.client = self.client or self.client_factory(self.key_file)
-            response = self.client.request(payload)
+            response = self.connection().request(payload)
             self.prefix_requests += int('prompt_cache_options' in payload)
         except LunaRatePause as error:
             if error.status is not None:
@@ -368,7 +391,7 @@ class Enricher:
                        'max_output_tokens': max_output_tokens})
         usage = response.get('usage', {}) if isinstance(response, dict) else {}
         try:
-            actual = luna_usage_cost(usage)
+            actual = provider_usage_cost(self.provider, usage)
         except (ValueError, TypeError, AttributeError, OverflowError):
             raise EnrichmentError('usage') from None
         self.store.db.execute("UPDATE attempts SET actual=?,status='received' WHERE id=?", (actual, attempt))
@@ -404,7 +427,7 @@ class Enricher:
         with self.writer, self.store.db:
             self.store.db.execute("UPDATE attempts SET status='enriched' WHERE signature=? AND status='received'", (signature,))
             self.store.set('enrichment_validation:' + signature, receipt)
-        return {**metadata, 'llm_model_name': response.get('model', MODEL), 'llm_enrichment_signature': signature}
+        return {**metadata, 'llm_model_name': response.get('model') or self.provider.model, 'llm_enrichment_signature': signature}
 
     def maintenance_payload(self, capture, previous, grounding):
         prompts = domain_prompts(urlsplit(capture['url']).hostname)
@@ -427,24 +450,25 @@ class Enricher:
         """Use source-bound paid caches, then request only metadata this write owns."""
         if not grounding:
             raise EnrichmentError('context')
+        self.select_provider()
         previous = self.payload(capture, source, grounding=grounding)
-        legacy_signature = digest({'payload': previous, 'raw_source_sha256': capture['sha256']})
+        legacy_signature = self.signature(previous, capture)
         cached = self.cached_enrichment(source, legacy_signature, grounding)
         if cached is not None:
             return cached
         standard = self.maintenance_payload(capture, previous, grounding)
         payload = adaptive_summary(standard, grounding)
         if payload is not standard:
-            standard_signature = digest({'payload': standard, 'raw_source_sha256': capture['sha256']})
+            standard_signature = self.signature(standard, capture)
             if self.started(standard_signature):
                 # Retain every paid or uncertain attempt and numbered repair.
                 payload = standard
         summary_max = EXTENDED_SUMMARY_CHARS if payload is not standard else SHORT_SUMMARY_CHARS
-        original = digest({'payload': payload, 'raw_source_sha256': capture['sha256']})
+        original = self.signature(payload, capture)
         # Date-free maintenance requests contain only the bounded passages.
         # Different captures in this scope can send exactly the same request.
         # Their raw-source signatures and validation receipts remain separate.
-        evidence_key = 'maintenance_evidence:' + digest(payload)
+        evidence_key = 'maintenance_evidence:' + self.signature(payload)
         with self.maintenance_flight(evidence_key) as joined:
             return self.maintain(capture, grounding, payload, original, legacy_signature,
                                  evidence_key, summary_max, joined)
@@ -464,7 +488,7 @@ class Enricher:
         signature = original
         host = urlsplit(capture['url']).hostname
         # The transport change preserves logical signatures and old cache/attempt lookup.
-        initial = cache_only_instructions(payload) if host in PREFIX_CACHE_CATALOGS else payload
+        initial = cache_only_instructions(payload) if self.provider.luna and host in PREFIX_CACHE_CATALOGS else payload
         response = self.exchange(capture, initial, signature, initial_signatures=(legacy_signature,))
         last_issue = 'request'
         for correction in range(MAX_CORRECTIONS + 1):
@@ -516,19 +540,20 @@ class Enricher:
         return self.accepted(best[2], source, best[1], grounding, summary_max=summary_max) if best else None
 
     def enrich(self, capture, source, search_view=''):
+        self.select_provider()
         plain = self.payload(capture, source)
         legacy = self.payload(capture, source, legacy=True)
         grounding = search_enrichment.evidence_parts(search_view)
-        variants = [(value, (), SHORT_SUMMARY_CHARS) for value in (
-            plain, legacy, {**plain, 'max_output_tokens': PREVIOUS_OUTPUT_TOKENS},
-            {**legacy, 'max_output_tokens': PREVIOUS_OUTPUT_TOKENS})]
+        older = ({**plain, 'max_output_tokens': PREVIOUS_OUTPUT_TOKENS},
+                 {**legacy, 'max_output_tokens': PREVIOUS_OUTPUT_TOKENS}) if self.provider.luna else ()
+        variants = [(value, (), SHORT_SUMMARY_CHARS) for value in (plain, legacy, *older)]
         if grounding:
             standard = self.payload(capture, source, grounding=grounding)
             variants.insert(0, (standard, grounding, SHORT_SUMMARY_CHARS))
             extended = adaptive_summary(standard, grounding)
             if extended is not standard:
                 variants.insert(0, (extended, grounding, EXTENDED_SUMMARY_CHARS))
-        signatures = [digest({'payload': value, 'raw_source_sha256': capture['sha256']}) for value, _, _ in variants]
+        signatures = [self.signature(value, capture) for value, _, _ in variants]
         # Keep exact source/request identities and the original numbered
         # correction chain. Valid paid 4K results need no replacement request.
         for (previous, evidence, allowance), key in zip(variants, signatures, strict=True):
@@ -550,7 +575,7 @@ class Enricher:
                 # The extra passage view is optional at the request/model boundary.
                 # A context rejection precedes the paid reservation.
                 payload, grounding, summary_max = plain, (), SHORT_SUMMARY_CHARS
-                signature = digest({'payload': plain, 'raw_source_sha256': capture['sha256']})
+                signature = self.signature(plain, capture)
                 response = self.exchange(capture, payload, signature, initial_signatures=signatures)
         original_signature = signature
         cached = self.cached_enrichment(source, original_signature, grounding, summary_max=summary_max)
@@ -570,7 +595,7 @@ class Enricher:
                 saved = self.store.get('enrichment:' + signature) or {}
                 limit = saved.get('max_output_tokens', response.get('max_output_tokens', payload['max_output_tokens'])
                                   if isinstance(response, dict) else None)
-                if (payload['max_output_tokens'] == PREVIOUS_OUTPUT_TOKENS and type(limit) is int
+                if (self.provider.luna and payload['max_output_tokens'] == PREVIOUS_OUTPUT_TOKENS and type(limit) is int
                         and limit < MAX_OUTPUT_TOKENS and isinstance(response, dict)
                         and response.get('status') == 'incomplete'
                         and isinstance(response.get('incomplete_details'), dict)

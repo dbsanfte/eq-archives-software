@@ -53,6 +53,8 @@ def write_status(directory, job_name, manifest_sha256, state, error=None):
                       cause=error.cause if isinstance(error, EnrichmentError) else None)
         if isinstance(error, DailyBudgetPause):
             record.update(required_usd=error.amount, retry_at=error.retry_at,budget_period=error.period)
+            if getattr(error, 'provider_revision', 0):
+                record['provider_revision'] = error.provider_revision
     save(status_path(directory, job_name), record)
 
 
@@ -84,12 +86,13 @@ def read_budget_pause(root, batch, job_name):
         return None
     try:
         period = record.get('budget_period')
+        revision = record.get('provider_revision', 0)
         amount = units(record['required_usd'])
         if not (amount == 0 if period == 'provider' else amount > 0) or datetime.fromisoformat(record['retry_at']).utcoffset() is None:
             return None
-        if period not in (None, 'daily', 'monthly', 'provider'):
+        if period not in (None, 'daily', 'monthly', 'provider') or type(revision) is not int or revision < 0:
             return None
     except (CrawlError, KeyError, TypeError, ValueError):
         return None
     return {**{key: record[key] for key in ('required_usd', 'retry_at')},
-            **({'budget_period':period} if period else {})}
+            **({'budget_period':period} if period else {}), **({'provider_revision':revision} if revision else {})}

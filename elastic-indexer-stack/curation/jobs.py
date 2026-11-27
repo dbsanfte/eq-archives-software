@@ -125,6 +125,8 @@ def import_job(batch, image):
                                                        {"name": "SSL_CERT_FILE", "value": "/usr/local/lib/python3.13/site-packages/certifi/cacert.pem"},
                                                        {"name": "IMPORT_JOB_NAME", "value": import_name(batch)},
                                                        {"name": "LUNA_DAILY_BUDGET_ROOT", "value": "/luna-budget"},
+                                                       {"name": "CURATION_AI_PRIVATE_ORIGINS", "valueFrom": {"configMapKeyRef": {
+                                                           "name": "eqarchives-curation-provider", "key": "private_origins", "optional": True}}},
                                                        {"name": "LUNA_MONTHLY_BUDGET_VERSION", "value": "calendar-v1"},
                                                        {"name": "LUNA_SITE_BUDGET_VERSION", "value": "site-v1"},
                                                        {"name": "IMPORT_LUNA_WORKERS", "value": "12"},
@@ -152,6 +154,8 @@ def import_job(batch, image):
                                                                               {"key": "es_password", "path": "es_password"}]}},
                                                                     {"secret": {"name": "search-eqarchives-secrets",
                                                                     "items": [{"key": "openai_api_key", "path": "openai_api_key"}]}},
+                                                                    {"secret": {"name": "eqarchives-curation-provider", "optional": True,
+                                                                    "items": [{"key": "ai_provider.json", "path": "ai_provider.json"}]}},
                                                                     {"secret": {"name": "eqarchives-curation-secrets",
                                                                     "items": [{"key": "luna_api_key", "path": "luna_api_key"}]}}]}},
                                                        {"name": "database-trust", "configMap": {"name": "eqarchives-database-client"}}]}}}}
