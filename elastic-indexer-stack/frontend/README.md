@@ -46,6 +46,7 @@ BROWSER_TEST_PYTHON="$PWD/.venv/bin/python" \
 
 Regular result cards and grouped discussions use one top-right icon slot.
 Ranked sites display a fingerprinted WebP or a monogram if the logo is unavailable.
+Wide banners use square adaptations of the archived artwork.
 Other results use their existing thumbnail when one is available. The domain
 stays visible as text. The ranked inventory records each source and the alias rules.
 [Top 100 archive sites and logo sources](../../docs/top-100-site-icons.md)
