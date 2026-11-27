@@ -10,7 +10,10 @@ const result = { ...match(0), domain_name: { raw: 'forum.example.org' }, _discus
 } };
 
 test('shows one source excerpt and a single matches disclosure with exact reader links', () => {
-  render(<ReaderSearchContext.Provider value="zone"><DiscussionResult result={result} returnTo="/?q=zone&current=2" /></ReaderSearchContext.Provider>);
+  const branded = { ...result, domain_name: { raw: 'pub98.ezboard.com' } };
+  render(<ReaderSearchContext.Provider value="zone"><DiscussionResult result={branded} returnTo="/?q=zone&current=2" /></ReaderSearchContext.Provider>);
+  const heading = screen.getByRole('heading', { name: 'A verified discussion' });
+  expect(heading.querySelector('img')).toHaveAttribute('src', expect.stringMatching(/^\/static\/site-icons\/ezboard\.com\./));
   expect(screen.getByRole('link', { name: 'Read discussion' })).toHaveAttribute('href', expect.stringContaining('id=capture-0'));
   expect(screen.queryByRole('region', { name: 'Matching excerpts' })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Show matches' }));

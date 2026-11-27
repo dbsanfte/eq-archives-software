@@ -51,6 +51,45 @@ class FrontendBrowserTests(unittest.TestCase):
                    if 'aggs' in route.request.post_data_json else {}),
             })
 
+    def test_archived_site_icon_loads_locally_and_keeps_the_title_readable(self):
+        def archive(route):
+            if route.request.url.endswith('/_count'):
+                return route.fulfill(json={'count': 1})
+            if route.request.url.endswith('/_rerank'):
+                return route.fulfill(json={'ids': route.request.post_data_json['ids'], 'status': 'fixture'})
+            hits = [{'_id': 'websites/www.eqatlas.com/20000101000000/antonica.html', '_score': 1,
+                     '_source': {'title': 'The complete annotated maps of Antonica and the Commonlands',
+                                 'url': 'https://www.eqatlas.com/antonica.html', 'domain_name': 'www.eqatlas.com'}}]
+            route.fulfill(json={'hits': {'total': {'value': 1, 'relation': 'eq'}, 'hits': hits},
+                                'aggregations': {'facet_bucket_all': {'doc_count': 1, **empty_facets()}}})
+
+        for width in (320, 390, 1280):
+            with self.subTest(width=width):
+                context = self.browser.new_context(viewport={'width': width, 'height': 800},
+                                                   is_mobile=width < 650, has_touch=width < 650)
+                try:
+                    page = context.new_page()
+                    page.route('**/elasticsearch/**', archive)
+                    page.goto(self.base_url + '/?q=%22antonica%22', wait_until='networkidle')
+                    title = page.get_by_role('link', name='The complete annotated maps of Antonica and the Commonlands')
+                    expect(title).to_be_visible()
+                    card = page.locator('.sui-result')
+                    image = card.locator('.archive-result-site-icon img')
+                    expect(image).to_be_visible()
+                    page.wait_for_function("img => img.complete && img.naturalWidth > 0", arg=image.element_handle())
+                    source = image.get_attribute('src')
+                    self.assertRegex(source, r'^/static/site-icons/eqatlas\.com\.[0-9a-f]{12}\.webp$')
+                    left, right, bounds = image.bounding_box(), title.bounding_box(), card.bounding_box()
+                    self.assertLessEqual(left['x'] + left['width'], right['x'])
+                    self.assertLessEqual(right['x'] + right['width'], bounds['x'] + bounds['width'] + 1)
+                    response = page.request.get(self.base_url + source)
+                    self.assertEqual(response.status, 200)
+                    self.assertTrue(response.headers['content-type'].startswith('image/webp'))
+                    self.assertIn('immutable', response.headers['cache-control'])
+                    expect(card.get_by_text('www.eqatlas.com', exact=True)).to_be_visible()
+                finally:
+                    context.close()
+
     def test_source_backed_topic_and_entity_facets_are_selectable_on_mobile(self):
         context = self.browser.new_context(viewport={"width": 390, "height": 900}, is_mobile=True, has_touch=True)
         try:

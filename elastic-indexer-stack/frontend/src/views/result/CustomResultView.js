@@ -6,6 +6,7 @@ import ButtonRow from "./ButtonRow";
 import { sourceLink } from "../reader/reader-utils";
 import CaptureHistory from "./CaptureHistory";
 import DiscussionResult from "./DiscussionResult";
+import ResultHeading from "./ResultHeading";
 import { captureIdentity } from "../../search/CaptureIdentity";
 
 const CustomResultView = (context) => {
@@ -30,7 +31,7 @@ const CustomResultView = (context) => {
     <li className="sui-result">
       {/* Header with link to source URL */}
       <div className="sui-result__header">
-        <h2 className="archive-result-heading">
+        <ResultHeading domain={context.result.domain_name?.raw}>
           <a
             className="sui-result__title sui-result__title-link"
             onClick={onClickLink}
@@ -40,7 +41,7 @@ const CustomResultView = (context) => {
           >
             {context.result.title.raw}
           </a>
-        </h2>
+        </ResultHeading>
         {context.result.thumbnail?.raw && (
           <img className="archive-result-thumbnail" src={context.result.thumbnail.raw} alt="" loading="lazy" />
         )}
