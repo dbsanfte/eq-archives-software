@@ -241,6 +241,9 @@ links continue to work.
 Navigation from search results also carries a validated same-origin search URL
 in an optional `return` parameter. **Back to results** restores that exact query,
 filters, sort and page, including after a reader reload or capture comparison.
+Opening a document from a completed search saves one bounded results page in
+the current tab for up to an hour. Returning reuses that page and its ranking
+once. Refreshing the results page then loads current results.
 Direct reader links without a valid return URL lead to the archive search page.
 
 **View captures → Compare** compares the selected capture with another version
