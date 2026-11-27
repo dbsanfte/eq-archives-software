@@ -8,6 +8,7 @@ import sqlite3
 import time
 from urllib.parse import urlsplit
 
+from ai_provider import current_provider
 from common import CrawlError, digest
 from daily_budget import AutomaticStopped, DailyBudget, DailyBudgetPause, EnrichmentPriorityPause, LunaRatePause
 from grading import Luna
@@ -176,10 +177,12 @@ def run_enrichment(state, services, sources, owner, budget_root, check, *, secon
 
     try:
         account = DailyBudget(budget_root)
+        profile = current_provider()
+        account.activate_provider(profile)
         budget = account.snapshot(maintenance=True)
         if not budget['complete']:
             return report('waiting_configuration', next_at=time.time() + 300)
-        if budget['remaining_usd'] <= 0:
+        if budget['remaining_usd'] <= 0 and not profile.free:
             return report('waiting_budget', next_at=datetime.fromisoformat(budget['resets_at']).timestamp())
         if budget['luna_retry_at']:
             return report('retry_wait', next_at=datetime.fromisoformat(budget['luna_retry_at']).timestamp())

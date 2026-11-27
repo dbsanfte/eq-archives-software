@@ -233,8 +233,9 @@ def test_import_job_only_mounts_staging_readonly_and_separate_indexing_secrets()
     assert {'name':'LUNA_DAILY_BUDGET_ROOT','value':'/luna-budget'} in spec['containers'][0]['env']
     assert not any('hostPath' in volume for volume in spec['volumes'])
     secret_names=[source['secret']['name'] for source in spec['volumes'][1]['projected']['sources']]
-    assert secret_names == ['eqarchives-capture-indexer-secrets','search-eqarchives-secrets','eqarchives-curation-secrets']
-    assert spec['volumes'][1]['projected']['sources'][2]['secret']['items']==[{'key':'luna_api_key','path':'luna_api_key'}]
+    assert secret_names == ['eqarchives-capture-indexer-secrets','search-eqarchives-secrets','eqarchives-curation-provider','eqarchives-curation-secrets']
+    assert spec['volumes'][1]['projected']['sources'][2]['secret']['items']==[{'key':'ai_provider.json','path':'ai_provider.json'}]
+    assert spec['volumes'][1]['projected']['sources'][3]['secret']['items']==[{'key':'luna_api_key','path':'luna_api_key'}]
     assert next(row['value'] for row in spec['containers'][0]['env'] if row['name']=='IMPORT_JOB_NAME')==import_name(batch)
     with pytest.raises(CrawlError): import_job(batch,'latest')
 

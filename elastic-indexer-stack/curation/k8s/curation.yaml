@@ -30,6 +30,10 @@ rules:
   - apiGroups: ['']
     resources: [pods]
     verbs: [list]
+  - apiGroups: ['']
+    resources: [secrets]
+    resourceNames: [eqarchives-curation-provider]
+    verbs: [get, update]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -143,6 +147,12 @@ spec:
                   name: eqarchives-wayback-relay
                   key: port
                   optional: true
+            - name: CURATION_AI_PRIVATE_ORIGINS
+              valueFrom:
+                configMapKeyRef:
+                  name: eqarchives-curation-provider
+                  key: private_origins
+                  optional: true
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -207,9 +217,17 @@ spec:
             path: /home/dbsanfte/eq-archives-research/crawler-pilot-2026-10-06
             type: DirectoryOrCreate
         - name: credentials
-          secret:
-            secretName: eqarchives-curation-secrets
+          projected:
             defaultMode: 288
+            sources:
+              - secret:
+                  name: eqarchives-curation-secrets
+              - secret:
+                  name: eqarchives-curation-provider
+                  optional: true
+                  items:
+                    - key: ai_provider.json
+                      path: ai_provider.json
         - name: kubernetes
           projected:
             defaultMode: 288

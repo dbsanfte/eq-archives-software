@@ -8,6 +8,8 @@ from enrichment_worker import EXECUTION_COUNTERS as ENRICHMENT_EXECUTION_COUNTER
 import math
 
 from common import CrawlError,save
+from ai_provider import current_provider
+from daily_budget import DailyBudget
 from jobs import blockers, finished, import_job
 from policy_enrichment import APP as ENRICHMENT_APP, COUNTERS as ENRICHMENT_COUNTERS
 from policy_maintenance import APP, identity
@@ -53,6 +55,7 @@ def job_for(name,image,*,enrichment=False):
     entrypoint='enrichment_worker.py' if dedicated else 'policy_maintenance.py'
     container.update(name='enrichment' if dedicated else 'policy',command=['python','/app/curation/'+entrypoint,'--root','/data'],
         resources={'requests':{'cpu':'100m','memory':'512Mi'},'limits':{'cpu':'4' if dedicated else '2','memory':'3Gi'}})
+    private_origins=next(e for e in container['env'] if e['name']=='CURATION_AI_PRIVATE_ORIGINS')
     container['env']=[e for e in container['env'] if e['name'] in ('ELASTICSEARCH_URL','SSL_CERT_FILE','EMBEDDING_URL','EMBEDDING_MODEL','EMBEDDING_CACHE_PATH','EMBEDDING_BATCH_SIZE','EMBEDDING_BATCH_CONCURRENCY')]+[
         {'name':'ELASTICSEARCH_INDEX','valueFrom':{'secretKeyRef':{'name':'eqarchives-policy-indexer-secrets','key':'es_index'}}},
         {'name':'POLICY_INDEX','valueFrom':{'secretKeyRef':{'name':'eqarchives-policy-indexer-secrets','key':'es_index'}}},
@@ -74,7 +77,9 @@ def job_for(name,image,*,enrichment=False):
     if enrichment or dedicated:
         credentials['projected']['sources'].append(
             {'secret':{'name':'eqarchives-curation-secrets','items':[{'key':'luna_api_key','path':'luna_api_key'}]}})
-        container['env'].append({'name':'LUNA_DAILY_BUDGET_ROOT','value':'/luna-budget'})
+        credentials['projected']['sources'].append({'secret':{'name':'eqarchives-curation-provider','optional':True,
+            'items':[{'key':'ai_provider.json','path':'ai_provider.json'}]}})
+        container['env'].extend([{'name':'LUNA_DAILY_BUDGET_ROOT','value':'/luna-budget'},private_origins])
         container['volumeMounts'].append({'name':'staging','mountPath':'/luna-budget','subPath':'luna-budget'})
     pod['volumes']+=[{'name':'sources','hostPath':{'path':'/mnt/samsung/eq-archives-html-reindex','type':'Directory'}},
                      {'name':'archive','hostPath':{'path':'/mnt/samsung/eq-archives','type':'Directory'}},
@@ -136,9 +141,13 @@ def blocks(job, *, enrichment):
     return True
 
 
-def schedule(root,kube,jobs,image,*,enrichment=False):
+def schedule(root,kube,jobs,image,*,enrichment=False,budget_account=None):
     state_key=ENRICHMENT_STATE if enrichment else 'policy_maintenance'
     lane,app=('enrichment',ENRICHMENT_APP) if enrichment else ('policy',APP)
+    provider=current_provider() if enrichment else None
+    revision=provider.revision if provider else 0
+    if revision:
+        (budget_account or DailyBudget(Path(root)/'luna-budget')).activate_provider(provider)
     with connect(root) as store:state=store.get(state_key,{})
     def saved(**changes):
         state.update(changes,requested_policy=passages.VERSION)
@@ -173,7 +182,9 @@ def schedule(root,kube,jobs,image,*,enrichment=False):
     waiting=sorted(j['metadata']['name'] for j in jobs if not finished(j) and not j['spec'].get('suspend',False)
                    and blocks(j,enrichment=enrichment))
     if waiting:return saved(phase='waiting_jobs',waiting_for=waiting)
-    if state.get('key')==identity() and state.get('next_at',0)>time.time():
+    changed_provider = (enrichment and revision > state.get('provider_revision', 0)
+                        and (state.get('progress') or {}).get('phase') in ('waiting_budget','retry_wait'))
+    if not changed_provider and state.get('key')==identity() and state.get('next_at',0)>time.time():
         if enrichment and not state.get('error') and state.get('progress'):
             return saved(phase=state['progress']['phase'])
         return saved(phase='retry_wait' if state.get('error') else 'sweep_waiting')
@@ -189,7 +200,8 @@ def schedule(root,kube,jobs,image,*,enrichment=False):
         if sequence>=10**9:raise CrawlError('Policy maintenance attempt limit reached')
         name=f'eqarchives-{lane}-{identity()}-{sequence}'
         saved(name=name,key=identity(),sequence=sequence,policy=passages.VERSION,image=image,
-              submitted=False,phase='submitting',error=None,waiting_for=[],enrichment_enabled=enrichment)
+              submitted=False,phase='submitting',error=None,waiting_for=[],enrichment_enabled=enrichment,
+              **({'provider_revision':revision} if enrichment else {}))
     job=job_for(name,state['image'],enrichment=state.get('enrichment_enabled') is True)
     try:kube.create(job)
     except Exception:

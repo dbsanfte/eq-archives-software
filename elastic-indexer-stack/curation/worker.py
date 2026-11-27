@@ -10,6 +10,7 @@ import threading
 import time
 from datetime import datetime, timedelta
 
+from ai_provider import current_provider
 from common import CrawlError, Store, capture_scope, digest, now, save
 from campaign_storage import initialize as initialize_campaign
 from capture_flow import Action, UNDO_SECONDS, transition
@@ -502,7 +503,8 @@ class Worker:
             if not enabled:
                 continue
             try:
-                state = schedule(self.root, self.kube, jobs, os.environ.get('IMPORT_IMAGE', ''), enrichment=paid)
+                state = schedule(self.root, self.kube, jobs, os.environ.get('IMPORT_IMAGE', ''),
+                                 enrichment=paid, budget_account=self.daily_budget)
                 if state['phase'] == 'checking_submission':
                     uncertain.append(state['name'])
                 if paid:
@@ -557,9 +559,13 @@ class Worker:
                 pause = read_budget_pause(self.root, batch, name)
                 if pause:
                     state, detail = 'index_budget_waiting', {**detail, 'state': 'waiting_budget', **pause}
+                    provider = current_provider()
+                    self.daily_budget.activate_provider(provider)
                     budget = self.daily_budget.snapshot()
-                    ready = (max(pause['retry_at'], budget.get('luna_retry_at', '')) <= now()
-                             if pause.get('budget_period') == 'provider' else budget['remaining_usd'] >= pause['required_usd'])
+                    retry_at = pause['retry_at'] if provider.revision <= pause.get('provider_revision', 0) else ''
+                    ready = (max(retry_at, budget.get('luna_retry_at', '')) <= now()
+                             if pause.get('budget_period') == 'provider' else
+                             provider.free or budget['remaining_usd'] >= pause['required_usd'])
                     if ready:
                         state, detail = 'published_waiting_index', self.continue_import(batch, name)
                 elif diagnostic.get('state') != 'completed':

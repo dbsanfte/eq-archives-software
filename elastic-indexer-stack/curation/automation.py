@@ -6,6 +6,7 @@ import sqlite3
 import time
 
 from candidate_checks import require_finished, start as start_check
+from ai_provider import current_provider
 from common import CrawlError, digest, now
 from coverage_check import refresh, require_new
 from daily_budget import DailyBudget, DailyBudgetPause, AutomaticStopped, EnrichmentPriorityPause, LunaRatePause
@@ -176,7 +177,8 @@ def schedule(root, account):
                 store.set('automatic_activity', {'phase': 'enrichment_priority' if snapshot.get('enrichment_pending') else 'discovering', 'operation': active['id'], 'revision': config['revision']})
             return
         activity = store.get('automatic_activity', {})
-        if snapshot['remaining_usd'] <= 0:
+        free = current_provider().free
+        if snapshot['remaining_usd'] <= 0 and not free:
             store.set('automatic_activity', {'phase': 'daily_budget', 'retry_at': snapshot['resets_at']})
             return
         if snapshot.get('enrichment_pending'):
@@ -192,7 +194,7 @@ def schedule(root, account):
         previous = unpack(previous) if previous else None
         if previous and previous['state'] == 'interrupted':
             pause = (previous['result'] or {}).get('automatic_pause') or {}
-            if pause.get('reason') == 'daily_budget' and snapshot['remaining_usd'] < pause.get('required_usd', 0):
+            if pause.get('reason') == 'daily_budget' and not free and snapshot['remaining_usd'] < pause.get('required_usd', 0):
                 store.set('automatic_activity', {'phase': 'daily_budget', 'retry_at': snapshot['resets_at'], 'required_usd': pause['required_usd']})
                 return
             # A site failure waits for an explicit decision. Its saved operation
@@ -244,7 +246,8 @@ def pause_detail(error, operation=None):
     if isinstance(error, EnrichmentPriorityPause):
         return {'reason':'enrichment_priority'}
     if isinstance(error, LunaRatePause):
-        return {'reason':'luna_capacity', 'retry_at':error.retry_at}
+        return {'reason':'luna_capacity', 'retry_at':error.retry_at,
+                **({'provider_revision':error.provider_revision} if error.provider_revision else {})}
     if isinstance(error, DailyBudgetPause):
         return {'reason': 'daily_budget', 'required_usd': error.amount, 'retry_at': error.retry_at,'budget_period':error.period}
     if isinstance(error, AutomaticStopped):
@@ -255,6 +258,8 @@ def pause_detail(error, operation=None):
 def resume_owned(root, lane, account):
     if lane == Lane.CAPTURE:
         return  # Capture recovery uses the shared FIFO, regardless of discovery mode.
+    provider = current_provider()
+    account.activate_provider(provider)
     snapshot = account.snapshot()
     kinds = OPERATION_KINDS[Lane(lane)]
     with connect(root) as store:
@@ -271,12 +276,14 @@ def resume_owned(root, lane, account):
             reason = pause.get('reason')
             priority=reason=='enrichment_priority' and not snapshot.get('enrichment_pending')
             retry_at = pause.get('retry_at')
+            if provider.revision > pause.get('provider_revision', 0):
+                retry_at = ''  # The paused request belonged to an older provider.
             capacity = (reason == 'luna_capacity' and isinstance(retry_at, str) and
                         not snapshot.get('enrichment_pending') and
                         max(retry_at, snapshot.get('luna_retry_at', '')) <= now())
             allowed = ((priority or capacity) and (not operation['payload'].get('automatic') or snapshot['settings']['enabled']) or
                        snapshot['settings']['enabled'] and (reason == 'disabled' or
-                       reason == 'daily_budget' and snapshot['remaining_usd'] >= pause.get('required_usd', float('inf')) or
+                       reason == 'daily_budget' and (provider.free or snapshot['remaining_usd'] >= pause.get('required_usd', float('inf'))) or
                        operation['error'] == 'Worker stopped; resume explicitly'))
             if allowed:
                 # Nonresumable failures need no event scan. Retaining hundreds

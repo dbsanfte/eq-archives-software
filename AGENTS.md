@@ -1396,6 +1396,13 @@ decision. Keep the filter private, bounded and literal.
 Share a verified TLS context within each historical Job and keep each grader's
 connection independent. Dedicated enrichment Jobs can burst to four CPUs with
 the existing low CPU request. Body maintenance keeps its two-CPU limit.
+The LAN AI provider editor updates only the named operator-owned Secret. Preserve
+its revision across deploys and mount it only for the portal and paid workers.
+Read each projected profile at the record boundary. Keep in-flight spend bound
+to its original pricing, retain validated and uncertain paid receipts, and
+isolate provider cooldowns and paid cache identity. Generic API origins require
+verified TLS and public IPs unless trusted explicitly by the cluster operator.
+Never forward credentials to redirects or include keys in API responses or logs.
 Parse bundled Luna prompt YAML once per process. Preserve regex precedence,
 template contents and exact request signatures across the cache change.
 Serialize identical date-free requests within each scope by the exact logical

@@ -32,6 +32,8 @@ from candidate_checks import attach_checks, require_finished, start as start_can
 from automatic_indexing import retry as retry_preparation
 from grading import criteria
 import automation
+import provider_settings
+from ai_provider import current_provider
 import activity
 import capture_recovery
 import compact_queue
@@ -657,6 +659,23 @@ def create_app(root=None, origin=None, start_worker=True):
             return automation.configure(root, payload, kube=kube)
         return JSONResponse(await run_in_threadpool(configure))
 
+    async def ai_settings(request):
+        payload = await body(request) if request.method == 'POST' else None
+
+        def settings():
+            from jobs import Kubernetes
+            live = start_worker and os.environ.get('KUBERNETES_SERVICE_HOST')
+            if not live:
+                if request.method == 'POST':
+                    raise CrawlError('AI provider settings require the deployed curation service')
+                profile = current_provider().public()
+                return {**profile, 'applied_revision': profile['revision']}
+            kube = Kubernetes()
+            return {**(provider_settings.configure(kube, payload) if request.method == 'POST' else
+                       provider_settings.read(kube)[2].public()), 'applied_revision': current_provider().revision}
+
+        return JSONResponse(await run_in_threadpool(settings))
+
     app = Starlette(routes=[Route("/", screen), Route('/chunking-audit', chunking_audit),
                             Route("/assets/{name}", asset), Route("/healthz", health),
                             Route('/api/cancel-resume', cancel_capture_resume, methods=['POST']),
@@ -664,6 +683,7 @@ def create_app(root=None, origin=None, start_worker=True):
                             Route('/api/pause-capture-retries', pause_capture_retries, methods=['POST']),
                             Route("/api/queue", listing), Route("/api/source", source),
                             Route('/api/automation', automatic_settings, methods=['POST']),
+                            Route('/api/ai-provider', ai_settings, methods=['GET', 'POST']),
                             Route('/api/candidate',candidate_detail), Route('/api/restore',restore_candidate,methods=['POST']),
                             Route('/api/site',site_review), Route('/api/site-decision',site_decision,methods=['POST']),
                             Route('/api/continue-capture',capture_continuation,methods=['POST']),
