@@ -44,10 +44,10 @@ BROWSER_TEST_PYTHON="$PWD/.venv/bin/python" \
 
 ## Search result site icons
 
-Regular result cards and grouped discussion cards share the same site badges.
-They use small, fingerprinted WebP files and fall back to a monogram if a known
-site has no verified logo or its image cannot load. The domain stays visible as
-text. The ranked inventory records every source and the alias rules.
+Regular result cards and grouped discussions use one top-right icon slot.
+Ranked sites display a fingerprinted WebP or a monogram if the logo is unavailable.
+Other results use their existing thumbnail when one is available. The domain
+stays visible as text. The ranked inventory records each source and the alias rules.
 [Top 100 archive sites and logo sources](../../docs/top-100-site-icons.md)
 
 ## Date filters

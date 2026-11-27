@@ -6,7 +6,7 @@ import ButtonRow from "./ButtonRow";
 import { sourceLink } from "../reader/reader-utils";
 import CaptureHistory from "./CaptureHistory";
 import DiscussionResult from "./DiscussionResult";
-import ResultHeading from "./ResultHeading";
+import ResultHeader from "./ResultHeader";
 import { captureIdentity } from "../../search/CaptureIdentity";
 
 const CustomResultView = (context) => {
@@ -30,22 +30,17 @@ const CustomResultView = (context) => {
   return (
     <li className="sui-result">
       {/* Header with link to source URL */}
-      <div className="sui-result__header">
-        <ResultHeading domain={context.result.domain_name?.raw}>
-          <a
-            className="sui-result__title sui-result__title-link"
-            onClick={onClickLink}
-            href={sourceLink(context.result.url.raw) || undefined}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            {context.result.title.raw}
-          </a>
-        </ResultHeading>
-        {context.result.thumbnail?.raw && (
-          <img className="archive-result-thumbnail" src={context.result.thumbnail.raw} alt="" loading="lazy" />
-        )}
-      </div>
+      <ResultHeader domain={context.result.domain_name?.raw} thumbnail={context.result.thumbnail?.raw}>
+        <a
+          className="sui-result__title sui-result__title-link"
+          onClick={onClickLink}
+          href={sourceLink(context.result.url.raw) || undefined}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          {context.result.title.raw}
+        </a>
+      </ResultHeader>
       {/* Label Row providing metadata labels for the result */}
       <LabelRow
         flavour={context.result.llm_content_flavour?.raw}
