@@ -87,6 +87,7 @@ class FrontendBrowserTests(unittest.TestCase):
                     image = header.locator('img')
                     expect(image).to_be_visible()
                     page.wait_for_function("img => img.complete && img.naturalWidth > 0", arg=image.element_handle())
+                    self.assertTrue(image.evaluate('img => img.naturalWidth === img.naturalHeight'))
                     source = image.get_attribute('src')
                     self.assertRegex(source, r'^/static/site-icons/eqatlas\.com\.[0-9a-f]{12}\.webp$')
                     logo, label, bounds = image.bounding_box(), title.bounding_box(), header.bounding_box()
