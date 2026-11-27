@@ -51,7 +51,13 @@ class FrontendBrowserTests(unittest.TestCase):
                    if 'aggs' in route.request.post_data_json else {}),
             })
 
-    def test_archived_site_icon_loads_locally_and_keeps_the_title_readable(self):
+    def test_archived_site_icon_replaces_the_thumbnail_in_the_top_right_slot(self):
+        legacy_requests = []
+
+        def legacy_image(route):
+            legacy_requests.append(route.request.url)
+            route.continue_()
+
         def archive(route):
             if route.request.url.endswith('/_count'):
                 return route.fulfill(json={'count': 1})
@@ -59,7 +65,8 @@ class FrontendBrowserTests(unittest.TestCase):
                 return route.fulfill(json={'ids': route.request.post_data_json['ids'], 'status': 'fixture'})
             hits = [{'_id': 'websites/www.eqatlas.com/20000101000000/antonica.html', '_score': 1,
                      '_source': {'title': 'The complete annotated maps of Antonica and the Commonlands',
-                                 'url': 'https://www.eqatlas.com/antonica.html', 'domain_name': 'www.eqatlas.com'}}]
+                                 'url': 'https://www.eqatlas.com/antonica.html', 'domain_name': 'www.eqatlas.com',
+                                 'thumbnail': '/thumbnails/website.webp'}}]
             route.fulfill(json={'hits': {'total': {'value': 1, 'relation': 'eq'}, 'hits': hits},
                                 'aggregations': {'facet_bucket_all': {'doc_count': 1, **empty_facets()}}})
 
@@ -70,23 +77,28 @@ class FrontendBrowserTests(unittest.TestCase):
                 try:
                     page = context.new_page()
                     page.route('**/elasticsearch/**', archive)
+                    page.route('**/thumbnails/website.webp', legacy_image)
                     page.goto(self.base_url + '/?q=%22antonica%22', wait_until='networkidle')
                     title = page.get_by_role('link', name='The complete annotated maps of Antonica and the Commonlands')
                     expect(title).to_be_visible()
                     card = page.locator('.sui-result')
-                    image = card.locator('.archive-result-site-icon img')
+                    header = card.locator('.sui-result__header')
+                    expect(header.locator('img')).to_have_count(1)
+                    image = header.locator('img')
                     expect(image).to_be_visible()
                     page.wait_for_function("img => img.complete && img.naturalWidth > 0", arg=image.element_handle())
                     source = image.get_attribute('src')
                     self.assertRegex(source, r'^/static/site-icons/eqatlas\.com\.[0-9a-f]{12}\.webp$')
-                    left, right, bounds = image.bounding_box(), title.bounding_box(), card.bounding_box()
-                    self.assertLessEqual(left['x'] + left['width'], right['x'])
-                    self.assertLessEqual(right['x'] + right['width'], bounds['x'] + bounds['width'] + 1)
+                    logo, label, bounds = image.bounding_box(), title.bounding_box(), header.bounding_box()
+                    self.assertLessEqual(label['x'] + label['width'], logo['x'])
+                    self.assertAlmostEqual(logo['x'] + logo['width'], bounds['x'] + bounds['width'], delta=2)
+                    self.assertAlmostEqual(logo['y'], bounds['y'], delta=2)
                     response = page.request.get(self.base_url + source)
                     self.assertEqual(response.status, 200)
                     self.assertTrue(response.headers['content-type'].startswith('image/webp'))
                     self.assertIn('immutable', response.headers['cache-control'])
                     expect(card.get_by_text('www.eqatlas.com', exact=True)).to_be_visible()
+                    self.assertEqual(legacy_requests, [])
                 finally:
                     context.close()
 

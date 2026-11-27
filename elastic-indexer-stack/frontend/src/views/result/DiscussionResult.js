@@ -3,7 +3,7 @@ import { Button } from '@mui/material';
 import { excerptFind, excerptText, snippetHtml } from '../../search/DiscussionIdentity';
 import { readerUrl, recordId, ReaderSearchContext, searchReturnLinkHandlers } from '../reader/reader-utils';
 import ResultBody from './ResultBody';
-import ResultHeading from './ResultHeading';
+import ResultHeader from './ResultHeader';
 
 export default function DiscussionResult({ result, returnTo }) {
   const group = result._discussionGroup;
@@ -12,9 +12,9 @@ export default function DiscussionResult({ result, returnTo }) {
   const [visible, setVisible] = useState(3);
   const region = useId();
   return <li className="sui-result archive-discussion-result">
-    <div className="sui-result__header"><ResultHeading domain={result.domain_name?.raw || group.forum}>
+    <ResultHeader domain={result.domain_name?.raw || group.forum} thumbnail={result.thumbnail?.raw}>
       <a className="sui-result__title" href={readerUrl(recordId(result), { find, returnTo })} {...searchReturnLinkHandlers}>{group.title}</a>
-    </ResultHeading></div>
+    </ResultHeader>
     <p className="archive-discussion-label">Forum discussion · {result.domain_name?.raw || group.forum}</p>
     <ResultBody summaryHTML="" textHTML={snippetHtml(result)} />
     <div className="archive-result-actions">
