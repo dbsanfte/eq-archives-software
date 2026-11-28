@@ -115,6 +115,48 @@ def test_connection_pins_resolved_addresses_and_rejects_private_answers(monkeypa
     connect.assert_called_with(('192.168.1.15', 8000), 3, None)
 
 
+@pytest.mark.parametrize('changes', [
+    {'endpoint': 'https://provider.example/v1'}, {'input_price': .10},
+    {'output_price': .10}, {'api': 'responses'}, {'api': 'gemini'},
+])
+def test_uncapped_output_requires_an_allowlisted_unmetered_chat_provider(monkeypatch, changes):
+    monkeypatch.setenv('CURATION_AI_PRIVATE_ORIGINS', 'http://192.168.1.15:8000')
+    initial = replace(ai_provider.DEFAULT_PROVIDER, endpoint='http://192.168.1.15:8000/v1',
+                      model='gemma-4-26b-a4b-it', api='chat', input_price=0, output_price=0)
+    with pytest.raises(CrawlError, match='allowlisted private Chat Completions'):
+        ai_provider.provider_from_payload(initial, form(initial, output_tokens=0, **changes))
+
+
+@pytest.mark.parametrize('api', ai_provider.CHAT_APIS)
+def test_enrichment_leaves_the_full_context_to_the_self_hosted_tokenizer(tmp_path, monkeypatch, api):
+    origin = 'http://192.168.1.15:8000'
+    monkeypatch.setenv('CURATION_AI_PRIVATE_ORIGINS', origin)
+    initial = ai_provider.DEFAULT_PROVIDER
+    profile = ai_provider.provider_from_payload(initial, form(
+        initial, endpoint=origin + '/v1', model='gemma-4-26b-a4b-it', api=api,
+        context_tokens=8192, output_tokens=0, input_price=0, output_price=0))
+    monkeypatch.setattr(capture_enrichment, 'current_provider', lambda: profile)
+    key = tmp_path / 'key'
+    key.write_text('bootstrap-fixture')
+    capture = {'url': 'http://site.example/raid.html', 'sha256': 'a' * 64,
+               'archive_path': 'websites/site.example/20000101000000/raid.html'}
+    source = SOURCE * 200
+    post = Mock(return_value={
+        'model': profile.model,
+        'choices': [{'finish_reason': 'stop', 'message': {'content': json.dumps(RESULT)}}],
+        'usage': {'prompt_tokens': 4000, 'completion_tokens': 200},
+    })
+    monkeypatch.setattr(grading.Luna, '_post', post)
+    with closing(capture_enrichment.Enricher(tmp_path / 'attempts', key)) as client:
+        result = client.enrich(capture, source)
+        assert result['llm_model_name'] == profile.model
+        wire = post.call_args.args[1]
+        assert len(source.encode()) > profile.context_tokens
+        assert json.loads(wire['messages'][-1]['content'])['complete_source_markdown'] == source
+        assert {'max_tokens', 'max_completion_tokens'}.isdisjoint(wire)
+        assert client.store.db.execute('SELECT actual FROM attempts').fetchone()[0] == 0
+
+
 @pytest.mark.parametrize(('api', 'mode', 'suffix'), [('chat', 'prompt', '/v1/chat/completions'),
     ('chat_completion_tokens', 'schema', '/v1/chat/completions'), ('chat', 'json', '/v1/chat/completions'),
     ('responses', 'schema', '/v1/responses'), ('gemini', 'prompt', '/v1/models/models-example:generateContent')])

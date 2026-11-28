@@ -118,11 +118,14 @@ def provider_from_payload(previous, data):
         raise CrawlError('Choose an API and an output format')
     context, output = data['context_tokens'], data['output_tokens']
     if (type(context) is not int or not 8192 <= context <= 2_000_000
-            or type(output) is not int or not 2048 <= output <= 65536 or output >= context):
-        raise CrawlError('Use a context limit of 8,192–2,000,000 and a lower output limit of 2,048–65,536')
+            or type(output) is not int or (output != 0 and not 2048 <= output <= 65536) or output >= context):
+        raise CrawlError('Use a context limit of 8,192–2,000,000 and an output limit of 2,048–65,536 below it, or zero for a self-hosted provider')
     prices = (data['input_price'], data['output_price'])
     if any(type(price) not in (int, float) or not 0 <= price <= 10_000 or not math.isfinite(price) for price in prices):
         raise CrawlError('Enter nonnegative input and output USD prices per million tokens')
+    origin = address(endpoint)[2]
+    if output == 0 and (api not in CHAT_APIS or not trusted_private(origin) or any(prices)):
+        raise CrawlError('Zero output limit requires an allowlisted private Chat Completions provider with zero token prices')
     rpm, tpm = data['requests_per_minute'], data['tokens_per_minute']
     if (type(rpm) is not int or not 1 <= rpm <= MINUTE_REQUEST_TARGET
             or type(tpm) is not int or not 1000 <= tpm <= MINUTE_TOKEN_TARGET):
@@ -133,7 +136,6 @@ def provider_from_payload(previous, data):
     candidate = Provider(endpoint=endpoint, model=model, api=api, format=response_format, context_tokens=context,
                          output_tokens=output, input_price=prices[0], output_price=prices[1], requests_per_minute=rpm,
                          tokens_per_minute=tpm, revision=previous.revision + 1, api_key=key)
-    origin = address(endpoint)[2]
     if not key and origin == address(previous.endpoint)[2]:
         candidate = replace(candidate, api_key=previous.api_key)
     if not candidate.api_key and not candidate.uses_bootstrap_key and not trusted_private(origin):

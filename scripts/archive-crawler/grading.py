@@ -127,7 +127,9 @@ def provider_payload(provider, payload):
                 if provider.format == 'prompt' else [{'role': 'system', 'content': prompt},
                                                      {'role': 'user', 'content': payload['input']}])
     limit = 'max_completion_tokens' if provider.api == 'chat_completion_tokens' else 'max_tokens'
-    request = {'model': provider.model, 'messages': messages, limit: payload['max_output_tokens']}
+    request = {'model': provider.model, 'messages': messages}
+    if payload['max_output_tokens']:
+        request[limit] = payload['max_output_tokens']
     if provider.format == 'schema':
         request['response_format'] = {'type': 'json_schema', 'json_schema': {
             key: spec[key] for key in ('name', 'schema', 'strict')}}
@@ -526,7 +528,7 @@ def reserve(store, candidate, signature, payload, maximum, provider=DEFAULT_PROV
     # protocol/schema overhead. Count all output tokens, including reasoning.
     # Retain the reservation after ambiguous failures rather than retry for free.
     bound = len(json.dumps(provider_payload(provider, payload), ensure_ascii=False).encode()) + (8192 if provider.luna else 256)
-    if not provider.luna and bound + payload['max_output_tokens'] > provider.context_tokens:
+    if not provider.luna and payload['max_output_tokens'] and bound + payload['max_output_tokens'] > provider.context_tokens:
         raise CrawlError('Complete evidence exceeds the configured provider context limit')
     amount = provider_reservation(provider, bound, payload['max_output_tokens'])
     store.db.execute("BEGIN IMMEDIATE")

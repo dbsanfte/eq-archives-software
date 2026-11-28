@@ -106,7 +106,8 @@
           <label for="provider-format">Output format</label><select id="provider-format"><option value="schema">JSON Schema</option><option value="json">JSON object</option><option value="prompt">JSON in the prompt</option></select>
           <details id="provider-limits"><summary>Limits and pricing</summary><div class="provider-numbers">
             <label for="provider-context">Context tokens</label><input id="provider-context" type="number" min="8192" max="2000000" step="1" required />
-            <label for="provider-output">Maximum output tokens</label><input id="provider-output" type="number" min="2048" max="65536" step="1" required />
+            <label for="provider-output">Maximum output tokens</label><input id="provider-output" type="number" min="0" max="65536" step="1" aria-describedby="provider-output-help" required />
+            <p class="meta" id="provider-output-help">Use 0 to let an allowlisted private Chat Completions server with zero token prices use its full context for input and output.</p>
             <label for="provider-rpm">Requests per minute</label><input id="provider-rpm" type="number" min="1" max="8000" step="1" required />
             <label for="provider-tpm">Tokens per minute</label><input id="provider-tpm" type="number" min="1000" max="8000000" step="1" required />
             <label for="provider-input-price">Input USD per million tokens</label><input id="provider-input-price" type="number" min="0" max="10000" step="any" required />

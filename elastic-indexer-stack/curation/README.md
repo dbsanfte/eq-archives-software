@@ -1107,6 +1107,10 @@ set `private_origins` in the optional `eqarchives-curation-provider` ConfigMap t
 a space-separated list of exact scheme, host and port origins. Workers connect
 directly to validated addresses and ignore HTTP redirects. Only use an HTTP
 allowlisted origin for a trusted local service.
+For an allowlisted private Chat Completions provider with zero token prices,
+set **Maximum output tokens** to 0 to let the inference server apply its own
+combined prompt and generation window. Curation continues to bound request and
+response sizes in bytes and validate structured output.
 
 ### Historical re-enrichment
 

@@ -333,7 +333,9 @@ class Enricher:
                 raise
             except (CrawlError, OSError):
                 raise EnrichmentError('context_check') from None
-        if ((not self.provider.luna or size > INPUT_PREFLIGHT_BYTES or self.provider.context_tokens != LUNA_CONTEXT_TOKENS)
+        # An uncapped private provider measures the actual prompt with its own tokenizer.
+        if (payload['max_output_tokens']
+                and (not self.provider.luna or size > INPUT_PREFLIGHT_BYTES or self.provider.context_tokens != LUNA_CONTEXT_TOKENS)
                 and input_tokens + payload['max_output_tokens'] > self.provider.context_tokens):
             raise EnrichmentError('context')
         # Reserve every request, including corrections and ambiguous failures.
